@@ -11,7 +11,8 @@ komari-theme-Glassmorphism 是一个为 Komari Monitor 打造的毛玻璃（Glas
 
 ##效果预览
 ![主页](https://i.111666.best/image/8ipd0XZXr159FwES6qsyV8.png)
-![节点详情](https://i.111666.best/image/v4CAvcy5ZYdTKwRTzMm9pm.png))
+
+![节点详情](https://i.111666.best/image/v4CAvcy5ZYdTKwRTzMm9pm.png)
 ## 主要改动
 
 ### 视觉设计
