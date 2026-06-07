@@ -9,6 +9,9 @@
 
 komari-theme-Glassmorphism 是一个为 Komari Monitor 打造的毛玻璃（Glassmorphism）风格主题，以简洁现代的设计理念，打造清爽的监控面板视觉体验。此项目在原始 `Komari Emerald` 主题基础上进行了完整改造，优化了整体设计、色彩方案、卡片样式和交互体验。
 
+##效果预览
+![主页](https://i.111666.best/image/8ipd0XZXr159FwES6qsyV8.png)
+![节点详情](https://i.111666.best/image/v4CAvcy5ZYdTKwRTzMm9pm.png))
 ## 主要改动
 
 ### 视觉设计
