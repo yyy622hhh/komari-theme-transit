@@ -11,10 +11,14 @@ export interface IpGeo {
   lng: number
   city?: string
   countryCode?: string
+  /** ASN 组织 / ISP 名称（用于识别厂商） */
+  org?: string
+  /** AS 号，如 "AS401115" */
+  asn?: string
 }
 
 const CACHE_PREFIX = 'komari-theme-emerald:ipgeo'
-const CACHE_VERSION = 1
+const CACHE_VERSION = 2
 const CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000 // 30 天
 
 interface CacheEntry {
@@ -73,6 +77,14 @@ function toFinite(value: unknown): number | null {
   return typeof n === 'number' && Number.isFinite(n) ? n : null
 }
 
+function pickString(...values: unknown[]): string | undefined {
+  for (const v of values) {
+    if (typeof v === 'string' && v.trim())
+      return v.trim()
+  }
+  return undefined
+}
+
 type Provider = (ip: string) => Promise<IpGeo | null>
 
 /** ip.sb：返回 latitude / longitude / city / country_code */
@@ -90,10 +102,12 @@ const fromIpSb: Provider = async (ip) => {
     lng,
     city: typeof d.city === 'string' ? d.city : undefined,
     countryCode: typeof d.country_code === 'string' ? d.country_code : undefined,
+    org: pickString(d.organization, d.asn_organization, d.isp),
+    asn: typeof d.asn === 'number' ? `AS${d.asn}` : pickString(d.asn),
   }
 }
 
-/** ipinfo.io：loc = "lat,lng"，city，country */
+/** ipinfo.io：loc = "lat,lng"，city，country，org = "AS#### 组织名" */
 const fromIpinfo: Provider = async (ip) => {
   const res = await fetch(`https://ipinfo.io/${ip}/json`)
   if (!res.ok)
@@ -106,11 +120,14 @@ const fromIpinfo: Provider = async (ip) => {
   const lng = toFinite(lngStr)
   if (lat === null || lng === null)
     return null
+  const org = pickString(d.org)
   return {
     lat,
     lng,
     city: typeof d.city === 'string' ? d.city : undefined,
     countryCode: typeof d.country === 'string' ? d.country : undefined,
+    org,
+    asn: org?.match(/^AS\d+/)?.[0],
   }
 }
 
@@ -129,10 +146,44 @@ const fromIpapiCo: Provider = async (ip) => {
     lng,
     city: typeof d.city === 'string' ? d.city : undefined,
     countryCode: typeof d.country_code === 'string' ? d.country_code : undefined,
+    org: pickString(d.org),
+    asn: pickString(d.asn),
   }
 }
 
-const PROVIDERS: Provider[] = [fromIpSb, fromIpinfo, fromIpapiCo]
+/** ipwho.is：latitude/longitude/city/country_code，connection.{org,isp,asn} */
+const fromIpwhois: Provider = async (ip) => {
+  const res = await fetch(`https://ipwho.is/${ip}`)
+  if (!res.ok)
+    return null
+  const d = await res.json() as Record<string, unknown>
+  if (d.success === false)
+    return null
+  const lat = toFinite(d.latitude)
+  const lng = toFinite(d.longitude)
+  if (lat === null || lng === null)
+    return null
+  const conn = (d.connection ?? {}) as Record<string, unknown>
+  return {
+    lat,
+    lng,
+    city: typeof d.city === 'string' ? d.city : undefined,
+    countryCode: typeof d.country_code === 'string' ? d.country_code : undefined,
+    org: pickString(conn.org, conn.isp),
+    asn: typeof conn.asn === 'number' ? `AS${conn.asn}` : pickString(conn.asn),
+  }
+}
+
+const PROVIDERS: Provider[] = [fromIpSb, fromIpinfo, fromIpwhois, fromIpapiCo]
+
+// 轮询起始服务：每次查询从不同站点开始，避免所有请求都打到同一站点导致频控后整体失败
+let providerCursor = 0
+function orderedProviders(): Provider[] {
+  const n = PROVIDERS.length
+  const start = providerCursor % n
+  providerCursor = (providerCursor + 1) % n
+  return Array.from({ length: n }, (_, i) => PROVIDERS[(start + i) % n]!)
+}
 
 // 同一 IP 的并发查询去重
 const inflight = new Map<string, Promise<IpGeo | null>>()
@@ -153,7 +204,8 @@ export async function lookupIpGeo(ip: string): Promise<IpGeo | null> {
     return existing
 
   const task = (async () => {
-    for (const provider of PROVIDERS) {
+    // 从轮询选出的起始站点开始，依次回退，分摊请求压力
+    for (const provider of orderedProviders()) {
       try {
         const geo = await provider(ip)
         if (geo) {

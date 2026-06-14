@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import type { CurrencyCode } from '@/utils/financeHelper'
+import type { NodeData } from '@/stores/nodes'
+import type { IpGeo } from '@/utils/ipGeoHelper'
 import { Icon } from '@iconify/vue'
 import { computed, defineAsyncComponent, onMounted, ref } from 'vue'
 // 监听节点数据，获取厂商
@@ -12,11 +14,12 @@ import { Empty } from '@/components/ui/empty'
 import { useAppStore } from '@/stores/app'
 import { useNodesStore } from '@/stores/nodes'
 import * as financeHelper from '@/utils/financeHelper'
-import { formatBytesPerSecondWithConfig, formatBytesWithConfig, formatDateTime, formatUptimeWithFormat } from '@/utils/helper'
+import { formatBytesPerSecondWithConfig, formatBytesWithConfig, formatUptimeWithFormat } from '@/utils/helper'
+import { lookupIpGeo } from '@/utils/ipGeoHelper'
 import { getOSImage, getOSName } from '@/utils/osImageHelper'
 import { getRegionCode, getRegionDisplayName } from '@/utils/regionHelper'
 
-import { formatPrice, formatPriceWithCycle, getExpireStatus, getExpireText } from '@/utils/tagHelper'
+import { formatPrice, formatPriceWithCycle, getExpireStatus, getExpireText, parseTags } from '@/utils/tagHelper'
 
 const LoadChart = defineAsyncComponent(() => import('@/components/LoadChart.vue'))
 const PingChart = defineAsyncComponent(() => import('@/components/PingChart.vue'))
@@ -31,6 +34,11 @@ const financeCurrency = ref<CurrencyCode>('CNY')
 
 // VPS 厂商识别
 const vpsProvider = ref<{ name: string, icon: string } | null>(null)
+// IP 解析结果（城市 / ASN 组织 / AS 号）
+const nodeGeo = ref<IpGeo | null>(null)
+// 近一天网速峰值（B/s）
+const peakNetOut = ref(0)
+const peakNetIn = ref(0)
 
 // CPU 评分
 interface CpuScore {
@@ -125,7 +133,59 @@ const PROVIDER_DB: Array<{ keywords: string[], name: string, icon: string }> = [
   { keywords: ['frantech', 'buyvm'], name: 'BuyVM', icon: 'tabler:server' },
   { keywords: ['path.net', 'pathnet'], name: 'Path.net', icon: 'tabler:server' },
   { keywords: ['alice networks', 'alice'], name: 'Alice Networks', icon: 'tabler:server' },
+  { keywords: ['oracle'], name: 'Oracle Cloud', icon: 'simple-icons:oracle' },
+  { keywords: ['ibm', 'softlayer'], name: 'IBM Cloud', icon: 'simple-icons:ibmcloud' },
+  { keywords: ['scaleway', 'iliad', 'online sas'], name: 'Scaleway', icon: 'simple-icons:scaleway' },
+  { keywords: ['leaseweb'], name: 'Leaseweb', icon: 'tabler:server' },
+  { keywords: ['g-core', 'gcore'], name: 'Gcore', icon: 'tabler:server' },
+  { keywords: ['dmit'], name: 'DMIT', icon: 'tabler:server' },
+  { keywords: ['greencloud'], name: 'GreenCloudVPS', icon: 'tabler:server' },
+  { keywords: ['hosthatch'], name: 'HostHatch', icon: 'tabler:server' },
+  { keywords: ['kamatera'], name: 'Kamatera', icon: 'tabler:server' },
+  { keywords: ['colocrossing'], name: 'ColoCrossing', icon: 'tabler:server' },
+  { keywords: ['psychz'], name: 'Psychz Networks', icon: 'tabler:server' },
+  { keywords: ['m247'], name: 'M247', icon: 'tabler:server' },
+  { keywords: ['zenlayer'], name: 'Zenlayer', icon: 'tabler:server' },
+  { keywords: ['hurricane electric', 'he.net'], name: 'Hurricane Electric', icon: 'tabler:server' },
+  { keywords: ['misaka'], name: 'Misaka', icon: 'tabler:server' },
+  { keywords: ['gigsgigs', 'gigsgigscloud'], name: 'GigsGigsCloud', icon: 'tabler:server' },
+  { keywords: ['akile'], name: 'Akile', icon: 'tabler:server' },
+  { keywords: ['cloudie'], name: 'Cloudie', icon: 'tabler:server' },
+  { keywords: ['china mobile', 'cmi'], name: 'China Mobile (CMI)', icon: 'tabler:server' },
+  { keywords: ['china unicom', 'unicom', 'cuii'], name: 'China Unicom', icon: 'tabler:server' },
+  { keywords: ['china telecom', 'chinanet', 'ctg'], name: 'China Telecom', icon: 'tabler:server' },
+  { keywords: ['hostpapa'], name: 'HostPapa', icon: 'tabler:server' },
+  { keywords: ['colocrossing', 'colo crossing'], name: 'ColoCrossing', icon: 'tabler:server' },
+  { keywords: ['virmach'], name: 'VirMach', icon: 'tabler:server' },
+  { keywords: ['hostdare'], name: 'HostDare', icon: 'tabler:server' },
+  { keywords: ['nexusbytes', 'nexus bytes'], name: 'NexusBytes', icon: 'tabler:server' },
+  { keywords: ['evolution host', 'evolution-host'], name: 'Evolution Host', icon: 'tabler:server' },
+  { keywords: ['servarica'], name: 'Servarica', icon: 'tabler:server' },
+  { keywords: ['bytevirt'], name: 'ByteVirt', icon: 'tabler:server' },
+  { keywords: ['hostslick'], name: 'HostSlick', icon: 'tabler:server' },
+  { keywords: ['spartanhost', 'spartan host'], name: 'SpartanHost', icon: 'tabler:server' },
+  { keywords: ['lightnode'], name: 'LightNode', icon: 'tabler:server' },
+  { keywords: ['netcup'], name: 'Netcup', icon: 'tabler:server' },
+  { keywords: ['ionos', '1and1'], name: 'IONOS', icon: 'tabler:server' },
+  { keywords: ['time4vps'], name: 'Time4VPS', icon: 'tabler:server' },
+  { keywords: ['aeza'], name: 'Aeza', icon: 'tabler:server' },
+  { keywords: ['pq.hosting', 'pqhosting'], name: 'PQ.Hosting', icon: 'tabler:server' },
+  { keywords: ['xtom', 'v.ps'], name: 'V.PS (xTom)', icon: 'tabler:server' },
 ]
+
+// 知名共享 ASN → 网络运营商：org 名常被子分配掩盖（如 AS36352 实为 ColoCrossing，
+// 但 org 可能显示成某个转售品牌），按 ASN 号兜底识别更准。
+const ASN_PROVIDER_DB: Record<string, { name: string, icon: string }> = {
+  AS36352: { name: 'ColoCrossing', icon: 'tabler:server' },
+  AS53667: { name: 'FranTech (BuyVM)', icon: 'tabler:server' },
+  AS20473: { name: 'Vultr (Choopa)', icon: 'simple-icons:vultr' },
+  AS14061: { name: 'DigitalOcean', icon: 'simple-icons:digitalocean' },
+  AS24940: { name: 'Hetzner', icon: 'simple-icons:hetzner' },
+  AS16276: { name: 'OVHcloud', icon: 'simple-icons:ovh' },
+  AS63949: { name: 'Akamai (Linode)', icon: 'simple-icons:linode' },
+  AS13335: { name: 'Cloudflare', icon: 'simple-icons:cloudflare' },
+  AS51167: { name: 'Contabo', icon: 'tabler:server' },
+}
 
 function detectProvider(org: string): { name: string, icon: string } | null {
   if (!org)
@@ -135,22 +195,79 @@ function detectProvider(org: string): { name: string, icon: string } | null {
     if (p.keywords.some(k => lower.includes(k)))
       return { name: p.name, icon: p.icon }
   }
-  // 尝试提取 org 名称（去掉 ASN 前缀如 "AS12345 "）
-  const orgName = org.replace(/^AS\d+\s*/i, '').trim()
-  if (orgName)
-    return { name: orgName, icon: 'tabler:server' }
   return null
 }
 
-async function fetchProviderInfo(ip: string) {
+// 优先用 IP 解析出的 ASN 组织名识别厂商（最准确），回退到节点名称/备注/region 关键字
+async function resolveProvider(node: NodeData): Promise<void> {
+  nodeGeo.value = null
+  const nameText = `${node.name ?? ''} ${node.public_remark ?? ''} ${node.remark ?? ''} ${node.tags ?? ''}`
+
+  let org: string | undefined
+  let asn: string | undefined
+  const ip = node.ipv4 || node.ipv6
+  if (ip) {
+    const geo = await lookupIpGeo(ip)
+    if (geo) {
+      nodeGeo.value = geo
+      org = geo.org
+      asn = geo.asn
+    }
+  }
+
+  // 1. 节点名称/备注/标签命中已知厂商关键字 —— 通常是用户标注的实际转售商家，最贴合认知
+  const byName = detectProvider(nameText)
+  if (byName) {
+    vpsProvider.value = byName
+    return
+  }
+  // 2. 知名共享 ASN → 网络运营商（org 名常被子分配掩盖，如 AS36352=ColoCrossing）
+  if (asn) {
+    const byAsn = ASN_PROVIDER_DB[asn.toUpperCase()]
+    if (byAsn) {
+      vpsProvider.value = byAsn
+      return
+    }
+  }
+  // 3. IP org 命中已知厂商关键字
+  const byOrg = org ? detectProvider(org) : null
+  if (byOrg) {
+    vpsProvider.value = byOrg
+    return
+  }
+  // 4. 直接使用真实 ASN 组织名；都没有则留空
+  if (org) {
+    const orgName = org.replace(/^AS\d+\s*/i, '').trim()
+    vpsProvider.value = orgName ? { name: orgName, icon: 'tabler:server' } : null
+    return
+  }
+  vpsProvider.value = null
+}
+
+// 拉取近一天负载记录，统计网速峰值（上/下行各自取最大瞬时值）
+async function fetchTrafficPeak(uuid: string): Promise<void> {
+  peakNetOut.value = 0
+  peakNetIn.value = 0
   try {
-    const res = await fetch(`https://ipapi.co/${ip}/json/`)
-    const data = await res.json()
-    const org = data.org || data.asn || ''
-    vpsProvider.value = detectProvider(org)
+    const apiBase = import.meta.env.VITE_API_BASE
+    const res = await fetch(`${apiBase}/records/load?uuid=${uuid}&hours=24`)
+    if (!res.ok)
+      return
+    const resp = await res.json()
+    const records: Array<{ net_in?: number, net_out?: number }> = resp.data?.records ?? []
+    let up = 0
+    let down = 0
+    for (const r of records) {
+      if (typeof r.net_out === 'number' && r.net_out > up)
+        up = r.net_out
+      if (typeof r.net_in === 'number' && r.net_in > down)
+        down = r.net_in
+    }
+    peakNetOut.value = up
+    peakNetIn.value = down
   }
   catch {
-    vpsProvider.value = null
+    // 静默失败，不显示峰值
   }
 }
 
@@ -165,18 +282,42 @@ onMounted(async () => {
 // 注：节点 IP 通常不直接暴露，这里用节点 uuid 作为 fallback 标识
 // 如果 data.value 有 ip 字段则直接用，否则跳过
 const data = computed(() => nodesStore.nodes.find(node => node.uuid === route.params.id))
-watch(data, async (node) => {
-  if (!node)
-    return
-  // 尝试用节点名称/region 匹配已知厂商
-  const regionStr = `${node.region ?? ''} ${node.name ?? ''}`
-  const detected = detectProvider(regionStr)
-  if (detected) {
-    vpsProvider.value = detected
+watch(data, (node) => {
+  if (node) {
+    void resolveProvider(node)
+    void fetchTrafficPeak(node.uuid)
   }
 }, { immediate: true })
 
 const cpuScore = computed(() => estimateCpuScore(data.value?.cpu_name ?? ''))
+
+// 机房/厂商展示：城市 · 厂商 · ASN（缺项自动省略）
+const providerDisplay = computed(() => {
+  const parts: string[] = []
+  if (nodeGeo.value?.city)
+    parts.push(nodeGeo.value.city)
+  if (vpsProvider.value?.name)
+    parts.push(vpsProvider.value.name)
+  if (nodeGeo.value?.asn)
+    parts.push(nodeGeo.value.asn)
+  return parts.length ? parts.join(' · ') : '-'
+})
+
+// 节点自定义标签
+const customTags = computed(() => parseTags(data.value?.tags).map(t => t.text))
+
+// 该节点支持的 IP 协议（仅显示"支持"，不暴露具体 IP）
+const ipSupport = computed(() => {
+  const node = data.value
+  const arr: string[] = []
+  if (node?.ipv4)
+    arr.push('IPv4')
+  if (node?.ipv6)
+    arr.push('IPv6')
+  return arr
+})
+
+const hasPeak = computed(() => peakNetOut.value > 0 || peakNetIn.value > 0)
 
 // 未登录且开启「未登录隐藏价格」时，屏蔽金额类指标（剩余时间为天数，仍显示）
 const showPrice = computed(() => appStore.isLoggedIn || !appStore.hidePriceWhenLoggedOut)
@@ -295,18 +436,33 @@ const metricCards = computed<MetricCard[]>(() => {
   ]
 })
 
-const hardwareInfo = computed<InfoItem[]>(() => [
-  { label: 'CPU', value: data.value ? `${data.value.cpu_name} (x${data.value.cpu_cores})` : '-', icon: 'icon-park-outline:cpu' },
-  { label: '架构', value: data.value?.arch ?? '-', icon: 'icon-park-outline:application-two' },
-  { label: '虚拟化', value: data.value?.virtualization ?? '-', icon: 'icon-park-outline:server' },
-  { label: 'GPU', value: data.value?.gpu_name || '-', icon: 'icon-park-outline:video-one' },
-])
+// 硬件信息小卡：CPU 单独全宽展示，这里是其余小格。
+// - 「架构」格：登录后改显节点 IP（避免未登录访客扫到 IP），未登录或无 IP 时回退显示架构
+// - GPU：仅在节点确实有 GPU 时才显示
+const hardwareSmallItems = computed<InfoItem[]>(() => {
+  const node = data.value
+  const items: InfoItem[] = []
+
+  const ip = node?.ipv4 || node?.ipv6
+  if (appStore.isLoggedIn && ip)
+    items.push({ label: 'IP', value: ip, icon: 'tabler:world' })
+  else
+    items.push({ label: '架构', value: node?.arch ?? '-', icon: 'icon-park-outline:application-two' })
+
+  items.push({ label: '虚拟化', value: node?.virtualization ?? '-', icon: 'icon-park-outline:server' })
+
+  const gpu = node?.gpu_name?.trim()
+  if (gpu && gpu.toLowerCase() !== 'none')
+    items.push({ label: 'GPU', value: gpu, icon: 'icon-park-outline:video-one' })
+
+  return items
+})
 
 const systemInfo = computed<InfoItem[]>(() => [
   { label: '操作系统', value: data.value?.os ?? '-', icon: 'icon-park-outline:computer' },
   { label: '内核版本', value: data.value?.kernel_version ?? '-', icon: 'icon-park-outline:code' },
   { label: '运行时间', value: formatUptime(data.value?.uptime ?? 0), icon: 'icon-park-outline:timer' },
-  { label: '最后上报', value: formatDateTime(data.value?.time), icon: 'icon-park-outline:time' },
+  { label: '厂商', value: providerDisplay.value, icon: vpsProvider.value?.icon ?? 'icon-park-outline:server' },
 ])
 
 const storageInfo = computed<InfoItem[]>(() => [
@@ -348,6 +504,16 @@ const trafficUsageText = computed(() => {
 const trafficProgressStyle = computed(() => ({
   width: `${trafficUsedPercentage.value}%`,
 }))
+
+// 总流量进度条按使用率分级着色：≥80% 红、60-80% 琥珀、<60% 绿
+const trafficProgressClass = computed(() => {
+  const p = trafficUsedPercentage.value
+  if (p >= 80)
+    return 'bg-red-500/30'
+  if (p >= 60)
+    return 'bg-amber-500/25'
+  return 'bg-emerald-500/20'
+})
 </script>
 
 <template>
@@ -377,6 +543,15 @@ const trafficProgressStyle = computed(() => ({
         <Badge :variant="data.online ? 'default' : 'destructive'" class="text-xs !rounded">
           {{ data.online ? '在线' : '离线' }}
         </Badge>
+        <!-- 节点自定义标签 -->
+        <div v-if="customTags.length" class="flex flex-wrap gap-1">
+          <Badge
+            v-for="(tag, i) in customTags" :key="i" variant="outline"
+            class="!text-[11px] rounded text-muted-foreground border-muted-foreground/15 px-1.5 py-0"
+          >
+            {{ tag }}
+          </Badge>
+        </div>
         <!-- 厂商标识 -->
         <div v-if="vpsProvider" class="ml-auto flex items-center gap-1.5 text-xs text-muted-foreground bg-background/50 rounded-full px-3 py-1">
           <Icon :icon="vpsProvider.icon" :width="14" :height="14" />
@@ -409,12 +584,12 @@ const trafficProgressStyle = computed(() => ({
       <!-- 硬件信息 + CPU 评分 -->
       <div class="px-4 gap-4 grid grid-cols-1 lg:grid-cols-2">
         <CardX
-          title="硬件信息" size="small"
+          title="硬件信息" size="small" content-class="flex-1"
           class="group h-full bg-background/50 border-none hover:bg-background transition-all rounded-md"
         >
-          <div class="gap-3 grid grid-cols-3">
+          <div class="flex flex-col gap-3 h-full">
             <!-- CPU 信息 + 评分（跨全宽） -->
-            <div class="col-span-3 min-w-0 flex flex-col gap-2 rounded-sm bg-slate-500/5 p-2">
+            <div class="min-w-0 flex flex-col gap-2 rounded-sm bg-slate-500/5 p-2">
               <div class="flex gap-1 items-center text-muted-foreground">
                 <Icon icon="icon-park-outline:cpu" :width="14" :height="14" />
                 <span class="text-xs sm:text-sm">CPU</span>
@@ -440,25 +615,27 @@ const trafficProgressStyle = computed(() => ({
               </div>
             </div>
 
-            <!-- 架构 / 虚拟化 / GPU -->
-            <div
-              v-for="item in hardwareInfo.slice(1)" :key="item.label"
-              class="min-w-0 flex flex-col gap-1 rounded-sm bg-slate-500/5 p-2"
-            >
-              <div class="flex gap-1 items-center text-muted-foreground">
-                <Icon v-if="item.icon" :icon="item.icon" :width="14" :height="14" />
-                <span class="text-xs sm:text-sm">{{ item.label }}</span>
+            <!-- IP/架构 · 虚拟化 · GPU(仅在存在时)，列数随数量自适应避免留空，整体撑满高度 -->
+            <div class="grid gap-3 flex-1 auto-rows-fr" :class="hardwareSmallItems.length <= 2 ? 'grid-cols-2' : 'grid-cols-3'">
+              <div
+                v-for="item in hardwareSmallItems" :key="item.label"
+                class="min-w-0 flex flex-col gap-1 rounded-sm bg-slate-500/5 p-2"
+              >
+                <div class="flex gap-1 items-center text-muted-foreground">
+                  <Icon v-if="item.icon" :icon="item.icon" :width="14" :height="14" />
+                  <span class="text-xs sm:text-sm">{{ item.label }}</span>
+                </div>
+                <span class="text-xs sm:text-sm break-all">{{ item.value }}</span>
               </div>
-              <span class="text-xs sm:text-sm break-all">{{ item.value }}</span>
             </div>
           </div>
         </CardX>
 
         <CardX
-          title="系统信息" size="small"
+          title="系统信息" size="small" content-class="flex-1"
           class="group h-full bg-background/50 border-none hover:bg-background transition-all rounded-md"
         >
-          <div class="gap-3 grid grid-cols-1 sm:grid-cols-2">
+          <div class="gap-3 grid grid-cols-1 sm:grid-cols-2 h-full sm:auto-rows-fr">
             <div
               v-for="item in systemInfo" :key="item.label"
               class="min-w-0 flex flex-col gap-1 rounded-sm bg-slate-500/5 p-2"
@@ -502,19 +679,35 @@ const trafficProgressStyle = computed(() => ({
             <div class="relative min-w-0 overflow-hidden rounded-sm bg-slate-500/5 p-2">
               <div
                 v-if="hasTrafficLimit"
-                class="absolute inset-y-0 left-0 rounded-sm bg-primary/10 pointer-events-none transition-[width] duration-300 ease-out"
+                class="absolute inset-y-0 left-0 rounded-sm pointer-events-none transition-[width,background-color] duration-300 ease-out"
+                :class="trafficProgressClass"
                 :style="trafficProgressStyle"
               />
               <div class="relative flex flex-col gap-1.5">
                 <div class="flex gap-1 items-center text-muted-foreground">
                   <Icon icon="icon-park-outline:transfer-data" :width="14" :height="14" />
                   <span class="text-xs sm:text-sm">总流量</span>
+                  <Badge
+                    v-for="proto in ipSupport" :key="proto" variant="outline"
+                    class="!text-[10px] rounded text-emerald-600 border-emerald-600/25 px-1 py-0 leading-none"
+                  >
+                    {{ proto }}
+                  </Badge>
                   <div class="flex-1" />
                   <span class="hidden sm:block text-[11px] font-medium text-foreground/70">
                     {{ formatBytes(data?.net_total_up ?? 0) }} / {{ formatBytes(data?.net_total_down ?? 0) }}
                   </span>
                 </div>
                 <span class="text-xs sm:text-sm break-all">{{ trafficUsageText }}</span>
+                <span v-if="hasPeak" class="text-[10px] text-muted-foreground/80 flex items-center gap-2 leading-none">
+                  <span>近一天峰值</span>
+                  <span class="text-green-600 flex items-center gap-0.5">
+                    <Icon icon="tabler:chevron-up" width="10" height="10" />{{ formatBytesPerSecond(peakNetOut) }}
+                  </span>
+                  <span class="text-blue-600 flex items-center gap-0.5">
+                    <Icon icon="tabler:chevron-down" width="10" height="10" />{{ formatBytesPerSecond(peakNetIn) }}
+                  </span>
+                </span>
               </div>
             </div>
             <div class="min-w-0 flex flex-col gap-1 rounded-sm bg-slate-500/5 p-2">
