@@ -178,6 +178,9 @@ watch(data, async (node) => {
 
 const cpuScore = computed(() => estimateCpuScore(data.value?.cpu_name ?? ''))
 
+// 未登录且开启「未登录隐藏价格」时，屏蔽金额类指标（剩余时间为天数，仍显示）
+const showPrice = computed(() => appStore.isLoggedIn || !appStore.hidePriceWhenLoggedOut)
+
 const formatBytes = (bytes: number) => formatBytesWithConfig(bytes, appStore.byteDecimals)
 const formatBytesPerSecond = (bytes: number) => formatBytesPerSecondWithConfig(bytes, appStore.byteDecimals)
 const formatUptime = (seconds: number) => formatUptimeWithFormat(seconds, 'minute')
@@ -279,15 +282,16 @@ const remainingTimeValueClass = computed(() => {
 const metricCards = computed<MetricCard[]>(() => {
   if (!data.value)
     return []
+  const masked = !showPrice.value
   const nodePrice = splitMetricValue(nodePriceText.value)
   const monthlyAverageCost = splitMetricValue(monthlyAverageCostText.value)
   const remainingTime = splitMetricValue(remainingTimeText.value)
   const remainingValue = splitMetricValue(remainingValueText.value)
   return [
-    { label: '节点价格', value: nodePrice.value, unit: nodePrice.unit, icon: 'tabler:cash' },
-    { label: '月均支出', value: monthlyAverageCost.value, unit: monthlyAverageCost.unit, icon: 'tabler:receipt-2' },
+    { label: '节点价格', value: masked ? '***' : nodePrice.value, unit: masked ? undefined : nodePrice.unit, icon: 'tabler:cash' },
+    { label: '月均支出', value: masked ? '***' : monthlyAverageCost.value, unit: masked ? undefined : monthlyAverageCost.unit, icon: 'tabler:receipt-2' },
     { label: '剩余时间', value: remainingTime.value, unit: remainingTime.unit, icon: 'tabler:calendar-dollar', valueClass: remainingTimeValueClass.value },
-    { label: '剩余价值', value: remainingValue.value, unit: remainingValue.unit, icon: 'tabler:coins' },
+    { label: '剩余价值', value: masked ? '***' : remainingValue.value, unit: masked ? undefined : remainingValue.unit, icon: 'tabler:coins' },
   ]
 })
 

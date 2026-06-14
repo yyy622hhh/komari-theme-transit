@@ -142,6 +142,14 @@ const useAppStore = defineStore('app', () => {
     return false
   })
 
+  const hidePriceWhenLoggedOut = computed<boolean>(() => {
+    const settings = publicSettings.value?.theme_settings
+    if (settings && typeof settings.hidePriceWhenLoggedOut === 'boolean') {
+      return settings.hidePriceWhenLoggedOut
+    }
+    return false
+  })
+
   const disablePageAnimation = computed<boolean>(() => {
     const settings = publicSettings.value?.theme_settings
     if (settings && typeof settings.disablePageAnimation === 'boolean') {
@@ -325,6 +333,7 @@ const useAppStore = defineStore('app', () => {
     hideEarth,
     hideGeneralCard,
     hideAdminEntryWhenLoggedOut,
+    hidePriceWhenLoggedOut,
     disablePageAnimation,
     icpEnabled,
     icpNumber,

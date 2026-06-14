@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { Arc, COBEOptions, Globe, Marker } from 'cobe'
 import type { NodeData } from '@/stores/nodes'
+import type { IpGeo } from '@/utils/ipGeoHelper'
 import { Icon } from '@iconify/vue'
 import {
   useDocumentVisibility,
@@ -14,6 +15,7 @@ import { useAppStore } from '@/stores/app'
 import { useNodesStore } from '@/stores/nodes'
 import { getCoordByCode, getCountryCodeFromRegion } from '@/utils/geoHelper'
 import { formatBytesPerSecondSplit } from '@/utils/helper'
+import { lookupIpGeo } from '@/utils/ipGeoHelper'
 
 const props = defineProps<{
   nodes?: NodeData[]
@@ -71,6 +73,30 @@ onMounted(async () => {
   }
 })
 
+// 各节点 IP → 城市坐标（异步解析后填充，驱动地球城市级定位）
+const ipGeoMap = ref<Map<string, IpGeo>>(new Map())
+const attemptedIps = new Set<string>()
+
+async function resolveNodeCities(nodes: NodeData[]): Promise<void> {
+  for (const node of nodes) {
+    const ip = node.ipv4 || node.ipv6
+    if (!ip || attemptedIps.has(ip) || ipGeoMap.value.has(ip))
+      continue
+    attemptedIps.add(ip)
+    const geo = await lookupIpGeo(ip)
+    if (geo) {
+      // 重新赋值新 Map 以触发响应式更新
+      const next = new Map(ipGeoMap.value)
+      next.set(ip, geo)
+      ipGeoMap.value = next
+    }
+  }
+}
+
+watch(displayNodes, (nodes) => {
+  void resolveNodeCities(nodes)
+}, { immediate: true })
+
 function normalizePhi(value: number): number {
   const circle = Math.PI * 2
   let next = value % circle
@@ -113,6 +139,7 @@ function getCappedDpr(): number {
 }
 
 interface RegionCluster {
+  id: string
   code: string
   coord: [number, number]
   servers: number
@@ -120,22 +147,48 @@ interface RegionCluster {
 }
 
 function clusterKey(c: RegionCluster) {
-  return `${c.code}:${c.servers}:${c.onlineServers}`
+  return `${c.id}:${c.servers}:${c.onlineServers}`
+}
+
+// 计算单个节点的归属簇：优先用 IP 解析出的城市坐标，回退到国家中心点。
+// id 用于 marker / 锚点唯一标识，code 为国家代码（用于国旗），coord 为标记坐标。
+function nodeClusterInfo(node: NodeData): { id: string, code: string, coord: [number, number] } | null {
+  const countryCode = getCountryCodeFromRegion(node.region)
+  const ip = node.ipv4 || node.ipv6
+  const geo = ip ? ipGeoMap.value.get(ip) : undefined
+
+  if (geo && Number.isFinite(geo.lat) && Number.isFinite(geo.lng)) {
+    const code = (geo.countryCode || countryCode || '').toUpperCase()
+    const citySlug = (geo.city || `${geo.lat.toFixed(2)},${geo.lng.toFixed(2)}`)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+    return {
+      id: `${(code || 'xx').toLowerCase()}-${citySlug || 'city'}`,
+      code: code || (countryCode ?? ''),
+      coord: [geo.lat, geo.lng],
+    }
+  }
+
+  if (countryCode) {
+    const coord = getCoordByCode(countryCode)
+    if (coord)
+      return { id: countryCode.toLowerCase(), code: countryCode, coord }
+  }
+
+  return null
 }
 
 const regionClusters = computed<RegionCluster[]>(() => {
   const map = new Map<string, RegionCluster>()
   for (const node of displayNodes.value) {
-    const code = getCountryCodeFromRegion(node.region)
-    if (!code)
+    const info = nodeClusterInfo(node)
+    if (!info)
       continue
-    const coord = getCoordByCode(code)
-    if (!coord)
-      continue
-    let entry = map.get(code)
+    let entry = map.get(info.id)
     if (!entry) {
-      entry = { code, coord, servers: 0, onlineServers: 0 }
-      map.set(code, entry)
+      entry = { id: info.id, code: info.code, coord: info.coord, servers: 0, onlineServers: 0 }
+      map.set(info.id, entry)
     }
     entry.servers += 1
     if (node.online)
@@ -154,13 +207,13 @@ const regionRates = computed<Map<string, RegionRate>>(() => {
   for (const node of displayNodes.value) {
     if (!node.online)
       continue
-    const code = getCountryCodeFromRegion(node.region)
-    if (!code)
+    const info = nodeClusterInfo(node)
+    if (!info)
       continue
-    let entry = map.get(code)
+    let entry = map.get(info.id)
     if (!entry) {
       entry = { up: 0, down: 0 }
-      map.set(code, entry)
+      map.set(info.id, entry)
     }
     entry.up += node.net_out || 0
     entry.down += node.net_in || 0
@@ -293,7 +346,7 @@ function syncAnchorRefs() {
   }
   const next = new Map<string, HTMLDivElement>()
   for (const cluster of regionClusters.value) {
-    const id = markerId(cluster.code)
+    const id = markerId(cluster.id)
     const el = wrapper.querySelector<HTMLDivElement>(`div[style*="--cobe-${id}"]`)
     if (el)
       next.set(id, el)
@@ -303,7 +356,7 @@ function syncAnchorRefs() {
 
 const markers = computed<Marker[]>(() => {
   return regionClusters.value.map(cluster => ({
-    id: markerId(cluster.code),
+    id: markerId(cluster.id),
     location: cluster.coord,
     size: 0,
   }))
@@ -354,14 +407,14 @@ function buildInitialOptions(): COBEOptions {
   const colors = themeColors.value
   const { width, height } = getRenderSize()
   return {
-    devicePixelRatio: getCappedDpr(),
+    devicePixelRatio: 3,
     width,
     height,
     phi,
     theta,
     dark: colors.dark,
-    diffuse: 1.0, // 从 2.2 降到 1.0，减少白色溢光
-    mapSamples: 36000, // 保持高采样以获得更平滑的地球，尤其是在大屏幕上
+    diffuse: 0.5, // 从 2.2 降到 1.0，减少白色溢光
+    mapSamples: 16000, // 适中采样：点阵更稀疏，旋转时摩尔纹更轻（过高采样会加剧像素干涉）
     mapBrightness: colors.mapBrightness,
     baseColor: colors.baseColor,
     markerColor: colors.markerColor,
@@ -372,6 +425,7 @@ function buildInitialOptions(): COBEOptions {
     arcHeight: 0.4,
     arcWidth: 0.5,
     markerElevation: 0,
+
   }
 }
 
@@ -394,7 +448,7 @@ const { pause: pauseRaf, resume: resumeRaf } = useRafFn(
     const prevPhi = phi
     const prevTheta = theta
     if (!isPointerDown && shouldAutoRotate.value)
-      targetPhi += 0.0025
+      targetPhi += 0.0014
     phi += (targetPhi - phi) * 1
     theta += (targetTheta - theta) * 1
     if (
@@ -548,8 +602,8 @@ const totalServers = computed(() => displayNodes.value.length)
 const onlineServers = computed(() => displayNodes.value.filter(node => node.online).length)
 const offlineServers = computed(() => totalServers.value - onlineServers.value)
 
-function rateFor(code: string): RegionRate {
-  return regionRates.value.get(code) ?? { up: 0, down: 0 }
+function rateFor(id: string): RegionRate {
+  return regionRates.value.get(id) ?? { up: 0, down: 0 }
 }
 
 function formatRate(bytesPerSec: number): string {
@@ -566,13 +620,13 @@ function formatRate(bytesPerSec: number): string {
       @pointerdown="onPointerDown" @pointermove="onPointerMove" @pointerup="onPointerUp" @pointercancel="onPointerUp"
     />
 
-    <template v-for="cluster in regionClusters" :key="cluster.code">
-      <Teleport :to="getAnchorEl(cluster.code) ?? containerRef!" :disabled="!getAnchorEl(cluster.code)">
+    <template v-for="cluster in regionClusters" :key="cluster.id">
+      <Teleport :to="getAnchorEl(cluster.id) ?? containerRef!" :disabled="!getAnchorEl(cluster.id)">
         <div
           class="absolute -top-7.5 left-0 transition-[opacity,filter] duration-500 rounded backdrop-blur-[2px]"
           :style="{
-            opacity: `var(--cobe-visible-${markerId(cluster.code)}, 0)`,
-            filter: `blur(calc((1 - var(--cobe-visible-${markerId(cluster.code)}, 0)) * 20px))`,
+            opacity: `var(--cobe-visible-${markerId(cluster.id)}, 0)`,
+            filter: `blur(calc((1 - var(--cobe-visible-${markerId(cluster.id)}, 0)) * 20px))`,
           }"
         >
           <img
@@ -581,10 +635,10 @@ function formatRate(bytesPerSec: number): string {
           >
           <div class="relative z-2 bg-background/60 rounded py-0.5 px-1 text-xs zoom-80 items-start justify-center text-nowrap">
             <div class="text-green-600 flex flex-row items-center gap-0.5">
-              <Icon icon="tabler:chevron-up" width="12" height="12" /> {{ formatRate(rateFor(cluster.code).up) }}
+              <Icon icon="tabler:chevron-up" width="12" height="12" /> {{ formatRate(rateFor(cluster.id).up) }}
             </div>
             <div class="text-blue-600 flex flex-row items-center gap-0.5">
-              <Icon icon="tabler:chevron-down" width="12" height="12" /> {{ formatRate(rateFor(cluster.code).down) }}
+              <Icon icon="tabler:chevron-down" width="12" height="12" /> {{ formatRate(rateFor(cluster.id).down) }}
             </div>
           </div>
         </div>
@@ -610,5 +664,6 @@ function formatRate(bytesPerSec: number): string {
 <style scoped>
 .earth-globe-canvas {
   contain: layout paint;
+  filter: blur(0.5px); /* 轻微模糊柔化点阵，进一步抑制旋转时的摩尔纹 */
 }
 </style>

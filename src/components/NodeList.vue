@@ -32,6 +32,9 @@ const rowStaggerLimit = 12
 
 const appStore = useAppStore()
 
+// 未登录且开启「未登录隐藏价格」时，隐藏价格信息
+const showPrice = computed(() => appStore.isLoggedIn || !appStore.hidePriceWhenLoggedOut)
+
 const columns: ColumnConfig[] = [
   { key: 'status', label: '状态', width: '40px', sortable: false },
   { key: 'os', label: '系统', width: '40px', sortable: false },
@@ -258,7 +261,7 @@ function getCustomTags(node: NodeData): Array<string> {
                   <span class="truncate">{{ node.name }}</span>
                 </div>
                 <div
-                  v-if="getPriceTags(node).length > 0"
+                  v-if="showPrice && getPriceTags(node).length > 0"
                   class="text-[11px] text-muted-foreground/70 truncate"
                 >
                   <span v-for="(tag, tagIndex) in getPriceTags(node)" :key="tagIndex" :class="!!tagIndex && 'ml-3'">

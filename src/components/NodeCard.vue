@@ -11,7 +11,7 @@ import { useAppStore } from '@/stores/app'
 import { formatBytesPerSecondWithConfig, formatBytesWithConfig, formatDateTime, formatUptimeWithFormat, getStatus } from '@/utils/helper'
 import { getOSImage, getOSName } from '@/utils/osImageHelper'
 import { getRegionCode, getRegionDisplayName } from '@/utils/regionHelper'
-import { formatPriceWithCycle, getDaysUntilExpired, getExpireStatus, parseTags } from '@/utils/tagHelper'
+import { formatCurrencyValue, formatPriceWithCycle, getDaysOnline, getDaysUntilExpired, getExpireStatus, getRemainingValue, parseTags } from '@/utils/tagHelper'
 
 const props = defineProps<{ node: NodeData }>()
 const emit = defineEmits<{ click: [] }>()
@@ -69,22 +69,71 @@ const trafficUsed = computed(() => {
   }
 })
 
-const priceTags = computed(() => {
-  const tags: Array<string> = []
-  const lang = appStore.lang
+// 流量状态颜色
+const trafficStatus = computed(() => {
+  if (!showTrafficProgress(props.node))
+    return 'success'
+  if (trafficUsedPercentage.value >= 95)
+    return 'error'
+  if (trafficUsedPercentage.value >= 80)
+    return 'warning'
+  if (trafficUsedPercentage.value >= 60)
+    return 'info'
+  return 'success'
+})
+
+const trafficPercentageClass = computed(() => {
+  if (!showTrafficProgress(props.node))
+    return 'text-muted-foreground'
+  if (trafficUsedPercentage.value >= 95)
+    return 'text-red-500'
+  if (trafficUsedPercentage.value >= 80)
+    return 'text-orange-500'
+  if (trafficUsedPercentage.value >= 60)
+    return 'text-yellow-500'
+  return 'text-green-600'
+})
+
+// 是否显示金额：未登录且开启「未登录隐藏价格」时不显示价格 / 剩余价值，
+// 但在线天数、剩余天数等非金额信息仍然展示
+const showPrice = computed(() => appStore.isLoggedIn || !appStore.hidePriceWhenLoggedOut)
+
+// 左上角：在线天数（始终） + 价格（仅在允许显示金额时）
+const onlineInfoTags = computed(() => {
   const node = props.node
-  if (node.price !== 0) {
-    const days = getDaysUntilExpired(node.expired_at)
-    const status = getExpireStatus(node.expired_at)
-    if (status === 'expired')
-      tags.push(lang === 'zh-CN' ? '已过期' : 'Expired')
-    else if (status === 'long_term')
-      tags.push(lang === 'zh-CN' ? '长期' : 'Long-term')
-    else
-      tags.push(lang === 'zh-CN' ? `剩余 ${days} 天` : `${days} days left`)
+  if (node.price === 0)
+    return []
+  const lang = appStore.lang
+  const days = getDaysOnline(node.created_at)
+  const tags = [lang === 'zh-CN' ? `在线 ${days} 天` : `${days} days online`]
+  if (showPrice.value)
     tags.push(formatPriceWithCycle(node.price, node.billing_cycle, node.currency, lang))
-  }
   return tags
+})
+
+// 第三列：剩余天数（始终） + 剩余价值（仅在允许显示金额时），带图标与相邻列对齐
+const remainingInfoTags = computed<Array<{ icon: string, text: string }>>(() => {
+  const node = props.node
+  if (node.price === 0)
+    return []
+  const lang = appStore.lang
+  const days = getDaysUntilExpired(node.expired_at)
+  const status = getExpireStatus(node.expired_at)
+  let daysText: string
+  if (status === 'expired')
+    daysText = lang === 'zh-CN' ? '已过期' : 'Expired'
+  else if (status === 'long_term')
+    daysText = lang === 'zh-CN' ? '长期' : 'Long-term'
+  else
+    daysText = lang === 'zh-CN' ? `剩余 ${days} 天` : `${days} days left`
+  const items: Array<{ icon: string, text: string }> = [
+    { icon: 'tabler:calendar-stats', text: daysText },
+  ]
+  if (showPrice.value) {
+    const remainingValue = getRemainingValue(node.price, node.billing_cycle, node.expired_at)
+    items.push({ icon: 'tabler:coins', text: formatCurrencyValue(remainingValue, node.currency) })
+  }
+  return items
 })
 
 const customTags = computed(() => parseTags(props.node.tags).map(t => t.text))
@@ -101,7 +150,7 @@ function hasRegion(region: string | null | undefined): boolean {
     :class="[!props.node.online && '!shadow-red-500/30']"
     @click="emit('click')"
   >
-    <!-- 头部：名称 + OS + 国旗 -->
+    <!-- 头部：在线点 + 名称 -->
     <template #header>
       <div class="flex items-center gap-2 min-w-0">
         <div class="relative size-2.5 shrink-0">
@@ -118,6 +167,7 @@ function hasRegion(region: string | null | undefined): boolean {
       </div>
     </template>
 
+    <!-- 头部右侧：OS + 国旗 -->
     <template #header-extra>
       <div class="flex gap-1.5 items-center shrink-0">
         <img :src="getOSImage(props.node.os)" :alt="getOSName(props.node.os)" class="size-4">
@@ -132,11 +182,11 @@ function hasRegion(region: string | null | undefined): boolean {
 
     <template #default>
       <div class="flex flex-col gap-3 relative">
-        <!-- 价格标签 -->
-        <div v-if="priceTags.length" class="flex gap-1.5 flex-wrap -mt-1">
+        <!-- 价格标签行（在线天数 + 价格） -->
+        <div v-if="onlineInfoTags.length" class="flex gap-1.5 flex-wrap -mt-1">
           <span
-            v-for="(tag, i) in priceTags" :key="i"
-            class="text-[11px] px-2 py-0.5 rounded-full bg-slate-500/10 text-muted-foreground"
+            v-for="(tag, i) in onlineInfoTags" :key="i"
+            class="text-[11px] px-2 py-0.5 rounded-full bg-slate-500/10 text-muted-foreground leading-tight"
           >
             {{ tag }}
           </span>
@@ -180,67 +230,72 @@ function hasRegion(region: string | null | undefined): boolean {
             </div>
           </div>
 
-          <!-- 流量 -->
+          <!-- 流量（分级颜色） -->
           <div class="flex flex-col gap-1">
             <div class="flex justify-between text-xs">
               <span class="text-muted-foreground">流量</span>
-              <span class="tabular-nums font-medium">{{ trafficUsedPercentage.toFixed(1) }}%</span>
+              <span class="tabular-nums font-medium" :class="trafficPercentageClass">
+                {{ showTrafficProgress(props.node) ? `${trafficUsedPercentage.toFixed(1)}%` : '∞' }}
+              </span>
             </div>
-            <ProgressThin :percentage="trafficUsedPercentage" status="success" :height="4" />
-            <div class="text-[11px] text-muted-foreground truncate">
-              {{ formatBytes(trafficUsed) }} /
-              <template v-if="showTrafficProgress(node)">
-                {{ formatBytes(props.node.traffic_limit) }}
+            <ProgressThin :percentage="trafficUsedPercentage" :status="trafficStatus" :height="4" />
+            <div class="text-[11px] truncate" :class="trafficUsedPercentage >= 95 ? 'text-red-500' : 'text-muted-foreground'">
+              {{ formatBytes(trafficUsed) }}
+              <template v-if="showTrafficProgress(props.node)">
+                / {{ formatBytes(props.node.traffic_limit) }}
               </template>
               <template v-else>
-                ∞
+                / ∞
               </template>
             </div>
           </div>
         </div>
 
-        <!-- 网速 / 总流量 / 价格 三列 -->
+        <!-- 三列：网速 / 总流量 / 剩余天数+价格或负载 -->
         <div class="grid grid-cols-3 gap-1.5">
-          <div class="flex flex-col gap-0.5 px-2 py-1.5 rounded-lg bg-slate-500/5">
+          <!-- 实时网速 -->
+          <div class="flex flex-col gap-0.5 px-2 py-1.5 rounded-lg bg-slate-500/5 min-w-0">
             <div class="text-[11px] text-green-600 flex items-center gap-1">
               <Icon icon="tabler:chevron-up" width="11" height="11" />
-              <span class="truncate">{{ formatBytesPerSecond(props.node.net_out ?? 0) }}</span>
+              <span class="truncate min-w-0">{{ formatBytesPerSecond(props.node.net_out ?? 0) }}</span>
             </div>
             <div class="text-[11px] text-blue-600 flex items-center gap-1">
               <Icon icon="tabler:chevron-down" width="11" height="11" />
-              <span class="truncate">{{ formatBytesPerSecond(props.node.net_in ?? 0) }}</span>
+              <span class="truncate min-w-0">{{ formatBytesPerSecond(props.node.net_in ?? 0) }}</span>
             </div>
           </div>
 
-          <div class="flex flex-col gap-0.5 px-2 py-1.5 rounded-lg bg-slate-500/5">
+          <!-- 总流量 -->
+          <div class="flex flex-col gap-0.5 px-2 py-1.5 rounded-lg bg-slate-500/5 min-w-0">
             <div class="text-[11px] text-muted-foreground flex items-center gap-1">
               <Icon icon="tabler:upload" width="11" height="11" />
-              <span class="truncate">{{ formatBytes(props.node.net_total_up ?? 0) }}</span>
+              <span class="truncate min-w-0">{{ formatBytes(props.node.net_total_up ?? 0) }}</span>
             </div>
             <div class="text-[11px] text-muted-foreground flex items-center gap-1">
               <Icon icon="tabler:download" width="11" height="11" />
-              <span class="truncate">{{ formatBytes(props.node.net_total_down ?? 0) }}</span>
+              <span class="truncate min-w-0">{{ formatBytes(props.node.net_total_down ?? 0) }}</span>
             </div>
           </div>
 
-          <div
-            v-if="priceTags.length"
-            class="flex flex-col gap-0.5 px-2 py-1.5 rounded-lg bg-slate-500/5"
-          >
-            <div v-for="(tag, i) in priceTags" :key="i" class="text-[11px] text-muted-foreground truncate">
-              {{ tag }}
-            </div>
-          </div>
-          <div
-            v-else
-            class="flex flex-col gap-0.5 px-2 py-1.5 rounded-lg bg-slate-500/5"
-          >
-            <div class="text-[11px] text-muted-foreground truncate">
-              {{ props.node.load.toFixed(2) }}
-            </div>
-            <div class="text-[11px] text-muted-foreground truncate">
-              {{ props.node.load5.toFixed(2) }} / {{ props.node.load15.toFixed(2) }}
-            </div>
+          <!-- 第三列：有价格显示剩余天数+价格，否则显示负载 -->
+          <div class="flex flex-col gap-0.5 px-2 py-1.5 rounded-lg bg-slate-500/5 min-w-0">
+            <template v-if="remainingInfoTags.length">
+              <div
+                v-for="(item, i) in remainingInfoTags" :key="i"
+                class="text-[11px] text-muted-foreground flex items-center gap-1"
+              >
+                <Icon :icon="item.icon" width="11" height="11" class="shrink-0" />
+                <span class="truncate min-w-0">{{ item.text }}</span>
+              </div>
+            </template>
+            <template v-else>
+              <div class="text-[11px] text-muted-foreground truncate">
+                {{ props.node.load.toFixed(2) }}
+              </div>
+              <div class="text-[11px] text-muted-foreground truncate">
+                {{ props.node.load5.toFixed(2) }} / {{ props.node.load15.toFixed(2) }}
+              </div>
+            </template>
           </div>
         </div>
 

@@ -18,6 +18,8 @@ const props = defineProps<{
 }>()
 const appStore = useAppStore()
 const nodesStore = useNodesStore()
+// 未登录且开启「未登录隐藏价格」时，屏蔽剩余价值
+const showPrice = computed(() => appStore.isLoggedIn || !appStore.hidePriceWhenLoggedOut)
 const exchangeRates = ref(financeHelper.DEFAULT_EXCHANGE_RATES)
 const exchangeRateSource = ref<ExchangeRateSource | 'loading'>('loading')
 const financeCurrency = ref<CurrencyCode>('CNY')
@@ -104,6 +106,8 @@ const formattedTotalValue = computed(() => {
   return financeHelper.formatFinanceAmount(totalValue.value, financeCurrency.value)
 })
 const totalValueTooltip = computed(() => {
+  if (!showPrice.value)
+    return '总价值\n***'
   return `总价值\n${formattedTotalValue.value.symbol}${formattedTotalValue.value.value} ${formattedTotalValue.value.currency}`
 })
 const showEarth = computed(() => !appStore.hideEarth)
@@ -216,12 +220,15 @@ onMounted(async () => {
                 class="flex items-baseline gap-1 min-w-0"
                 :style="getMetricSwitchStyle(2)"
               >
-                <span class="text-md md:text-2xl font-bold leading-none tracking-tight">
-                  {{ formattedRemainingValue.symbol }}{{ formattedRemainingValue.value }}
-                </span>
-                <span class="block cursor-help truncate text-[11px] md:text-xs font-medium text-muted-foreground">
-                  {{ formattedRemainingValue.currency }}
-                </span>
+                <template v-if="showPrice">
+                  <span class="text-md md:text-2xl font-bold leading-none tracking-tight">
+                    {{ formattedRemainingValue.symbol }}{{ formattedRemainingValue.value }}
+                  </span>
+                  <span class="block cursor-help truncate text-[11px] md:text-xs font-medium text-muted-foreground">
+                    {{ formattedRemainingValue.currency }}
+                  </span>
+                </template>
+                <span v-else class="text-md md:text-2xl font-bold leading-none tracking-tight">***</span>
               </div>
             </Transition>
           </DataTooltip>

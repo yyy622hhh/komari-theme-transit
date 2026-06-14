@@ -343,6 +343,67 @@ export function formatPriceWithCycle(
   return `${priceText} / ${cycleText}`
 }
 
+const TRAILING_ZERO_REGEX = /\.?0+$/
+
+/**
+ * 计算已在线天数（自创建时间 createdAt 起至今）
+ * @param createdAt 创建时间（字符串或时间戳）
+ * @returns 已在线天数，无效时间返回 0
+ */
+export function getDaysOnline(createdAt: string | number | undefined): number {
+  if (!createdAt)
+    return 0
+
+  const created = dayjs(createdAt)
+  if (!created.isValid())
+    return 0
+
+  const days = dayjs().diff(created, 'day')
+  return days > 0 ? days : 0
+}
+
+/**
+ * 计算剩余价值（按剩余天数占一个计费周期的比例折算）
+ * - 价格 <= 0：返回 0
+ * - 已过期：返回 0
+ * - 一次性 / 未知周期（billingCycle <= 0）：返回全额价格
+ * - 折算比例上限为 1，不超过一个计费周期的价格
+ * @param price 价格
+ * @param billingCycle 计费周期（天）
+ * @param expiredAt 过期时间
+ * @returns 剩余价值金额
+ */
+export function getRemainingValue(
+  price: number,
+  billingCycle: number,
+  expiredAt: string | number | undefined,
+): number {
+  if (!price || price <= 0)
+    return 0
+
+  const days = getDaysUntilExpired(expiredAt)
+  if (days <= 0)
+    return 0
+
+  if (billingCycle <= 0)
+    return price
+
+  const fraction = Math.min(days / billingCycle, 1)
+  return price * fraction
+}
+
+/**
+ * 格式化金额（用于剩余价值显示），自动去除多余的小数 0
+ * @param value 金额
+ * @param currency 货币符号
+ * @returns 金额显示文本，如 "$29.79"、"$0"
+ */
+export function formatCurrencyValue(value: number, currency: string = '￥'): string {
+  const rounded = Math.round(value * 100) / 100
+  const text = rounded.toFixed(2).replace(TRAILING_ZERO_REGEX, '')
+  return `${currency}${text || '0'}`
+}
+
 /**
  * 检查是否有 IPv4
  */
