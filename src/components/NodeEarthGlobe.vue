@@ -53,6 +53,9 @@ let staticRedrawUntil = 0
 const visitorCoord = ref<[number, number] | null>(null)
 
 onMounted(async () => {
+  if (!appStore.visitorGeoArcEnabled)
+    return
+
   try {
     const cached = localStorage.getItem('visitor_coord')
     if (cached) {

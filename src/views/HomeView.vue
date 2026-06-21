@@ -110,6 +110,15 @@ function getNodeItemTransitionStyle(index: number): Record<string, string> {
     '--node-item-delay': `${Math.min(index, nodeItemStaggerLimit) * nodeItemStaggerMs}ms`,
   }
 }
+
+const nodeCardGridClass = computed(() => {
+  const sizeClass: Record<typeof appStore.nodeCardSize, string> = {
+    compact: 'gap-3 sm:grid-cols-[repeat(auto-fill,minmax(300px,1fr))]',
+    comfortable: 'gap-4 sm:grid-cols-[repeat(auto-fill,minmax(360px,1fr))]',
+    large: 'gap-5 sm:grid-cols-[repeat(auto-fill,minmax(420px,1fr))]',
+  }
+  return ['grid grid-cols-1', sizeClass[appStore.nodeCardSize]]
+})
 </script>
 
 <template>
@@ -191,7 +200,7 @@ function getNodeItemTransitionStyle(index: number): Record<string, string> {
               :css="!appStore.disablePageAnimation"
               name="node-card-switch"
               tag="div"
-              class="gap-3 grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,minmax(300px,1fr))]"
+              :class="nodeCardGridClass"
             >
               <div
                 v-for="(node, index) in nodeList"

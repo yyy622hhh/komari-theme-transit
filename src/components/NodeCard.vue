@@ -17,6 +17,22 @@ const props = defineProps<{ node: NodeData }>()
 const emit = defineEmits<{ click: [] }>()
 const appStore = useAppStore()
 
+interface RemainingInfoTag {
+  icon: string
+  text?: string
+  prefix?: string
+  value?: string
+  unit?: string
+}
+
+const nodeCardXSize = computed(() => appStore.nodeCardSize === 'large' ? 'large' : 'medium')
+const nodeCardContentClass = computed(() => appStore.nodeCardSize === 'large' ? 'gap-4' : 'gap-3')
+const nodeCardMetricGridClass = 'grid-cols-3'
+const nodeCardMetricBoxClass = computed(() => appStore.nodeCardSize === 'compact'
+  ? 'px-1.5 py-1.5'
+  : 'px-2 py-1.5')
+const nodeCardPanelClass = computed(() => appStore.nodeCardSize === 'large' ? 'h-14' : appStore.nodeCardSize === 'comfortable' ? 'h-12' : 'h-11')
+
 const formatBytes = (bytes: number) => formatBytesWithConfig(bytes, appStore.byteDecimals)
 const formatBytesPerSecond = (bytes: number) => formatBytesPerSecondWithConfig(bytes, appStore.byteDecimals)
 const formatUptime = (seconds: number) => formatUptimeWithFormat(seconds, 'hour')
@@ -47,12 +63,22 @@ const trafficUsedPercentage = computed(() => {
   const { net_total_up = 0, net_total_down = 0, traffic_limit_type } = props.node
   let used = 0
   switch (traffic_limit_type) {
-    case 'up': used = net_total_up; break
-    case 'down': used = net_total_down; break
-    case 'min': used = Math.min(net_total_up, net_total_down); break
-    case 'max': used = Math.max(net_total_up, net_total_down); break
+    case 'up':
+      used = net_total_up
+      break
+    case 'down':
+      used = net_total_down
+      break
+    case 'min':
+      used = Math.min(net_total_up, net_total_down)
+      break
+    case 'max':
+      used = Math.max(net_total_up, net_total_down)
+      break
     case 'sum':
-    default: used = net_total_up + net_total_down; break
+    default:
+      used = net_total_up + net_total_down
+      break
   }
   return Math.min((used / props.node.traffic_limit) * 100, 100)
 })
@@ -112,23 +138,28 @@ const onlineInfoTags = computed(() => {
 })
 
 // 第三列：剩余天数（始终） + 剩余价值（仅在允许显示金额时），带图标与相邻列对齐
-const remainingInfoTags = computed<Array<{ icon: string, text: string }>>(() => {
+const remainingInfoTags = computed<RemainingInfoTag[]>(() => {
   const node = props.node
   if (node.price === 0)
     return []
   const lang = appStore.lang
   const days = getDaysUntilExpired(node.expired_at)
   const status = getExpireStatus(node.expired_at)
-  let daysText: string
-  if (status === 'expired')
-    daysText = lang === 'zh-CN' ? '已过期' : 'Expired'
-  else if (status === 'long_term')
-    daysText = lang === 'zh-CN' ? '长期' : 'Long-term'
-  else
-    daysText = lang === 'zh-CN' ? `剩余 ${days} 天` : `${days} days left`
-  const items: Array<{ icon: string, text: string }> = [
-    { icon: 'tabler:calendar-stats', text: daysText },
-  ]
+  const items: RemainingInfoTag[] = []
+
+  if (status === 'expired') {
+    items.push({ icon: 'tabler:calendar-stats', text: lang === 'zh-CN' ? '已过期' : 'Expired' })
+  }
+  else if (status === 'long_term') {
+    items.push({ icon: 'tabler:calendar-stats', text: lang === 'zh-CN' ? '长期' : 'Long-term' })
+  }
+  else if (lang === 'zh-CN') {
+    items.push({ icon: 'tabler:calendar-stats', prefix: '剩余', value: String(days), unit: '天' })
+  }
+  else {
+    items.push({ icon: 'tabler:calendar-stats', prefix: 'left', value: String(days), unit: 'days' })
+  }
+
   if (showPrice.value) {
     const remainingValue = getRemainingValue(node.price, node.billing_cycle, node.expired_at)
     items.push({ icon: 'tabler:coins', text: formatCurrencyValue(remainingValue, node.currency) })
@@ -146,13 +177,14 @@ function hasRegion(region: string | null | undefined): boolean {
 <template>
   <CardX
     hoverable
+    :size="nodeCardXSize"
     class="node-card w-full cursor-pointer border-none shadow-[0_0_0_3px] shadow-transparent transition-all duration-200 rounded-xl"
     :class="[!props.node.online && '!shadow-red-500/30']"
     @click="emit('click')"
   >
     <!-- 头部：在线点 + 名称 -->
     <template #header>
-      <div class="flex items-center gap-2 min-w-0">
+      <div class="flex items-center gap-2 min-w-0 overflow-hidden">
         <div class="relative size-2.5 shrink-0">
           <span
             class="size-2.5 rounded-full block"
@@ -181,7 +213,7 @@ function hasRegion(region: string | null | undefined): boolean {
     </template>
 
     <template #default>
-      <div class="flex flex-col gap-3 relative">
+      <div class="flex flex-col relative" :class="nodeCardContentClass">
         <!-- 价格标签行（在线天数 + 价格） -->
         <div v-if="onlineInfoTags.length" class="flex gap-1.5 flex-wrap -mt-1">
           <span
@@ -252,40 +284,45 @@ function hasRegion(region: string | null | undefined): boolean {
         </div>
 
         <!-- 三列：网速 / 总流量 / 剩余天数+价格或负载 -->
-        <div class="grid grid-cols-3 gap-1.5">
+        <div class="grid gap-1.5" :class="nodeCardMetricGridClass">
           <!-- 实时网速 -->
-          <div class="flex flex-col gap-0.5 px-2 py-1.5 rounded-lg bg-slate-500/5 min-w-0">
+          <div class="flex flex-col gap-0.5 rounded-lg bg-slate-500/5 min-w-0 overflow-hidden" :class="nodeCardMetricBoxClass">
             <div class="text-[11px] text-green-600 flex items-center gap-1">
               <Icon icon="tabler:chevron-up" width="11" height="11" />
-              <span class="truncate min-w-0">{{ formatBytesPerSecond(props.node.net_out ?? 0) }}</span>
+              <span class="truncate min-w-0 overflow-hidden">{{ formatBytesPerSecond(props.node.net_out ?? 0) }}</span>
             </div>
             <div class="text-[11px] text-blue-600 flex items-center gap-1">
               <Icon icon="tabler:chevron-down" width="11" height="11" />
-              <span class="truncate min-w-0">{{ formatBytesPerSecond(props.node.net_in ?? 0) }}</span>
+              <span class="truncate min-w-0 overflow-hidden">{{ formatBytesPerSecond(props.node.net_in ?? 0) }}</span>
             </div>
           </div>
 
           <!-- 总流量 -->
-          <div class="flex flex-col gap-0.5 px-2 py-1.5 rounded-lg bg-slate-500/5 min-w-0">
+          <div class="flex flex-col gap-0.5 rounded-lg bg-slate-500/5 min-w-0 overflow-hidden" :class="nodeCardMetricBoxClass">
             <div class="text-[11px] text-muted-foreground flex items-center gap-1">
               <Icon icon="tabler:upload" width="11" height="11" />
-              <span class="truncate min-w-0">{{ formatBytes(props.node.net_total_up ?? 0) }}</span>
+              <span class="truncate min-w-0 overflow-hidden">{{ formatBytes(props.node.net_total_up ?? 0) }}</span>
             </div>
             <div class="text-[11px] text-muted-foreground flex items-center gap-1">
               <Icon icon="tabler:download" width="11" height="11" />
-              <span class="truncate min-w-0">{{ formatBytes(props.node.net_total_down ?? 0) }}</span>
+              <span class="truncate min-w-0 overflow-hidden">{{ formatBytes(props.node.net_total_down ?? 0) }}</span>
             </div>
           </div>
 
           <!-- 第三列：有价格显示剩余天数+价格，否则显示负载 -->
-          <div class="flex flex-col gap-0.5 px-2 py-1.5 rounded-lg bg-slate-500/5 min-w-0">
+          <div class="flex flex-col gap-0.5 rounded-lg bg-slate-500/5 min-w-0 overflow-hidden" :class="nodeCardMetricBoxClass">
             <template v-if="remainingInfoTags.length">
               <div
                 v-for="(item, i) in remainingInfoTags" :key="i"
-                class="text-[11px] text-muted-foreground flex items-center gap-1"
+                class="text-[11px] text-muted-foreground flex items-center gap-0.5"
               >
                 <Icon :icon="item.icon" width="11" height="11" class="shrink-0" />
-                <span class="truncate min-w-0">{{ item.text }}</span>
+                <span v-if="item.text" class="truncate min-w-0 overflow-hidden">{{ item.text }}</span>
+                <template v-else>
+                  <span v-if="item.prefix" class="shrink-0">{{ item.prefix }}</span>
+                  <span v-if="item.value" class="shrink-0 tabular-nums">{{ item.value }}</span>
+                  <span v-if="item.unit" class="shrink-0">{{ item.unit }}</span>
+                </template>
               </div>
             </template>
             <template v-else>
@@ -302,8 +339,8 @@ function hasRegion(region: string | null | undefined): boolean {
         <!-- 延迟 + 丢包 -->
         <div class="grid grid-cols-2 gap-1.5">
           <div
-            class="group/panel relative flex flex-col gap-1.5 p-2 h-11 rounded-lg bg-slate-500/5"
-            :class="[!props.node.online ? 'blur-xs opacity-50' : '']"
+            class="group/panel relative flex flex-col gap-1.5 p-2 rounded-lg bg-slate-500/5"
+            :class="[nodeCardPanelClass, !props.node.online ? 'blur-xs opacity-50' : '']"
             :title="latencyPanelTooltip"
           >
             <div class="flex items-center justify-between text-[11px] leading-none">
@@ -327,8 +364,8 @@ function hasRegion(region: string | null | undefined): boolean {
           </div>
 
           <div
-            class="group/panel relative flex flex-col gap-1.5 p-2 h-11 rounded-lg bg-slate-500/5"
-            :class="[!props.node.online ? 'blur-xs opacity-50' : '']"
+            class="group/panel relative flex flex-col gap-1.5 p-2 rounded-lg bg-slate-500/5"
+            :class="[nodeCardPanelClass, !props.node.online ? 'blur-xs opacity-50' : '']"
             :title="lossPanelTooltip"
           >
             <div class="flex items-center justify-between text-[11px] leading-none">

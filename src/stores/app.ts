@@ -24,6 +24,7 @@ export type GeneralCardKey
 
 type Lang = 'zh-CN' | 'en-US'
 type NodeViewMode = 'card' | 'list'
+type NodeCardSize = 'compact' | 'comfortable' | 'large'
 type RpcTransportMode = 'websocket' | 'http'
 
 /** 固定的字节精度配置 */
@@ -135,6 +136,17 @@ const useAppStore = defineStore('app', () => {
     return value === 'card' || value === 'list'
   }
 
+  function isValidNodeCardSize(value: unknown): value is NodeCardSize {
+    return value === 'compact' || value === 'comfortable' || value === 'large'
+  }
+
+  const nodeCardSize = computed<NodeCardSize>(() => {
+    const settings = publicSettings.value?.theme_settings
+    if (settings && isValidNodeCardSize(settings.nodeCardSize))
+      return settings.nodeCardSize
+    return 'compact'
+  })
+
   // 当前实际使用的视图模式
   const nodeViewMode = computed<NodeViewMode>({
     get: () => {
@@ -213,6 +225,20 @@ const useAppStore = defineStore('app', () => {
     return false
   })
 
+  const visitorInfoEnabled = computed<boolean>(() => {
+    const settings = publicSettings.value?.theme_settings
+    if (settings && typeof settings.visitorInfoEnabled === 'boolean')
+      return settings.visitorInfoEnabled
+    return true
+  })
+
+  const visitorGeoArcEnabled = computed<boolean>(() => {
+    const settings = publicSettings.value?.theme_settings
+    if (settings && typeof settings.visitorGeoArcEnabled === 'boolean')
+      return settings.visitorGeoArcEnabled
+    return true
+  })
+
   const generalCardEnabledMap = computed<Record<GeneralCardKey, boolean>>(() => {
     const settings = publicSettings.value?.theme_settings
     const enabledMap = { ...DEFAULT_GENERAL_CARD_ENABLED }
@@ -272,6 +298,13 @@ const useAppStore = defineStore('app', () => {
       return settings.hidePriceWhenLoggedOut
     }
     return false
+  })
+
+  const providerAliases = computed<string>(() => {
+    const settings = publicSettings.value?.theme_settings
+    if (settings && typeof settings.providerAliases === 'string')
+      return settings.providerAliases.trim()
+    return ''
   })
 
   const disablePageAnimation = computed<boolean>(() => {
@@ -448,6 +481,7 @@ const useAppStore = defineStore('app', () => {
     nodeSelectedGroup,
     nodeViewMode,
     defaultViewMode,
+    nodeCardSize,
     rpcTransportMode,
     byteDecimals,
     alertEnabled,
@@ -456,10 +490,13 @@ const useAppStore = defineStore('app', () => {
     stopEarth,
     hideEarth,
     hideGeneralCard,
+    visitorInfoEnabled,
+    visitorGeoArcEnabled,
     generalCardEnabledMap,
     generalCardOrder,
     hideAdminEntryWhenLoggedOut,
     hidePriceWhenLoggedOut,
+    providerAliases,
     disablePageAnimation,
     icpEnabled,
     icpNumber,

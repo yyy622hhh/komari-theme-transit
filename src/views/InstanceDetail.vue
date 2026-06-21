@@ -2,14 +2,14 @@
 import type { NodeData } from '@/stores/nodes'
 import type { CurrencyCode } from '@/utils/financeHelper'
 import type { IpGeo } from '@/utils/ipGeoHelper'
+import type { ProviderResolveResult } from '@/utils/providerInfo'
 import { Icon } from '@iconify/vue'
-import { computed, defineAsyncComponent, onMounted, ref } from 'vue'
-// 监听节点数据，获取厂商
-import { watch } from 'vue'
+import { computed, defineAsyncComponent, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { CardX } from '@/components/ui/card-x'
+import { DataTooltip } from '@/components/ui/data-tooltip'
 import { Empty } from '@/components/ui/empty'
 import { useAppStore } from '@/stores/app'
 import { useNodesStore } from '@/stores/nodes'
@@ -17,6 +17,7 @@ import * as financeHelper from '@/utils/financeHelper'
 import { formatBytesPerSecondWithConfig, formatBytesWithConfig, formatUptimeWithFormat } from '@/utils/helper'
 import { lookupIpGeo } from '@/utils/ipGeoHelper'
 import { getOSImage, getOSName } from '@/utils/osImageHelper'
+import { resolveProviderInfo } from '@/utils/providerInfo'
 import { getRegionCode, getRegionDisplayName } from '@/utils/regionHelper'
 
 import { formatPrice, formatPriceWithCycle, getExpireStatus, getExpireText, parseTags } from '@/utils/tagHelper'
@@ -33,7 +34,7 @@ const exchangeRates = ref(financeHelper.DEFAULT_EXCHANGE_RATES)
 const financeCurrency = ref<CurrencyCode>('CNY')
 
 // VPS 厂商识别
-const vpsProvider = ref<{ name: string, icon: string } | null>(null)
+const vpsProvider = ref<ProviderResolveResult | null>(null)
 // IP 解析结果（城市 / ASN 组织 / AS 号）
 const nodeGeo = ref<IpGeo | null>(null)
 // 近一天网速峰值（B/s）
@@ -110,138 +111,40 @@ function estimateCpuScore(cpuName: string): CpuScore {
   return { score: 35, tier: 'C', tierColor: 'text-orange-500', label: '通用' }
 }
 
-// VPS 厂商数据库（通过 ASN org 关键字匹配）
-const PROVIDER_DB: Array<{ keywords: string[], name: string, icon: string }> = [
-  { keywords: ['vultr'], name: 'Vultr', icon: 'simple-icons:vultr' },
-  { keywords: ['linode', 'akamai'], name: 'Akamai (Linode)', icon: 'simple-icons:linode' },
-  { keywords: ['digitalocean'], name: 'DigitalOcean', icon: 'simple-icons:digitalocean' },
-  { keywords: ['amazon', 'aws', 'amazon.com'], name: 'Amazon AWS', icon: 'simple-icons:amazonaws' },
-  { keywords: ['google', 'gcp'], name: 'Google Cloud', icon: 'simple-icons:googlecloud' },
-  { keywords: ['microsoft', 'azure'], name: 'Microsoft Azure', icon: 'simple-icons:microsoftazure' },
-  { keywords: ['cloudflare'], name: 'Cloudflare', icon: 'simple-icons:cloudflare' },
-  { keywords: ['hetzner'], name: 'Hetzner', icon: 'simple-icons:hetzner' },
-  { keywords: ['ovh'], name: 'OVHcloud', icon: 'simple-icons:ovh' },
-  { keywords: ['contabo'], name: 'Contabo', icon: 'tabler:server' },
-  { keywords: ['bandwagonhost', 'it7'], name: 'BandwagonHost', icon: 'tabler:server' },
-  { keywords: ['racknerd'], name: 'RackNerd', icon: 'tabler:server' },
-  { keywords: ['hostinger'], name: 'Hostinger', icon: 'simple-icons:hostinger' },
-  { keywords: ['tencent', 'qcloud'], name: '腾讯云', icon: 'simple-icons:tencentqq' },
-  { keywords: ['alibaba', 'aliyun'], name: '阿里云', icon: 'simple-icons:alibabacloud' },
-  { keywords: ['huawei'], name: '华为云', icon: 'simple-icons:huawei' },
-  { keywords: ['hytron', 'hinet'], name: 'Hytron', icon: 'tabler:server' },
-  { keywords: ['choopa', 'constant'], name: 'Vultr (Choopa)', icon: 'simple-icons:vultr' },
-  { keywords: ['frantech', 'buyvm'], name: 'BuyVM', icon: 'tabler:server' },
-  { keywords: ['path.net', 'pathnet'], name: 'Path.net', icon: 'tabler:server' },
-  { keywords: ['alice networks', 'alice'], name: 'Alice Networks', icon: 'tabler:server' },
-  { keywords: ['oracle'], name: 'Oracle Cloud', icon: 'simple-icons:oracle' },
-  { keywords: ['ibm', 'softlayer'], name: 'IBM Cloud', icon: 'simple-icons:ibmcloud' },
-  { keywords: ['scaleway', 'iliad', 'online sas'], name: 'Scaleway', icon: 'simple-icons:scaleway' },
-  { keywords: ['leaseweb'], name: 'Leaseweb', icon: 'tabler:server' },
-  { keywords: ['g-core', 'gcore'], name: 'Gcore', icon: 'tabler:server' },
-  { keywords: ['dmit'], name: 'DMIT', icon: 'tabler:server' },
-  { keywords: ['greencloud'], name: 'GreenCloudVPS', icon: 'tabler:server' },
-  { keywords: ['hosthatch'], name: 'HostHatch', icon: 'tabler:server' },
-  { keywords: ['kamatera'], name: 'Kamatera', icon: 'tabler:server' },
-  { keywords: ['colocrossing'], name: 'ColoCrossing', icon: 'tabler:server' },
-  { keywords: ['psychz'], name: 'Psychz Networks', icon: 'tabler:server' },
-  { keywords: ['m247'], name: 'M247', icon: 'tabler:server' },
-  { keywords: ['zenlayer'], name: 'Zenlayer', icon: 'tabler:server' },
-  { keywords: ['hurricane electric', 'he.net'], name: 'Hurricane Electric', icon: 'tabler:server' },
-  { keywords: ['misaka'], name: 'Misaka', icon: 'tabler:server' },
-  { keywords: ['gigsgigs', 'gigsgigscloud'], name: 'GigsGigsCloud', icon: 'tabler:server' },
-  { keywords: ['akile'], name: 'Akile', icon: 'tabler:server' },
-  { keywords: ['cloudie'], name: 'Cloudie', icon: 'tabler:server' },
-  { keywords: ['china mobile', 'cmi'], name: 'China Mobile (CMI)', icon: 'tabler:server' },
-  { keywords: ['china unicom', 'unicom', 'cuii'], name: 'China Unicom', icon: 'tabler:server' },
-  { keywords: ['china telecom', 'chinanet', 'ctg'], name: 'China Telecom', icon: 'tabler:server' },
-  { keywords: ['hostpapa'], name: 'HostPapa', icon: 'tabler:server' },
-  { keywords: ['colocrossing', 'colo crossing'], name: 'ColoCrossing', icon: 'tabler:server' },
-  { keywords: ['virmach'], name: 'VirMach', icon: 'tabler:server' },
-  { keywords: ['hostdare'], name: 'HostDare', icon: 'tabler:server' },
-  { keywords: ['nexusbytes', 'nexus bytes'], name: 'NexusBytes', icon: 'tabler:server' },
-  { keywords: ['evolution host', 'evolution-host'], name: 'Evolution Host', icon: 'tabler:server' },
-  { keywords: ['servarica'], name: 'Servarica', icon: 'tabler:server' },
-  { keywords: ['bytevirt'], name: 'ByteVirt', icon: 'tabler:server' },
-  { keywords: ['hostslick'], name: 'HostSlick', icon: 'tabler:server' },
-  { keywords: ['spartanhost', 'spartan host'], name: 'SpartanHost', icon: 'tabler:server' },
-  { keywords: ['lightnode'], name: 'LightNode', icon: 'tabler:server' },
-  { keywords: ['netcup'], name: 'Netcup', icon: 'tabler:server' },
-  { keywords: ['ionos', '1and1'], name: 'IONOS', icon: 'tabler:server' },
-  { keywords: ['time4vps'], name: 'Time4VPS', icon: 'tabler:server' },
-  { keywords: ['aeza'], name: 'Aeza', icon: 'tabler:server' },
-  { keywords: ['pq.hosting', 'pqhosting'], name: 'PQ.Hosting', icon: 'tabler:server' },
-  { keywords: ['xtom', 'v.ps'], name: 'V.PS (xTom)', icon: 'tabler:server' },
-]
+let providerResolveSeq = 0
 
-// 知名共享 ASN → 网络运营商：org 名常被子分配掩盖（如 AS36352 实为 ColoCrossing，
-// 但 org 可能显示成某个转售品牌），按 ASN 号兜底识别更准。
-const ASN_PROVIDER_DB: Record<string, { name: string, icon: string }> = {
-  AS36352: { name: 'ColoCrossing', icon: 'tabler:server' },
-  AS53667: { name: 'FranTech (BuyVM)', icon: 'tabler:server' },
-  AS20473: { name: 'Vultr (Choopa)', icon: 'simple-icons:vultr' },
-  AS14061: { name: 'DigitalOcean', icon: 'simple-icons:digitalocean' },
-  AS24940: { name: 'Hetzner', icon: 'simple-icons:hetzner' },
-  AS16276: { name: 'OVHcloud', icon: 'simple-icons:ovh' },
-  AS63949: { name: 'Akamai (Linode)', icon: 'simple-icons:linode' },
-  AS13335: { name: 'Cloudflare', icon: 'simple-icons:cloudflare' },
-  AS51167: { name: 'Contabo', icon: 'tabler:server' },
-}
-
-function detectProvider(org: string): { name: string, icon: string } | null {
-  if (!org)
-    return null
-  const lower = org.toLowerCase()
-  for (const p of PROVIDER_DB) {
-    if (p.keywords.some(k => lower.includes(k)))
-      return { name: p.name, icon: p.icon }
+async function lookupNodeGeo(node: NodeData): Promise<IpGeo | null> {
+  const ips = [node.ipv4, node.ipv6].filter((ip): ip is string => Boolean(ip?.trim()))
+  for (const ip of ips) {
+    const geo = await lookupIpGeo(ip)
+    if (geo)
+      return geo
   }
   return null
 }
 
-// 优先用 IP 解析出的 ASN 组织名识别厂商（最准确），回退到节点名称/备注/region 关键字
+// 优先使用用户元数据识别实际商家，再回退到 ASN / org 网络信息。
 async function resolveProvider(node: NodeData): Promise<void> {
+  const seq = ++providerResolveSeq
+  const uuid = node.uuid
   nodeGeo.value = null
-  const nameText = `${node.name ?? ''} ${node.public_remark ?? ''} ${node.remark ?? ''} ${node.tags ?? ''}`
-
-  let org: string | undefined
-  let asn: string | undefined
-  const ip = node.ipv4 || node.ipv6
-  if (ip) {
-    const geo = await lookupIpGeo(ip)
-    if (geo) {
-      nodeGeo.value = geo
-      org = geo.org
-      asn = geo.asn
-    }
-  }
-
-  // 1. 节点名称/备注/标签命中已知厂商关键字 —— 通常是用户标注的实际转售商家，最贴合认知
-  const byName = detectProvider(nameText)
-  if (byName) {
-    vpsProvider.value = byName
-    return
-  }
-  // 2. 知名共享 ASN → 网络运营商（org 名常被子分配掩盖，如 AS36352=ColoCrossing）
-  if (asn) {
-    const byAsn = ASN_PROVIDER_DB[asn.toUpperCase()]
-    if (byAsn) {
-      vpsProvider.value = byAsn
-      return
-    }
-  }
-  // 3. IP org 命中已知厂商关键字
-  const byOrg = org ? detectProvider(org) : null
-  if (byOrg) {
-    vpsProvider.value = byOrg
-    return
-  }
-  // 4. 直接使用真实 ASN 组织名；都没有则留空
-  if (org) {
-    const orgName = org.replace(/^AS\d+\s*/i, '').trim()
-    vpsProvider.value = orgName ? { name: orgName, icon: 'tabler:server' } : null
-    return
-  }
   vpsProvider.value = null
+
+  const metadata = [node.name, node.public_remark, node.remark, node.tags, node.group, node.region]
+    .filter(Boolean)
+    .join(' ')
+  const geo = await lookupNodeGeo(node)
+
+  if (seq !== providerResolveSeq || data.value?.uuid !== uuid)
+    return
+
+  nodeGeo.value = geo
+  vpsProvider.value = resolveProviderInfo({
+    metadata,
+    org: geo?.org,
+    asn: geo?.asn,
+    customAliases: appStore.providerAliases,
+  })
 }
 
 // 拉取近一天负载记录，统计网速峰值（上/下行各自取最大瞬时值）
@@ -296,8 +199,8 @@ const providerDisplay = computed(() => {
   const parts: string[] = []
   if (nodeGeo.value?.city)
     parts.push(nodeGeo.value.city)
-  if (vpsProvider.value?.name)
-    parts.push(vpsProvider.value.name)
+  if (vpsProvider.value?.displayName)
+    parts.push(vpsProvider.value.displayName)
   if (nodeGeo.value?.asn)
     parts.push(nodeGeo.value.asn)
   return parts.length ? parts.join(' · ') : '-'
@@ -462,7 +365,7 @@ const systemInfo = computed<InfoItem[]>(() => [
   { label: '操作系统', value: data.value?.os ?? '-', icon: 'icon-park-outline:computer' },
   { label: '内核版本', value: data.value?.kernel_version ?? '-', icon: 'icon-park-outline:code' },
   { label: '运行时间', value: formatUptime(data.value?.uptime ?? 0), icon: 'icon-park-outline:timer' },
-  { label: '厂商', value: providerDisplay.value, icon: vpsProvider.value?.icon ?? 'icon-park-outline:server' },
+  { label: '厂商', value: providerDisplay.value, icon: vpsProvider.value?.primary.icon ?? 'icon-park-outline:server' },
 ])
 
 const storageInfo = computed<InfoItem[]>(() => [
@@ -553,10 +456,19 @@ const trafficProgressClass = computed(() => {
           </Badge>
         </div>
         <!-- 厂商标识 -->
-        <div v-if="vpsProvider" class="ml-auto flex items-center gap-1.5 text-xs text-muted-foreground bg-background/50 rounded-full px-3 py-1">
-          <Icon :icon="vpsProvider.icon" :width="14" :height="14" />
-          <span>{{ vpsProvider.name }}</span>
-        </div>
+        <DataTooltip
+          v-if="vpsProvider"
+          as="div"
+          placement="bottom"
+          :content="vpsProvider.tooltipLines.join('\n')"
+          class="ml-auto max-w-full"
+          content-class="w-72 whitespace-pre-wrap break-words px-2 py-1.5 text-left leading-relaxed"
+        >
+          <div class="flex max-w-full items-center gap-1.5 rounded-full bg-background/50 px-3 py-1 text-xs text-muted-foreground">
+            <Icon :icon="vpsProvider.primary.icon" :width="14" :height="14" class="shrink-0" />
+            <span class="whitespace-normal break-words leading-snug">{{ vpsProvider.displayName }}</span>
+          </div>
+        </DataTooltip>
       </div>
 
       <!-- 价格指标卡片 -->
@@ -625,7 +537,7 @@ const trafficProgressClass = computed(() => {
                   <Icon v-if="item.icon" :icon="item.icon" :width="14" :height="14" />
                   <span class="text-xs sm:text-sm">{{ item.label }}</span>
                 </div>
-                <span class="text-xs sm:text-sm break-all">{{ item.value }}</span>
+                <span class="text-xs sm:text-sm break-words">{{ item.value }}</span>
               </div>
             </div>
           </div>
@@ -646,7 +558,7 @@ const trafficProgressClass = computed(() => {
               </div>
               <div class="flex min-w-0 gap-2 items-center">
                 <img v-if="item.label === '操作系统'" :src="getOSImage(data.os)" :alt="getOSName(data.os)" class="size-5 shrink-0">
-                <span class="text-xs sm:text-sm break-all">{{ item.value }}</span>
+                <span class="text-xs sm:text-sm break-words">{{ item.value }}</span>
               </div>
             </div>
           </div>
@@ -665,7 +577,7 @@ const trafficProgressClass = computed(() => {
                 <Icon v-if="item.icon" :icon="item.icon" :width="14" :height="14" />
                 <span class="text-xs sm:text-sm">{{ item.label }}</span>
               </div>
-              <span class="text-xs sm:text-sm break-all">{{ item.value }}</span>
+              <span class="text-xs sm:text-sm break-words">{{ item.value }}</span>
             </div>
           </div>
         </CardX>
