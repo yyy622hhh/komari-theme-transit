@@ -41,6 +41,12 @@ function komariThemeZip(): Plugin {
       const themeJsonPath = resolve(__dirname, 'komari-theme.json')
       const previewPath = resolve(__dirname, 'docs/preview.png')
       const outputPath = resolve(__dirname, zipFileName)
+      const themeManifest = existsSync(themeJsonPath)
+        ? JSON.parse(fs.readFileSync(themeJsonPath, 'utf-8')) as { preview?: unknown }
+        : {}
+      const manifestPreviewName = typeof themeManifest.preview === 'string' && themeManifest.preview.trim()
+        ? themeManifest.preview.trim()
+        : 'preview.png'
 
       if (!existsSync(distDir)) {
         console.log('[komari-theme-zip] dist directory not found, skipping zip creation')
@@ -70,6 +76,9 @@ function komariThemeZip(): Plugin {
 
         if (existsSync(previewPath)) {
           archive.file(previewPath, { name: 'preview.png' })
+          if (manifestPreviewName !== 'preview.png') {
+            archive.file(previewPath, { name: manifestPreviewName })
+          }
         }
 
         archive.directory(distDir, 'dist')

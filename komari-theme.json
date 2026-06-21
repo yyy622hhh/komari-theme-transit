@@ -2,10 +2,10 @@
   "name": "Komari Glassmorphism",
   "short": "Glassmorphism",
   "description": "A Glassmorphism theme for Komari",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "author": "sanrokamlan",
   "url": "https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism",
-  "preview": "preview.png",
+  "preview": "preview-v1.0.3.png",
   "configuration": {
     "type": "managed",
     "name": "Glassmorphism 设置",
