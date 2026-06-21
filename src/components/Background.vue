@@ -121,35 +121,12 @@ onUnmounted(() => {
 <template>
   <div class="background-container" :style="backgroundContainerStyle">
     <Transition name="fade">
-      <div
-        v-if="showDefaultBackground"
-        class="absolute inset-0 mx-0 max-w-none overflow-hidden zoom-200 bg-slate-50 dark:bg-slate-900/50"
-      >
-        <div class="absolute top-0 left-1/2 -ml-152 h-100 w-325 dark:mask-[linear-gradient(white,transparent)]">
-          <div
-            class="absolute inset-0 bg-linear-to-r from-emerald-500 to-lime-300 mask-[radial-gradient(farthest-side_at_top,white,transparent)] opacity-40 dark:from-emerald-500/30 dark:to-lime-300/30 dark:opacity-100"
-          >
-            <svg
-              aria-hidden="true"
-              class="absolute inset-x-0 inset-y-[-50%] h-[200%] w-full skew-y-[-18deg] fill-black/40 stroke-black/50 mix-blend-overlay dark:fill-white/2.5 dark:stroke-white/5"
-            >
-              <defs>
-                <pattern id="_S_1_" width="72" height="56" patternUnits="userSpaceOnUse" x="-12" y="4">
-                  <path d="M.5 56V.5H72" fill="none" />
-                </pattern>
-              </defs>
-              <rect width="100%" height="100%" stroke-width="0" fill="url(#_S_1_)" /><svg
-                x="-12" y="4"
-                class="overflow-visible"
-              >
-                <rect stroke-width="0" width="73" height="57" x="288" y="168" />
-                <rect stroke-width="0" width="73" height="57" x="144" y="56" />
-                <rect stroke-width="0" width="73" height="57" x="504" y="168" />
-                <rect stroke-width="0" width="73" height="57" x="720" y="336" />
-              </svg>
-            </svg>
-          </div>
-        </div>
+      <div v-if="showDefaultBackground" class="default-background">
+        <div class="default-background__mesh" />
+        <div class="default-background__glow default-background__glow--cyan" />
+        <div class="default-background__glow default-background__glow--violet" />
+        <div class="default-background__glow default-background__glow--mint" />
+        <div class="default-background__grid" />
       </div>
     </Transition>
     <Transition name="fade">
@@ -191,6 +168,96 @@ onUnmounted(() => {
   inset: 0;
   z-index: -1;
   overflow: hidden;
+}
+
+.default-background {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 12% 18%, rgb(125 211 252 / 0.32), transparent 30%),
+    radial-gradient(circle at 78% 10%, rgb(196 181 253 / 0.28), transparent 28%),
+    linear-gradient(135deg, #f8fbff 0%, #eef7ff 38%, #f6f0ff 68%, #eefdf8 100%);
+}
+
+.dark .default-background {
+  background:
+    radial-gradient(circle at 18% 16%, rgb(34 211 238 / 0.18), transparent 32%),
+    radial-gradient(circle at 82% 12%, rgb(168 85 247 / 0.2), transparent 30%),
+    linear-gradient(135deg, #08111f 0%, #101827 38%, #1a1430 68%, #061c1a 100%);
+}
+
+.default-background__mesh,
+.default-background__grid,
+.default-background__glow {
+  position: absolute;
+  pointer-events: none;
+}
+
+.default-background__mesh {
+  inset: -18%;
+  background:
+    conic-gradient(from 130deg at 28% 32%, transparent 0 20%, rgb(20 184 166 / 0.22) 32%, transparent 45% 100%),
+    conic-gradient(from 320deg at 74% 62%, transparent 0 18%, rgb(59 130 246 / 0.18) 30%, transparent 48% 100%),
+    linear-gradient(115deg, transparent 0 40%, rgb(255 255 255 / 0.58) 48%, transparent 58% 100%);
+  filter: blur(28px);
+  transform: rotate(-8deg);
+}
+
+.dark .default-background__mesh {
+  background:
+    conic-gradient(from 130deg at 28% 32%, transparent 0 20%, rgb(45 212 191 / 0.16) 32%, transparent 45% 100%),
+    conic-gradient(from 320deg at 74% 62%, transparent 0 18%, rgb(96 165 250 / 0.14) 30%, transparent 48% 100%),
+    linear-gradient(115deg, transparent 0 40%, rgb(255 255 255 / 0.08) 48%, transparent 58% 100%);
+}
+
+.default-background__glow {
+  border-radius: 9999px;
+  filter: blur(10px);
+  opacity: 0.7;
+}
+
+.default-background__glow--cyan {
+  top: 10%;
+  left: 4%;
+  width: 38rem;
+  height: 38rem;
+  background: rgb(56 189 248 / 0.22);
+}
+
+.default-background__glow--violet {
+  right: -8%;
+  top: -10%;
+  width: 34rem;
+  height: 34rem;
+  background: rgb(167 139 250 / 0.24);
+}
+
+.default-background__glow--mint {
+  right: 16%;
+  bottom: -18%;
+  width: 46rem;
+  height: 46rem;
+  background: rgb(52 211 153 / 0.16);
+}
+
+.dark .default-background__glow {
+  opacity: 0.55;
+}
+
+.default-background__grid {
+  inset: 0;
+  background-image:
+    linear-gradient(rgb(15 23 42 / 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(15 23 42 / 0.055) 1px, transparent 1px);
+  background-size: 46px 46px;
+  mask-image: radial-gradient(circle at 50% 28%, black, transparent 72%);
+}
+
+.dark .default-background__grid {
+  background-image:
+    linear-gradient(rgb(255 255 255 / 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(255 255 255 / 0.06) 1px, transparent 1px);
 }
 
 .background-loading {

@@ -11,10 +11,23 @@ komari-theme-Glassmorphism 是一个为 Komari Monitor 打造的毛玻璃（Glas
 
 ## 效果预览
 
+### 首页默认总览
+
+![首页默认总览](/docs/preview.png)
+
+### 头部卡片开关与排序
+
+![头部卡片开关与排序](/docs/preview-configurable-cards.png)
+
+### 节点详情
+
+![节点详情](/docs/preview-detail.png)
+
+### 更多场景
+
 未登录主页
 
 <img width="1322" height="596" alt="image" src="https://github.com/user-attachments/assets/7817e96b-4878-49a3-b310-7925e4662dad" />
-
 
 未登录节点详情
 
@@ -28,18 +41,19 @@ komari-theme-Glassmorphism 是一个为 Komari Monitor 打造的毛玻璃（Glas
 
 <img width="2560" height="1266" alt="image" src="https://github.com/user-attachments/assets/5573241d-c3f1-4d61-b33d-824c8b7be594" />
 
-
 ## 主要改动
 
 ### 视觉设计
 
 - 添加了根据识别到的cpu信息对vps进行打分的内容(仅供娱乐)
 - 全局采用毛玻璃（Glassmorphism）设计风格，卡片和容器具有半透明玻璃效果
+- 默认背景重新设计为柔和冷色渐变光斑 + 细网格纹理，和旧版绿色顶光背景明显区分
 - 地球仪改用纯白色背景，搭配淡蓝色柔和光晕，提升整体洁净感,连线从访客ip出发到所有节点
 - 地球连线采用更细更浅的设计，减少视觉压力，强调数据流向的轻盈感
 
 ### 交互和体验
 
+- 头部总览卡片支持独立开关、排序和扩展指标展示
 - 调整节点卡片尺寸和间距，增强可读性和视觉层次感
 - 优化色彩方案，深色和浅色模式都采用现代配色
 
@@ -48,6 +62,11 @@ komari-theme-Glassmorphism 是一个为 Komari Monitor 打造的毛玻璃（Glas
 - 迁移至 reka-ui + Tailwind CSS v4，移除 Naive UI 和 UnoCSS
 - 采用 shadcn-vue 组件库设计模式，确保高度可定制性
 - 优化性能和包体积
+
+## 更新内容（v1.0.1）
+
+- **头部总览卡片可配置**：新增「头部卡片设置」，现有 6 张总览卡片可独立开关，并支持通过英文逗号配置显示顺序；额外提供在线节点、平均 CPU、平均负载、交换内存、进程总数、连接数、平均温度、CPU 核心、流量配额等可选卡片
+- **默认背景重绘**：内置默认背景改为浅蓝、薄荷绿、淡紫渐变光斑与细网格纹理，保持毛玻璃通透感的同时与旧版配色明显区分
 
 ## 更新内容（v1.0.0）
 

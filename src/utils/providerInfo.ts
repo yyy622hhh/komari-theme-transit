@@ -32,7 +32,7 @@ export async function fetchProviderInfo(ip: string): Promise<string> {
     if (!response.ok)
       return ''
 
-    const data = await response.json() as { org?: string; hostname?: string; city?: string; region?: string; country?: string }
+    const data = await response.json() as { org?: string, hostname?: string, city?: string, region?: string, country?: string }
     const org = data.org?.trim()
     if (org) {
       return org.replace(/^AS\d+\s*/i, '').trim()

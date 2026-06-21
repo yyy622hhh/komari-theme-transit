@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import type { CurrencyCode } from '@/utils/financeHelper'
 import type { NodeData } from '@/stores/nodes'
+import type { CurrencyCode } from '@/utils/financeHelper'
 import type { IpGeo } from '@/utils/ipGeoHelper'
 import { Icon } from '@iconify/vue'
 import { computed, defineAsyncComponent, onMounted, ref } from 'vue'
