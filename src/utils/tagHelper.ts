@@ -346,23 +346,6 @@ export function formatPriceWithCycle(
 const TRAILING_ZERO_REGEX = /\.?0+$/
 
 /**
- * 计算已在线天数（自创建时间 createdAt 起至今）
- * @param createdAt 创建时间（字符串或时间戳）
- * @returns 已在线天数，无效时间返回 0
- */
-export function getDaysOnline(createdAt: string | number | undefined): number {
-  if (!createdAt)
-    return 0
-
-  const created = dayjs(createdAt)
-  if (!created.isValid())
-    return 0
-
-  const days = dayjs().diff(created, 'day')
-  return days > 0 ? days : 0
-}
-
-/**
  * 计算剩余价值（按剩余天数占一个计费周期的比例折算）
  * - 价格 <= 0：返回 0
  * - 已过期：返回 0

@@ -4,9 +4,11 @@ import dayjs from 'dayjs'
 const BYTE_UNITS = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'] as const
 const LAST_BYTE_UNIT = BYTE_UNITS.at(-1)
 
+const SECONDS_PER_DAY = 86400
+
 /** 时间单位配置（秒为单位） */
 const TIME_UNITS = [
-  { value: 86400, label: '天' },
+  { value: SECONDS_PER_DAY, label: '天' },
   { value: 3600, label: '小时' },
   { value: 60, label: '分钟' },
   { value: 1, label: '秒' },
@@ -14,6 +16,13 @@ const TIME_UNITS = [
 
 /** 运行时间格式化精度类型 */
 export type UptimeFormat = 'day' | 'hour' | 'minute' | 'second'
+
+const FORMAT_MAX_UNIT_INDEX_MAP: Record<UptimeFormat, number> = {
+  day: 0, // 只到天
+  hour: 1, // 到小时
+  minute: 2, // 到分钟
+  second: 3, // 到秒
+}
 
 /** 字节格式化精度配置 */
 export interface ByteDecimalsConfig {
@@ -165,6 +174,13 @@ export function formatBytesPerSecondWithConfig(bytes: number, config?: ByteDecim
   return `${formatBytesWithConfig(bytes, config)}/s`
 }
 
+export function getUptimeDays(seconds: number | null | undefined): number {
+  const normalizedSeconds = Number(seconds)
+  if (!Number.isFinite(normalizedSeconds) || normalizedSeconds <= 0)
+    return 0
+  return Math.floor(normalizedSeconds / SECONDS_PER_DAY)
+}
+
 /**
  * 格式化运行时间
  * @param seconds 秒数
@@ -199,20 +215,13 @@ export function formatUptime(seconds: number): string {
  * @returns 格式化后的字符串
  */
 export function formatUptimeWithFormat(seconds: number, format: UptimeFormat = 'day'): string {
-  if (!seconds || seconds <= 0)
+  const maxUnitIndex = FORMAT_MAX_UNIT_INDEX_MAP[format]
+  const normalizedSeconds = Number(seconds)
+  if (!Number.isFinite(normalizedSeconds) || normalizedSeconds <= 0)
     return '0 秒'
 
-  // 根据格式确定最大单位索引（从天开始）
-  const formatMaxUnitIndexMap: Record<UptimeFormat, number> = {
-    day: 0, // 只到天
-    hour: 1, // 到小时
-    minute: 2, // 到分钟
-    second: 3, // 到秒
-  }
-
-  const maxUnitIndex = formatMaxUnitIndexMap[format]
   const parts: string[] = []
-  let remaining = seconds
+  let remaining = Math.floor(normalizedSeconds)
 
   for (let i = 0; i < TIME_UNITS.length; i++) {
     const unit = TIME_UNITS[i]
@@ -231,11 +240,8 @@ export function formatUptimeWithFormat(seconds: number, format: UptimeFormat = '
   }
 
   // 如果没有任何单位有值，显示"不足 1 X"
-  if (parts.length === 0) {
-    const fallbackUnit = TIME_UNITS[maxUnitIndex]
-    const fallbackLabel = fallbackUnit?.label ?? '秒'
-    return `不足 1 ${fallbackLabel}`
-  }
+  if (parts.length === 0)
+    return `不足 1 ${TIME_UNITS[maxUnitIndex]?.label ?? '秒'}`
 
   return parts.join(' ')
 }

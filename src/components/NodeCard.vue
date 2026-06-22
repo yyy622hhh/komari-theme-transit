@@ -8,11 +8,11 @@ import { DataTooltip } from '@/components/ui/data-tooltip'
 import { ProgressThin } from '@/components/ui/progress-thin'
 import { useNodePingDisplay } from '@/composables/useNodePingDisplay'
 import { useAppStore } from '@/stores/app'
-import { formatBytesPerSecondWithConfig, formatBytesWithConfig, formatDateTime, getStatus } from '@/utils/helper'
+import { formatBytesPerSecondWithConfig, formatBytesWithConfig, formatDateTime, getStatus, getUptimeDays } from '@/utils/helper'
 import { getDiskPercentage, getMemoryPercentage, getTrafficUsed, getTrafficUsedPercentage, hasTrafficLimit } from '@/utils/nodeMetricsHelper'
 import { getOSImage, getOSName } from '@/utils/osImageHelper'
 import { getRegionCode, getRegionDisplayName } from '@/utils/regionHelper'
-import { formatCurrencyValue, formatPriceWithCycle, getDaysOnline, getDaysUntilExpired, getExpireStatus, getRemainingValue, parseTags } from '@/utils/tagHelper'
+import { formatCurrencyValue, formatPriceWithCycle, getDaysUntilExpired, getExpireStatus, getRemainingValue, parseTags } from '@/utils/tagHelper'
 
 const props = defineProps<{ node: NodeData }>()
 const emit = defineEmits<{ click: [] }>()
@@ -85,15 +85,16 @@ const trafficPercentageClass = computed(() => {
 // 但在线天数、剩余天数等非金额信息仍然展示
 const showPrice = computed(() => appStore.isLoggedIn || !appStore.hidePriceWhenLoggedOut)
 
-// 左上角：在线天数（始终） + 价格（仅在允许显示金额时）
-const onlineInfoTags = computed(() => {
+const uptimeDaysText = computed(() => {
+  const days = getUptimeDays(props.node.uptime)
+  return appStore.lang === 'zh-CN' ? `在线 ${days} 天` : `${days} days online`
+})
+
+const priceText = computed(() => {
   const node = props.node
-  const lang = appStore.lang
-  const days = getDaysOnline(node.created_at)
-  const tags = [lang === 'zh-CN' ? `在线 ${days} 天` : `${days} days online`]
-  if (node.price !== 0 && showPrice.value)
-    tags.push(formatPriceWithCycle(node.price, node.billing_cycle, node.currency, lang))
-  return tags
+  if (node.price === 0 || !showPrice.value)
+    return ''
+  return formatPriceWithCycle(node.price, node.billing_cycle, node.currency, appStore.lang)
 })
 
 // 第三列：剩余天数（始终） + 剩余价值（仅在允许显示金额时），带图标与相邻列对齐
@@ -173,13 +174,16 @@ function hasRegion(region: string | null | undefined): boolean {
 
     <template #default>
       <div class="flex flex-col relative" :class="nodeCardContentClass">
-        <!-- 价格标签行（在线天数 + 价格） -->
-        <div class="relative z-20 flex gap-1.5 flex-wrap -mt-1">
+        <!-- 在线天数固定展示，价格独立展示，避免不同主机卡片高度不一致 -->
+        <div class="relative z-20 flex items-center gap-1.5 -mt-1 h-[19px] overflow-hidden">
+          <span class="shrink-0 text-[11px] px-2 py-0.5 rounded-full bg-slate-500/10 text-muted-foreground leading-tight">
+            {{ uptimeDaysText }}
+          </span>
           <span
-            v-for="(tag, i) in onlineInfoTags" :key="i"
-            class="text-[11px] px-2 py-0.5 rounded-full bg-slate-500/10 text-muted-foreground leading-tight"
+            v-if="priceText"
+            class="min-w-0 truncate text-[11px] px-2 py-0.5 rounded-full bg-slate-500/10 text-muted-foreground leading-tight"
           >
-            {{ tag }}
+            {{ priceText }}
           </span>
         </div>
 
