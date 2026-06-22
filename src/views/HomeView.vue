@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { HomeQuickControlKey } from '@/stores/app'
+import type { NodeData } from '@/stores/nodes'
 import { Icon } from '@iconify/vue'
 import { useDebounceFn } from '@vueuse/core'
 import { computed, defineAsyncComponent, nextTick, onActivated, onDeactivated, ref, watch } from 'vue'
@@ -12,7 +14,19 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useAppStore } from '@/stores/app'
 import { useNodesStore } from '@/stores/nodes'
 import { isNodeInGroup, parseNodeGroups } from '@/utils/groupHelper'
+import {
+  getRealtimePeakSpeed,
+  getTotalTraffic,
+  isExpiringNode,
+  isHighLoadNode,
+} from '@/utils/nodeMetricsHelper'
 import { isRegionMatch } from '@/utils/regionHelper'
+
+interface QuickControlOption {
+  key: HomeQuickControlKey
+  label: string
+  icon: string
+}
 
 defineOptions({ name: 'HomeView' })
 
@@ -41,6 +55,18 @@ onDeactivated(() => {
 
 const searchText = ref('')
 const debouncedSearchText = ref('')
+const activeQuickControl = ref<HomeQuickControlKey>(appStore.homeQuickDefaultControl)
+
+const quickControlDefinitions: Record<HomeQuickControlKey, QuickControlOption> = {
+  default: { key: 'default', label: '默认', icon: 'tabler:sort-ascending' },
+  totalTraffic: { key: 'totalTraffic', label: '总流量', icon: 'tabler:database' },
+  upload: { key: 'upload', label: '上行', icon: 'tabler:chevron-up' },
+  download: { key: 'download', label: '下行', icon: 'tabler:chevron-down' },
+  peak: { key: 'peak', label: '峰值', icon: 'tabler:activity' },
+  offline: { key: 'offline', label: '离线', icon: 'tabler:plug-connected-x' },
+  highLoad: { key: 'highLoad', label: '高负载', icon: 'tabler:alert-triangle' },
+  expiring: { key: 'expiring', label: '即将到期', icon: 'tabler:calendar-exclamation' },
+}
 
 const updateDebouncedSearch = useDebounceFn((value: string) => {
   debouncedSearchText.value = value
@@ -55,6 +81,23 @@ const groups = computed(() => [
   ...nodesStore.groups.map(g => ({ tab: g, name: g })),
 ])
 
+const quickControls = computed(() => appStore.homeQuickControlOrder.map(key => quickControlDefinitions[key]))
+const showQuickControls = computed(() => appStore.homeQuickControlsEnabled && quickControls.value.length > 0)
+
+watch(
+  () => [appStore.homeQuickDefaultControl, appStore.homeQuickControlOrder.join('|'), appStore.homeQuickControlsEnabled] as const,
+  () => {
+    if (!appStore.homeQuickControlsEnabled) {
+      activeQuickControl.value = 'default'
+      return
+    }
+
+    if (!appStore.homeQuickControlOrder.includes(activeQuickControl.value))
+      activeQuickControl.value = appStore.homeQuickDefaultControl
+  },
+  { immediate: true },
+)
+
 watch(
   () => nodesStore.groups,
   (gs) => {
@@ -66,7 +109,7 @@ watch(
   { immediate: true },
 )
 
-function isNodeMatchSearch(node: typeof nodesStore.nodes[number], search: string): boolean {
+function isNodeMatchSearch(node: NodeData, search: string): boolean {
   if (!search.trim())
     return true
   const lowerSearch = search.toLowerCase().trim()
@@ -85,6 +128,28 @@ function isNodeMatchSearch(node: typeof nodesStore.nodes[number], search: string
   return false
 }
 
+function applyQuickControl(nodes: NodeData[], control: HomeQuickControlKey): NodeData[] {
+  switch (control) {
+    case 'totalTraffic':
+      return [...nodes].sort((a, b) => getTotalTraffic(b) - getTotalTraffic(a))
+    case 'upload':
+      return [...nodes].sort((a, b) => (b.net_out || 0) - (a.net_out || 0))
+    case 'download':
+      return [...nodes].sort((a, b) => (b.net_in || 0) - (a.net_in || 0))
+    case 'peak':
+      return [...nodes].sort((a, b) => getRealtimePeakSpeed(b) - getRealtimePeakSpeed(a))
+    case 'offline':
+      return nodes.filter(node => !node.online)
+    case 'highLoad':
+      return nodes.filter(node => isHighLoadNode(node, appStore.homeHighLoadThreshold))
+    case 'expiring':
+      return nodes.filter(node => isExpiringNode(node, appStore.homeExpiringDays))
+    case 'default':
+    default:
+      return nodes
+  }
+}
+
 const groupNodeList = computed(() => {
   return nodesStore.nodes.filter(node => isNodeInGroup(node.group, appStore.nodeSelectedGroup))
 })
@@ -94,21 +159,29 @@ const nodeList = computed(() => {
   if (debouncedSearchText.value.trim()) {
     filtered = filtered.filter(n => isNodeMatchSearch(n, debouncedSearchText.value))
   }
-  return filtered
+  return applyQuickControl(filtered, activeQuickControl.value)
 })
 
-function handleNodeClick(node: typeof nodesStore.nodes[number]) {
+const nodeListSortResetKey = computed(() => {
+  return `${appStore.nodeSelectedGroup}|${debouncedSearchText.value.trim()}|${activeQuickControl.value}`
+})
+
+function handleNodeClick(node: NodeData) {
   router.push({ name: 'instance-detail', params: { id: node.uuid } })
 }
 
-function getNodeItemTransitionKey(node: typeof nodesStore.nodes[number]): string {
-  return `${appStore.nodeSelectedGroup}-${node.uuid}`
+function getNodeItemTransitionKey(node: NodeData): string {
+  return `${appStore.nodeSelectedGroup}-${activeQuickControl.value}-${node.uuid}`
 }
 
 function getNodeItemTransitionStyle(index: number): Record<string, string> {
   return {
     '--node-item-delay': `${Math.min(index, nodeItemStaggerLimit) * nodeItemStaggerMs}ms`,
   }
+}
+
+function setQuickControl(key: HomeQuickControlKey) {
+  activeQuickControl.value = key
 }
 
 const nodeCardGridClass = computed(() => {
@@ -153,14 +226,32 @@ const nodeCardGridClass = computed(() => {
         <Tabs v-model="appStore.nodeSelectedGroup" class="w-full flex-col gap-4">
           <div class="flex gap-2 items-center flex-nowrap">
             <div class="min-w-0 flex-1 overflow-x-auto rounded-sm pointer-events-none">
-              <TabsList class="w-max h-8 bg-background/50 backdrop-blur-xl rounded-md pointer-events-auto">
-                <TabsTrigger
-                  v-for="g in groups" :key="g.name" :value="g.name"
-                  class="h-6.5 flex-none shrink-0 text-xs border-none data-[state=active]:text-green-600 shadow-none rounded-sm"
+              <div class="flex w-max gap-2">
+                <TabsList class="w-max h-8 bg-background/50 backdrop-blur-xl rounded-md pointer-events-auto">
+                  <TabsTrigger
+                    v-for="g in groups" :key="g.name" :value="g.name"
+                    class="h-6.5 flex-none shrink-0 text-xs border-none data-[state=active]:text-green-600 shadow-none rounded-sm"
+                  >
+                    {{ g.tab }}
+                  </TabsTrigger>
+                </TabsList>
+
+                <div
+                  v-if="showQuickControls"
+                  class="flex h-8 w-max items-center gap-1 rounded-md bg-background/50 px-1 backdrop-blur-xl pointer-events-auto"
                 >
-                  {{ g.tab }}
-                </TabsTrigger>
-              </TabsList>
+                  <button
+                    v-for="control in quickControls" :key="control.key"
+                    type="button"
+                    class="inline-flex h-6.5 flex-none shrink-0 items-center gap-1 rounded-sm px-2 text-xs text-muted-foreground transition-colors hover:text-foreground"
+                    :class="activeQuickControl === control.key ? 'bg-background text-green-600 shadow-sm' : ''"
+                    @click="setQuickControl(control.key)"
+                  >
+                    <Icon :icon="control.icon" :width="12" :height="12" />
+                    <span>{{ control.label }}</span>
+                  </button>
+                </div>
+              </div>
             </div>
             <div class="search flex gap-2 items-center pointer-events-auto">
               <Button
@@ -215,6 +306,7 @@ const nodeCardGridClass = computed(() => {
               v-else-if="nodeList.length !== 0 && appStore.nodeViewMode === 'list'"
               :nodes="nodeList"
               :transition-key="appStore.nodeSelectedGroup"
+              :sort-reset-key="nodeListSortResetKey"
               @click="handleNodeClick"
             />
             <div v-else class="text-muted-foreground text-center py-8">

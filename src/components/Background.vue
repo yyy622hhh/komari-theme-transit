@@ -269,7 +269,6 @@ onUnmounted(() => {
 .background-media {
   position: absolute;
   inset: 0;
-  transform: scale(1.1);
   transition: opacity 0.8s ease;
 }
 

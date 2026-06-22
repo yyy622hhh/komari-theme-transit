@@ -190,7 +190,7 @@ export async function getDailyExchangeRates(): Promise<{
   }
 }
 
-function getPriceCNY(node: NodeData, exchangeRates: ExchangeRates): number {
+export function getPriceCNY(node: NodeData, exchangeRates: ExchangeRates): number {
   const price = Number(node.price)
   if (!Number.isFinite(price) || price <= 0)
     return 0

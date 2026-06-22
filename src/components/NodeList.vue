@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { NodeData } from '@/stores/nodes'
 import { Icon } from '@iconify/vue'
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import NodePingListCell from '@/components/NodePingListCell.vue'
 import TrafficProgress from '@/components/TrafficProgress.vue'
 import { Badge } from '@/components/ui/badge'
@@ -9,6 +9,7 @@ import { DataTooltip } from '@/components/ui/data-tooltip'
 import { ProgressThin } from '@/components/ui/progress-thin'
 import { useAppStore } from '@/stores/app'
 import { formatBytesPerSecondWithConfig, formatBytesWithConfig, formatDateTime, formatUptimeWithFormat, getStatus } from '@/utils/helper'
+import { getRealtimeTotalSpeed, getTrafficUsed, getTrafficUsedPercentage, hasTrafficLimit } from '@/utils/nodeMetricsHelper'
 import { getOSImage, getOSName } from '@/utils/osImageHelper'
 import { getRegionCode, getRegionDisplayName } from '@/utils/regionHelper'
 import { formatPriceWithCycle, getDaysUntilExpired, getExpireStatus, parseTags } from '@/utils/tagHelper'
@@ -23,6 +24,7 @@ interface ColumnConfig {
 const props = defineProps<{
   nodes: NodeData[]
   transitionKey?: string
+  sortResetKey?: string
 }>()
 
 const emit = defineEmits<{ click: [node: NodeData] }>()
@@ -50,6 +52,14 @@ const columns: ColumnConfig[] = [
 
 const sortKey = ref<string>('')
 const sortDir = ref<1 | -1>(1)
+
+watch(
+  () => props.sortResetKey,
+  () => {
+    sortKey.value = ''
+    sortDir.value = 1
+  },
+)
 
 function handleSort(col: ColumnConfig) {
   if (!col.sortable)
@@ -93,14 +103,14 @@ const sortedNodes = computed(() => {
       case 'disk': return dir * ((a.disk ?? 0) / (a.disk_total || 1) - (b.disk ?? 0) / (b.disk_total || 1))
       case 'traffic':
       case 'rate':
-        return dir * (((a.net_out ?? 0) + (a.net_in ?? 0)) - ((b.net_out ?? 0) + (b.net_in ?? 0)))
+        return dir * (getRealtimeTotalSpeed(a) - getRealtimeTotalSpeed(b))
       default: return 0
     }
   })
 })
 
-const formatBytes = (bytes: number) => formatBytesWithConfig(bytes)
-const formatBytesPerSecond = (bytes: number) => formatBytesPerSecondWithConfig(bytes)
+const formatBytes = (bytes: number) => formatBytesWithConfig(bytes, appStore.byteDecimals)
+const formatBytesPerSecond = (bytes: number) => formatBytesPerSecondWithConfig(bytes, appStore.byteDecimals)
 const formatUptime = (seconds: number) => formatUptimeWithFormat(seconds, 'hour')
 
 const columnKeys = computed(() => columns.map(c => c.key))
@@ -141,44 +151,6 @@ function getRowTransitionKey(node: NodeData): string {
 function getRowTransitionStyle(index: number): Record<string, string> {
   return {
     '--node-row-delay': `${Math.min(index, rowStaggerLimit) * rowStaggerMs}ms`,
-  }
-}
-
-function showTrafficProgress(node: NodeData): boolean {
-  return node.traffic_limit > 0
-}
-
-function getTrafficUsedPercentage(node: NodeData): number {
-  if (node.traffic_limit <= 0)
-    return 0
-  const { net_total_up = 0, net_total_down = 0, traffic_limit_type } = node
-  let used = 0
-  switch (traffic_limit_type) {
-    case 'up': used = net_total_up
-      break
-    case 'down': used = net_total_down
-      break
-    case 'min': used = Math.min(net_total_up, net_total_down)
-      break
-    case 'max': used = Math.max(net_total_up, net_total_down)
-      break
-    case 'sum':
-    default:
-      used = net_total_up + net_total_down
-      break
-  }
-  return Math.min((used / node.traffic_limit) * 100, 100)
-}
-
-function getTrafficUsed(node: NodeData): number {
-  const { net_total_up = 0, net_total_down = 0, traffic_limit_type } = node
-  switch (traffic_limit_type) {
-    case 'up': return net_total_up
-    case 'down': return net_total_down
-    case 'min': return Math.min(net_total_up, net_total_down)
-    case 'max': return Math.max(net_total_up, net_total_down)
-    case 'sum':
-    default: return net_total_up + net_total_down
   }
 }
 
@@ -308,8 +280,7 @@ function getCustomTags(node: NodeData): Array<string> {
                       {{ (node.cpu ?? 0).toFixed(1) }}%
                     </span>
                     <span class="hidden group-hover:inline">
-                      {{ node.load.toFixed(2) ?? 0 }}, {{ node.load5.toFixed(2) ?? 0 }}, {{ node.load15.toFixed(2) ?? 0
-                      }}
+                      {{ (node.load ?? 0).toFixed(2) }}, {{ (node.load5 ?? 0).toFixed(2) }}, {{ (node.load15 ?? 0).toFixed(2) }}
                     </span>
                   </div>
                   <ProgressThin :percentage="node.cpu ?? 0" :status="getStatus(node.cpu ?? 0)" :height="4" />
@@ -362,7 +333,7 @@ function getCustomTags(node: NodeData): Array<string> {
                       </span>
                       <span class="hidden group-hover:inline">
                         {{ formatBytes(getTrafficUsed(node)) }} /
-                        <template v-if="showTrafficProgress(node)">{{ formatBytes(node.traffic_limit) }}</template>
+                        <template v-if="hasTrafficLimit(node)">{{ formatBytes(node.traffic_limit) }}</template>
                         <template v-else>∞</template>
                       </span>
                     </div>

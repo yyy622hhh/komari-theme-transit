@@ -20,6 +20,7 @@ export interface IpGeo {
 const CACHE_PREFIX = 'komari-theme-emerald:ipgeo'
 const CACHE_VERSION = 2
 const CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000 // 30 天
+const ASN_ORG_PREFIX_REGEX = /^AS\d+/
 
 interface CacheEntry {
   version: number
@@ -127,7 +128,7 @@ const fromIpinfo: Provider = async (ip) => {
     city: typeof d.city === 'string' ? d.city : undefined,
     countryCode: typeof d.country === 'string' ? d.country : undefined,
     org,
-    asn: org?.match(/^AS\d+/)?.[0],
+    asn: org?.match(ASN_ORG_PREFIX_REGEX)?.[0],
   }
 }
 

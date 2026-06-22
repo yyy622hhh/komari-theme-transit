@@ -2,10 +2,8 @@
 import type { VersionInfo } from '@/utils/api'
 import { computed, onMounted, ref } from 'vue'
 import { DataTooltip } from '@/components/ui/data-tooltip'
-import { useAppStore } from '@/stores/app'
 import { getSharedApi } from '@/utils/api'
 
-const appStore = useAppStore()
 const api = getSharedApi()
 
 const buildVersion = __BUILD_VERSION__
@@ -22,22 +20,18 @@ onMounted(async () => {
   }
 })
 
-const formattedServerVersion = computed(() => serverVersion.value?.version ?? null)
-
-const showIcp = computed(() => appStore.icpEnabled && appStore.icpNumber)
-const showPolice = computed(() => appStore.policeEnabled && appStore.policeNumber)
-const showFiling = computed(() => showIcp.value || showPolice.value)
+const formattedServerVersion = computed(() => serverVersion.value?.version ?? '')
 </script>
 
 <template>
-  <footer class="w-full sm:flex-row sm:gap-4 sm:items-center sm:justify-between max-w-[1280px] mx-auto p-4">
+  <footer class="w-full flex sm:flex-row sm:gap-4 sm:items-center sm:justify-between max-w-[1280px] mx-auto p-4">
     <div class="flex flex-row text-xs text-muted-foreground">
       <div class="flex gap-1 items-center">
         Powered by
         <DataTooltip
           as="span"
           placement="top"
-          :content="formattedServerVersion ?? ''"
+          :content="formattedServerVersion"
         >
           <a
             href="https://github.com/komari-monitor/komari" target="_blank" rel="noopener noreferrer"
@@ -56,32 +50,13 @@ const showFiling = computed(() => showIcp.value || showPolice.value)
           :content="`v${buildVersion}\n${buildGitHash}`"
         >
           <a
-            href="https://github.com/komaris/komari-theme-Glassmorphism" target="_blank" rel="noopener noreferrer"
+            href="https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism" target="_blank" rel="noopener noreferrer"
             class="transition-opacity hover:opacity-80"
           >
             <span class="font-medium text-foreground">Komari Glassmorphism</span>
           </a>
         </DataTooltip>
       </div>
-    </div>
-
-    <div v-if="showFiling" class="flex flex-wrap gap-2 items-center justify-center sm:flex-shrink-0">
-      <a
-        v-if="showIcp" :href="appStore.icpUrl" target="_blank" rel="noopener noreferrer"
-        class="transition-opacity hover:opacity-70"
-      >
-        <span class="text-xs text-muted-foreground">{{ appStore.icpNumber || '' }}</span>
-      </a>
-      <span v-if="showIcp && showPolice" class="opacity-50 text-xs text-muted-foreground">·</span>
-      <template v-if="showPolice">
-        <a
-          v-if="appStore.policeUrl" :href="appStore.policeUrl" target="_blank" rel="noopener noreferrer"
-          class="transition-opacity hover:opacity-70"
-        >
-          <span class="text-xs text-muted-foreground">{{ appStore.policeNumber || '' }}</span>
-        </a>
-        <span v-else class="text-xs text-muted-foreground">{{ appStore.policeNumber || '' }}</span>
-      </template>
     </div>
   </footer>
 </template>

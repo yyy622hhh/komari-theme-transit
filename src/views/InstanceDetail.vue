@@ -40,6 +40,7 @@ const nodeGeo = ref<IpGeo | null>(null)
 // 近一天网速峰值（B/s）
 const peakNetOut = ref(0)
 const peakNetIn = ref(0)
+const data = computed(() => nodesStore.nodes.find(node => node.uuid === route.params.id))
 
 // CPU 评分
 interface CpuScore {
@@ -184,7 +185,6 @@ onMounted(async () => {
 // 当节点数据加载后尝试获取厂商信息
 // 注：节点 IP 通常不直接暴露，这里用节点 uuid 作为 fallback 标识
 // 如果 data.value 有 ip 字段则直接用，否则跳过
-const data = computed(() => nodesStore.nodes.find(node => node.uuid === route.params.id))
 watch(data, (node) => {
   if (node) {
     void resolveProvider(node)

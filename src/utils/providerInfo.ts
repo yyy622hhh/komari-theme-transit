@@ -31,8 +31,10 @@ interface ProviderResolveInput {
 
 const COMPANY_SUFFIX_REGEX = /\b(?:llc|ltd|limited|inc|incorporated|gmbh|sas|bv|bhd|co|corp|corporation|company|pte|plc|sa|srl|sro|oy|ab|ag|kg|pte\s*ltd|co\s*ltd)\b/g
 const ASN_PREFIX_REGEX = /^AS\d+\s*/i
-const NON_ALNUM_REGEX = /[^a-z0-9一-鿿]+/g
+const NON_ALNUM_REGEX = /[^a-z0-9\p{Script=Han}]+/gu
 const SPACE_REGEX = /\s+/g
+const ASN_DIGITS_REGEX = /\d+/
+const CUSTOM_ALIAS_GROUP_SEPARATOR_REGEX = /[;\n]+/
 
 const PROVIDER_DB: ProviderEntry[] = [
   { keywords: ['vultr', 'choopa', 'constant'], name: 'Vultr', icon: 'simple-icons:vultr' },
@@ -151,13 +153,13 @@ function normalizeText(value: string): NormalizedText {
 function matchesKeyword(text: NormalizedText, keyword: string): boolean {
   const normalizedKeyword = normalizeText(keyword)
   return Boolean(
-    normalizedKeyword.spaced && text.spaced.includes(normalizedKeyword.spaced)
-    || normalizedKeyword.compact && text.compact.includes(normalizedKeyword.compact),
+    (normalizedKeyword.spaced && text.spaced.includes(normalizedKeyword.spaced))
+    || (normalizedKeyword.compact && text.compact.includes(normalizedKeyword.compact)),
   )
 }
 
 function normalizeAsn(asn?: string): string {
-  const digits = asn?.match(/\d+/)?.[0]
+  const digits = asn?.match(ASN_DIGITS_REGEX)?.[0]
   return digits ? `AS${digits}` : ''
 }
 
@@ -178,7 +180,7 @@ function parseCustomAliases(config?: string): ProviderEntry[] {
     return []
 
   return config
-    .split(/[;\n]+/)
+    .split(CUSTOM_ALIAS_GROUP_SEPARATOR_REGEX)
     .map((group) => {
       const [rawName, rawAliases] = group.split(':')
       const name = rawName?.trim()
