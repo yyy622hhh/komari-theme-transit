@@ -144,7 +144,7 @@ function hasRegion(region: string | null | undefined): boolean {
   >
     <!-- 头部：在线点 + 名称 -->
     <template #header>
-      <div class="flex items-center gap-2 min-w-0 overflow-hidden">
+      <div class="flex items-center gap-2 min-w-0">
         <div class="relative size-2.5 shrink-0">
           <span
             class="size-2.5 rounded-full block"

@@ -225,7 +225,7 @@ const nodeCardGridClass = computed(() => {
       <div class="nodes">
         <Tabs v-model="appStore.nodeSelectedGroup" class="w-full flex-col gap-4">
           <div class="flex gap-2 items-center flex-nowrap">
-            <div class="min-w-0 flex-1 overflow-x-auto rounded-sm pointer-events-none">
+            <div class="home-controls-scroll min-w-0 flex-1 overflow-x-auto overscroll-x-contain rounded-sm pointer-events-auto touch-pan-x">
               <div class="flex w-max gap-2">
                 <TabsList class="w-max h-8 bg-background/50 backdrop-blur-xl rounded-md pointer-events-auto">
                   <TabsTrigger
@@ -320,6 +320,14 @@ const nodeCardGridClass = computed(() => {
 </template>
 
 <style scoped>
+.home-controls-scroll {
+  scrollbar-width: none;
+}
+
+.home-controls-scroll::-webkit-scrollbar {
+  display: none;
+}
+
 .node-card-switch-enter-active,
 .node-card-switch-leave-active {
   transition:

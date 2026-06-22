@@ -24,8 +24,8 @@ const formattedServerVersion = computed(() => serverVersion.value?.version ?? ''
 </script>
 
 <template>
-  <footer class="w-full flex sm:flex-row sm:gap-4 sm:items-center sm:justify-between max-w-[1280px] mx-auto p-4">
-    <div class="flex flex-row text-xs text-muted-foreground">
+  <footer class="w-full max-w-[1280px] mx-auto p-4">
+    <div class="flex w-full flex-row justify-between gap-4 text-xs text-muted-foreground">
       <div class="flex gap-1 items-center">
         Powered by
         <DataTooltip
@@ -41,8 +41,7 @@ const formattedServerVersion = computed(() => serverVersion.value?.version ?? ''
           </a>
         </DataTooltip>
       </div>
-      <div class="flex-1" />
-      <div class="flex flex-wrap gap-1 items-center">
+      <div class="flex flex-wrap gap-1 items-center justify-end text-right">
         Theme by
         <DataTooltip
           as="span"
