@@ -16,10 +16,22 @@ const isScrolled = inject<ReturnType<typeof ref<boolean>>>('isScrolled', ref(fal
 const siteFavicon = ref('/favicon.ico')
 
 const actionButtons = computed(() => {
-  const buttons = [
+  const themeTitleMap = {
+    beijing: appStore.isBeijingDaytime ? '北京时间自动：日间模式' : '北京时间自动：夜间模式',
+    light: '后台指定：浅色主题',
+    dark: '后台指定：深色主题',
+  } as const
+
+  const themeIconMap = {
+    beijing: appStore.isBeijingDaytime ? 'icon-park-outline:sun-one' : 'icon-park-outline:moon',
+    light: 'icon-park-outline:sun-one',
+    dark: 'icon-park-outline:moon',
+  } as const
+
+  const buttons: Array<{ title: string, icon: string, action: string }> = [
     {
-      title: appStore.themeMode === 'auto' ? '自动主题' : appStore.themeMode === 'light' ? '浅色主题' : '深色主题',
-      icon: appStore.themeMode === 'auto' ? 'icon-park-outline:dark-mode' : appStore.themeMode === 'light' ? 'icon-park-outline:sun-one' : 'icon-park-outline:moon',
+      title: `${themeTitleMap[appStore.managedThemeMode]}（后台统一控制）`,
+      icon: themeIconMap[appStore.managedThemeMode],
       action: 'toggleTheme',
     },
   ]
@@ -37,7 +49,7 @@ const actionButtons = computed(() => {
 function handleButtonClick(action: string) {
   switch (action) {
     case 'toggleTheme':
-      appStore.updateThemeMode()
+      window.$message?.info?.('主题模式由后台 Glassmorphism 设置统一控制')
       break
     case 'jumpToSetting':
       location.href = '/admin'
