@@ -3,7 +3,7 @@ import type { HomeQuickControlKey } from '@/stores/app'
 import type { NodeData } from '@/stores/nodes'
 import { Icon } from '@iconify/vue'
 import { useDebounceFn } from '@vueuse/core'
-import { computed, defineAsyncComponent, nextTick, onActivated, onDeactivated, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onActivated, onDeactivated, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import MarkdownRenderer from '@/components/MarkdownRenderer.vue'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useAppStore } from '@/stores/app'
 import { useNodesStore } from '@/stores/nodes'
+import * as financeHelper from '@/utils/financeHelper'
 import { isNodeInGroup, parseNodeGroups } from '@/utils/groupHelper'
 import {
   getRealtimePeakSpeed,
@@ -56,9 +57,12 @@ onDeactivated(() => {
 const searchText = ref('')
 const debouncedSearchText = ref('')
 const activeQuickControl = ref<HomeQuickControlKey>(appStore.homeQuickDefaultControl)
+const exchangeRates = ref(financeHelper.DEFAULT_EXCHANGE_RATES)
+const excludeFreeNodes = ref(true)
 
 const quickControlDefinitions: Record<HomeQuickControlKey, QuickControlOption> = {
   default: { key: 'default', label: '默认', icon: 'tabler:sort-ascending' },
+  monthlyCost: { key: 'monthlyCost', label: '月成本', icon: 'tabler:calendar-dollar' },
   totalTraffic: { key: 'totalTraffic', label: '总流量', icon: 'tabler:database' },
   upload: { key: 'upload', label: '上行', icon: 'tabler:chevron-up' },
   download: { key: 'download', label: '下行', icon: 'tabler:chevron-down' },
@@ -98,6 +102,12 @@ watch(
   { immediate: true },
 )
 
+onMounted(async () => {
+  excludeFreeNodes.value = financeHelper.shouldExcludeFreeNodes()
+  const { rates } = await financeHelper.getDailyExchangeRates()
+  exchangeRates.value = rates
+})
+
 watch(
   () => nodesStore.groups,
   (gs) => {
@@ -108,6 +118,13 @@ watch(
   },
   { immediate: true },
 )
+
+function getNodeMonthlyCostCNY(node: NodeData): number {
+  if (excludeFreeNodes.value && node.tags?.includes('白嫖中'))
+    return 0
+
+  return financeHelper.calculateMonthlyCostCNY(node, exchangeRates.value)
+}
 
 function isNodeMatchSearch(node: NodeData, search: string): boolean {
   if (!search.trim())
@@ -130,6 +147,8 @@ function isNodeMatchSearch(node: NodeData, search: string): boolean {
 
 function applyQuickControl(nodes: NodeData[], control: HomeQuickControlKey): NodeData[] {
   switch (control) {
+    case 'monthlyCost':
+      return [...nodes].sort((a, b) => getNodeMonthlyCostCNY(b) - getNodeMonthlyCostCNY(a))
     case 'totalTraffic':
       return [...nodes].sort((a, b) => getTotalTraffic(b) - getTotalTraffic(a))
     case 'upload':

@@ -117,6 +117,7 @@ export default defineConfig({
         manualChunks: {
           'vue-vendor': ['vue', 'vue-router', 'pinia'],
           'echarts': ['echarts', 'vue-echarts'],
+          'globe': ['globe.gl', 'three'],
           'reka-ui': ['reka-ui'],
           'vueuse': ['@vueuse/core'],
         },

@@ -36,6 +36,7 @@ export type GeneralCardKey
 
 export type HomeQuickControlKey
   = | 'default'
+    | 'monthlyCost'
     | 'totalTraffic'
     | 'upload'
     | 'download'
@@ -50,6 +51,7 @@ type Lang = 'zh-CN' | 'en-US'
 type NodeViewMode = 'card' | 'list'
 type NodeCardSize = 'compact' | 'comfortable' | 'large'
 type RpcTransportMode = 'websocket' | 'http'
+type EarthRenderer = 'realistic' | 'cobe' | 'tiled'
 
 type ThemeSettings = Record<string, unknown>
 
@@ -72,8 +74,15 @@ const DEFAULT_GENERAL_CARD_ORDER: GeneralCardKey[] = [
 ]
 
 const ALL_GENERAL_CARD_KEYS = [
-  ...DEFAULT_GENERAL_CARD_ORDER,
+  'memory',
+  'disk',
+  'remainingValue',
+  'monthlyCost',
+  'totalTraffic',
+  'uploadSpeed',
+  'downloadSpeed',
   'onlineNodes',
+  'offlineNodes',
   'avgCpu',
   'avgLoad',
   'swap',
@@ -84,7 +93,6 @@ const ALL_GENERAL_CARD_KEYS = [
   'trafficPeak',
   'uploadPeakNode',
   'downloadPeakNode',
-  'offlineNodes',
   'highLoadNodes',
   'expiringNodes',
   'trafficWarnings',
@@ -92,7 +100,6 @@ const ALL_GENERAL_CARD_KEYS = [
   'regionDistribution',
   'systemDistribution',
   'virtualizationDistribution',
-  'monthlyCost',
   'yearlyCost',
 ] as const satisfies readonly GeneralCardKey[]
 
@@ -145,6 +152,7 @@ const LEGACY_GENERAL_CARD_SETTING_KEYS: Partial<Record<GeneralCardKey, string>> 
 
 const DEFAULT_HOME_QUICK_CONTROL_ORDER: HomeQuickControlKey[] = [
   'default',
+  'monthlyCost',
   'totalTraffic',
   'upload',
   'download',
@@ -191,9 +199,9 @@ const GENERAL_CARD_PRESETS: Record<GeneralCardPreset, GeneralCardKey[]> = {
 }
 
 const HOME_QUICK_CONTROL_PRESETS: Record<HomeQuickControlPreset, HomeQuickControlKey[]> = {
-  basic: ['default', 'peak', 'offline'],
+  basic: ['default', 'monthlyCost', 'peak', 'offline'],
   traffic: ['default', 'totalTraffic', 'upload', 'download', 'peak'],
-  ops: ['default', 'offline', 'highLoad', 'expiring'],
+  ops: ['default', 'monthlyCost', 'offline', 'highLoad', 'expiring'],
   full: DEFAULT_HOME_QUICK_CONTROL_ORDER,
   custom: DEFAULT_HOME_QUICK_CONTROL_ORDER,
 }
@@ -344,6 +352,10 @@ const useAppStore = defineStore('app', () => {
     return value === 'compact' || value === 'comfortable' || value === 'large'
   }
 
+  function isValidEarthRenderer(value: unknown): value is EarthRenderer {
+    return value === 'realistic' || value === 'cobe' || value === 'tiled'
+  }
+
   const nodeCardSize = computed<NodeCardSize>(() => {
     const settings = themeSettings.value
     if (isValidNodeCardSize(settings.nodeCardSize))
@@ -394,6 +406,11 @@ const useAppStore = defineStore('app', () => {
   })
 
   const stopEarth = computed<boolean>(() => readBooleanSetting(themeSettings.value, 'stopEarth', false))
+
+  const earthRenderer = computed<EarthRenderer>(() => {
+    const value = themeSettings.value.earthRenderer
+    return isValidEarthRenderer(value) ? value : 'realistic'
+  })
 
   const hideEarth = computed<boolean>(() => readBooleanSetting(themeSettings.value, 'hideEarth', false))
 
@@ -590,6 +607,7 @@ const useAppStore = defineStore('app', () => {
     alertTitle,
     alertContent,
     stopEarth,
+    earthRenderer,
     hideEarth,
     hideGeneralCard,
     visitorInfoEnabled,

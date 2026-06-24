@@ -105,6 +105,46 @@ export function calculateTotalValueCNY(
   }, 0)
 }
 
+export function calculateMonthlyCostCNY(
+  node: NodeData,
+  exchangeRates: ExchangeRates,
+): number {
+  const priceCNY = getPriceCNY(node, exchangeRates)
+  if (priceCNY <= 0)
+    return 0
+
+  const billingCycle = Number(node.billing_cycle)
+  if (!Number.isFinite(billingCycle) || billingCycle <= 0)
+    return priceCNY
+
+  return priceCNY / billingCycle * 30
+}
+
+export function calculateTotalMonthlyCostCNY(
+  nodes: NodeData[],
+  exchangeRates: ExchangeRates,
+  excludeFreeTags = true,
+): number {
+  return nodes.reduce((sum, node) => {
+    if (excludeFreeTags && node.tags?.includes('白嫖中'))
+      return sum
+
+    return sum + calculateMonthlyCostCNY(node, exchangeRates)
+  }, 0)
+}
+
+export function calculatePeriodCostCNY(
+  node: NodeData,
+  exchangeRates: ExchangeRates,
+  periodDays: number,
+): number {
+  const monthlyCostCNY = calculateMonthlyCostCNY(node, exchangeRates)
+  if (monthlyCostCNY <= 0)
+    return 0
+
+  return monthlyCostCNY / 30 * periodDays
+}
+
 export function calculateRemainingValueCNY(
   node: NodeData,
   exchangeRates: ExchangeRates,

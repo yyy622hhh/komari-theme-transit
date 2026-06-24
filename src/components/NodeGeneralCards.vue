@@ -138,14 +138,8 @@ function formatExpiryNode(node: NodeData): string {
 function getNodePeriodCostCNY(node: NodeData, periodDays: number): number {
   if (excludeFreeNodes.value && node.tags?.includes('白嫖中'))
     return 0
-  if (!node.billing_cycle || node.billing_cycle <= 0)
-    return 0
 
-  const priceCNY = financeHelper.getPriceCNY(node, exchangeRates.value)
-  if (priceCNY <= 0)
-    return 0
-
-  return priceCNY / node.billing_cycle * periodDays
+  return financeHelper.calculatePeriodCostCNY(node, exchangeRates.value, periodDays)
 }
 
 function formatCostCard(amountCNY: number): { value: string, unit?: string } {
@@ -508,27 +502,52 @@ const cardDefinitions = computed<Record<GeneralCardKey, GeneralMetricCard>>(() =
   },
 }))
 
-const visibleCards = computed(() => appStore.generalCardOrder.map(key => cardDefinitions.value[key]))
+const tiledDefaultCardKeys: GeneralCardKey[] = [
+  'onlineNodes',
+  'remainingValue',
+  'monthlyCost',
+  'totalTraffic',
+  'uploadSpeed',
+  'downloadSpeed',
+  'trafficPeak',
+  'expiringNodes',
+]
+const baseVisibleCards = computed(() => appStore.generalCardOrder.map(key => cardDefinitions.value[key]))
+const tiledDefaultCards = computed(() => tiledDefaultCardKeys.map(key => cardDefinitions.value[key]))
 const showEarth = computed(() => !appStore.hideEarth)
+const isTiledEarth = computed(() => showEarth.value && appStore.earthRenderer === 'tiled')
+const visibleCards = computed(() => isTiledEarth.value ? tiledDefaultCards.value : baseVisibleCards.value)
 const shouldRenderHeader = computed(() => showEarth.value || visibleCards.value.length > 0)
 const hasExtraCards = computed(() => visibleCards.value.length > 6)
 const wrapperClass = computed(() => {
   if (!showEarth.value)
     return 'p-4 grid grid-cols-1 gap-2 h-auto'
 
+  if (isTiledEarth.value)
+    return 'p-3 sm:p-4 grid grid-cols-12 gap-2 sm:gap-3 h-auto min-h-[40rem] sm:min-h-[30rem] md:min-h-[36rem] lg:min-h-[40rem]'
+
   return hasExtraCards.value
     ? 'p-4 grid grid-cols-12 gap-2 h-auto md:min-h-58'
     : 'p-4 grid grid-cols-12 grid-rows-1 gap-2 h-auto md:h-58'
+})
+const earthClass = computed(() => {
+  if (isTiledEarth.value)
+    return 'col-span-12 row-start-2 min-h-[18rem] h-[18rem] sm:h-[20rem] md:h-[24rem] lg:h-[28rem]'
+
+  return 'col-span-12 col-start-1 md:col-span-6 md:col-start-7 md:row-start-1'
 })
 const cardGridClass = computed(() => {
   if (!showEarth.value)
     return 'col-span-1 grid grid-cols-3 md:grid-cols-6 gap-2'
 
+  if (isTiledEarth.value)
+    return 'col-span-12 row-start-1 z-9 grid grid-cols-12 auto-rows-[4.75rem] sm:auto-rows-[5rem] md:auto-rows-[5.8rem] gap-2 sm:gap-3'
+
   return hasExtraCards.value
     ? 'h-auto -mt-42 md:mt-0 col-span-12 row-start-3 z-9 md:h-auto md:col-span-6 md:row-start-1 grid grid-cols-12 auto-rows-[5rem] md:auto-rows-[7rem] gap-2'
     : 'h-42 -mt-42 md:mt-0 col-span-12 row-start-3 z-9 md:h-auto md:col-span-6 md:row-start-1 grid grid-cols-12 grid-rows-2 gap-2'
 })
-const cardClass = 'group h-full bg-background/50 border-none hover:bg-background backdrop-blur-sm md:backdrop-blur-none transition-all'
+const cardClass = 'group relative z-10 h-full bg-background/50 border-none hover:bg-background backdrop-blur-sm md:backdrop-blur-none transition-all'
 const cardPositionClasses = [
   'col-span-4 row-span-1 col-start-1 row-start-1',
   'col-span-4 row-span-1 col-start-1 row-start-2',
@@ -537,11 +556,24 @@ const cardPositionClasses = [
   'col-span-4 row-span-1 col-start-9 row-start-1',
   'col-span-4 row-span-1 col-start-9 row-start-2',
 ]
+const tiledCardPositionClasses = [
+  'col-span-6 sm:col-span-3 row-span-1 sm:col-start-1 row-start-1',
+  'col-span-6 sm:col-span-3 row-span-1 sm:col-start-4 row-start-1',
+  'col-span-6 sm:col-span-3 row-span-1 sm:col-start-7 row-start-2 sm:row-start-1',
+  'col-span-6 sm:col-span-3 row-span-1 sm:col-start-10 row-start-2 sm:row-start-1',
+  'col-span-6 sm:col-span-3 row-span-1 sm:col-start-1 row-start-3 sm:row-start-2',
+  'col-span-6 sm:col-span-3 row-span-1 sm:col-start-4 row-start-3 sm:row-start-2',
+  'col-span-6 sm:col-span-3 row-span-1 sm:col-start-7 row-start-4 sm:row-start-2',
+  'col-span-6 sm:col-span-3 row-span-1 sm:col-start-10 row-start-4 sm:row-start-2',
+]
 const unitClass = 'text-[11px] md:text-xs font-medium text-muted-foreground truncate'
 
 function getCardPositionClass(index: number): string {
   if (!showEarth.value)
     return 'col-span-1 min-h-18 md:min-h-28'
+
+  if (isTiledEarth.value)
+    return tiledCardPositionClasses[index] ?? 'col-span-6 sm:col-span-3 row-span-1'
 
   return cardPositionClasses[index] ?? 'col-span-4 row-span-1'
 }
@@ -561,7 +593,7 @@ onMounted(async () => {
     <NodeEarthGlobe
       v-if="showEarth"
       :nodes="globeNodes"
-      class="col-span-12 col-start-1 md:col-span-6 md:col-start-7 md:row-start-1"
+      :class="earthClass"
     />
 
     <div v-if="visibleCards.length > 0" :class="cardGridClass">
