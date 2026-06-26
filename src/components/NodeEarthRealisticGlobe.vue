@@ -94,8 +94,10 @@ function toRadians(degrees: number): number {
 }
 
 function greatCircleAngle(from: [number, number], to: [number, number]): number {
-  const [lat1, lng1] = from.map(toRadians)
-  const [lat2, lng2] = to.map(toRadians)
+  const lat1 = toRadians(from[0])
+  const lng1 = toRadians(from[1])
+  const lat2 = toRadians(to[0])
+  const lng2 = toRadians(to[1])
   const deltaLng = Math.abs(lng2 - lng1)
   const cosAngle = Math.sin(lat1) * Math.sin(lat2)
     + Math.cos(lat1) * Math.cos(lat2) * Math.cos(deltaLng)
@@ -105,7 +107,7 @@ function greatCircleAngle(from: [number, number], to: [number, number]): number 
 
 function getArcAltitude(from: [number, number], to: [number, number]): number {
   const normalizedDistance = greatCircleAngle(from, to) / Math.PI
-  return Math.min(0.58, Math.max(0.12, 0.10 + normalizedDistance * 0.78))
+  return Math.min(0.22, Math.max(0.045, 0.035 + normalizedDistance * 0.24))
 }
 
 const arcsData = computed<GlobeArc[]>(() => routes.value.map(route => ({
