@@ -12,7 +12,7 @@
     "data": [
       { "name": "基础设置", "type": "title" },
       { "key": "dataUpdateInterval", "name": "数据更新间隔", "type": "number", "default": 3, "help": "实时数据刷新间隔，单位：秒（建议 1-10 秒）" },
-      { "key": "rpcTransportMode", "name": "RPC 连接模式", "type": "select", "default": "websocket", "options": "websocket,http", "help": "RPC 默认连接模式，推荐使用 websocket，若您无法使用 websocket 请选择 http" },
+      { "key": "rpcTransportMode", "name": "RPC 连接模式", "type": "select", "default": "http", "options": "http,websocket", "help": "RPC 默认连接模式，HTTP 兼容性最好；确认反向代理已支持 WebSocket 时可切换为 websocket" },
       { "key": "defaultViewMode", "name": "默认视图模式", "type": "select", "default": "card", "options": "card,list", "help": "节点列表的默认显示模式" },
       { "key": "nodeCardSize", "name": "节点卡片尺寸", "type": "select", "default": "compact", "options": "compact,comfortable,large", "help": "首页节点卡片尺寸：compact 接近当前紧凑布局，comfortable 更宽松，large 为大卡片" },
 

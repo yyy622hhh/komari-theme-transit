@@ -386,7 +386,7 @@ const useAppStore = defineStore('app', () => {
         return mode
       }
     }
-    return 'websocket'
+    return 'http'
   })
 
   // 字节格式化精度（固定配置）
