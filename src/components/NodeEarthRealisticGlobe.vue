@@ -59,6 +59,7 @@ interface GlobeArc {
   startLng: number
   endLat: number
   endLng: number
+  altitude: number
   speedMs: number
 }
 
@@ -88,12 +89,32 @@ const labelsData = computed<GlobeLabel[]>(() => regionClusters.value.map(cluster
   code: cluster.code,
 })))
 
+function toRadians(degrees: number): number {
+  return degrees * Math.PI / 180
+}
+
+function greatCircleAngle(from: [number, number], to: [number, number]): number {
+  const [lat1, lng1] = from.map(toRadians)
+  const [lat2, lng2] = to.map(toRadians)
+  const deltaLng = Math.abs(lng2 - lng1)
+  const cosAngle = Math.sin(lat1) * Math.sin(lat2)
+    + Math.cos(lat1) * Math.cos(lat2) * Math.cos(deltaLng)
+
+  return Math.acos(Math.min(1, Math.max(-1, cosAngle)))
+}
+
+function getArcAltitude(from: [number, number], to: [number, number]): number {
+  const normalizedDistance = greatCircleAngle(from, to) / Math.PI
+  return Math.min(0.58, Math.max(0.12, 0.10 + normalizedDistance * 0.78))
+}
+
 const arcsData = computed<GlobeArc[]>(() => routes.value.map(route => ({
   id: route.id,
   startLat: route.from[0],
   startLng: route.from[1],
   endLat: route.to[0],
   endLng: route.to[1],
+  altitude: getArcAltitude(route.from, route.to),
   speedMs: route.speedMs,
 })))
 function earthTextureUrl() {
@@ -241,7 +262,7 @@ async function startGlobe() {
       .arcEndLat('endLat')
       .arcEndLng('endLng')
       .arcColor(arcColor)
-      .arcAltitude(0.15)
+      .arcAltitude('altitude')
       .arcStroke(0.48)
       .arcDashLength(1)
       .arcDashGap(0)
