@@ -20,6 +20,7 @@ export interface IpGeo {
 const CACHE_PREFIX = 'komari-theme-emerald:ipgeo'
 const CACHE_VERSION = 2
 const CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000 // 30 天
+const IP_GEO_TIMEOUT_MS = 5000
 const ASN_ORG_PREFIX_REGEX = /^AS\d+/
 
 interface CacheEntry {
@@ -88,9 +89,20 @@ function pickString(...values: unknown[]): string | undefined {
 
 type Provider = (ip: string) => Promise<IpGeo | null>
 
+async function fetchWithTimeout(url: string, timeoutMs = IP_GEO_TIMEOUT_MS): Promise<Response> {
+  const controller = new AbortController()
+  const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    return await fetch(url, { signal: controller.signal })
+  }
+  finally {
+    window.clearTimeout(timeoutId)
+  }
+}
+
 /** ip.sb：返回 latitude / longitude / city / country_code */
 const fromIpSb: Provider = async (ip) => {
-  const res = await fetch(`https://api.ip.sb/geoip/${ip}`)
+  const res = await fetchWithTimeout(`https://api.ip.sb/geoip/${ip}`)
   if (!res.ok)
     return null
   const d = await res.json() as Record<string, unknown>
@@ -110,7 +122,7 @@ const fromIpSb: Provider = async (ip) => {
 
 /** ipinfo.io：loc = "lat,lng"，city，country，org = "AS#### 组织名" */
 const fromIpinfo: Provider = async (ip) => {
-  const res = await fetch(`https://ipinfo.io/${ip}/json`)
+  const res = await fetchWithTimeout(`https://ipinfo.io/${ip}/json`)
   if (!res.ok)
     return null
   const d = await res.json() as Record<string, unknown>
@@ -134,7 +146,7 @@ const fromIpinfo: Provider = async (ip) => {
 
 /** ipapi.co：latitude / longitude / city / country_code */
 const fromIpapiCo: Provider = async (ip) => {
-  const res = await fetch(`https://ipapi.co/${ip}/json/`)
+  const res = await fetchWithTimeout(`https://ipapi.co/${ip}/json/`)
   if (!res.ok)
     return null
   const d = await res.json() as Record<string, unknown>
@@ -154,7 +166,7 @@ const fromIpapiCo: Provider = async (ip) => {
 
 /** ipwho.is：latitude/longitude/city/country_code，connection.{org,isp,asn} */
 const fromIpwhois: Provider = async (ip) => {
-  const res = await fetch(`https://ipwho.is/${ip}`)
+  const res = await fetchWithTimeout(`https://ipwho.is/${ip}`)
   if (!res.ok)
     return null
   const d = await res.json() as Record<string, unknown>

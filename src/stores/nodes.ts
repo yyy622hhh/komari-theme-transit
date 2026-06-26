@@ -34,6 +34,7 @@ export interface NodeData {
   currency: string
   expired_at: string
   group: string
+  groups: string[]
   tags: string
   hidden: boolean
   traffic_limit: number
@@ -105,7 +106,7 @@ const useNodesStore = defineStore('nodes', () => {
   const groups = computed(() => {
     const groupSet = new Set<string>()
     nodes.value.forEach((n) => {
-      parseNodeGroups(n.group).forEach(group => groupSet.add(group))
+      n.groups.forEach(group => groupSet.add(group))
     })
     return Array.from(groupSet)
   })
@@ -151,6 +152,7 @@ const useNodesStore = defineStore('nodes', () => {
       currency: client.currency,
       expired_at: client.expired_at,
       group: client.group,
+      groups: parseNodeGroups(client.group),
       tags: client.tags,
       hidden: client.hidden,
       traffic_limit: client.traffic_limit,
@@ -283,8 +285,10 @@ const useNodesStore = defineStore('nodes', () => {
       node.currency = client.currency
     if (node.expired_at !== client.expired_at)
       node.expired_at = client.expired_at
-    if (node.group !== client.group)
+    if (node.group !== client.group) {
       node.group = client.group
+      node.groups = parseNodeGroups(client.group)
+    }
     if (node.tags !== client.tags)
       node.tags = client.tags
     if (node.hidden !== client.hidden)

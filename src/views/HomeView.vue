@@ -14,7 +14,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useAppStore } from '@/stores/app'
 import { useNodesStore } from '@/stores/nodes'
 import * as financeHelper from '@/utils/financeHelper'
-import { isNodeInGroup, parseNodeGroups } from '@/utils/groupHelper'
 import {
   getRealtimePeakSpeed,
   getTotalTraffic,
@@ -136,7 +135,7 @@ function isNodeMatchSearch(node: NodeData, search: string): boolean {
     return true
   if (node.os && node.os.toLowerCase().includes(lowerSearch))
     return true
-  if (parseNodeGroups(node.group).some(group => group.toLowerCase().includes(lowerSearch)))
+  if (node.groups.some(group => group.toLowerCase().includes(lowerSearch)))
     return true
   if (node.tags && node.tags.toLowerCase().includes(lowerSearch))
     return true
@@ -145,18 +144,25 @@ function isNodeMatchSearch(node: NodeData, search: string): boolean {
   return false
 }
 
+function sortNodesByComputedValue(nodes: NodeData[], selector: (node: NodeData) => number): NodeData[] {
+  return nodes
+    .map(node => ({ node, value: selector(node) }))
+    .sort((a, b) => b.value - a.value)
+    .map(item => item.node)
+}
+
 function applyQuickControl(nodes: NodeData[], control: HomeQuickControlKey): NodeData[] {
   switch (control) {
     case 'monthlyCost':
-      return [...nodes].sort((a, b) => getNodeMonthlyCostCNY(b) - getNodeMonthlyCostCNY(a))
+      return sortNodesByComputedValue(nodes, getNodeMonthlyCostCNY)
     case 'totalTraffic':
-      return [...nodes].sort((a, b) => getTotalTraffic(b) - getTotalTraffic(a))
+      return sortNodesByComputedValue(nodes, getTotalTraffic)
     case 'upload':
       return [...nodes].sort((a, b) => (b.net_out || 0) - (a.net_out || 0))
     case 'download':
       return [...nodes].sort((a, b) => (b.net_in || 0) - (a.net_in || 0))
     case 'peak':
-      return [...nodes].sort((a, b) => getRealtimePeakSpeed(b) - getRealtimePeakSpeed(a))
+      return sortNodesByComputedValue(nodes, getRealtimePeakSpeed)
     case 'offline':
       return nodes.filter(node => !node.online)
     case 'highLoad':
@@ -170,7 +176,10 @@ function applyQuickControl(nodes: NodeData[], control: HomeQuickControlKey): Nod
 }
 
 const groupNodeList = computed(() => {
-  return nodesStore.nodes.filter(node => isNodeInGroup(node.group, appStore.nodeSelectedGroup))
+  const selectedGroup = appStore.nodeSelectedGroup
+  if (selectedGroup === 'all')
+    return nodesStore.nodes
+  return nodesStore.nodes.filter(node => node.groups.includes(selectedGroup))
 })
 
 const nodeList = computed(() => {

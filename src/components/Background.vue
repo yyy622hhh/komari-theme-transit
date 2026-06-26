@@ -11,7 +11,7 @@ const showBackground = computed(() => appStore.backgroundEnabled)
 const currentUrl = computed(() => appStore.currentBackgroundUrl)
 const backgroundType = computed(() => appStore.backgroundType)
 const hasCustomBackground = computed(() => showBackground.value && !!currentUrl.value)
-const showBackgroundOverlay = computed(() => hasCustomBackground.value && appStore.backgroundOverlay > 0)
+const showBackgroundOverlay = computed(() => appStore.backgroundOverlay > 0)
 
 const backgroundStyle = computed(() => {
   const blur = appStore.backgroundBlur
@@ -22,9 +22,6 @@ const backgroundStyle = computed(() => {
 })
 
 const backgroundContainerStyle = computed(() => {
-  if (!hasCustomBackground.value)
-    return {}
-
   const overlay = appStore.backgroundOverlay
   if (overlay >= 0)
     return {}

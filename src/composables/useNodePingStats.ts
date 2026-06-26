@@ -294,27 +294,43 @@ function buildPingHistory(records: PingRecord[]): NodePingHistoryPoint[] {
   const bucketCount = Math.min(HISTORY_BUCKET_COUNT, sortedRecords.length)
   const bucketSize = Math.max(1, (lastTime - firstTime) / bucketCount)
 
-  return Array.from({ length: bucketCount }, (_, index) => {
+  const history: NodePingHistoryPoint[] = []
+  let recordIndex = 0
+
+  for (let index = 0; index < bucketCount; index++) {
     const startTime = firstTime + bucketSize * index
     const endTime = index === bucketCount - 1 ? lastTime + 1 : startTime + bucketSize
-    const bucketRecords = sortedRecords.filter(
-      record => record.timestamp >= startTime && record.timestamp < endTime,
-    )
-    const validLatencyRecords = bucketRecords.filter(record => record.value >= 0)
-    const lostCount = bucketRecords.length - validLatencyRecords.length
-    const latency = validLatencyRecords.length
-      ? average(validLatencyRecords.map(record => record.value))
-      : null
-    const loss = bucketRecords.length
-      ? lostCount / bucketRecords.length * 100
-      : null
+    let totalCount = 0
+    let lostCount = 0
+    let latencySum = 0
+    let latencyCount = 0
 
-    return {
-      time: new Date(startTime).toISOString(),
-      latency,
-      loss,
+    while (recordIndex < sortedRecords.length) {
+      const record = sortedRecords[recordIndex]
+      if (!record || record.timestamp >= endTime)
+        break
+
+      if (record.timestamp >= startTime) {
+        totalCount += 1
+        if (record.value >= 0) {
+          latencySum += record.value
+          latencyCount += 1
+        }
+        else {
+          lostCount += 1
+        }
+      }
+      recordIndex += 1
     }
-  })
+
+    history.push({
+      time: new Date(startTime).toISOString(),
+      latency: latencyCount ? latencySum / latencyCount : null,
+      loss: totalCount ? lostCount / totalCount * 100 : null,
+    })
+  }
+
+  return history
 }
 
 function getPercentile(values: number[], percentile: number): number | null {

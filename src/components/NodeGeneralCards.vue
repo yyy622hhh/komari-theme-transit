@@ -2,6 +2,7 @@
 import type { GeneralCardKey } from '@/stores/app'
 import type { NodeData } from '@/stores/nodes'
 import type { CurrencyCode, ExchangeRateSource } from '@/utils/financeHelper'
+import type { TopNodeMetric } from '@/utils/nodeMetricsHelper'
 import { Icon } from '@iconify/vue'
 import { computed, onMounted, ref } from 'vue'
 import NodeEarthGlobe from '@/components/NodeEarthGlobe.vue'
@@ -16,7 +17,6 @@ import {
   getExpiryDays,
   getHighLoadMetrics,
   getRealtimeTotalSpeed,
-  getTopNodeBy,
   getTrafficUsed,
   getTrafficUsedPercentage,
   isExpiringNode,
@@ -33,6 +33,23 @@ interface GeneralMetricCard {
   tooltip?: string
 }
 
+interface OnlineStats {
+  count: number
+  totalSpeed: { up: number, down: number }
+  avgCpu: number
+  avgLoad: number
+  avgLoad5: number
+  avgLoad15: number
+  totalProcesses: number
+  totalConnectionsTcp: number
+  totalConnectionsUdp: number
+  trafficPeak: TopNodeMetric | null
+  uploadPeakNode: TopNodeMetric | null
+  downloadPeakNode: TopNodeMetric | null
+  connectionPeakNode: TopNodeMetric | null
+  highLoadNodes: NodeData[]
+}
+
 const props = defineProps<{
   nodes?: NodeData[]
   globeNodes?: NodeData[]
@@ -47,8 +64,7 @@ const exchangeRateSource = ref<ExchangeRateSource | 'loading'>('loading')
 const financeCurrency = ref<CurrencyCode>('CNY')
 const excludeFreeNodes = ref(true)
 const summaryNodes = computed(() => props.nodes ?? nodesStore.nodes)
-const onlineNodes = computed(() => summaryNodes.value.filter(node => node.online))
-const summaryTransitionKey = computed(() => props.transitionKey ?? summaryNodes.value.map(node => node.uuid).join('|'))
+const summaryTransitionKey = computed(() => props.transitionKey ?? nodesStore.nodes.length)
 const metricSwitchTransitionProps = computed(() => ({
   ...(appStore.disablePageAnimation
     ? { css: false }
@@ -81,13 +97,7 @@ function formatDecimal(value: number, digits = 1): string {
   return value.toFixed(digits)
 }
 
-function averageBy(nodes: NodeData[], selector: (node: NodeData) => number): number {
-  if (nodes.length === 0)
-    return 0
-  return nodes.reduce((sum, node) => sum + (selector(node) || 0), 0) / nodes.length
-}
-
-function formatTopNodeSpeed(metric: ReturnType<typeof getTopNodeBy>, fallback = '-'): { value: string, unit?: string, tooltip?: string } {
+function formatTopNodeSpeed(metric: TopNodeMetric | null, fallback = '-'): { value: string, unit?: string, tooltip?: string } {
   if (!metric || metric.value <= 0)
     return { value: fallback }
 
@@ -154,11 +164,67 @@ function formatCostCard(amountCNY: number): { value: string, unit?: string } {
   }
 }
 
-const totalSpeed = computed(() => {
-  const up = onlineNodes.value.reduce((sum, node) => sum + (node.net_out || 0), 0)
-  const down = onlineNodes.value.reduce((sum, node) => sum + (node.net_in || 0), 0)
-  return { up, down }
+function updateTopMetric(current: TopNodeMetric | null, node: NodeData, value: number): TopNodeMetric | null {
+  if (!Number.isFinite(value))
+    return current
+
+  if (!current || value > current.value)
+    return { node, value: Math.max(0, value) }
+
+  return current
+}
+
+const onlineStats = computed<OnlineStats>(() => {
+  const stats: OnlineStats = {
+    count: 0,
+    totalSpeed: { up: 0, down: 0 },
+    avgCpu: 0,
+    avgLoad: 0,
+    avgLoad5: 0,
+    avgLoad15: 0,
+    totalProcesses: 0,
+    totalConnectionsTcp: 0,
+    totalConnectionsUdp: 0,
+    trafficPeak: null,
+    uploadPeakNode: null,
+    downloadPeakNode: null,
+    connectionPeakNode: null,
+    highLoadNodes: [],
+  }
+
+  for (const node of summaryNodes.value) {
+    if (!node.online)
+      continue
+
+    stats.count += 1
+    stats.totalSpeed.up += node.net_out || 0
+    stats.totalSpeed.down += node.net_in || 0
+    stats.avgCpu += node.cpu || 0
+    stats.avgLoad += node.load || 0
+    stats.avgLoad5 += node.load5 || 0
+    stats.avgLoad15 += node.load15 || 0
+    stats.totalProcesses += node.process || 0
+    stats.totalConnectionsTcp += node.connections || 0
+    stats.totalConnectionsUdp += node.connections_udp || 0
+    stats.trafficPeak = updateTopMetric(stats.trafficPeak, node, getRealtimeTotalSpeed(node))
+    stats.uploadPeakNode = updateTopMetric(stats.uploadPeakNode, node, node.net_out || 0)
+    stats.downloadPeakNode = updateTopMetric(stats.downloadPeakNode, node, node.net_in || 0)
+    stats.connectionPeakNode = updateTopMetric(stats.connectionPeakNode, node, getConnectionCount(node))
+    if (isHighLoadNode(node, appStore.homeHighLoadThreshold))
+      stats.highLoadNodes.push(node)
+  }
+
+  if (stats.count > 0) {
+    stats.avgCpu /= stats.count
+    stats.avgLoad /= stats.count
+    stats.avgLoad5 /= stats.count
+    stats.avgLoad15 /= stats.count
+  }
+
+  return stats
 })
+
+const totalSpeed = computed(() => onlineStats.value.totalSpeed)
 
 const totalTraffic = computed(() => {
   const up = summaryNodes.value.reduce((sum, node) => sum + (node.net_total_up || 0), 0)
@@ -212,15 +278,15 @@ const formattedDiskTotal = computed(() => formatBytesSplit(totalDisk.value.total
 const formattedSwapUsed = computed(() => formatBytesSplit(totalSwap.value.used, appStore.byteDecimals))
 const formattedSwapTotal = computed(() => formatBytesSplit(totalSwap.value.total, appStore.byteDecimals))
 
-const onlineNodeCount = computed(() => onlineNodes.value.length)
+const onlineNodeCount = computed(() => onlineStats.value.count)
 const totalNodeCount = computed(() => summaryNodes.value.length)
-const avgCpu = computed(() => averageBy(onlineNodes.value, node => node.cpu))
-const avgLoad = computed(() => averageBy(onlineNodes.value, node => node.load))
-const avgLoad5 = computed(() => averageBy(onlineNodes.value, node => node.load5))
-const avgLoad15 = computed(() => averageBy(onlineNodes.value, node => node.load15))
-const totalProcesses = computed(() => onlineNodes.value.reduce((sum, node) => sum + (node.process || 0), 0))
-const totalConnectionsTcp = computed(() => onlineNodes.value.reduce((sum, node) => sum + (node.connections || 0), 0))
-const totalConnectionsUdp = computed(() => onlineNodes.value.reduce((sum, node) => sum + (node.connections_udp || 0), 0))
+const avgCpu = computed(() => onlineStats.value.avgCpu)
+const avgLoad = computed(() => onlineStats.value.avgLoad)
+const avgLoad5 = computed(() => onlineStats.value.avgLoad5)
+const avgLoad15 = computed(() => onlineStats.value.avgLoad15)
+const totalProcesses = computed(() => onlineStats.value.totalProcesses)
+const totalConnectionsTcp = computed(() => onlineStats.value.totalConnectionsTcp)
+const totalConnectionsUdp = computed(() => onlineStats.value.totalConnectionsUdp)
 const totalCpuCores = computed(() => summaryNodes.value.reduce((sum, node) => sum + (node.cpu_cores || 0), 0))
 const trafficQuota = computed(() => {
   let used = 0
@@ -241,12 +307,12 @@ const trafficQuotaPercentage = computed(() => {
   return trafficQuota.value.used / trafficQuota.value.limit * 100
 })
 
-const trafficPeak = computed(() => getTopNodeBy(onlineNodes.value, getRealtimeTotalSpeed))
-const uploadPeakNode = computed(() => getTopNodeBy(onlineNodes.value, node => node.net_out || 0))
-const downloadPeakNode = computed(() => getTopNodeBy(onlineNodes.value, node => node.net_in || 0))
-const connectionPeakNode = computed(() => getTopNodeBy(onlineNodes.value, getConnectionCount))
+const trafficPeak = computed(() => onlineStats.value.trafficPeak)
+const uploadPeakNode = computed(() => onlineStats.value.uploadPeakNode)
+const downloadPeakNode = computed(() => onlineStats.value.downloadPeakNode)
+const connectionPeakNode = computed(() => onlineStats.value.connectionPeakNode)
 const offlineNodes = computed(() => summaryNodes.value.filter(node => !node.online))
-const highLoadNodes = computed(() => onlineNodes.value.filter(node => isHighLoadNode(node, appStore.homeHighLoadThreshold)))
+const highLoadNodes = computed(() => onlineStats.value.highLoadNodes)
 const expiringNodes = computed(() => summaryNodes.value.filter(node => isExpiringNode(node, appStore.homeExpiringDays)))
 const trafficWarningNodes = computed(() => summaryNodes.value.filter(node => isTrafficWarningNode(node, appStore.homeTrafficWarningThreshold)))
 const regionDistribution = computed(() => getDistribution(summaryNodes.value, node => node.region))
@@ -293,214 +359,245 @@ const connectionPeakTooltip = computed(() => {
 const monthlyCostCard = computed(() => formatCostCard(monthlyCostCNY.value))
 const yearlyCostCard = computed(() => formatCostCard(yearlyCostCNY.value))
 
-const cardDefinitions = computed<Record<GeneralCardKey, GeneralMetricCard>>(() => ({
-  memory: {
-    key: 'memory',
-    label: '内存用量',
-    icon: 'icon-park-outline:memory',
-    value: formattedMemoryUsed.value.value,
-    unit: `${formattedMemoryUsed.value.unit} / ${formattedMemoryTotal.value.value} ${formattedMemoryTotal.value.unit}`,
-  },
-  disk: {
-    key: 'disk',
-    label: '硬盘用量',
-    icon: 'tabler:server-2',
-    value: formattedDiskUsed.value.value,
-    unit: `${formattedDiskUsed.value.unit} / ${formattedDiskTotal.value.value} ${formattedDiskTotal.value.unit}`,
-  },
-  remainingValue: {
-    key: 'remainingValue',
-    label: '剩余价值',
-    icon: 'tabler:cash',
-    value: showPrice.value ? `${formattedRemainingValue.value.symbol}${formattedRemainingValue.value.value}` : '***',
-    unit: showPrice.value ? formattedRemainingValue.value.currency : undefined,
-    tooltip: totalValueTooltip.value,
-  },
-  totalTraffic: {
-    key: 'totalTraffic',
-    label: '累计流量',
-    icon: 'tabler:download',
-    value: totalTrafficTooltip.value.value,
-    unit: totalTrafficTooltip.value.unit,
-    tooltip: `↑ ${formattedTrafficUp.value.value} ${formattedTrafficUp.value.unit}\n↓ ${formattedTrafficDown.value.value} ${formattedTrafficDown.value.unit}`,
-  },
-  uploadSpeed: {
-    key: 'uploadSpeed',
-    label: '实时上行',
-    icon: 'tabler:chevrons-up',
-    value: formattedSpeedUp.value.value,
-    unit: formattedSpeedUp.value.unit,
-  },
-  downloadSpeed: {
-    key: 'downloadSpeed',
-    label: '实时下行',
-    icon: 'tabler:chevrons-down',
-    value: formattedSpeedDown.value.value,
-    unit: formattedSpeedDown.value.unit,
-  },
-  onlineNodes: {
-    key: 'onlineNodes',
-    label: '在线节点',
-    icon: 'tabler:activity-heartbeat',
-    value: formatCount(onlineNodeCount.value),
-    unit: `/ ${formatCount(totalNodeCount.value)}`,
-  },
-  avgCpu: {
-    key: 'avgCpu',
-    label: '平均 CPU',
-    icon: 'tabler:cpu',
-    value: formatDecimal(avgCpu.value),
-    unit: '%',
-  },
-  avgLoad: {
-    key: 'avgLoad',
-    label: '平均负载',
-    icon: 'tabler:chart-line',
-    value: formatDecimal(avgLoad.value, 2),
-    tooltip: `1m ${formatDecimal(avgLoad.value, 2)}\n5m ${formatDecimal(avgLoad5.value, 2)}\n15m ${formatDecimal(avgLoad15.value, 2)}`,
-  },
-  swap: {
-    key: 'swap',
-    label: '交换内存',
-    icon: 'icon-park-outline:switch',
-    value: formattedSwapUsed.value.value,
-    unit: `${formattedSwapUsed.value.unit} / ${formattedSwapTotal.value.value} ${formattedSwapTotal.value.unit}`,
-  },
-  processes: {
-    key: 'processes',
-    label: '进程总数',
-    icon: 'tabler:list-numbers',
-    value: formatCount(totalProcesses.value),
-  },
-  connections: {
-    key: 'connections',
-    label: '连接数',
-    icon: 'tabler:plug-connected',
-    value: formatCount(totalConnectionsTcp.value + totalConnectionsUdp.value),
-    tooltip: `TCP ${formatCount(totalConnectionsTcp.value)}\nUDP ${formatCount(totalConnectionsUdp.value)}`,
-  },
-  cpuCores: {
-    key: 'cpuCores',
-    label: 'CPU 核心',
-    icon: 'tabler:chip',
-    value: formatCount(totalCpuCores.value),
-    unit: 'Core',
-  },
-  trafficQuota: {
-    key: 'trafficQuota',
-    label: '流量配额',
-    icon: 'tabler:gauge',
-    value: trafficQuota.value.limit > 0 ? formatDecimal(trafficQuotaPercentage.value) : '-',
-    unit: trafficQuota.value.limit > 0 ? '%' : undefined,
-    tooltip: trafficQuota.value.limit > 0
-      ? `${formatBytesText(trafficQuota.value.used)} / ${formatBytesText(trafficQuota.value.limit)}`
-      : '无限流量',
-  },
-  trafficPeak: {
-    key: 'trafficPeak',
-    label: '实时峰值',
-    icon: 'tabler:activity',
-    value: trafficPeakCard.value.value,
-    unit: trafficPeakCard.value.unit,
-    tooltip: trafficPeakCard.value.tooltip,
-  },
-  uploadPeakNode: {
-    key: 'uploadPeakNode',
-    label: '上行最高',
-    icon: 'tabler:arrow-big-up-lines',
-    value: uploadPeakCard.value.value,
-    unit: uploadPeakCard.value.unit,
-    tooltip: uploadPeakCard.value.tooltip,
-  },
-  downloadPeakNode: {
-    key: 'downloadPeakNode',
-    label: '下行最高',
-    icon: 'tabler:arrow-big-down-lines',
-    value: downloadPeakCard.value.value,
-    unit: downloadPeakCard.value.unit,
-    tooltip: downloadPeakCard.value.tooltip,
-  },
-  offlineNodes: {
-    key: 'offlineNodes',
-    label: '离线节点',
-    icon: 'tabler:plug-connected-x',
-    value: formatCount(offlineNodes.value.length),
-    unit: `/ ${formatCount(totalNodeCount.value)}`,
-    tooltip: formatNodeNames(offlineNodes.value),
-  },
-  highLoadNodes: {
-    key: 'highLoadNodes',
-    label: '高负载节点',
-    icon: 'tabler:alert-triangle',
-    value: formatCount(highLoadNodes.value.length),
-    unit: `/ ${formatCount(onlineNodeCount.value)}`,
-    tooltip: formatNodeNames(highLoadNodes.value, (node) => {
-      const metrics = getHighLoadMetrics(node, appStore.homeHighLoadThreshold)
-      return `${node.name}: ${metrics.map(metric => `${metric.label} ${formatDecimal(metric.percentage)}%`).join(' / ')}`
-    }),
-  },
-  expiringNodes: {
-    key: 'expiringNodes',
-    label: '即将到期',
-    icon: 'tabler:calendar-exclamation',
-    value: formatCount(expiringNodes.value.length),
-    unit: '台',
-    tooltip: formatNodeNames(expiringNodes.value, formatExpiryNode),
-  },
-  trafficWarnings: {
-    key: 'trafficWarnings',
-    label: '流量预警',
-    icon: 'tabler:traffic-cone',
-    value: formatCount(trafficWarningNodes.value.length),
-    unit: '台',
-    tooltip: formatNodeNames(trafficWarningNodes.value, node => `${node.name}: ${formatDecimal(getTrafficUsedPercentage(node))}%`),
-  },
-  connectionPeakNode: {
-    key: 'connectionPeakNode',
-    label: '连接峰值',
-    icon: 'tabler:plug-connected',
-    value: connectionPeakNode.value ? formatCount(connectionPeakNode.value.value) : '-',
-    tooltip: connectionPeakTooltip.value,
-  },
-  regionDistribution: {
-    key: 'regionDistribution',
-    label: '地区分布',
-    icon: 'tabler:map-pin',
-    value: formatCount(regionDistribution.value.length),
-    unit: '个',
-    tooltip: formatDistributionTooltip(regionDistribution.value),
-  },
-  systemDistribution: {
-    key: 'systemDistribution',
-    label: '系统分布',
-    icon: 'tabler:device-desktop',
-    value: systemDistribution.value[0]?.[0] ?? '-',
-    unit: systemDistribution.value[0] ? `${systemDistribution.value[0][1]} 台` : undefined,
-    tooltip: formatDistributionTooltip(systemDistribution.value),
-  },
-  virtualizationDistribution: {
-    key: 'virtualizationDistribution',
-    label: '虚拟化',
-    icon: 'tabler:box-multiple',
-    value: virtualizationDistribution.value[0]?.[0] ?? '-',
-    unit: virtualizationDistribution.value[0] ? `${virtualizationDistribution.value[0][1]} 台` : undefined,
-    tooltip: formatDistributionTooltip(virtualizationDistribution.value),
-  },
-  monthlyCost: {
-    key: 'monthlyCost',
-    label: '月费用估算',
-    icon: 'tabler:calendar-dollar',
-    value: monthlyCostCard.value.value,
-    unit: monthlyCostCard.value.unit,
-  },
-  yearlyCost: {
-    key: 'yearlyCost',
-    label: '年费用估算',
-    icon: 'tabler:receipt-2',
-    value: yearlyCostCard.value.value,
-    unit: yearlyCostCard.value.unit,
-  },
-}))
+function getCardDefinition(key: GeneralCardKey): GeneralMetricCard {
+  switch (key) {
+    case 'memory':
+      return {
+        key: 'memory',
+        label: '内存用量',
+        icon: 'icon-park-outline:memory',
+        value: formattedMemoryUsed.value.value,
+        unit: `${formattedMemoryUsed.value.unit} / ${formattedMemoryTotal.value.value} ${formattedMemoryTotal.value.unit}`,
+      }
+    case 'disk':
+      return {
+        key: 'disk',
+        label: '硬盘用量',
+        icon: 'tabler:server-2',
+        value: formattedDiskUsed.value.value,
+        unit: `${formattedDiskUsed.value.unit} / ${formattedDiskTotal.value.value} ${formattedDiskTotal.value.unit}`,
+      }
+    case 'remainingValue':
+      return {
+        key: 'remainingValue',
+        label: '剩余价值',
+        icon: 'tabler:cash',
+        value: showPrice.value ? `${formattedRemainingValue.value.symbol}${formattedRemainingValue.value.value}` : '***',
+        unit: showPrice.value ? formattedRemainingValue.value.currency : undefined,
+        tooltip: totalValueTooltip.value,
+      }
+    case 'totalTraffic':
+      return {
+        key: 'totalTraffic',
+        label: '累计流量',
+        icon: 'tabler:download',
+        value: totalTrafficTooltip.value.value,
+        unit: totalTrafficTooltip.value.unit,
+        tooltip: `↑ ${formattedTrafficUp.value.value} ${formattedTrafficUp.value.unit}\n↓ ${formattedTrafficDown.value.value} ${formattedTrafficDown.value.unit}`,
+      }
+    case 'uploadSpeed':
+      return {
+        key: 'uploadSpeed',
+        label: '实时上行',
+        icon: 'tabler:chevrons-up',
+        value: formattedSpeedUp.value.value,
+        unit: formattedSpeedUp.value.unit,
+      }
+    case 'downloadSpeed':
+      return {
+        key: 'downloadSpeed',
+        label: '实时下行',
+        icon: 'tabler:chevrons-down',
+        value: formattedSpeedDown.value.value,
+        unit: formattedSpeedDown.value.unit,
+      }
+    case 'onlineNodes':
+      return {
+        key: 'onlineNodes',
+        label: '在线节点',
+        icon: 'tabler:activity-heartbeat',
+        value: formatCount(onlineNodeCount.value),
+        unit: `/ ${formatCount(totalNodeCount.value)}`,
+      }
+    case 'avgCpu':
+      return {
+        key: 'avgCpu',
+        label: '平均 CPU',
+        icon: 'tabler:cpu',
+        value: formatDecimal(avgCpu.value),
+        unit: '%',
+      }
+    case 'avgLoad':
+      return {
+        key: 'avgLoad',
+        label: '平均负载',
+        icon: 'tabler:chart-line',
+        value: formatDecimal(avgLoad.value, 2),
+        tooltip: `1m ${formatDecimal(avgLoad.value, 2)}\n5m ${formatDecimal(avgLoad5.value, 2)}\n15m ${formatDecimal(avgLoad15.value, 2)}`,
+      }
+    case 'swap':
+      return {
+        key: 'swap',
+        label: '交换内存',
+        icon: 'icon-park-outline:switch',
+        value: formattedSwapUsed.value.value,
+        unit: `${formattedSwapUsed.value.unit} / ${formattedSwapTotal.value.value} ${formattedSwapTotal.value.unit}`,
+      }
+    case 'processes':
+      return {
+        key: 'processes',
+        label: '进程总数',
+        icon: 'tabler:list-numbers',
+        value: formatCount(totalProcesses.value),
+      }
+    case 'connections':
+      return {
+        key: 'connections',
+        label: '连接数',
+        icon: 'tabler:plug-connected',
+        value: formatCount(totalConnectionsTcp.value + totalConnectionsUdp.value),
+        tooltip: `TCP ${formatCount(totalConnectionsTcp.value)}\nUDP ${formatCount(totalConnectionsUdp.value)}`,
+      }
+    case 'cpuCores':
+      return {
+        key: 'cpuCores',
+        label: 'CPU 核心',
+        icon: 'tabler:chip',
+        value: formatCount(totalCpuCores.value),
+        unit: 'Core',
+      }
+    case 'trafficQuota':
+      return {
+        key: 'trafficQuota',
+        label: '流量配额',
+        icon: 'tabler:gauge',
+        value: trafficQuota.value.limit > 0 ? formatDecimal(trafficQuotaPercentage.value) : '-',
+        unit: trafficQuota.value.limit > 0 ? '%' : undefined,
+        tooltip: trafficQuota.value.limit > 0
+          ? `${formatBytesText(trafficQuota.value.used)} / ${formatBytesText(trafficQuota.value.limit)}`
+          : '无限流量',
+      }
+    case 'trafficPeak':
+      return {
+        key: 'trafficPeak',
+        label: '实时峰值',
+        icon: 'tabler:activity',
+        value: trafficPeakCard.value.value,
+        unit: trafficPeakCard.value.unit,
+        tooltip: trafficPeakCard.value.tooltip,
+      }
+    case 'uploadPeakNode':
+      return {
+        key: 'uploadPeakNode',
+        label: '上行最高',
+        icon: 'tabler:arrow-big-up-lines',
+        value: uploadPeakCard.value.value,
+        unit: uploadPeakCard.value.unit,
+        tooltip: uploadPeakCard.value.tooltip,
+      }
+    case 'downloadPeakNode':
+      return {
+        key: 'downloadPeakNode',
+        label: '下行最高',
+        icon: 'tabler:arrow-big-down-lines',
+        value: downloadPeakCard.value.value,
+        unit: downloadPeakCard.value.unit,
+        tooltip: downloadPeakCard.value.tooltip,
+      }
+    case 'offlineNodes':
+      return {
+        key: 'offlineNodes',
+        label: '离线节点',
+        icon: 'tabler:plug-connected-x',
+        value: formatCount(offlineNodes.value.length),
+        unit: `/ ${formatCount(totalNodeCount.value)}`,
+        tooltip: formatNodeNames(offlineNodes.value),
+      }
+    case 'highLoadNodes':
+      return {
+        key: 'highLoadNodes',
+        label: '高负载节点',
+        icon: 'tabler:alert-triangle',
+        value: formatCount(highLoadNodes.value.length),
+        unit: `/ ${formatCount(onlineNodeCount.value)}`,
+        tooltip: formatNodeNames(highLoadNodes.value, (node) => {
+          const metrics = getHighLoadMetrics(node, appStore.homeHighLoadThreshold)
+          return `${node.name}: ${metrics.map(metric => `${metric.label} ${formatDecimal(metric.percentage)}%`).join(' / ')}`
+        }),
+      }
+    case 'expiringNodes':
+      return {
+        key: 'expiringNodes',
+        label: '即将到期',
+        icon: 'tabler:calendar-exclamation',
+        value: formatCount(expiringNodes.value.length),
+        unit: '台',
+        tooltip: formatNodeNames(expiringNodes.value, formatExpiryNode),
+      }
+    case 'trafficWarnings':
+      return {
+        key: 'trafficWarnings',
+        label: '流量预警',
+        icon: 'tabler:traffic-cone',
+        value: formatCount(trafficWarningNodes.value.length),
+        unit: '台',
+        tooltip: formatNodeNames(trafficWarningNodes.value, node => `${node.name}: ${formatDecimal(getTrafficUsedPercentage(node))}%`),
+      }
+    case 'connectionPeakNode':
+      return {
+        key: 'connectionPeakNode',
+        label: '连接峰值',
+        icon: 'tabler:plug-connected',
+        value: connectionPeakNode.value ? formatCount(connectionPeakNode.value.value) : '-',
+        tooltip: connectionPeakTooltip.value,
+      }
+    case 'regionDistribution':
+      return {
+        key: 'regionDistribution',
+        label: '地区分布',
+        icon: 'tabler:map-pin',
+        value: formatCount(regionDistribution.value.length),
+        unit: '个',
+        tooltip: formatDistributionTooltip(regionDistribution.value),
+      }
+    case 'systemDistribution':
+      return {
+        key: 'systemDistribution',
+        label: '系统分布',
+        icon: 'tabler:device-desktop',
+        value: systemDistribution.value[0]?.[0] ?? '-',
+        unit: systemDistribution.value[0] ? `${systemDistribution.value[0][1]} 台` : undefined,
+        tooltip: formatDistributionTooltip(systemDistribution.value),
+      }
+    case 'virtualizationDistribution':
+      return {
+        key: 'virtualizationDistribution',
+        label: '虚拟化',
+        icon: 'tabler:box-multiple',
+        value: virtualizationDistribution.value[0]?.[0] ?? '-',
+        unit: virtualizationDistribution.value[0] ? `${virtualizationDistribution.value[0][1]} 台` : undefined,
+        tooltip: formatDistributionTooltip(virtualizationDistribution.value),
+      }
+    case 'monthlyCost':
+      return {
+        key: 'monthlyCost',
+        label: '月费用估算',
+        icon: 'tabler:calendar-dollar',
+        value: monthlyCostCard.value.value,
+        unit: monthlyCostCard.value.unit,
+      }
+    case 'yearlyCost':
+      return {
+        key: 'yearlyCost',
+        label: '年费用估算',
+        icon: 'tabler:receipt-2',
+        value: yearlyCostCard.value.value,
+        unit: yearlyCostCard.value.unit,
+      }
+    default:
+      return getCardDefinition('memory')
+  }
+}
 
 const tiledDefaultCardKeys: GeneralCardKey[] = [
   'onlineNodes',
@@ -512,8 +609,8 @@ const tiledDefaultCardKeys: GeneralCardKey[] = [
   'trafficPeak',
   'expiringNodes',
 ]
-const baseVisibleCards = computed(() => appStore.generalCardOrder.map(key => cardDefinitions.value[key]))
-const tiledDefaultCards = computed(() => tiledDefaultCardKeys.map(key => cardDefinitions.value[key]))
+const baseVisibleCards = computed(() => appStore.generalCardOrder.map(getCardDefinition))
+const tiledDefaultCards = computed(() => tiledDefaultCardKeys.map(getCardDefinition))
 const showEarth = computed(() => !appStore.hideEarth)
 const isTiledEarth = computed(() => showEarth.value && appStore.earthRenderer === 'tiled')
 const visibleCards = computed(() => isTiledEarth.value ? tiledDefaultCards.value : baseVisibleCards.value)

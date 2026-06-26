@@ -405,6 +405,8 @@ const useAppStore = defineStore('app', () => {
     return typeof value === 'string' ? value : ''
   })
 
+  const dataUpdateInterval = computed<number>(() => readNumberSetting(themeSettings.value, 'dataUpdateInterval', 3, 1, 60))
+
   const stopEarth = computed<boolean>(() => readBooleanSetting(themeSettings.value, 'stopEarth', false))
 
   const earthRenderer = computed<EarthRenderer>(() => {
@@ -606,6 +608,7 @@ const useAppStore = defineStore('app', () => {
     alertEnabled,
     alertTitle,
     alertContent,
+    dataUpdateInterval,
     stopEarth,
     earthRenderer,
     hideEarth,

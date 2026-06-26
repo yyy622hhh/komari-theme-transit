@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { Arc, COBEOptions, Globe, Marker } from 'cobe'
+import type { ComponentPublicInstance } from 'vue'
 import type { NodeData } from '@/stores/nodes'
 import {
   useDocumentVisibility,
@@ -40,7 +41,7 @@ let isPointerDown = false
 let lastPointerX = 0
 let lastPointerY = 0
 let staticRedrawUntil = 0
-const frameTick = ref(0)
+const labelElements = new Map<string, HTMLElement>()
 
 function normalizePhi(value: number): number {
   const circle = Math.PI * 2
@@ -103,8 +104,7 @@ const arcs = computed<Arc[]>(() => routes.value.map(route => ({
   to: route.to,
 })))
 
-function clusterStyle(coord: [number, number]): Record<string, string> {
-  void frameTick.value
+function getClusterStyle(coord: [number, number]): { transform: string, opacity: string, filter: string } {
   const [lat, lng] = coord
   const lambda = lng * Math.PI / 180
   const beta = lat * Math.PI / 180
@@ -115,18 +115,51 @@ function clusterStyle(coord: [number, number]): Record<string, string> {
   const y = Math.sin(beta) * Math.cos(theta) - Math.cos(beta) * Math.cos(rotated) * Math.sin(theta)
   const z = Math.sin(beta) * Math.sin(theta) + Math.cos(beta) * Math.cos(rotated) * Math.cos(theta)
   const visible = z > -0.08
+  const nextX = (center + x * radius * 0.84).toFixed(1)
+  const nextY = (center - y * radius * 0.84).toFixed(1)
 
   return {
-    transform: `translate3d(${(center + x * radius * 0.84).toFixed(1)}px, ${(center - y * radius * 0.84).toFixed(1)}px, 0) translate(-50%, -50%)`,
+    transform: `translate3d(${nextX}px, ${nextY}px, 0) translate(-50%, -50%)`,
     opacity: visible ? '1' : '0',
     filter: visible ? 'blur(0)' : 'blur(12px)',
   }
 }
 
+function applyLabelStyles() {
+  for (const cluster of regionClusters.value) {
+    const element = labelElements.get(cluster.id)
+    if (!element)
+      continue
+    const style = getClusterStyle(cluster.coord)
+    element.style.transform = style.transform
+    element.style.opacity = style.opacity
+    element.style.filter = style.filter
+  }
+}
+
+function setLabelRef(id: string, element: Element | ComponentPublicInstance | null) {
+  if (element instanceof HTMLElement) {
+    labelElements.set(id, element)
+    const cluster = regionClusters.value.find(item => item.id === id)
+    if (cluster) {
+      const style = getClusterStyle(cluster.coord)
+      element.style.transform = style.transform
+      element.style.opacity = style.opacity
+      element.style.filter = style.filter
+    }
+    return
+  }
+
+  labelElements.delete(id)
+}
+
+function bindLabelRef(id: string) {
+  return (element: Element | ComponentPublicInstance | null) => setLabelRef(id, element)
+}
+
 const cobeLabels = computed(() => regionClusters.value.map(cluster => ({
   id: cluster.id,
   code: cluster.code,
-  style: clusterStyle(cluster.coord),
 })))
 
 const themeColors = computed(() => {
@@ -156,11 +189,18 @@ function getRenderSize() {
   return { width, height }
 }
 
+function getDevicePixelRatio(): number {
+  if (typeof window === 'undefined')
+    return 1
+
+  return Math.min(window.devicePixelRatio || 1, 2)
+}
+
 function buildInitialOptions(): COBEOptions {
   const colors = themeColors.value
   const { width, height } = getRenderSize()
   return {
-    devicePixelRatio: 3,
+    devicePixelRatio: getDevicePixelRatio(),
     width,
     height,
     phi,
@@ -204,12 +244,14 @@ const { pause: pauseRaf, resume: resumeRaf } = useRafFn(
       Math.abs(phi - prevPhi) < ORIENTATION_IDLE_EPSILON
       && Math.abs(theta - prevTheta) < ORIENTATION_IDLE_EPSILON
     ) {
-      if (!shouldAutoRotate.value && shouldKeepStaticRedraw())
+      if (!shouldAutoRotate.value && shouldKeepStaticRedraw()) {
         updateGlobeFrame()
+        applyLabelStyles()
+      }
       return
     }
     updateGlobeFrame()
-    frameTick.value += 1
+    applyLabelStyles()
   },
   { immediate: false },
 )
@@ -224,6 +266,7 @@ function startGlobe() {
   globe = createGlobe(canvasRef.value, buildInitialOptions())
   requestAnimationFrame(() => {
     updateGlobeFrame()
+    applyLabelStyles()
   })
   if (documentVisibility.value === 'visible')
     resumeRaf()
@@ -270,6 +313,7 @@ watch(
     if (!shouldAutoRotate.value)
       triggerStaticRedrawWindow(600)
     updateGlobeFrame()
+    applyLabelStyles()
   },
 )
 
@@ -280,6 +324,7 @@ watch(
       resetStoppedView()
     triggerStaticRedrawWindow()
     updateGlobeFrame()
+    applyLabelStyles()
   },
 )
 
@@ -289,6 +334,7 @@ watch(
     if (!globe)
       return
     globe.update({ markers: markers.value, arcs: arcs.value })
+    applyLabelStyles()
     if (!shouldAutoRotate.value)
       triggerStaticRedrawWindow(600)
   },
@@ -354,8 +400,8 @@ function onPointerUp(e: PointerEvent) {
     <div
       v-for="label in cobeLabels"
       :key="label.id"
+      :ref="bindLabelRef(label.id)"
       class="absolute left-0 top-0 z-3 rounded-[0.18rem] transition-[opacity,filter] duration-300"
-      :style="label.style"
     >
       <img
         :src="`/images/flags/${label.code}.svg`" :alt="label.code"

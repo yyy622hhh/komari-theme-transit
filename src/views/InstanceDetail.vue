@@ -19,6 +19,7 @@ import { lookupIpGeo } from '@/utils/ipGeoHelper'
 import { getOSImage, getOSName } from '@/utils/osImageHelper'
 import { resolveProviderInfo } from '@/utils/providerInfo'
 import { getRegionCode, getRegionDisplayName } from '@/utils/regionHelper'
+import { getSharedRpc } from '@/utils/rpc'
 
 import { formatPrice, formatPriceWithCycle, getExpireStatus, getExpireText, parseTags } from '@/utils/tagHelper'
 
@@ -153,12 +154,7 @@ async function fetchTrafficPeak(uuid: string): Promise<void> {
   peakNetOut.value = 0
   peakNetIn.value = 0
   try {
-    const apiBase = import.meta.env.VITE_API_BASE
-    const res = await fetch(`${apiBase}/records/load?uuid=${uuid}&hours=24`)
-    if (!res.ok)
-      return
-    const resp = await res.json()
-    const records: Array<{ net_in?: number, net_out?: number }> = resp.data?.records ?? []
+    const { records } = await getSharedRpc().getLoadRecords(uuid, 24)
     let up = 0
     let down = 0
     for (const r of records) {

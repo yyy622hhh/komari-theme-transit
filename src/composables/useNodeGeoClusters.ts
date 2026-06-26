@@ -35,10 +35,19 @@ export interface GeoRoute {
   speedMs: number
 }
 
+interface ClusterSummary {
+  clusters: RegionCluster[]
+  rates: Map<string, RegionRate>
+  totalServers: number
+  onlineServers: number
+}
+
 const CITY_SLUG_INVALID_REGEX = /[^a-z0-9]+/g
 const CITY_SLUG_EDGE_REGEX = /^-+|-+$/g
 const VISITOR_COORD_KEY = 'visitor_coord'
 const SAME_COORD_EPSILON = 0.01
+const IP_GEO_LOOKUP_BATCH_SIZE = 8
+const VISITOR_GEO_TIMEOUT_MS = 5000
 
 function isFiniteCoord(value: unknown): value is [number, number] {
   return Array.isArray(value)
@@ -91,18 +100,32 @@ export function useNodeGeoClusters(options: UseNodeGeoClustersOptions = {}) {
   const attemptedIps = new Set<string>()
 
   async function resolveNodeCities(nodes: NodeData[]): Promise<void> {
+    const ips: string[] = []
+    const seenIps = new Set<string>()
     for (const node of nodes) {
       const ip = node.ipv4 || node.ipv6
-      if (!ip || attemptedIps.has(ip) || ipGeoMap.value.has(ip))
+      if (!ip || seenIps.has(ip) || attemptedIps.has(ip) || ipGeoMap.value.has(ip))
         continue
 
+      seenIps.add(ip)
       attemptedIps.add(ip)
-      const geo = await lookupIpGeo(ip)
-      if (!geo)
+      ips.push(ip)
+    }
+
+    for (let i = 0; i < ips.length; i += IP_GEO_LOOKUP_BATCH_SIZE) {
+      const batch = ips.slice(i, i + IP_GEO_LOOKUP_BATCH_SIZE)
+      const results = await Promise.all(batch.map(async (ip) => {
+        const geo = await lookupIpGeo(ip)
+        return geo ? { ip, geo } : null
+      }))
+      const resolved = results.filter((result): result is { ip: string, geo: IpGeo } => result !== null)
+      if (!resolved.length)
         continue
 
       const next = new Map(ipGeoMap.value)
-      next.set(ip, geo)
+      for (const { ip, geo } of resolved) {
+        next.set(ip, geo)
+      }
       ipGeoMap.value = next
     }
   }
@@ -137,46 +160,53 @@ export function useNodeGeoClusters(options: UseNodeGeoClustersOptions = {}) {
     return null
   }
 
-  const regionClusters = computed<RegionCluster[]>(() => {
-    const map = new Map<string, RegionCluster>()
+  const clusterSummary = computed<ClusterSummary>(() => {
+    const clustersById = new Map<string, RegionCluster>()
+    const rates = new Map<string, RegionRate>()
+    let onlineServers = 0
+
     for (const node of displayNodes.value) {
+      if (node.online)
+        onlineServers += 1
+
       const info = nodeClusterInfo(node)
       if (!info)
         continue
-      let entry = map.get(info.id)
-      if (!entry) {
-        entry = { id: info.id, code: info.code, coord: info.coord, label: info.label, asn: info.asn, org: info.org, servers: 0, onlineServers: 0 }
-        map.set(info.id, entry)
-      }
-      if (!entry.asn && info.asn)
-        entry.asn = info.asn
-      if (!entry.org && info.org)
-        entry.org = info.org
-      entry.servers += 1
-      if (node.online)
-        entry.onlineServers += 1
-    }
-    return Array.from(map.values()).sort((a, b) => b.servers - a.servers)
-  })
 
-  const regionRates = computed<Map<string, RegionRate>>(() => {
-    const map = new Map<string, RegionRate>()
-    for (const node of displayNodes.value) {
+      let cluster = clustersById.get(info.id)
+      if (!cluster) {
+        cluster = { id: info.id, code: info.code, coord: info.coord, label: info.label, asn: info.asn, org: info.org, servers: 0, onlineServers: 0 }
+        clustersById.set(info.id, cluster)
+      }
+      if (!cluster.asn && info.asn)
+        cluster.asn = info.asn
+      if (!cluster.org && info.org)
+        cluster.org = info.org
+      cluster.servers += 1
+
       if (!node.online)
         continue
-      const info = nodeClusterInfo(node)
-      if (!info)
-        continue
-      let entry = map.get(info.id)
-      if (!entry) {
-        entry = { up: 0, down: 0 }
-        map.set(info.id, entry)
+
+      cluster.onlineServers += 1
+      let rate = rates.get(info.id)
+      if (!rate) {
+        rate = { up: 0, down: 0 }
+        rates.set(info.id, rate)
       }
-      entry.up += node.net_out || 0
-      entry.down += node.net_in || 0
+      rate.up += node.net_out || 0
+      rate.down += node.net_in || 0
     }
-    return map
+
+    return {
+      clusters: Array.from(clustersById.values()).sort((a, b) => b.servers - a.servers),
+      rates,
+      totalServers: displayNodes.value.length,
+      onlineServers,
+    }
   })
+
+  const regionClusters = computed<RegionCluster[]>(() => clusterSummary.value.clusters)
+  const regionRates = computed<Map<string, RegionRate>>(() => clusterSummary.value.rates)
 
   const routes = computed<GeoRoute[]>(() => {
     const clusters = regionClusters.value
@@ -203,8 +233,8 @@ export function useNodeGeoClusters(options: UseNodeGeoClustersOptions = {}) {
       })
   })
 
-  const totalServers = computed(() => displayNodes.value.length)
-  const onlineServers = computed(() => displayNodes.value.filter(node => node.online).length)
+  const totalServers = computed(() => clusterSummary.value.totalServers)
+  const onlineServers = computed(() => clusterSummary.value.onlineServers)
   const offlineServers = computed(() => totalServers.value - onlineServers.value)
 
   function clusterKey(cluster: RegionCluster) {
@@ -234,8 +264,10 @@ export function useNodeGeoClusters(options: UseNodeGeoClustersOptions = {}) {
       return
     }
 
+    const controller = new AbortController()
+    const timeoutId = window.setTimeout(() => controller.abort(), VISITOR_GEO_TIMEOUT_MS)
     try {
-      const res = await fetch('https://ipapi.co/json/')
+      const res = await fetch('https://ipapi.co/json/', { signal: controller.signal })
       if (!res.ok)
         return
       const data = await res.json() as { latitude?: unknown, longitude?: unknown }
@@ -248,6 +280,9 @@ export function useNodeGeoClusters(options: UseNodeGeoClustersOptions = {}) {
     }
     catch {
       // 静默失败，降级到 hub 连线
+    }
+    finally {
+      window.clearTimeout(timeoutId)
     }
   }
 

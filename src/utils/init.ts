@@ -28,14 +28,17 @@ const DEFAULT_CONFIG: Required<InitConfig> = {
   postFailureThreshold: 3,
 }
 
+const CLIENTS_REFRESH_INTERVAL_MS = 60_000
+
 /** 初始化状态管理 */
 class InitManager {
   private config: Required<InitConfig>
   private rpc: KomariRpc
   private appStore: ReturnType<typeof useAppStore>
   private nodesStore: ReturnType<typeof useNodesStore>
-  private pollTimer: ReturnType<typeof setInterval> | null = null
+  private pollTimer: ReturnType<typeof setTimeout> | null = null
   private isPolling = false
+  private lastClientsFetchedAt = 0
   private isInitialized = false
   private useWebSocket: boolean | null = null // 根据主题配置决定
   constructor(config: InitConfig = {}) {
@@ -50,13 +53,7 @@ class InitManager {
    * 从 publicSettings.theme_settings.dataUpdateInterval 读取，默认 3 秒
    */
   private getPollInterval(): number {
-    const settings = this.appStore.publicSettings?.theme_settings
-    const interval = settings?.dataUpdateInterval
-    // 确保值在合理范围内（1-60秒）
-    if (typeof interval === 'number' && interval >= 1 && interval <= 60) {
-      return interval * 1000 // 转换为毫秒
-    }
-    return 3000 // 默认 3 秒
+    return this.appStore.dataUpdateInterval * 1000
   }
 
   /**
@@ -165,6 +162,7 @@ class InitManager {
 
       // 初始化节点数据
       this.nodesStore.initNodes(clientsResult, statusesResult)
+      this.lastClientsFetchedAt = Date.now()
     }
     catch (error) {
       console.error('[InitManager] Failed to fetch nodes data:', error)
@@ -306,12 +304,17 @@ class InitManager {
    */
   private startPolling(): void {
     if (this.pollTimer) {
-      clearInterval(this.pollTimer)
+      clearTimeout(this.pollTimer)
     }
 
-    this.pollTimer = setInterval(() => {
-      this.poll()
-    }, this.getPollInterval())
+    const schedulePoll = () => {
+      this.pollTimer = setTimeout(() => {
+        void this.poll()
+        schedulePoll()
+      }, this.getPollInterval())
+    }
+
+    schedulePoll()
   }
 
   /**
@@ -325,20 +328,21 @@ class InitManager {
     this.isPolling = true
 
     try {
-      // 并行执行三个请求
-      const [, clientsResult, statusesResult] = await Promise.all([
-        // 1. Ping 测试服务器状态
-        this.rpc.ping(),
-        // 2. 获取节点信息
-        this.rpc.getNodes() as Promise<Record<string, Client>>,
-        // 3. 获取节点最新状态
+      const now = Date.now()
+      const shouldRefreshClients = now - this.lastClientsFetchedAt >= CLIENTS_REFRESH_INTERVAL_MS
+
+      const [statusesResult, clientsResult] = await Promise.all([
         this.rpc.getNodesLatestStatus() as Promise<Record<string, NodeStatus>>,
+        shouldRefreshClients
+          ? this.rpc.getNodes() as Promise<Record<string, Client>>
+          : Promise.resolve(null),
       ])
 
-      // 更新节点信息（会智能合并，不会重建数组）
-      this.nodesStore.updateNodeClients(clientsResult)
+      if (clientsResult) {
+        this.nodesStore.updateNodeClients(clientsResult)
+        this.lastClientsFetchedAt = now
+      }
 
-      // 更新节点状态
       this.nodesStore.updateNodeStatuses(statusesResult)
 
       // 连接恢复正常，重置错误状态
@@ -365,7 +369,7 @@ class InitManager {
    */
   stopPolling(): void {
     if (this.pollTimer) {
-      clearInterval(this.pollTimer)
+      clearTimeout(this.pollTimer)
       this.pollTimer = null
     }
   }
