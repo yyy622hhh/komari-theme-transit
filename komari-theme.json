@@ -25,7 +25,6 @@
       { "key": "hideEarth", "name": "隐藏地球", "type": "switch", "default": false, "help": "隐藏地球后仅显示总览卡片" },
       { "key": "hideGeneralCard", "name": "隐藏头部", "type": "switch", "default": false, "help": "隐藏地球和总览卡片" },
       { "key": "visitorInfoEnabled", "name": "显示访客信息", "type": "switch", "default": true, "help": "显示底部访客 IP 条和左下角访客详情卡片" },
-      { "key": "visitorGeoArcEnabled", "name": "访客位置连线", "type": "switch", "default": true, "help": "使用访客位置作为地球连线起点；关闭后不请求访客坐标" },
       { "key": "generalCardPreset", "name": "头部卡片方案", "type": "select", "default": "basic", "options": "基础,运维,财务,流量,完整,自定义", "help": "选择主页头部格子的显示方案。基础：默认 8 张，包含在线节点、剩余价值、月费用、流量、实时速度、峰值和到期；运维：加入在线/离线/高负载/预警/连接等；财务：突出即将到期、月费用、年费用；流量：加入实时峰值、上下行最高和流量预警；完整：除温度外全部显示；自定义：使用下方高级自定义项。" },
       { "key": "generalCardKeys", "name": "高级：自定义头部卡片", "type": "string", "default": "", "help": "仅当“头部卡片方案”选择“自定义”时生效，用英文逗号分隔 key，例如 memory,disk,totalTraffic,uploadSpeed,downloadSpeed。可用 key：memory=内存，disk=硬盘，remainingValue=剩余价值，totalTraffic=累计流量，uploadSpeed=实时上行，downloadSpeed=实时下行，onlineNodes=在线节点，offlineNodes=离线节点，highLoadNodes=高负载，expiringNodes=即将到期，trafficPeak=实时峰值，uploadPeakNode=上行最高，downloadPeakNode=下行最高，trafficWarnings=流量预警，connectionPeakNode=连接峰值，monthlyCost=月费用，yearlyCost=年费用，avgCpu=平均CPU，avgLoad=平均负载，swap=交换内存，processes=进程数，connections=连接数，cpuCores=CPU核心，trafficQuota=流量配额，regionDistribution=地区分布，systemDistribution=系统分布，virtualizationDistribution=虚拟化。" },
       { "key": "hideAdminEntryWhenLoggedOut", "name": "隐藏后台入口", "type": "switch", "default": false, "help": "未登录时隐藏顶部后台管理入口" },

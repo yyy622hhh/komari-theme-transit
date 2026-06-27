@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Arc, COBEOptions, Globe, Marker } from 'cobe'
+import type { COBEOptions, Globe, Marker } from 'cobe'
 import type { ComponentPublicInstance } from 'vue'
 import type { NodeData } from '@/stores/nodes'
 import {
@@ -79,12 +79,10 @@ function shouldKeepStaticRedraw(): boolean {
 
 const {
   regionClusters,
-  routes,
   totalServers,
   onlineServers,
   offlineServers,
   clusterKey,
-  routeKey,
 } = useNodeGeoClusters({ nodes: () => props.nodes })
 
 function markerId(code: string): string {
@@ -98,11 +96,6 @@ const markers = computed<Marker[]>(() => {
     size: 0,
   }))
 })
-
-const arcs = computed<Arc[]>(() => routes.value.map(route => ({
-  from: route.from,
-  to: route.to,
-})))
 
 function getClusterStyle(coord: [number, number]): { transform: string, opacity: string, filter: string } {
   const [lat, lng] = coord
@@ -170,7 +163,6 @@ const themeColors = computed(() => {
       baseColor: [0.95, 0.95, 0.98] as [number, number, number],
       markerColor: [0.18, 0.78, 1.0] as [number, number, number],
       glowColor: [0.78, 0.90, 1.0] as [number, number, number],
-      arcColor: [0.20, 0.62, 1.0] as [number, number, number],
     }
   }
   return {
@@ -179,7 +171,6 @@ const themeColors = computed(() => {
     baseColor: [0.98, 0.98, 0.99] as [number, number, number],
     markerColor: [0.05, 0.35, 0.90] as [number, number, number],
     glowColor: [0.80, 0.90, 1.0] as [number, number, number],
-    arcColor: [0.18, 0.55, 0.95] as [number, number, number],
   }
 })
 
@@ -213,10 +204,6 @@ function buildInitialOptions(): COBEOptions {
     markerColor: colors.markerColor,
     glowColor: colors.glowColor,
     markers: markers.value,
-    arcs: arcs.value,
-    arcColor: colors.arcColor,
-    arcHeight: 0.30,
-    arcWidth: 0.34,
     markerElevation: 0,
 
   }
@@ -333,19 +320,8 @@ watch(
   () => {
     if (!globe)
       return
-    globe.update({ markers: markers.value, arcs: arcs.value })
+    globe.update({ markers: markers.value })
     applyLabelStyles()
-    if (!shouldAutoRotate.value)
-      triggerStaticRedrawWindow(600)
-  },
-)
-
-watch(
-  () => routes.value.map(routeKey).join(','),
-  () => {
-    if (!globe)
-      return
-    globe.update({ arcs: arcs.value })
     if (!shouldAutoRotate.value)
       triggerStaticRedrawWindow(600)
   },

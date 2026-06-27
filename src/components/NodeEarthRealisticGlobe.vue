@@ -53,24 +53,12 @@ interface GlobeLabel {
   code: string
 }
 
-interface GlobeArc {
-  id: string
-  startLat: number
-  startLng: number
-  endLat: number
-  endLng: number
-  altitude: number
-  speedMs: number
-}
-
 const {
   regionClusters,
-  routes,
   totalServers,
   onlineServers,
   offlineServers,
   clusterKey,
-  routeKey,
 } = useNodeGeoClusters({ nodes: () => props.nodes })
 
 const pointsData = computed<GlobePoint[]>(() => regionClusters.value.map(cluster => ({
@@ -89,36 +77,6 @@ const labelsData = computed<GlobeLabel[]>(() => regionClusters.value.map(cluster
   code: cluster.code,
 })))
 
-function toRadians(degrees: number): number {
-  return degrees * Math.PI / 180
-}
-
-function greatCircleAngle(from: [number, number], to: [number, number]): number {
-  const lat1 = toRadians(from[0])
-  const lng1 = toRadians(from[1])
-  const lat2 = toRadians(to[0])
-  const lng2 = toRadians(to[1])
-  const deltaLng = Math.abs(lng2 - lng1)
-  const cosAngle = Math.sin(lat1) * Math.sin(lat2)
-    + Math.cos(lat1) * Math.cos(lat2) * Math.cos(deltaLng)
-
-  return Math.acos(Math.min(1, Math.max(-1, cosAngle)))
-}
-
-function getArcAltitude(from: [number, number], to: [number, number]): number {
-  const normalizedDistance = greatCircleAngle(from, to) / Math.PI
-  return Math.min(0.22, Math.max(0.045, 0.035 + normalizedDistance * 0.24))
-}
-
-const arcsData = computed<GlobeArc[]>(() => routes.value.map(route => ({
-  id: route.id,
-  startLat: route.from[0],
-  startLng: route.from[1],
-  endLat: route.to[0],
-  endLng: route.to[1],
-  altitude: getArcAltitude(route.from, route.to),
-  speedMs: route.speedMs,
-})))
 function earthTextureUrl() {
   return appStore.isDark ? EARTH_NIGHT_TEXTURE : EARTH_DAY_TEXTURE
 }
@@ -128,12 +86,6 @@ function pointColor(point: object): string {
   if (data.onlineServers > 0)
     return appStore.isDark ? 'rgba(34, 211, 238, 1)' : 'rgba(2, 132, 199, 0.98)'
   return appStore.isDark ? 'rgba(250, 204, 21, 0.92)' : 'rgba(202, 138, 4, 0.88)'
-}
-
-function arcColor(): string[] {
-  return appStore.isDark
-    ? ['rgba(45, 212, 191, 0.24)', 'rgba(125, 211, 252, 0.66)']
-    : ['rgba(20, 184, 166, 0.22)', 'rgba(56, 189, 248, 0.58)']
 }
 
 function createLabelElement(data: object): HTMLElement {
@@ -191,7 +143,6 @@ function applyMaterialStyle() {
   globeMaterial.needsUpdate = true
   globe
     .pointColor(pointColor)
-    .arcColor(arcColor)
     .ringColor(() => appStore.isDark ? 'rgba(45, 212, 191, 0.34)' : 'rgba(14, 165, 233, 0.28)')
     .atmosphereColor(appStore.isDark ? '#38bdf8' : '#60a5fa')
     .atmosphereAltitude(appStore.isDark ? 0.14 : 0.11)
@@ -204,7 +155,6 @@ function syncDataToGlobe() {
     .pointsData(pointsData.value)
     .ringsData(pointsData.value)
     .htmlElementsData(labelsData.value)
-    .arcsData(arcsData.value)
 }
 
 async function startGlobe() {
@@ -258,18 +208,6 @@ async function startGlobe() {
         el.style.filter = isVisible ? 'blur(0)' : 'blur(14px)'
       })
       .htmlTransitionDuration(500)
-      .arcsData(arcsData.value)
-      .arcStartLat('startLat')
-      .arcStartLng('startLng')
-      .arcEndLat('endLat')
-      .arcEndLng('endLng')
-      .arcColor(arcColor)
-      .arcAltitude('altitude')
-      .arcStroke(0.48)
-      .arcDashLength(1)
-      .arcDashGap(0)
-      .arcDashAnimateTime(0)
-      .arcsTransitionDuration(500)
 
     const renderer = globe.renderer()
     renderer.setClearColor(0x000000, 0)
@@ -342,12 +280,6 @@ watch([containerWidth, containerHeight], ([width, height]) => {
 
 watch(() => regionClusters.value.map(clusterKey).join(','), () => {
   syncDataToGlobe()
-})
-
-watch(() => routes.value.map(routeKey).join(','), () => {
-  if (!globe)
-    return
-  globe.arcsData(arcsData.value)
 })
 
 watch(() => appStore.isDark, () => {
