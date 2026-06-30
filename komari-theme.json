@@ -2,7 +2,7 @@
   "name": "Komari Glassmorphism",
   "short": "Glassmorphism",
   "description": "A Glassmorphism theme for Komari",
-  "version": "2.0.1",
+  "version": "2.0.1"
   "author": "sanrokamlan",
   "url": "https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism",
   "preview": "preview-v2.0.0.png",
@@ -11,6 +11,7 @@
     "name": "Glassmorphism 设置",
     "data": [
       { "name": "基础设置", "type": "title" },
+      { "key": "themeMode", "name": "主题模式", "type": "select", "default": "beijing", "options": "beijing,light,dark", "help": "全站统一主题模式：beijing=按北京时间 07:00-18:59 日间、19:00-06:59 夜间；light=始终浅色；dark=始终深色。该设置由管理员统一控制，会同步到所有设备。" },
       { "key": "dataUpdateInterval", "name": "数据更新间隔", "type": "number", "default": 3, "help": "实时数据刷新间隔，单位：秒（建议 1-10 秒）" },
       { "key": "rpcTransportMode", "name": "RPC 连接模式", "type": "select", "default": "http", "options": "http,websocket", "help": "RPC 默认连接模式，HTTP 兼容性最好；确认反向代理已支持 WebSocket 时可切换为 websocket" },
       { "key": "defaultViewMode", "name": "默认视图模式", "type": "select", "default": "card", "options": "card,list", "help": "节点列表的默认显示模式" },

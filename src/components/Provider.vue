@@ -1,7 +1,5 @@
 <script setup lang="ts">
-import type { ThemeMode } from '@/stores/app'
-import { useDark } from '@vueuse/core'
-import { computed, provide, ref, watch } from 'vue'
+import { provide, ref, watch } from 'vue'
 import { BackTop } from '@/components/ui/back-top'
 import { useAppStore } from '@/stores/app'
 
@@ -9,21 +7,6 @@ const appStore = useAppStore()
 
 const isScrolled = ref(false)
 provide('isScrolled', isScrolled)
-
-const themeMode = computed<ThemeMode>({
-  get: () => appStore.themeMode,
-  set: mode => appStore.updateThemeMode(mode),
-})
-
-useDark({
-  storageKey: null,
-  storageRef: themeMode,
-  selector: 'html',
-  attribute: 'class',
-  valueDark: 'dark',
-  valueLight: '',
-  initialValue: 'auto',
-})
 
 watch(
   () => appStore.isDark,
