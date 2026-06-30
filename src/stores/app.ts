@@ -586,8 +586,14 @@ const useAppStore = defineStore('app', () => {
     return hour >= 7 && hour < 19
   })
 
-  // 计算当前是否为暗色模式
+  // 计算当前是否为暗色模式。本机按钮选择 auto 时跟随后台托管设置；手动选择浅色/深色时仅覆盖当前浏览器。
   const isDark = computed(() => {
+    const localMode = isValidThemeMode(themeMode.value) ? themeMode.value : 'auto'
+    if (localMode === 'light')
+      return false
+    if (localMode === 'dark')
+      return true
+
     if (managedThemeMode.value === 'beijing')
       return !isBeijingDaytime.value
 
@@ -605,8 +611,19 @@ const useAppStore = defineStore('app', () => {
   })
 
   function updateThemeMode(mode?: ThemeMode) {
-    // 主题模式由 Komari 后台的主题配置统一控制，避免不同设备使用本地偏好导致显示不一致。
-    void mode
+    if (mode) {
+      themeMode.value = isValidThemeMode(mode) ? mode : 'auto'
+      return
+    }
+
+    const nextMode: Record<ThemeMode, ThemeMode> = {
+      auto: 'light',
+      light: 'dark',
+      dark: 'auto',
+    }
+
+    const currentMode = isValidThemeMode(themeMode.value) ? themeMode.value : 'auto'
+    themeMode.value = nextMode[currentMode]
   }
 
   function updateLoginState(loggedIn: boolean) {

@@ -17,21 +17,23 @@ const siteFavicon = ref('/favicon.ico')
 
 const actionButtons = computed(() => {
   const themeTitleMap = {
-    beijing: appStore.isBeijingDaytime ? '北京时间自动：日间模式' : '北京时间自动：夜间模式',
-    light: '后台指定：浅色主题',
-    dark: '后台指定：深色主题',
+    auto: appStore.managedThemeMode === 'beijing'
+      ? appStore.isBeijingDaytime ? '自动主题：北京时间日间' : '自动主题：北京时间夜间'
+      : appStore.managedThemeMode === 'light' ? '自动主题：后台浅色' : '自动主题：后台深色',
+    light: '浅色主题',
+    dark: '深色主题',
   } as const
 
   const themeIconMap = {
-    beijing: appStore.isBeijingDaytime ? 'icon-park-outline:sun-one' : 'icon-park-outline:moon',
+    auto: appStore.isDark ? 'icon-park-outline:moon' : 'icon-park-outline:sun-one',
     light: 'icon-park-outline:sun-one',
     dark: 'icon-park-outline:moon',
   } as const
 
   const buttons: Array<{ title: string, icon: string, action: string }> = [
     {
-      title: `${themeTitleMap[appStore.managedThemeMode]}（后台统一控制）`,
-      icon: themeIconMap[appStore.managedThemeMode],
+      title: `${themeTitleMap[appStore.themeMode]}（点击切换）`,
+      icon: themeIconMap[appStore.themeMode],
       action: 'toggleTheme',
     },
   ]
@@ -49,7 +51,7 @@ const actionButtons = computed(() => {
 function handleButtonClick(action: string) {
   switch (action) {
     case 'toggleTheme':
-      window.$message?.info?.('主题模式由后台 Glassmorphism 设置统一控制')
+      appStore.updateThemeMode()
       break
     case 'jumpToSetting':
       location.href = '/admin'
