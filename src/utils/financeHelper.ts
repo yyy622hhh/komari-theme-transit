@@ -1,6 +1,6 @@
 import type { NodeData } from '@/stores/nodes'
 
-export type CurrencyCode = 'CNY' | 'USD' | 'HKD' | 'EUR' | 'GBP' | 'JPY'
+export type CurrencyCode = 'CNY' | 'USD' | 'HKD' | 'EUR' | 'GBP' | 'JPY' | 'RUB' | 'CHF' | 'INR' | 'VND' | 'THB' | 'CAD'
 export type ExchangeRates = Record<CurrencyCode, number>
 export type ExchangeRateSource = 'cache' | 'network' | 'stale-cache' | 'default'
 
@@ -12,7 +12,7 @@ interface ExchangeRatesCache {
 }
 
 const CACHE_KEY = 'komari_finance_exchange_rates_cny_v1'
-const REQUIRED_CURRENCIES: CurrencyCode[] = ['CNY', 'USD', 'HKD', 'EUR', 'GBP', 'JPY']
+const REQUIRED_CURRENCIES: CurrencyCode[] = ['CNY', 'USD', 'HKD', 'EUR', 'GBP', 'JPY', 'RUB', 'CHF', 'INR', 'VND', 'THB', 'CAD']
 const MS_PER_DAY = 24 * 60 * 60 * 1000
 const LONG_TERM_YEARS = 100
 
@@ -23,6 +23,12 @@ export const DEFAULT_EXCHANGE_RATES: ExchangeRates = {
   EUR: 0.12102,
   GBP: 0.105581,
   JPY: 22.231552,
+  RUB: 13.5,
+  CHF: 0.12,
+  INR: 11.8,
+  VND: 3500,
+  THB: 5.0,
+  CAD: 0.19,
 }
 
 export const CURRENCY_SYMBOLS: Record<CurrencyCode, string> = {
@@ -32,6 +38,12 @@ export const CURRENCY_SYMBOLS: Record<CurrencyCode, string> = {
   EUR: '€',
   GBP: '£',
   JPY: '¥',
+  RUB: '₽',
+  CHF: '₣',
+  INR: '₹',
+  VND: '₫',
+  THB: '฿',
+  CAD: 'CA$',
 }
 
 const EXCHANGE_RATE_APIS = [
@@ -58,6 +70,18 @@ export function normalizeCurrency(currency: string | null | undefined): Currency
     return 'GBP'
   if (value === 'JPY')
     return 'JPY'
+  if (value === 'RUB' || value === '₽')
+    return 'RUB'
+  if (value === 'CHF' || value === '₣')
+    return 'CHF'
+  if (value === 'INR' || value === '₹')
+    return 'INR'
+  if (value === 'VND' || value === '₫')
+    return 'VND'
+  if (value === 'THB' || value === '฿')
+    return 'THB'
+  if (value === 'CAD' || value === 'CA$' || value === 'C$' || value === 'CAD$')
+    return 'CAD'
 
   return 'CNY'
 }
