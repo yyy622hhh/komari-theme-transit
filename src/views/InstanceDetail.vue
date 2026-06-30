@@ -13,6 +13,7 @@ import { DataTooltip } from '@/components/ui/data-tooltip'
 import { Empty } from '@/components/ui/empty'
 import { useAppStore } from '@/stores/app'
 import { useNodesStore } from '@/stores/nodes'
+import { getSharedApi } from '@/utils/api'
 import * as financeHelper from '@/utils/financeHelper'
 import { formatBytesPerSecondWithConfig, formatBytesWithConfig, formatUptimeWithFormat } from '@/utils/helper'
 import { lookupIpGeo } from '@/utils/ipGeoHelper'
@@ -114,6 +115,7 @@ function estimateCpuScore(cpuName: string): CpuScore {
 }
 
 let providerResolveSeq = 0
+let trafficPeakSeq = 0
 
 async function lookupNodeGeo(node: NodeData): Promise<IpGeo | null> {
   const ips = [node.ipv4, node.ipv6].filter((ip): ip is string => Boolean(ip?.trim()))
@@ -149,26 +151,45 @@ async function resolveProvider(node: NodeData): Promise<void> {
   })
 }
 
-// 拉取近一天负载记录，统计网速峰值（上/下行各自取最大瞬时值）
-async function fetchTrafficPeak(uuid: string): Promise<void> {
-  peakNetOut.value = 0
-  peakNetIn.value = 0
+async function loadTrafficPeakRecords(uuid: string): Promise<Array<{ net_in?: number, net_out?: number }>> {
   try {
     const { records } = await getSharedRpc().getLoadRecords(uuid, 24)
-    let up = 0
-    let down = 0
-    for (const r of records) {
-      if (typeof r.net_out === 'number' && r.net_out > up)
-        up = r.net_out
-      if (typeof r.net_in === 'number' && r.net_in > down)
-        down = r.net_in
-    }
-    peakNetOut.value = up
-    peakNetIn.value = down
+    if (records.length > 0)
+      return records
   }
   catch {
-    // 静默失败，不显示峰值
+    // RPC 历史记录在部分 Komari 版本或传输模式下可能不可用，继续回退 REST。
   }
+
+  try {
+    const { records } = await getSharedApi().getLoadRecords(uuid, 24)
+    return records
+  }
+  catch {
+    return []
+  }
+}
+
+// 拉取近一天负载记录，统计网速峰值（上/下行各自取最大瞬时值）
+async function fetchTrafficPeak(uuid: string): Promise<void> {
+  const seq = ++trafficPeakSeq
+  peakNetOut.value = 0
+  peakNetIn.value = 0
+
+  const records = await loadTrafficPeakRecords(uuid)
+  if (seq !== trafficPeakSeq || data.value?.uuid !== uuid)
+    return
+
+  let up = 0
+  let down = 0
+  for (const r of records) {
+    if (typeof r.net_out === 'number' && r.net_out > up)
+      up = r.net_out
+    if (typeof r.net_in === 'number' && r.net_in > down)
+      down = r.net_in
+  }
+  peakNetOut.value = up
+  peakNetIn.value = down
 }
 
 onMounted(async () => {

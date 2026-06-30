@@ -159,6 +159,7 @@ const clusterMarkers = computed<ClusterMarker[]>(() => regionClusters.value.map(
 <style scoped>
 .earth-map-shell {
   display: grid;
+  isolation: isolate;
   min-height: 18rem;
   grid-template-columns: minmax(0, 1fr) minmax(14rem, 26%);
   background: color-mix(in oklab, var(--background) 68%, rgb(56 189 248 / 0.24));
