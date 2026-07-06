@@ -324,7 +324,7 @@ const remainingValueText = computed(() => {
   const remainingValueCNY = financeHelper.calculateRemainingValueCNY(data.value, exchangeRates.value)
   const targetRate = exchangeRates.value[financeCurrency.value] || 1
   const formattedValue = financeHelper.formatFinanceAmount(remainingValueCNY * targetRate, financeCurrency.value)
-  return `${formattedValue.symbol}${formattedValue.value} ${formattedValue.currency}`
+  return `${formattedValue.symbol}${formattedValue.value}`
 })
 
 const remainingTimeValueClass = computed(() => {

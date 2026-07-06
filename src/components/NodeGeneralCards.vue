@@ -160,7 +160,6 @@ function formatCostCard(amountCNY: number): { value: string, unit?: string } {
   const formatted = financeHelper.formatFinanceAmount(amountCNY * targetRate, financeCurrency.value)
   return {
     value: `${formatted.symbol}${formatted.value}`,
-    unit: formatted.currency,
   }
 }
 
@@ -344,7 +343,7 @@ const formattedTotalValue = computed(() => {
 const totalValueTooltip = computed(() => {
   if (!showPrice.value)
     return '总价值\n***'
-  return `总价值\n${formattedTotalValue.value.symbol}${formattedTotalValue.value.value} ${formattedTotalValue.value.currency}`
+  return `总价值\n${formattedTotalValue.value.symbol}${formattedTotalValue.value.value}`
 })
 
 const trafficPeakCard = computed(() => formatTopNodeSpeed(trafficPeak.value))
@@ -383,7 +382,6 @@ function getCardDefinition(key: GeneralCardKey): GeneralMetricCard {
         label: '剩余价值',
         icon: 'tabler:cash',
         value: showPrice.value ? `${formattedRemainingValue.value.symbol}${formattedRemainingValue.value.value}` : '***',
-        unit: showPrice.value ? formattedRemainingValue.value.currency : undefined,
         tooltip: totalValueTooltip.value,
       }
     case 'totalTraffic':
