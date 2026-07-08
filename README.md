@@ -25,13 +25,6 @@
 | 配置方式 | Komari 后台托管主题配置，可调总览卡片、快捷控制、背景、隐私等          |
 | 发布产物 | Release 中的 `komari-theme-Glassmorphism-build-*.zip`，直接导入 Komari |
 
-## 效果预览
-
-| 首页总览                           | 可配置总览卡片                                         |
-| ---------------------------------- | ------------------------------------------------------ |
-| ![首页总览](docs/preview-home.png) | ![可配置总览卡片](docs/preview-configurable-cards.png) |
-
-
 
 ## 主题特性
 
