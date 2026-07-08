@@ -18,6 +18,13 @@ const props = defineProps<{ node: NodeData }>()
 const emit = defineEmits<{ click: [] }>()
 const appStore = useAppStore()
 
+function handleKeyboardOpen(event: KeyboardEvent) {
+  if (event.key !== 'Enter' && event.key !== ' ')
+    return
+  event.preventDefault()
+  emit('click')
+}
+
 interface RemainingInfoTag {
   icon: string
   text?: string
@@ -129,6 +136,10 @@ const remainingInfoTags = computed<RemainingInfoTag[]>(() => {
 
 const customTags = computed(() => parseTags(props.node.tags).map(t => t.text))
 
+function getRegionAltText(region: string): string {
+  return getRegionDisplayName(region) || getRegionCode(region)
+}
+
 function hasRegion(region: string | null | undefined): boolean {
   return Boolean(region?.trim())
 }
@@ -140,7 +151,11 @@ function hasRegion(region: string | null | undefined): boolean {
     :size="nodeCardXSize"
     class="node-card w-full cursor-pointer border-none shadow-[0_0_0_3px] shadow-transparent transition-all duration-200 rounded-xl"
     :class="[!props.node.online && '!shadow-red-500/30']"
+    role="button"
+    tabindex="0"
+    :aria-label="`查看节点 ${props.node.name} 详情`"
     @click="emit('click')"
+    @keydown="handleKeyboardOpen"
   >
     <!-- 头部：在线点 + 名称 -->
     <template #header>
@@ -166,7 +181,7 @@ function hasRegion(region: string | null | undefined): boolean {
         <img
           v-if="hasRegion(props.node.region)"
           :src="`/images/flags/${getRegionCode(props.node.region)}.svg`"
-          :alt="getRegionDisplayName(props.node.region)"
+          :alt="getRegionAltText(props.node.region)"
           class="size-5 shrink-0"
         >
       </div>

@@ -96,16 +96,21 @@ const useNodesStore = defineStore('nodes', () => {
   const wsReconnectAttempts = ref<number>(0)
 
   // ===== 计算属性 =====
+  const nodeIndex = new Map<string, NodeData>()
+
+  /** 可见节点（Komari hidden 节点不参与公开首页展示） */
+  const visibleNodes = computed(() => nodes.value.filter(n => !n.hidden))
+
   /** 在线节点数量 */
-  const onlineCount = computed(() => nodes.value.filter(n => n.online).length)
+  const onlineCount = computed(() => visibleNodes.value.filter(n => n.online).length)
 
   /** 总节点数量 */
-  const totalCount = computed(() => nodes.value.length)
+  const totalCount = computed(() => visibleNodes.value.length)
 
   /** 所有分组 */
   const groups = computed(() => {
     const groupSet = new Set<string>()
-    nodes.value.forEach((n) => {
+    visibleNodes.value.forEach((n) => {
       n.groups.forEach(group => groupSet.add(group))
     })
     return Array.from(groupSet)
@@ -115,6 +120,14 @@ const useNodesStore = defineStore('nodes', () => {
   const nodesByUuid = computed(() => {
     const map = new Map<string, NodeData>()
     nodes.value.forEach((n) => {
+      map.set(n.uuid, n)
+    })
+    return map
+  })
+
+  const visibleNodesByUuid = computed(() => {
+    const map = new Map<string, NodeData>()
+    visibleNodes.value.forEach((n) => {
       map.set(n.uuid, n)
     })
     return map
@@ -308,7 +321,6 @@ const useNodesStore = defineStore('nodes', () => {
    * 初始化节点数据（首次加载）
    */
   function initNodes(clients: Record<string, Client>, statuses: Record<string, NodeStatus>): void {
-    const byUuid = new Map(nodes.value.map(n => [n.uuid, n]))
     const newUuids = new Set(Object.keys(clients))
 
     // 更新现有节点或添加新节点（就地合并，保持对象引用稳定）
@@ -317,7 +329,7 @@ const useNodesStore = defineStore('nodes', () => {
         continue
 
       const status = statuses[uuid]
-      const existing = byUuid.get(uuid)
+      const existing = nodeIndex.get(uuid)
 
       if (existing) {
         applyClient(existing, client)
@@ -329,6 +341,7 @@ const useNodesStore = defineStore('nodes', () => {
         if (status)
           applyStatus(node, status)
         nodes.value.push(node)
+        nodeIndex.set(node.uuid, node)
       }
     }
 
@@ -336,6 +349,7 @@ const useNodesStore = defineStore('nodes', () => {
     for (let i = nodes.value.length - 1; i >= 0; i--) {
       const node = nodes.value[i]
       if (node && !newUuids.has(node.uuid)) {
+        nodeIndex.delete(node.uuid)
         nodes.value.splice(i, 1)
       }
     }
@@ -355,9 +369,8 @@ const useNodesStore = defineStore('nodes', () => {
    * 更新节点状态（实时更新）
    */
   function updateNodeStatuses(statuses: Record<string, NodeStatus>): void {
-    const byUuid = new Map(nodes.value.map(n => [n.uuid, n]))
     for (const [uuid, status] of Object.entries(statuses)) {
-      const node = byUuid.get(uuid)
+      const node = nodeIndex.get(uuid)
       if (node && status)
         applyStatus(node, status)
     }
@@ -368,7 +381,6 @@ const useNodesStore = defineStore('nodes', () => {
    */
   function updateNodeClients(clients: Record<string, Client>): void {
     const newUuids = new Set(Object.keys(clients))
-    const byUuid = new Map(nodes.value.map(n => [n.uuid, n]))
     // 仅在结构或 weight 变化时才重排序，避免每轮轮询都触发数组排序的响应式开销
     let needSort = false
 
@@ -377,14 +389,16 @@ const useNodesStore = defineStore('nodes', () => {
       if (!client)
         continue
 
-      const node = byUuid.get(uuid)
+      const node = nodeIndex.get(uuid)
       if (node) {
         if (applyClient(node, client))
           needSort = true
       }
       else {
         // 添加新节点（不带状态）
-        nodes.value.push(createNodeFromClient(client))
+        const newNode = createNodeFromClient(client)
+        nodes.value.push(newNode)
+        nodeIndex.set(newNode.uuid, newNode)
         needSort = true
       }
     }
@@ -393,6 +407,7 @@ const useNodesStore = defineStore('nodes', () => {
     for (let i = nodes.value.length - 1; i >= 0; i--) {
       const node = nodes.value[i]
       if (node && !newUuids.has(node.uuid)) {
+        nodeIndex.delete(node.uuid)
         nodes.value.splice(i, 1)
         needSort = true
       }
@@ -419,6 +434,7 @@ const useNodesStore = defineStore('nodes', () => {
    */
   function clearNodes(): void {
     nodes.value = []
+    nodeIndex.clear()
   }
 
   return {
@@ -427,10 +443,12 @@ const useNodesStore = defineStore('nodes', () => {
     wsConnectionState,
     wsReconnectAttempts,
     // 计算属性
+    visibleNodes,
     onlineCount,
     totalCount,
     groups,
     nodesByUuid,
+    visibleNodesByUuid,
     // 方法
     initNodes,
     updateNodeStatuses,

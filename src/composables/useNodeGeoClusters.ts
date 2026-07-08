@@ -2,8 +2,10 @@ import type { NodeData } from '@/stores/nodes'
 import type { IpGeo } from '@/utils/ipGeoHelper'
 import { computed, ref, watch } from 'vue'
 import { useNodesStore } from '@/stores/nodes'
+import { formatCityNameZh } from '@/utils/cityNameHelper'
 import { getCoordByCode, getCountryCodeFromRegion } from '@/utils/geoHelper'
 import { lookupIpGeo } from '@/utils/ipGeoHelper'
+import { getRegionDisplayName } from '@/utils/regionHelper'
 
 interface UseNodeGeoClustersOptions {
   nodes?: () => NodeData[] | undefined
@@ -34,7 +36,7 @@ const IP_GEO_RETRY_INTERVAL_MS = 10 * 60 * 1000
 export function useNodeGeoClusters(options: UseNodeGeoClustersOptions = {}) {
   const nodesStore = useNodesStore()
 
-  const displayNodes = computed(() => options.nodes?.() ?? nodesStore.nodes)
+  const displayNodes = computed(() => options.nodes?.() ?? nodesStore.visibleNodes)
   const ipGeoMap = ref(new Map<string, IpGeo>())
   const failedIpAttempts = new Map<string, number>()
 
@@ -93,11 +95,12 @@ export function useNodeGeoClusters(options: UseNodeGeoClustersOptions = {}) {
         .toLowerCase()
         .replace(CITY_SLUG_INVALID_REGEX, '-')
         .replace(CITY_SLUG_EDGE_REGEX, '')
+      const label = formatCityNameZh(geo.city) || getRegionDisplayName(node.region) || getRegionDisplayName(code) || ''
       return {
         id: `${(code || 'xx').toLowerCase()}-${citySlug || 'city'}`,
         code: code || (countryCode ?? ''),
         coord: [geo.lat, geo.lng],
-        label: geo.city || node.region || code || 'Unknown',
+        label,
         asn: geo.asn,
         org: geo.org,
       }
@@ -106,7 +109,7 @@ export function useNodeGeoClusters(options: UseNodeGeoClustersOptions = {}) {
     if (countryCode) {
       const coord = getCoordByCode(countryCode)
       if (coord)
-        return { id: countryCode.toLowerCase(), code: countryCode, coord, label: node.region || countryCode }
+        return { id: countryCode.toLowerCase(), code: countryCode, coord, label: getRegionDisplayName(node.region) || getRegionDisplayName(countryCode) || '' }
     }
 
     return null

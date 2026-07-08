@@ -205,6 +205,22 @@ export class ApiError extends Error {
 // ==================== API 客户端 ====================
 
 /** Komari API 客户端 */
+function isApiResponse<T>(value: unknown): value is ApiResponse<T> {
+  if (!value || typeof value !== 'object')
+    return false
+  const record = value as Record<string, unknown>
+  return (record.status === 'success' || record.status === 'error') && 'data' in record
+}
+
+async function safeJson(response: Response): Promise<unknown> {
+  try {
+    return await response.json()
+  }
+  catch {
+    return null
+  }
+}
+
 export class KomariApi {
   private baseUrl: string
   private timeout: number
@@ -244,7 +260,9 @@ export class KomariApi {
 
       clearTimeout(timeoutId)
 
-      const result: ApiResponse<T> = await response.json()
+      const result = await safeJson(response)
+      if (!isApiResponse<T>(result))
+        throw new ApiError(response.ok ? 'Invalid API response' : `HTTP error: ${response.status}`, 'error', response.status)
 
       if (result.status === 'error') {
         throw new ApiError(result.message || 'Unknown error', 'error', response.status)
@@ -282,7 +300,10 @@ export class KomariApi {
         throw new ApiError(`HTTP error: ${response.status}`, 'error', response.status)
       }
 
-      return await response.json()
+      const result = await safeJson(response)
+      if (result === null)
+        throw new ApiError('Invalid JSON response', 'error', response.status)
+      return result as T
     }
     catch (error) {
       clearTimeout(timeoutId)
@@ -314,20 +335,23 @@ export class KomariApi {
 
       clearTimeout(timeoutId)
 
-      const result = await response.json()
+      const result = await safeJson(response)
+      if (!result || typeof result !== 'object')
+        throw new ApiError(response.ok ? 'Invalid API response' : `HTTP error: ${response.status}`, 'error', response.status)
 
       // 登录接口返回 set-cookie 特殊结构
-      if (result['set-cookie']) {
+      if ('set-cookie' in result) {
         return result as T
       }
 
       // 检查 API 响应状态
-      const apiResult: ApiResponse<T> = result
-      if (apiResult.status === 'error') {
-        throw new ApiError(apiResult.message || 'Unknown error', 'error', response.status)
+      if (!isApiResponse<T>(result))
+        throw new ApiError(response.ok ? 'Invalid API response' : `HTTP error: ${response.status}`, 'error', response.status)
+      if (result.status === 'error') {
+        throw new ApiError(result.message || 'Unknown error', 'error', response.status)
       }
 
-      return apiResult.data
+      return result.data
     }
     catch (error) {
       clearTimeout(timeoutId)
@@ -412,6 +436,8 @@ export class RealtimeWebSocket {
   private reconnectAttempts = 0
   private listeners: Set<(data: WebSocketRealtimeResponse) => void> = new Set()
   private errorListeners: Set<(error: Event) => void> = new Set()
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  private shouldReconnect = true
   private isOpen = false
 
   constructor(options: {
@@ -443,8 +469,9 @@ export class RealtimeWebSocket {
 
         this.ws.onmessage = (event) => {
           try {
-            const data: WebSocketRealtimeResponse = JSON.parse(event.data)
-            this.listeners.forEach(listener => listener(data))
+            const data = JSON.parse(event.data) as WebSocketRealtimeResponse
+            if (data?.status === 'success' || data?.status === 'error')
+              this.listeners.forEach(listener => listener(data))
           }
           catch {
             // Ignore parse errors
@@ -460,7 +487,8 @@ export class RealtimeWebSocket {
 
         this.ws.onclose = () => {
           this.isOpen = false
-          this.attemptReconnect()
+          if (this.shouldReconnect)
+            this.attemptReconnect()
         }
       }
       catch (error) {
@@ -473,14 +501,16 @@ export class RealtimeWebSocket {
    * 尝试重连
    */
   private attemptReconnect(): void {
-    if (this.reconnectAttempts < this.maxReconnectAttempts) {
-      this.reconnectAttempts++
-      setTimeout(() => {
-        this.connect().catch(() => {
-          // Ignore reconnect errors
-        })
-      }, this.reconnectInterval)
-    }
+    if (!this.shouldReconnect || this.reconnectTimer || this.reconnectAttempts >= this.maxReconnectAttempts)
+      return
+
+    this.reconnectAttempts++
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null
+      this.connect().catch(() => {
+        // Ignore reconnect errors
+      })
+    }, this.reconnectInterval)
   }
 
   /**
@@ -516,6 +546,11 @@ export class RealtimeWebSocket {
    * 关闭连接
    */
   close(): void {
+    this.shouldReconnect = false
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
     if (this.ws) {
       this.ws.close()
       this.ws = null

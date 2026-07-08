@@ -1,9 +1,9 @@
 /**
  * 根据 IP 在线查询地理坐标与城市，用于地球的城市级定位。
  *
- * 多个免费 HTTPS 服务依次回退（ip.sb → ipinfo.io → ipapi.co），任一返回经纬度即采用；
+ * 多个免费 HTTPS 服务依次回退（ip.sb → ipinfo.io → ipwho.is → ipapi.co），任一返回经纬度即采用；
  * 结果按 IP 缓存到 localStorage（带版本与过期时间），避免重复请求与频率限制。
- * 全部失败时返回 null，调用方应回落到国家级定位。
+ * 全部失败时写入短期负缓存，调用方应回落到国家级定位。
  */
 
 export interface IpGeo {
@@ -18,15 +18,31 @@ export interface IpGeo {
 }
 
 const CACHE_PREFIX = 'komari-theme-emerald:ipgeo'
-const CACHE_VERSION = 2
+const CACHE_VERSION = 3
 const CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000 // 30 天
+const NEGATIVE_CACHE_TTL_MS = 6 * 60 * 60 * 1000 // 6 小时
 const IP_GEO_TIMEOUT_MS = 5000
+const PROVIDER_BACKOFF_BASE_MS = 60 * 1000
+const PROVIDER_BACKOFF_MAX_MS = 30 * 60 * 1000
 const ASN_ORG_PREFIX_REGEX = /^AS\d+/
 
 interface CacheEntry {
   version: number
   updatedAt: number
-  geo: IpGeo
+  geo: IpGeo | null
+  negative?: boolean
+}
+
+interface ProviderState {
+  failures: number
+  blockedUntil: number
+}
+
+type Provider = (ip: string) => Promise<IpGeo | null>
+
+interface ProviderEntry {
+  id: string
+  lookup: Provider
 }
 
 function cacheKey(ip: string): string {
@@ -37,11 +53,11 @@ function isValidGeo(geo: unknown): geo is IpGeo {
   if (!geo || typeof geo !== 'object')
     return false
   const g = geo as Record<string, unknown>
-  return typeof g.lat === 'number' && Number.isFinite(g.lat)
-    && typeof g.lng === 'number' && Number.isFinite(g.lng)
+  return typeof g.lat === 'number' && Number.isFinite(g.lat) && g.lat >= -90 && g.lat <= 90
+    && typeof g.lng === 'number' && Number.isFinite(g.lng) && g.lng >= -180 && g.lng <= 180
 }
 
-function readCache(ip: string): IpGeo | null {
+function readCache(ip: string): { geo: IpGeo | null, negative: boolean } | null {
   if (typeof window === 'undefined')
     return null
   try {
@@ -51,11 +67,16 @@ function readCache(ip: string): IpGeo | null {
     const parsed = JSON.parse(raw) as CacheEntry
     if (parsed.version !== CACHE_VERSION)
       return null
-    if (Date.now() - parsed.updatedAt > CACHE_TTL_MS)
+
+    const ttl = parsed.negative ? NEGATIVE_CACHE_TTL_MS : CACHE_TTL_MS
+    if (Date.now() - parsed.updatedAt > ttl)
       return null
+
+    if (parsed.negative)
+      return { geo: null, negative: true }
     if (!isValidGeo(parsed.geo))
       return null
-    return parsed.geo
+    return { geo: parsed.geo, negative: false }
   }
   catch {
     return null
@@ -63,10 +84,17 @@ function readCache(ip: string): IpGeo | null {
 }
 
 function writeCache(ip: string, geo: IpGeo): void {
+  writeCacheEntry(ip, { version: CACHE_VERSION, updatedAt: Date.now(), geo })
+}
+
+function writeNegativeCache(ip: string): void {
+  writeCacheEntry(ip, { version: CACHE_VERSION, updatedAt: Date.now(), geo: null, negative: true })
+}
+
+function writeCacheEntry(ip: string, entry: CacheEntry): void {
   if (typeof window === 'undefined')
     return
   try {
-    const entry: CacheEntry = { version: CACHE_VERSION, updatedAt: Date.now(), geo }
     window.localStorage.setItem(cacheKey(ip), JSON.stringify(entry))
   }
   catch {
@@ -87,7 +115,15 @@ function pickString(...values: unknown[]): string | undefined {
   return undefined
 }
 
-type Provider = (ip: string) => Promise<IpGeo | null>
+async function safeJson(response: Response): Promise<Record<string, unknown> | null> {
+  try {
+    const data = await response.json()
+    return data && typeof data === 'object' ? data as Record<string, unknown> : null
+  }
+  catch {
+    return null
+  }
+}
 
 async function fetchWithTimeout(url: string, timeoutMs = IP_GEO_TIMEOUT_MS): Promise<Response> {
   const controller = new AbortController()
@@ -100,12 +136,18 @@ async function fetchWithTimeout(url: string, timeoutMs = IP_GEO_TIMEOUT_MS): Pro
   }
 }
 
+function normalizeIpPath(ip: string): string {
+  return encodeURIComponent(ip.trim())
+}
+
 /** ip.sb：返回 latitude / longitude / city / country_code */
 const fromIpSb: Provider = async (ip) => {
-  const res = await fetchWithTimeout(`https://api.ip.sb/geoip/${ip}`)
+  const res = await fetchWithTimeout(`https://api.ip.sb/geoip/${normalizeIpPath(ip)}`)
   if (!res.ok)
     return null
-  const d = await res.json() as Record<string, unknown>
+  const d = await safeJson(res)
+  if (!d)
+    return null
   const lat = toFinite(d.latitude)
   const lng = toFinite(d.longitude)
   if (lat === null || lng === null)
@@ -122,11 +164,11 @@ const fromIpSb: Provider = async (ip) => {
 
 /** ipinfo.io：loc = "lat,lng"，city，country，org = "AS#### 组织名" */
 const fromIpinfo: Provider = async (ip) => {
-  const res = await fetchWithTimeout(`https://ipinfo.io/${ip}/json`)
+  const res = await fetchWithTimeout(`https://ipinfo.io/${normalizeIpPath(ip)}/json`)
   if (!res.ok)
     return null
-  const d = await res.json() as Record<string, unknown>
-  if (typeof d.loc !== 'string')
+  const d = await safeJson(res)
+  if (!d || typeof d.loc !== 'string')
     return null
   const [latStr, lngStr] = d.loc.split(',')
   const lat = toFinite(latStr)
@@ -146,10 +188,12 @@ const fromIpinfo: Provider = async (ip) => {
 
 /** ipapi.co：latitude / longitude / city / country_code */
 const fromIpapiCo: Provider = async (ip) => {
-  const res = await fetchWithTimeout(`https://ipapi.co/${ip}/json/`)
+  const res = await fetchWithTimeout(`https://ipapi.co/${normalizeIpPath(ip)}/json/`)
   if (!res.ok)
     return null
-  const d = await res.json() as Record<string, unknown>
+  const d = await safeJson(res)
+  if (!d)
+    return null
   const lat = toFinite(d.latitude)
   const lng = toFinite(d.longitude)
   if (lat === null || lng === null)
@@ -166,11 +210,11 @@ const fromIpapiCo: Provider = async (ip) => {
 
 /** ipwho.is：latitude/longitude/city/country_code，connection.{org,isp,asn} */
 const fromIpwhois: Provider = async (ip) => {
-  const res = await fetchWithTimeout(`https://ipwho.is/${ip}`)
+  const res = await fetchWithTimeout(`https://ipwho.is/${normalizeIpPath(ip)}`)
   if (!res.ok)
     return null
-  const d = await res.json() as Record<string, unknown>
-  if (d.success === false)
+  const d = await safeJson(res)
+  if (!d || d.success === false)
     return null
   const lat = toFinite(d.latitude)
   const lng = toFinite(d.longitude)
@@ -187,15 +231,36 @@ const fromIpwhois: Provider = async (ip) => {
   }
 }
 
-const PROVIDERS: Provider[] = [fromIpSb, fromIpinfo, fromIpwhois, fromIpapiCo]
+const PROVIDERS: ProviderEntry[] = [
+  { id: 'ip.sb', lookup: fromIpSb },
+  { id: 'ipinfo.io', lookup: fromIpinfo },
+  { id: 'ipwho.is', lookup: fromIpwhois },
+  { id: 'ipapi.co', lookup: fromIpapiCo },
+]
+
+const providerStates = new Map<string, ProviderState>()
 
 // 轮询起始服务：每次查询从不同站点开始，避免所有请求都打到同一站点导致频控后整体失败
 let providerCursor = 0
-function orderedProviders(): Provider[] {
+function orderedProviders(): ProviderEntry[] {
   const n = PROVIDERS.length
   const start = providerCursor % n
   providerCursor = (providerCursor + 1) % n
-  return Array.from({ length: n }, (_, i) => PROVIDERS[(start + i) % n]!)
+  const providers = Array.from({ length: n }, (_, i) => PROVIDERS[(start + i) % n]!)
+  const now = Date.now()
+  const available = providers.filter(provider => (providerStates.get(provider.id)?.blockedUntil ?? 0) <= now)
+  return available.length > 0 ? available : providers
+}
+
+function markProviderSuccess(id: string): void {
+  providerStates.delete(id)
+}
+
+function markProviderFailure(id: string): void {
+  const current = providerStates.get(id) ?? { failures: 0, blockedUntil: 0 }
+  const failures = current.failures + 1
+  const backoff = Math.min(PROVIDER_BACKOFF_BASE_MS * 2 ** Math.min(failures - 1, 5), PROVIDER_BACKOFF_MAX_MS)
+  providerStates.set(id, { failures, blockedUntil: Date.now() + backoff })
 }
 
 // 同一 IP 的并发查询去重
@@ -205,14 +270,15 @@ const inflight = new Map<string, Promise<IpGeo | null>>()
  * 查询某个 IP 的地理坐标（含缓存与多服务回退）。失败返回 null。
  */
 export async function lookupIpGeo(ip: string): Promise<IpGeo | null> {
-  if (!ip)
+  const normalizedIp = ip.trim()
+  if (!normalizedIp)
     return null
 
-  const cached = readCache(ip)
+  const cached = readCache(normalizedIp)
   if (cached)
-    return cached
+    return cached.geo
 
-  const existing = inflight.get(ip)
+  const existing = inflight.get(normalizedIp)
   if (existing)
     return existing
 
@@ -220,24 +286,27 @@ export async function lookupIpGeo(ip: string): Promise<IpGeo | null> {
     // 从轮询选出的起始站点开始，依次回退，分摊请求压力
     for (const provider of orderedProviders()) {
       try {
-        const geo = await provider(ip)
-        if (geo) {
-          writeCache(ip, geo)
+        const geo = await provider.lookup(normalizedIp)
+        if (geo && isValidGeo(geo)) {
+          markProviderSuccess(provider.id)
+          writeCache(normalizedIp, geo)
           return geo
         }
+        markProviderFailure(provider.id)
       }
       catch {
-        // 静默失败，尝试下一个服务
+        markProviderFailure(provider.id)
       }
     }
+    writeNegativeCache(normalizedIp)
     return null
   })()
 
-  inflight.set(ip, task)
+  inflight.set(normalizedIp, task)
   try {
     return await task
   }
   finally {
-    inflight.delete(ip)
+    inflight.delete(normalizedIp)
   }
 }

@@ -37,7 +37,11 @@ class InitManager {
   private appStore: ReturnType<typeof useAppStore>
   private nodesStore: ReturnType<typeof useNodesStore>
   private pollTimer: ReturnType<typeof setTimeout> | null = null
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  private unsubscribeWsClose: (() => void) | null = null
   private isPolling = false
+  private destroyed = false
+  private postFailureCount = 0
   private lastClientsFetchedAt = 0
   private isInitialized = false
   private useWebSocket: boolean | null = null // 根据主题配置决定
@@ -60,6 +64,8 @@ class InitManager {
    * 执行初始化流程
    */
   async init(): Promise<void> {
+    this.destroyed = false
+
     if (this.isInitialized) {
       console.warn('[InitManager] Already initialized')
       return
@@ -230,30 +236,26 @@ class InitManager {
    * 监控 WebSocket 连接状态
    */
   private monitorWebSocketConnection(): void {
+    this.unsubscribeWsClose?.()
     const client = this.rpc.getClient()
-    const ws = client.getWebSocket()
-
-    if (!ws) {
-      return
-    }
-
-    ws.onclose = () => {
+    this.unsubscribeWsClose = client.onWebSocketClose(() => {
+      if (this.destroyed)
+        return
       // 如果当前是已连接状态且还在使用 WebSocket 模式，触发重连
       if (this.useWebSocket === true && this.nodesStore.wsConnectionState === 'connected') {
         this.nodesStore.updateWsState('disconnected')
         this.scheduleReconnect()
       }
-    }
-
-    ws.onerror = () => {
-      console.error('[InitManager] WebSocket error')
-    }
+    })
   }
 
   /**
    * 安排重连
    */
   private scheduleReconnect(): void {
+    if (this.destroyed || this.useWebSocket === false || this.reconnectTimer)
+      return
+
     const attempts = this.nodesStore.wsReconnectAttempts
 
     // 达到最大重连次数，回落到 POST 模式
@@ -268,9 +270,12 @@ class InitManager {
       window.$message?.error('WebSocket 建立失败，正在尝试重连。')
     }
 
-    this.nodesStore.updateWsState('reconnecting', attempts + 1)
+    const nextAttempts = attempts + 1
+    this.nodesStore.updateWsState('reconnecting', nextAttempts)
+    const backoff = Math.min(this.config.wsReconnectInterval * 2 ** Math.max(0, nextAttempts - 1), 30_000)
 
-    setTimeout(async () => {
+    this.reconnectTimer = setTimeout(async () => {
+      this.reconnectTimer = null
       try {
         const client = this.rpc.getClient()
         client.close()
@@ -280,7 +285,7 @@ class InitManager {
         console.error('[InitManager] Reconnect failed:', error)
         this.scheduleReconnect()
       }
-    }, this.config.wsReconnectInterval)
+    }, backoff)
   }
 
   /**
@@ -288,6 +293,12 @@ class InitManager {
    */
   private fallbackToPostMode(): void {
     this.useWebSocket = false
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
+    this.unsubscribeWsClose?.()
+    this.unsubscribeWsClose = null
     this.nodesStore.updateWsState('disconnected', this.config.wsMaxReconnectAttempts)
 
     // 关闭 WebSocket 连接
@@ -308,9 +319,10 @@ class InitManager {
     }
 
     const schedulePoll = () => {
-      this.pollTimer = setTimeout(() => {
-        void this.poll()
-        schedulePoll()
+      this.pollTimer = setTimeout(async () => {
+        await this.poll()
+        if (!this.destroyed)
+          schedulePoll()
       }, this.getPollInterval())
     }
 
@@ -346,6 +358,7 @@ class InitManager {
       this.nodesStore.updateNodeStatuses(statusesResult)
 
       // 连接恢复正常，重置错误状态
+      this.postFailureCount = 0
       this.appStore.connectionError = false
     }
     catch (error) {
@@ -356,8 +369,8 @@ class InitManager {
         console.error('[InitManager] Poll error:', error)
       }
 
-      // 一次失败就显示错误
-      this.appStore.connectionError = true
+      this.postFailureCount += 1
+      this.appStore.connectionError = this.postFailureCount >= this.config.postFailureThreshold
     }
     finally {
       this.isPolling = false
@@ -378,7 +391,14 @@ class InitManager {
    * 销毁管理器
    */
   destroy(): void {
+    this.destroyed = true
     this.stopPolling()
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
+    this.unsubscribeWsClose?.()
+    this.unsubscribeWsClose = null
     this.rpc.close()
     this.nodesStore.clearNodes()
     this.isInitialized = false

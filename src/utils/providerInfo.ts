@@ -138,7 +138,26 @@ interface NormalizedText {
   compact: string
 }
 
+const NORMALIZED_TEXT_CACHE_LIMIT = 1000
+const RESOLVE_CACHE_LIMIT = 800
+const normalizedTextCache = new Map<string, NormalizedText>()
+const customAliasCache = new Map<string, ProviderEntry[]>()
+const resolveCache = new Map<string, ProviderResolveResult | null>()
+
+function setBoundedCacheValue<K, V>(cache: Map<K, V>, key: K, value: V, limit: number): void {
+  if (cache.size >= limit) {
+    const firstKey = cache.keys().next().value as K | undefined
+    if (firstKey !== undefined)
+      cache.delete(firstKey)
+  }
+  cache.set(key, value)
+}
+
 function normalizeText(value: string): NormalizedText {
+  const cached = normalizedTextCache.get(value)
+  if (cached)
+    return cached
+
   const spaced = value
     .normalize('NFKC')
     .replace(ASN_PREFIX_REGEX, '')
@@ -147,7 +166,9 @@ function normalizeText(value: string): NormalizedText {
     .replace(COMPANY_SUFFIX_REGEX, ' ')
     .replace(SPACE_REGEX, ' ')
     .trim()
-  return { spaced, compact: spaced.replace(SPACE_REGEX, '') }
+  const normalized = { spaced, compact: spaced.replace(SPACE_REGEX, '') }
+  setBoundedCacheValue(normalizedTextCache, value, normalized, NORMALIZED_TEXT_CACHE_LIMIT)
+  return normalized
 }
 
 function matchesKeyword(text: NormalizedText, keyword: string): boolean {
@@ -176,10 +197,15 @@ function providerFromName(name: string): ProviderInfo {
 }
 
 function parseCustomAliases(config?: string): ProviderEntry[] {
-  if (!config?.trim())
+  const key = config?.trim() ?? ''
+  if (!key)
     return []
 
-  return config
+  const cached = customAliasCache.get(key)
+  if (cached)
+    return cached
+
+  const entries = key
     .split(CUSTOM_ALIAS_GROUP_SEPARATOR_REGEX)
     .map((group) => {
       const [rawName, rawAliases] = group.split(':')
@@ -191,6 +217,9 @@ function parseCustomAliases(config?: string): ProviderEntry[] {
       return { ...provider, keywords: [name, ...aliases] }
     })
     .filter((entry): entry is ProviderEntry => Boolean(entry))
+
+  customAliasCache.set(key, entries)
+  return entries
 }
 
 function detectProviderInEntries(text: string, entries: ProviderEntry[], source: ProviderMatchSource): ProviderMatch | null {
@@ -229,6 +258,10 @@ export function providerSourceLabel(source: ProviderMatchSource): string {
 }
 
 export function resolveProviderInfo(input: ProviderResolveInput): ProviderResolveResult | null {
+  const cacheKey = [input.metadata ?? '', input.org ?? '', input.asn ?? '', input.customAliases ?? ''].join('')
+  if (resolveCache.has(cacheKey))
+    return resolveCache.get(cacheKey) ?? null
+
   const customEntries = parseCustomAliases(input.customAliases)
   const seller = input.metadata
     ? detectProviderInEntries(input.metadata, customEntries, 'custom-alias') ?? detectProvider(input.metadata)
@@ -244,8 +277,10 @@ export function resolveProviderInfo(input: ProviderResolveInput): ProviderResolv
   const network = byAsn ?? byOrg ?? fallbackOrg
   const primary = seller ?? network
 
-  if (!primary)
+  if (!primary) {
+    setBoundedCacheValue(resolveCache, cacheKey, null, RESOLVE_CACHE_LIMIT)
     return null
+  }
 
   const shouldShowNetwork = seller && network && !isSameProvider(seller, network)
   const displayName = shouldShowNetwork ? `${seller.name} / ${network.name}` : primary.name
@@ -262,11 +297,13 @@ export function resolveProviderInfo(input: ProviderResolveInput): ProviderResolv
   if (input.org)
     tooltipLines.push(`Org：${cleanProviderOrg(input.org)}`)
 
-  return {
+  const result = {
     primary,
     seller: seller ?? undefined,
     network: network ?? undefined,
     displayName,
     tooltipLines,
   }
+  setBoundedCacheValue(resolveCache, cacheKey, result, RESOLVE_CACHE_LIMIT)
+  return result
 }

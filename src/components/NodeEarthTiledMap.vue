@@ -147,7 +147,7 @@ const clusterMarkers = computed<ClusterMarker[]>(() => regionClusters.value.map(
           <span class="legend-index">{{ marker.index }}</span>
           <img v-if="marker.code" :src="`/images/flags/${marker.code}.svg`" :alt="marker.code" class="legend-flag">
           <span class="legend-copy">
-            <span class="legend-name">{{ marker.label }}</span>
+            <span v-if="marker.label" class="legend-name">{{ marker.label }}</span>
             <span class="legend-meta">{{ marker.meta }}</span>
           </span>
         </div>

@@ -21,6 +21,7 @@ import {
   isHighLoadNode,
 } from '@/utils/nodeMetricsHelper'
 import { isRegionMatch } from '@/utils/regionHelper'
+import { hasFreeNodeTag } from '@/utils/tagHelper'
 
 interface QuickControlOption {
   key: HomeQuickControlKey
@@ -119,7 +120,7 @@ watch(
 )
 
 function getNodeMonthlyCostCNY(node: NodeData): number {
-  if (excludeFreeNodes.value && node.tags?.includes('白嫖中'))
+  if (excludeFreeNodes.value && hasFreeNodeTag(node.tags))
     return 0
 
   return financeHelper.calculateMonthlyCostCNY(node, exchangeRates.value)
@@ -151,7 +152,7 @@ function sortNodesByComputedValue(nodes: NodeData[], selector: (node: NodeData) 
     .map(item => item.node)
 }
 
-function applyQuickControl(nodes: NodeData[], control: HomeQuickControlKey): NodeData[] {
+function getQuickControlNodes(nodes: NodeData[], control: HomeQuickControlKey): NodeData[] {
   switch (control) {
     case 'monthlyCost':
       return sortNodesByComputedValue(nodes, getNodeMonthlyCostCNY)
@@ -178,8 +179,8 @@ function applyQuickControl(nodes: NodeData[], control: HomeQuickControlKey): Nod
 const groupNodeList = computed(() => {
   const selectedGroup = appStore.nodeSelectedGroup
   if (selectedGroup === 'all')
-    return nodesStore.nodes
-  return nodesStore.nodes.filter(node => node.groups.includes(selectedGroup))
+    return nodesStore.visibleNodes
+  return nodesStore.visibleNodes.filter(node => node.groups.includes(selectedGroup))
 })
 
 const nodeList = computed(() => {
@@ -187,8 +188,32 @@ const nodeList = computed(() => {
   if (debouncedSearchText.value.trim()) {
     filtered = filtered.filter(n => isNodeMatchSearch(n, debouncedSearchText.value))
   }
-  return applyQuickControl(filtered, activeQuickControl.value)
+  return getQuickControlNodes(filtered, activeQuickControl.value)
 })
+
+const quickControlCounts = computed<Record<HomeQuickControlKey, number>>(() => {
+  let base = groupNodeList.value
+  if (debouncedSearchText.value.trim())
+    base = base.filter(n => isNodeMatchSearch(n, debouncedSearchText.value))
+
+  const counts = {} as Record<HomeQuickControlKey, number>
+  for (const key of appStore.homeQuickControlOrder)
+    counts[key] = getQuickControlNodes(base, key).length
+  return counts
+})
+
+const emptyDescription = computed(() => {
+  if (debouncedSearchText.value.trim())
+    return '没有匹配的节点'
+  if (activeQuickControl.value !== 'default')
+    return '当前快捷筛选下暂无节点'
+  return '暂无节点'
+})
+
+function clearSearch() {
+  searchText.value = ''
+  debouncedSearchText.value = ''
+}
 
 const nodeListSortResetKey = computed(() => {
   return `${appStore.nodeSelectedGroup}|${debouncedSearchText.value.trim()}|${activeQuickControl.value}`
@@ -273,10 +298,15 @@ const nodeCardGridClass = computed(() => {
                     type="button"
                     class="inline-flex h-6.5 flex-none shrink-0 items-center gap-1 rounded-sm px-2 text-xs text-muted-foreground transition-colors hover:text-foreground"
                     :class="activeQuickControl === control.key ? 'bg-background text-green-600 shadow-sm' : ''"
+                    :aria-pressed="activeQuickControl === control.key"
+                    :aria-label="`切换到${control.label}节点，${quickControlCounts[control.key] ?? 0} 台`"
                     @click="setQuickControl(control.key)"
                   >
                     <Icon :icon="control.icon" :width="12" :height="12" />
                     <span>{{ control.label }}</span>
+                    <span class="rounded-full bg-slate-500/10 px-1 text-[10px] tabular-nums text-foreground/65">
+                      {{ quickControlCounts[control.key] ?? 0 }}
+                    </span>
                   </button>
                 </div>
               </div>
@@ -298,16 +328,28 @@ const nodeCardGridClass = computed(() => {
               >
                 <Icon icon="tabler:table" :width="14" :height="14" />
               </Button>
-              <div class="relative z-1 w-8 h-8">
-                <div class="absolute top-0 right-0 ">
+              <div class="relative z-1 h-8" :class="searchText ? 'w-60' : 'w-8'">
+                <div class="absolute top-0 right-0">
                   <Input
                     v-model="searchText" placeholder="搜索节点名称、地区、系统"
-                    class="transition-all placeholder:text-transparent border-none shadow-none w-8 h-8  bg-background/50 backdrop-blur-xs rounded-md hover:!bg-background/60 focus:!w-60 focus:!pl-7.5 focus:placeholder:!text-muted-foreground focus:!bg-background/80 focus:!ring-slate-500/10"
+                    aria-label="搜索节点"
+                    class="transition-all border-none shadow-none h-8 bg-background/50 backdrop-blur-xs rounded-md hover:!bg-background/60 focus:!pl-7.5 focus:placeholder:!text-muted-foreground focus:!bg-background/80 focus:!ring-slate-500/10"
+                    :class="searchText ? '!w-60 !pl-7.5 pr-7 placeholder:!text-muted-foreground' : 'w-8 placeholder:text-transparent focus:!w-60'"
+                    @keydown.esc.prevent="clearSearch"
                   />
                   <Icon
                     icon="tabler:search" :width="14" :height="14"
                     class="absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none"
                   />
+                  <button
+                    v-if="searchText"
+                    type="button"
+                    class="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    aria-label="清空搜索"
+                    @click="clearSearch"
+                  >
+                    <Icon icon="tabler:x" :width="14" :height="14" />
+                  </button>
                 </div>
               </div>
             </div>
@@ -338,7 +380,7 @@ const nodeCardGridClass = computed(() => {
               @click="handleNodeClick"
             />
             <div v-else class="text-muted-foreground text-center py-8">
-              <Empty description="暂无节点" />
+              <Empty :description="emptyDescription" />
             </div>
           </TabsContent>
         </Tabs>

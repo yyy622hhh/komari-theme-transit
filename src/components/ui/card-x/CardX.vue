@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { HTMLAttributes } from 'vue'
-import { computed } from 'vue'
+import { computed, useAttrs } from 'vue'
 import { cn } from '@/lib/utils'
 
 interface Props {
@@ -26,6 +26,8 @@ const hasHeaderSlot = defineSlots<{
   'default'?: () => any
   'footer'?: () => any
 }>()
+
+const attrs = useAttrs()
 
 const paddingClass = computed(() => {
   const isShowHeader = hasHeaderSlot.header || hasHeaderSlot['header-extra'] || props.title
@@ -60,6 +62,7 @@ const segmentedFooter = computed(() => {
 
 <template>
   <div
+    v-bind="attrs"
     :class="cn(
       'bg-card text-card-foreground flex flex-col rounded-lg',
       bordered && 'border',

@@ -11,9 +11,11 @@ import { Button } from '@/components/ui/button'
 import { CardX } from '@/components/ui/card-x'
 import { DataTooltip } from '@/components/ui/data-tooltip'
 import { Empty } from '@/components/ui/empty'
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useAppStore } from '@/stores/app'
 import { useNodesStore } from '@/stores/nodes'
 import { getSharedApi } from '@/utils/api'
+import { formatCityNameZh } from '@/utils/cityNameHelper'
 import * as financeHelper from '@/utils/financeHelper'
 import { formatBytesPerSecondWithConfig, formatBytesWithConfig, formatUptimeWithFormat } from '@/utils/helper'
 import { lookupIpGeo } from '@/utils/ipGeoHelper'
@@ -42,7 +44,8 @@ const nodeGeo = ref<IpGeo | null>(null)
 // 近一天网速峰值（B/s）
 const peakNetOut = ref(0)
 const peakNetIn = ref(0)
-const data = computed(() => nodesStore.nodes.find(node => node.uuid === route.params.id))
+const activeDetailSection = ref<'overview' | 'load' | 'ping'>('overview')
+const data = computed(() => nodesStore.visibleNodesByUuid.get(String(route.params.id)))
 
 // CPU 评分
 interface CpuScore {
@@ -203,6 +206,7 @@ onMounted(async () => {
 // 注：节点 IP 通常不直接暴露，这里用节点 uuid 作为 fallback 标识
 // 如果 data.value 有 ip 字段则直接用，否则跳过
 watch(data, (node) => {
+  activeDetailSection.value = 'overview'
   if (node) {
     void resolveProvider(node)
     void fetchTrafficPeak(node.uuid)
@@ -214,8 +218,9 @@ const cpuScore = computed(() => estimateCpuScore(data.value?.cpu_name ?? ''))
 // 机房/厂商展示：城市 · 厂商 · ASN（缺项自动省略）
 const providerDisplay = computed(() => {
   const parts: string[] = []
-  if (nodeGeo.value?.city)
-    parts.push(nodeGeo.value.city)
+  const cityName = formatCityNameZh(nodeGeo.value?.city)
+  if (cityName)
+    parts.push(cityName)
   if (vpsProvider.value?.displayName)
     parts.push(vpsProvider.value.displayName)
   if (nodeGeo.value?.asn)
@@ -245,6 +250,7 @@ const showPrice = computed(() => appStore.isLoggedIn || !appStore.hidePriceWhenL
 const formatBytes = (bytes: number) => formatBytesWithConfig(bytes, appStore.byteDecimals)
 const formatBytesPerSecond = (bytes: number) => formatBytesPerSecondWithConfig(bytes, appStore.byteDecimals)
 const formatUptime = (seconds: number) => formatUptimeWithFormat(seconds, 'minute')
+const getRegionAltText = (region: string) => getRegionDisplayName(region) || getRegionCode(region)
 
 interface InfoItem {
   label: string
@@ -453,11 +459,11 @@ const trafficProgressClass = computed(() => {
     <template v-else>
       <!-- 顶部导航 -->
       <div class="px-4 flex gap-4 items-center">
-        <Button variant="ghost" size="icon-sm" class="bg-background/50 hover:bg-background" @click="router.push('/')">
+        <Button variant="ghost" size="icon-sm" class="bg-background/50 hover:bg-background" aria-label="返回首页" @click="router.push('/')">
           <Icon icon="tabler:arrow-left" :width="16" :height="16" />
         </Button>
         <div class="text-lg font-bold flex gap-2 items-center">
-          <img :src="`/images/flags/${getRegionCode(data.region)}.svg`" :alt="getRegionDisplayName(data.region)" class="size-6">
+          <img :src="`/images/flags/${getRegionCode(data.region)}.svg`" :alt="getRegionAltText(data.region)" class="size-6">
           <span>{{ data.name }}</span>
         </div>
         <Badge :variant="data.online ? 'default' : 'destructive'" class="text-xs !rounded">
@@ -488,8 +494,27 @@ const trafficProgressClass = computed(() => {
         </DataTooltip>
       </div>
 
+      <div v-if="appStore.nodeDetailSectionTabsEnabled" class="px-4 overflow-x-auto">
+        <Tabs v-model="activeDetailSection" class="w-full">
+          <TabsList class="w-max h-8 bg-background/50 backdrop-blur-xl rounded-md">
+            <TabsTrigger value="overview" class="h-6.5 flex-none shrink-0 gap-1 text-xs border-none data-[state=active]:text-green-600 shadow-none rounded-sm">
+              <Icon icon="tabler:layout-dashboard" :width="12" :height="12" />
+              概览
+            </TabsTrigger>
+            <TabsTrigger value="load" class="h-6.5 flex-none shrink-0 gap-1 text-xs border-none data-[state=active]:text-green-600 shadow-none rounded-sm">
+              <Icon icon="tabler:activity" :width="12" :height="12" />
+              负载
+            </TabsTrigger>
+            <TabsTrigger value="ping" class="h-6.5 flex-none shrink-0 gap-1 text-xs border-none data-[state=active]:text-green-600 shadow-none rounded-sm">
+              <Icon icon="tabler:timeline" :width="12" :height="12" />
+              延迟
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
+      </div>
+
       <!-- 价格指标卡片 -->
-      <div class="px-4 grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div v-if="!appStore.nodeDetailSectionTabsEnabled || activeDetailSection === 'overview'" class="px-4 grid grid-cols-2 gap-4 lg:grid-cols-4">
         <CardX
           v-for="item in metricCards" :key="item.label" hoverable size="small"
           class="group h-full bg-background/50 border-none hover:bg-background transition-all rounded-md"
@@ -511,7 +536,7 @@ const trafficProgressClass = computed(() => {
       </div>
 
       <!-- 硬件信息 + CPU 评分 -->
-      <div class="px-4 gap-4 grid grid-cols-1 lg:grid-cols-2">
+      <div v-if="!appStore.nodeDetailSectionTabsEnabled || activeDetailSection === 'overview'" class="px-4 gap-4 grid grid-cols-1 lg:grid-cols-2">
         <CardX
           title="硬件信息" size="small" content-class="flex-1"
           class="group h-full bg-background/50 border-none hover:bg-background transition-all rounded-md"
@@ -656,8 +681,8 @@ const trafficProgressClass = computed(() => {
         </CardX>
       </div>
 
-      <LoadChart :uuid="data.uuid" class="px-4" />
-      <PingChart :uuid="data.uuid" class="px-4" />
+      <LoadChart v-if="!appStore.nodeDetailSectionTabsEnabled || activeDetailSection === 'load'" :uuid="data.uuid" class="px-4" />
+      <PingChart v-if="!appStore.nodeDetailSectionTabsEnabled || activeDetailSection === 'ping'" :uuid="data.uuid" class="px-4" />
     </template>
   </div>
 </template>

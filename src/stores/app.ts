@@ -46,6 +46,14 @@ export type HomeQuickControlKey
     | 'highLoad'
     | 'expiring'
 
+export type NodeListMetadataField
+  = | 'provider'
+    | 'region'
+    | 'city'
+    | 'asn'
+    | 'tags'
+    | 'group'
+
 type GeneralCardPreset = 'basic' | 'ops' | 'finance' | 'traffic' | 'full' | 'custom'
 type HomeQuickControlPreset = 'basic' | 'traffic' | 'ops' | 'full' | 'custom'
 type Lang = 'zh-CN' | 'en-US'
@@ -155,8 +163,6 @@ const DEFAULT_HOME_QUICK_CONTROL_ORDER: HomeQuickControlKey[] = [
   'default',
   'monthlyCost',
   'totalTraffic',
-  'upload',
-  'download',
   'peak',
   'offline',
   'highLoad',
@@ -165,7 +171,21 @@ const DEFAULT_HOME_QUICK_CONTROL_ORDER: HomeQuickControlKey[] = [
 
 const ALL_HOME_QUICK_CONTROL_KEYS = [
   ...DEFAULT_HOME_QUICK_CONTROL_ORDER,
+  'upload',
+  'download',
 ] as const satisfies readonly HomeQuickControlKey[]
+
+const DEFAULT_NODE_LIST_METADATA_FIELDS: NodeListMetadataField[] = [
+  'provider',
+  'region',
+  'asn',
+]
+
+const ALL_NODE_LIST_METADATA_FIELDS = [
+  ...DEFAULT_NODE_LIST_METADATA_FIELDS,
+  'tags',
+  'group',
+] as const satisfies readonly NodeListMetadataField[]
 
 const GENERAL_CARD_PRESETS: Record<GeneralCardPreset, GeneralCardKey[]> = {
   basic: DEFAULT_GENERAL_CARD_ORDER,
@@ -201,7 +221,7 @@ const GENERAL_CARD_PRESETS: Record<GeneralCardPreset, GeneralCardKey[]> = {
 
 const HOME_QUICK_CONTROL_PRESETS: Record<HomeQuickControlPreset, HomeQuickControlKey[]> = {
   basic: ['default', 'monthlyCost', 'peak', 'offline'],
-  traffic: ['default', 'totalTraffic', 'upload', 'download', 'peak'],
+  traffic: ['default', 'totalTraffic', 'peak'],
   ops: ['default', 'monthlyCost', 'offline', 'highLoad', 'expiring'],
   full: DEFAULT_HOME_QUICK_CONTROL_ORDER,
   custom: DEFAULT_HOME_QUICK_CONTROL_ORDER,
@@ -265,6 +285,10 @@ function isGeneralCardKey(value: string): value is GeneralCardKey {
 
 function isHomeQuickControlKey(value: string): value is HomeQuickControlKey {
   return (ALL_HOME_QUICK_CONTROL_KEYS as readonly string[]).includes(value)
+}
+
+function isNodeListMetadataField(value: string): value is NodeListMetadataField {
+  return (ALL_NODE_LIST_METADATA_FIELDS as readonly string[]).includes(value)
 }
 
 function parseGeneralCardPreset(value: unknown): GeneralCardPreset {
@@ -511,6 +535,16 @@ const useAppStore = defineStore('app', () => {
     return 'default'
   })
 
+  const nodeListMetadataEnabled = computed<boolean>(() => readBooleanSetting(themeSettings.value, 'nodeListMetadataEnabled', true))
+
+  const nodeListMetadataFields = computed<NodeListMetadataField[]>(() => {
+    return parseKeyList(themeSettings.value.nodeListMetadataFields, isNodeListMetadataField, DEFAULT_NODE_LIST_METADATA_FIELDS)
+  })
+
+  const nodeListCustomTagsVisible = computed<boolean>(() => readBooleanSetting(themeSettings.value, 'nodeListCustomTagsVisible', true))
+
+  const nodeDetailSectionTabsEnabled = computed<boolean>(() => readBooleanSetting(themeSettings.value, 'nodeDetailSectionTabsEnabled', false))
+
   const homeHighLoadThreshold = computed<number>(() => readNumberSetting(themeSettings.value, 'homeHighLoadThreshold', 80, 1, 100))
 
   const homeTrafficWarningThreshold = computed<number>(() => readNumberSetting(themeSettings.value, 'homeTrafficWarningThreshold', 80, 1, 100))
@@ -658,6 +692,10 @@ const useAppStore = defineStore('app', () => {
     homeQuickControlsEnabled,
     homeQuickControlOrder,
     homeQuickDefaultControl,
+    nodeListMetadataEnabled,
+    nodeListMetadataFields,
+    nodeListCustomTagsVisible,
+    nodeDetailSectionTabsEnabled,
     homeHighLoadThreshold,
     homeTrafficWarningThreshold,
     homeExpiringDays,

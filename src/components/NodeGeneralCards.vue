@@ -23,6 +23,8 @@ import {
   isHighLoadNode,
   isTrafficWarningNode,
 } from '@/utils/nodeMetricsHelper'
+import { getRegionDisplayName } from '@/utils/regionHelper'
+import { hasFreeNodeTag } from '@/utils/tagHelper'
 
 interface GeneralMetricCard {
   key: GeneralCardKey
@@ -63,8 +65,8 @@ const exchangeRates = ref(financeHelper.DEFAULT_EXCHANGE_RATES)
 const exchangeRateSource = ref<ExchangeRateSource | 'loading'>('loading')
 const financeCurrency = ref<CurrencyCode>('CNY')
 const excludeFreeNodes = ref(true)
-const summaryNodes = computed(() => props.nodes ?? nodesStore.nodes)
-const summaryTransitionKey = computed(() => props.transitionKey ?? nodesStore.nodes.length)
+const summaryNodes = computed(() => props.nodes ?? nodesStore.visibleNodes)
+const summaryTransitionKey = computed(() => props.transitionKey ?? nodesStore.visibleNodes.length)
 const metricSwitchTransitionProps = computed(() => ({
   ...(appStore.disablePageAnimation
     ? { css: false }
@@ -129,6 +131,18 @@ function getDistribution(nodes: NodeData[], selector: (node: NodeData) => string
   return Array.from(map.entries()).sort((a, b) => b[1] - a[1])
 }
 
+function getKnownDistribution(nodes: NodeData[], selector: (node: NodeData) => string | null | undefined): Array<[string, number]> {
+  const map = new Map<string, number>()
+  for (const node of nodes) {
+    const key = selector(node)?.trim()
+    if (!key)
+      continue
+    map.set(key, (map.get(key) || 0) + 1)
+  }
+
+  return Array.from(map.entries()).sort((a, b) => b[1] - a[1])
+}
+
 function formatDistributionTooltip(entries: Array<[string, number]>): string {
   if (entries.length === 0)
     return '暂无数据'
@@ -146,7 +160,7 @@ function formatExpiryNode(node: NodeData): string {
 }
 
 function getNodePeriodCostCNY(node: NodeData, periodDays: number): number {
-  if (excludeFreeNodes.value && node.tags?.includes('白嫖中'))
+  if (excludeFreeNodes.value && hasFreeNodeTag(node.tags))
     return 0
 
   return financeHelper.calculatePeriodCostCNY(node, exchangeRates.value, periodDays)
@@ -314,7 +328,7 @@ const offlineNodes = computed(() => summaryNodes.value.filter(node => !node.onli
 const highLoadNodes = computed(() => onlineStats.value.highLoadNodes)
 const expiringNodes = computed(() => summaryNodes.value.filter(node => isExpiringNode(node, appStore.homeExpiringDays)))
 const trafficWarningNodes = computed(() => summaryNodes.value.filter(node => isTrafficWarningNode(node, appStore.homeTrafficWarningThreshold)))
-const regionDistribution = computed(() => getDistribution(summaryNodes.value, node => node.region))
+const regionDistribution = computed(() => getKnownDistribution(summaryNodes.value, node => getRegionDisplayName(node.region)))
 const systemDistribution = computed(() => getDistribution(summaryNodes.value, node => node.os))
 const virtualizationDistribution = computed(() => getDistribution(summaryNodes.value, node => node.virtualization))
 const monthlyCostCNY = computed(() => summaryNodes.value.reduce((sum, node) => sum + getNodePeriodCostCNY(node, 30), 0))

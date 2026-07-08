@@ -1,4 +1,5 @@
 import type { NodeData } from '@/stores/nodes'
+import { hasFreeNodeTag } from '@/utils/tagHelper'
 
 export type CurrencyCode = 'CNY' | 'USD' | 'HKD' | 'EUR' | 'GBP' | 'JPY' | 'RUB' | 'CHF' | 'INR' | 'VND' | 'THB' | 'CAD'
 export type ExchangeRates = Record<CurrencyCode, number>
@@ -15,6 +16,7 @@ const CACHE_KEY = 'komari_finance_exchange_rates_cny_v1'
 const REQUIRED_CURRENCIES: CurrencyCode[] = ['CNY', 'USD', 'HKD', 'EUR', 'GBP', 'JPY', 'RUB', 'CHF', 'INR', 'VND', 'THB', 'CAD']
 const MS_PER_DAY = 24 * 60 * 60 * 1000
 const LONG_TERM_YEARS = 100
+let exchangeRatesInflight: Promise<{ rates: ExchangeRates, source: ExchangeRateSource }> | null = null
 
 export const DEFAULT_EXCHANGE_RATES: ExchangeRates = {
   CNY: 1,
@@ -56,6 +58,15 @@ const EXCHANGE_RATE_APIS = [
     parse: (data: unknown) => (data as { rates?: unknown }).rates,
   },
 ] as const
+
+async function safeJson(response: Response): Promise<unknown> {
+  try {
+    return await response.json()
+  }
+  catch {
+    return null
+  }
+}
 
 export function normalizeCurrency(currency: string | null | undefined): CurrencyCode {
   const value = String(currency || 'CNY').trim().toUpperCase()
@@ -109,7 +120,7 @@ export function calculateTotalRemainingValueCNY(
   now = new Date(),
 ): number {
   return nodes.reduce((sum, node) => {
-    if (excludeFreeTags && node.tags?.includes('白嫖中'))
+    if (excludeFreeTags && hasFreeNodeTag(node.tags))
       return sum
 
     return sum + calculateRemainingValueCNY(node, exchangeRates, now)
@@ -122,7 +133,7 @@ export function calculateTotalValueCNY(
   excludeFreeTags = true,
 ): number {
   return nodes.reduce((sum, node) => {
-    if (excludeFreeTags && node.tags?.includes('白嫖中'))
+    if (excludeFreeTags && hasFreeNodeTag(node.tags))
       return sum
 
     return sum + getPriceCNY(node, exchangeRates)
@@ -150,7 +161,7 @@ export function calculateTotalMonthlyCostCNY(
   excludeFreeTags = true,
 ): number {
   return nodes.reduce((sum, node) => {
-    if (excludeFreeTags && node.tags?.includes('白嫖中'))
+    if (excludeFreeTags && hasFreeNodeTag(node.tags))
       return sum
 
     return sum + calculateMonthlyCostCNY(node, exchangeRates)
@@ -186,17 +197,20 @@ export function calculateRemainingValueCNY(
     return 0
 
   const diffMs = expiredAt - now.getTime()
-  const diffYears = diffMs / (MS_PER_DAY * 365)
+  if (diffMs <= 0)
+    return 0
 
+  const diffYears = diffMs / (MS_PER_DAY * 365)
   if (diffYears > LONG_TERM_YEARS)
     return priceCNY
 
   const billingCycle = Number(node.billing_cycle)
-  const billingCycleMs = billingCycle * MS_PER_DAY
-  if (diffMs > 0 && billingCycleMs > 0)
-    return priceCNY * (diffMs / billingCycleMs)
+  if (!Number.isFinite(billingCycle) || billingCycle <= 0)
+    return priceCNY
 
-  return 0
+  const remainingDays = Math.ceil(diffMs / MS_PER_DAY)
+  const fraction = Math.min(remainingDays / billingCycle, 1)
+  return priceCNY * fraction
 }
 
 export function formatFinanceAmount(amount: number, currency: CurrencyCode): {
@@ -232,26 +246,34 @@ export async function getDailyExchangeRates(): Promise<{
     }
   }
 
-  const fetchedRates = await fetchExchangeRates()
-  if (fetchedRates) {
-    writeCachedExchangeRates(fetchedRates, today)
-    return {
-      rates: fetchedRates,
-      source: 'network',
-    }
+  if (!exchangeRatesInflight) {
+    exchangeRatesInflight = (async () => {
+      const fetchedRates = await fetchExchangeRates()
+      if (fetchedRates) {
+        writeCachedExchangeRates(fetchedRates, today)
+        return {
+          rates: fetchedRates,
+          source: 'network' as const,
+        }
+      }
+
+      if (cached) {
+        return {
+          rates: cached.rates,
+          source: 'stale-cache' as const,
+        }
+      }
+
+      return {
+        rates: DEFAULT_EXCHANGE_RATES,
+        source: 'default' as const,
+      }
+    })().finally(() => {
+      exchangeRatesInflight = null
+    })
   }
 
-  if (cached) {
-    return {
-      rates: cached.rates,
-      source: 'stale-cache',
-    }
-  }
-
-  return {
-    rates: DEFAULT_EXCHANGE_RATES,
-    source: 'default',
-  }
+  return exchangeRatesInflight
 }
 
 export function getPriceCNY(node: NodeData, exchangeRates: ExchangeRates): number {
@@ -273,7 +295,7 @@ async function fetchExchangeRates(): Promise<ExchangeRates | null> {
       if (!response.ok)
         continue
 
-      const data = await response.json()
+      const data = await safeJson(response)
       const rates = sanitizeExchangeRates(api.parse(data))
       if (rates)
         return rates

@@ -4,7 +4,7 @@ import dayjs from 'dayjs'
 export type BillingCycleType = 'monthly' | 'quarterly' | 'semi_annual' | 'annual' | 'biennial' | 'triennial' | 'quinquennial' | 'once' | 'custom'
 
 /** 过期状态类型 */
-export type ExpireStatus = 'expired' | 'critical' | 'warning' | 'normal' | 'long_term'
+export type ExpireStatus = 'unknown' | 'expired' | 'critical' | 'warning' | 'normal' | 'long_term'
 
 /** 支持的标签颜色 */
 export type TagColor
@@ -158,22 +158,32 @@ export function getBillingCycleText(billingCycle: number, lang: 'zh-CN' | 'en-US
   return texts[type][lang]
 }
 
+const MS_PER_DAY = 24 * 60 * 60 * 1000
+
+function getExpiryDiffMs(expiredAt: string | number | undefined, now = Date.now()): number | null {
+  if (!expiredAt)
+    return null
+
+  const expiredDate = dayjs(expiredAt)
+  if (!expiredDate.isValid())
+    return null
+
+  return expiredDate.valueOf() - now
+}
+
 /**
  * 计算距离过期的天数
  * @param expiredAt 过期时间（字符串或时间戳）
- * @returns 距离过期的天数，负数表示已过期
+ * @returns 距离过期的天数；无效时间返回 0，未来不足一天返回 1
  */
 export function getDaysUntilExpired(expiredAt: string | number | undefined): number {
-  if (!expiredAt)
+  const diffMs = getExpiryDiffMs(expiredAt)
+  if (diffMs === null)
     return 0
+  if (diffMs <= 0)
+    return Math.floor(diffMs / MS_PER_DAY)
 
-  const expiredDate = dayjs(expiredAt)
-  const now = dayjs()
-
-  if (!expiredDate.isValid())
-    return 0
-
-  return expiredDate.diff(now, 'day')
+  return Math.ceil(diffMs / MS_PER_DAY)
 }
 
 /**
@@ -182,10 +192,13 @@ export function getDaysUntilExpired(expiredAt: string | number | undefined): num
  * @returns 过期状态
  */
 export function getExpireStatus(expiredAt: string | number | undefined): ExpireStatus {
-  const days = getDaysUntilExpired(expiredAt)
-
-  if (days <= 0)
+  const diffMs = getExpiryDiffMs(expiredAt)
+  if (diffMs === null)
+    return 'unknown'
+  if (diffMs <= 0)
     return 'expired'
+
+  const days = Math.ceil(diffMs / MS_PER_DAY)
   if (days <= EXPIRE_THRESHOLDS.critical)
     return 'critical'
   if (days <= EXPIRE_THRESHOLDS.warning)
@@ -210,6 +223,7 @@ export function getExpireStatusColor(status: ExpireStatus): 'error' | 'warning' 
     case 'normal':
     case 'long_term':
       return 'success'
+    case 'unknown':
     default:
       return 'default'
   }
@@ -230,7 +244,7 @@ export function getExpireStatusHexColor(status: ExpireStatus): string {
     case 'normal':
       return TAG_COLOR_HEX_MAP.green
     case 'long_term':
-      return TAG_COLOR_HEX_MAP.gray
+    case 'unknown':
     default:
       return TAG_COLOR_HEX_MAP.gray
   }
@@ -245,6 +259,10 @@ export function getExpireStatusHexColor(status: ExpireStatus): string {
 export function getExpireText(expiredAt: string | number | undefined, lang: 'zh-CN' | 'en-US' = 'zh-CN'): string {
   const days = getDaysUntilExpired(expiredAt)
   const status = getExpireStatus(expiredAt)
+
+  if (status === 'unknown') {
+    return '-'
+  }
 
   if (status === 'expired') {
     return lang === 'zh-CN' ? '已过期' : 'Expired'
@@ -266,15 +284,16 @@ export function getExpireText(expiredAt: string | number | undefined, lang: 'zh-
  * @returns 解析后的标签对象
  */
 export function parseTagWithColor(tag: string): { text: string, color: TagColor | null } {
-  const colorMatch = tag.match(TAG_COLOR_SUFFIX_REGEX)
+  const normalizedTag = tag.trim()
+  const colorMatch = normalizedTag.match(TAG_COLOR_SUFFIX_REGEX)
   if (colorMatch && colorMatch[1]) {
     const colorCandidate = colorMatch[1].toLowerCase()
-    const text = tag.replace(TAG_COLOR_SUFFIX_REMOVE_REGEX, '')
+    const text = normalizedTag.replace(TAG_COLOR_SUFFIX_REMOVE_REGEX, '').trim()
     if ((TAG_COLORS as readonly string[]).includes(colorCandidate)) {
       return { text, color: colorCandidate as TagColor }
     }
   }
-  return { text: tag, color: null }
+  return { text: normalizedTag, color: null }
 }
 
 /**
@@ -295,7 +314,7 @@ export function parseTags(tags: string | undefined): Array<{ text: string, color
   if (!tags || tags.trim() === '')
     return []
 
-  const tagList = tags.split(';').filter(tag => tag.trim() !== '')
+  const tagList = tags.split(';').map(tag => tag.trim()).filter(Boolean)
 
   return tagList.map((tag, index) => {
     const { text, color } = parseTagWithColor(tag)
@@ -307,6 +326,10 @@ export function parseTags(tags: string | undefined): Array<{ text: string, color
       hex: getTagColorHex(resolvedColor),
     }
   })
+}
+
+export function hasFreeNodeTag(tags: string | undefined): boolean {
+  return parseTags(tags).some(tag => tag.text === '白嫖中')
 }
 
 /**
@@ -364,10 +387,13 @@ export function getRemainingValue(
   if (!price || price <= 0)
     return 0
 
-  const days = getDaysUntilExpired(expiredAt)
-  if (days <= 0)
+  const status = getExpireStatus(expiredAt)
+  if (status === 'unknown' || status === 'expired')
     return 0
+  if (status === 'long_term')
+    return price
 
+  const days = getDaysUntilExpired(expiredAt)
   if (billingCycle <= 0)
     return price
 

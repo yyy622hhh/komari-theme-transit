@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { CSSProperties } from 'vue'
 import type { NodeData } from '@/stores/nodes'
 import { Icon } from '@iconify/vue'
 import { computed, ref, watch } from 'vue'
@@ -7,7 +8,9 @@ import TrafficProgress from '@/components/TrafficProgress.vue'
 import { Badge } from '@/components/ui/badge'
 import { DataTooltip } from '@/components/ui/data-tooltip'
 import { ProgressThin } from '@/components/ui/progress-thin'
+import { useNodeProviderMetadata } from '@/composables/useNodeProviderMetadata'
 import { useAppStore } from '@/stores/app'
+import { formatCityNameZh } from '@/utils/cityNameHelper'
 import { formatBytesPerSecondWithConfig, formatBytesWithConfig, formatDateTime, formatUptimeWithFormat, getStatus } from '@/utils/helper'
 import { getRealtimeTotalSpeed, getTrafficUsed, getTrafficUsedPercentage, hasTrafficLimit } from '@/utils/nodeMetricsHelper'
 import { getOSImage, getOSName } from '@/utils/osImageHelper'
@@ -19,6 +22,17 @@ interface ColumnConfig {
   label: string
   width: string | number
   sortable: boolean
+}
+
+interface NodeMetadataItem {
+  key: string
+  value: string
+  title?: string
+  icon?: string
+  flagSrc?: string
+  variant?: 'secondary' | 'outline'
+  class?: string
+  style?: CSSProperties
 }
 
 const props = defineProps<{
@@ -37,18 +51,30 @@ const appStore = useAppStore()
 // 未登录且开启「未登录隐藏价格」时，隐藏价格信息
 const showPrice = computed(() => appStore.isLoggedIn || !appStore.hidePriceWhenLoggedOut)
 
-const columns: ColumnConfig[] = [
+const baseColumns: ColumnConfig[] = [
   { key: 'status', label: '状态', width: '40px', sortable: false },
-  { key: 'os', label: '系统', width: '40px', sortable: false },
-  { key: 'name', label: '节点', width: 'minmax(160px, 0.8fr)', sortable: true },
-  { key: 'tags', label: '标签', width: 'minmax(200px, 1fr)', sortable: false },
+  { key: 'os', label: '系统', width: '44px', sortable: false },
+  { key: 'name', label: '节点', width: 'minmax(180px, 0.85fr)', sortable: true },
+  { key: 'metadata', label: '信息', width: 'minmax(240px, 1.1fr)', sortable: false },
   { key: 'uptime', label: '运行时间', width: '116px', sortable: true },
   { key: 'cpu', label: 'CPU', width: '100px', sortable: false },
   { key: 'mem', label: '内存', width: '100px', sortable: false },
   { key: 'disk', label: '硬盘', width: '100px', sortable: false },
-  { key: 'traffic', label: '流量', width: '100px', sortable: false },
-  { key: 'rate', label: '速率', width: '80px', sortable: true },
+  { key: 'traffic', label: '流量', width: '104px', sortable: false },
+  { key: 'rate', label: '速率', width: '88px', sortable: true },
 ]
+
+const columns = computed(() => baseColumns.filter(col => col.key !== 'metadata' || appStore.nodeListMetadataEnabled))
+const providerMetadataEnabled = computed(() => {
+  return appStore.nodeListMetadataEnabled
+    && appStore.nodeListMetadataFields.some(field => field === 'provider' || field === 'city' || field === 'asn')
+})
+
+const { getNodeProviderMetadata } = useNodeProviderMetadata({
+  nodes: () => props.nodes,
+  customAliases: () => appStore.providerAliases,
+  enabled: () => providerMetadataEnabled.value,
+})
 
 const sortKey = ref<string>('')
 const sortDir = ref<1 | -1>(1)
@@ -113,10 +139,10 @@ const formatBytes = (bytes: number) => formatBytesWithConfig(bytes, appStore.byt
 const formatBytesPerSecond = (bytes: number) => formatBytesPerSecondWithConfig(bytes, appStore.byteDecimals)
 const formatUptime = (seconds: number) => formatUptimeWithFormat(seconds, 'hour')
 
-const columnKeys = computed(() => columns.map(c => c.key))
+const columnKeys = computed(() => columns.value.map(c => c.key))
 
 const gridStyle = computed(() => ({
-  gridTemplateColumns: columns.map(c => c.width).join(' '),
+  gridTemplateColumns: columns.value.map(c => c.width).join(' '),
 }))
 
 const offlineOverlayContentStyle = computed(() => {
@@ -132,8 +158,19 @@ const offlineOverlayContentStyle = computed(() => {
   return { gridColumn: `${startColumn} / -1` }
 })
 
+const nodeMetadataItemsByUuid = computed(() => {
+  const itemsByUuid: Record<string, NodeMetadataItem[]> = {}
+  for (const node of props.nodes)
+    itemsByUuid[node.uuid] = buildNodeMetadataItems(node)
+  return itemsByUuid
+})
+
 function getFlagSrc(region: string): string {
   return `/images/flags/${getRegionCode(region)}.svg`
+}
+
+function getRegionAltText(region: string): string {
+  return getRegionDisplayName(region) || getRegionCode(region)
 }
 
 function hasRegion(region: string | null | undefined): boolean {
@@ -142,6 +179,13 @@ function hasRegion(region: string | null | undefined): boolean {
 
 function handleClick(node: NodeData) {
   emit('click', node)
+}
+
+function handleRowKeydown(event: KeyboardEvent, node: NodeData) {
+  if (event.key !== 'Enter' && event.key !== ' ')
+    return
+  event.preventDefault()
+  handleClick(node)
 }
 
 function getRowTransitionKey(node: NodeData): string {
@@ -175,8 +219,114 @@ function getPriceTags(node: NodeData): Array<string> {
   return tags
 }
 
-function getCustomTags(node: NodeData): Array<string> {
-  return parseTags(node.tags).map(t => t.text)
+function getNodeMetadataItems(node: NodeData): NodeMetadataItem[] {
+  return nodeMetadataItemsByUuid.value[node.uuid] ?? []
+}
+
+function buildNodeMetadataItems(node: NodeData): NodeMetadataItem[] {
+  const items: NodeMetadataItem[] = []
+  const providerMetadata = getNodeProviderMetadata(node)
+
+  for (const field of appStore.nodeListMetadataFields) {
+    switch (field) {
+      case 'provider': {
+        const provider = providerMetadata?.provider
+        if (!provider?.displayName)
+          break
+
+        items.push({
+          key: 'provider',
+          value: provider.displayName,
+          icon: provider.primary.icon,
+          title: provider.tooltipLines.length > 0 ? provider.tooltipLines.join('\n') : provider.displayName,
+          variant: 'secondary',
+          class: 'max-w-[9.5rem] bg-secondary/85 text-secondary-foreground border-border/40',
+        })
+        break
+      }
+      case 'region': {
+        if (!hasRegion(node.region))
+          break
+
+        const displayName = getRegionDisplayName(node.region)
+        if (!displayName)
+          break
+
+        items.push({
+          key: 'region',
+          value: displayName,
+          flagSrc: getFlagSrc(node.region),
+          title: displayName,
+          variant: 'outline',
+          class: 'max-w-[8rem] bg-background/45 text-foreground/80 border-border/60',
+        })
+        break
+      }
+      case 'city': {
+        const city = providerMetadata?.geo?.city
+        const cityName = formatCityNameZh(city)
+        if (!cityName)
+          break
+
+        items.push({
+          key: 'city',
+          value: cityName,
+          icon: 'tabler:map-pin',
+          title: [cityName, providerMetadata?.geo?.countryCode].filter(Boolean).join(' · '),
+          variant: 'outline',
+          class: 'max-w-[8rem] bg-background/45 text-foreground/80 border-border/60',
+        })
+        break
+      }
+      case 'asn': {
+        const asn = providerMetadata?.geo?.asn
+        if (!asn)
+          break
+
+        items.push({
+          key: 'asn',
+          value: asn,
+          icon: 'tabler:network',
+          title: providerMetadata?.geo?.org ? `${asn}\n${providerMetadata.geo.org}` : asn,
+          variant: 'outline',
+          class: 'max-w-[7rem] bg-info/10 text-info border-info/25 font-mono',
+        })
+        break
+      }
+      case 'tags': {
+        if (!appStore.nodeListCustomTagsVisible)
+          break
+
+        parseTags(node.tags).forEach((tag, index) => {
+          items.push({
+            key: `tag-${index}-${tag.text}`,
+            value: tag.text,
+            title: tag.text,
+            icon: 'tabler:tag',
+            variant: 'outline',
+            class: 'max-w-[8rem] bg-background/45 text-foreground/80 border-border/60',
+            style: tag.hex ? { borderColor: `${tag.hex}66`, color: tag.hex } : undefined,
+          })
+        })
+        break
+      }
+      case 'group': {
+        node.groups.forEach((group, index) => {
+          items.push({
+            key: `group-${index}-${group}`,
+            value: group,
+            title: group,
+            icon: 'tabler:folder',
+            variant: 'outline',
+            class: 'max-w-[8rem] bg-background/45 text-foreground/80 border-border/60',
+          })
+        })
+        break
+      }
+    }
+  }
+
+  return items
 }
 </script>
 
@@ -184,13 +334,13 @@ function getCustomTags(node: NodeData): Array<string> {
   <div class="overflow-x-auto overflow-y-hidden min-w-0 p-1 -m-1">
     <div class="min-w-fit w-full flex flex-col gap-1">
       <!-- 表头 -->
-      <div class="grid p-2 bg-background/60 rounded-lg backdrop-blur-sm gap-2" :style="gridStyle">
+      <div class="grid px-2.5 py-2 bg-background/70 rounded-lg backdrop-blur-sm gap-2" :style="gridStyle">
         <div
           v-for="col in columns" :key="col.key"
-          :class="[col.sortable ? 'cursor-pointer' : '', ['status', 'os'].includes(col.key) ? 'text-center' : 'text-left']"
+          :class="[col.sortable ? 'cursor-pointer select-none' : '', ['status', 'os'].includes(col.key) ? 'text-center' : 'text-left']"
           @click="handleSort(col)"
         >
-          <span class="text-xs text-muted-foreground">
+          <span class="text-[11px] font-medium tracking-wide text-foreground/70">
             {{ col.label }}{{ col.sortable && sortKey === col.key ? (sortDir === 1 ? ' ↑' : ' ↓') : '' }}
           </span>
         </div>
@@ -206,10 +356,14 @@ function getCustomTags(node: NodeData): Array<string> {
         <div
           v-for="(node, index) in sortedNodes"
           :key="getRowTransitionKey(node)"
-          class="flex flex-col relative h-16 justify-center px-2 cursor-pointer bg-background/30 rounded-lg backdrop-blur-sm shadow-[0_0_0_2px] shadow-transparent hover:shadow-slate-500/10 hover:bg-background transition-all"
+          class="flex flex-col relative h-16 justify-center px-2.5 cursor-pointer bg-background/40 rounded-lg backdrop-blur-sm shadow-[0_0_0_2px] shadow-transparent hover:shadow-slate-500/10 hover:bg-background/70 transition-all"
           :class="[!node.online && '!shadow-red-600/10']"
           :style="getRowTransitionStyle(index)"
+          role="button"
+          tabindex="0"
+          :aria-label="`查看节点 ${node.name} 详情`"
           @click="handleClick(node)"
+          @keydown="handleRowKeydown($event, node)"
         >
           <div class="grid gap-2 items-center" :style="gridStyle">
             <template v-for="col in columns" :key="col.key">
@@ -224,17 +378,17 @@ function getCustomTags(node: NodeData): Array<string> {
               </div>
 
               <!-- 节点名称 -->
-              <div v-else-if="col.key === 'name'" class="space-y-0.5" :class="[!node.online && 'blur-sm opacity-30']">
-                <div class="flex gap-1 items-center text-xs font-semibold">
+              <div v-else-if="col.key === 'name'" class="space-y-0.5 min-w-0" :class="[!node.online && 'blur-sm opacity-30']">
+                <div class="flex gap-1.5 items-center text-[13px] font-semibold text-foreground min-w-0">
                   <img
                     v-if="hasRegion(node.region)" :src="getFlagSrc(node.region)"
-                    :alt="getRegionDisplayName(node.region)" class="size-5 rounded-sm"
+                    :alt="getRegionAltText(node.region)" class="size-5 rounded-sm shrink-0"
                   >
                   <span class="truncate">{{ node.name }}</span>
                 </div>
                 <div
                   v-if="showPrice && getPriceTags(node).length > 0"
-                  class="text-[11px] text-muted-foreground/70 truncate"
+                  class="text-[11px] font-medium text-foreground/60 truncate"
                 >
                   <span v-for="(tag, tagIndex) in getPriceTags(node)" :key="tagIndex" :class="!!tagIndex && 'ml-3'">
                     {{ tag }}
@@ -242,14 +396,20 @@ function getCustomTags(node: NodeData): Array<string> {
                 </div>
               </div>
 
-              <!-- 标签 -->
-              <div v-else-if="col.key === 'tags'">
-                <div class="flex flex-wrap gap-1 items-center">
+              <!-- 信息 / 标签 -->
+              <div v-else-if="col.key === 'metadata'" class="min-w-0">
+                <div v-if="getNodeMetadataItems(node).length > 0" class="flex flex-wrap gap-1 items-center max-h-11 overflow-hidden">
                   <Badge
-                    v-for="(tag, tagIndex) in getCustomTags(node)" :key="tagIndex" variant="outline"
-                    class="!text-[11px] rounded text-muted-foreground border-muted-foreground/10 px-1.5"
+                    v-for="item in getNodeMetadataItems(node)" :key="item.key"
+                    :variant="item.variant ?? 'secondary'"
+                    :title="item.title ?? item.value"
+                    :style="item.style"
+                    class="min-w-0 rounded-md px-1.5 text-[11px] font-medium shadow-none"
+                    :class="item.class"
                   >
-                    {{ tag }}
+                    <img v-if="item.flagSrc" :src="item.flagSrc" :alt="item.value" class="size-3.5 rounded-[2px] shrink-0">
+                    <Icon v-else-if="item.icon" :icon="item.icon" width="12" height="12" class="shrink-0" />
+                    <span class="truncate">{{ item.value }}</span>
                   </Badge>
                 </div>
               </div>
@@ -260,8 +420,8 @@ function getCustomTags(node: NodeData): Array<string> {
             </div> -->
 
               <!-- 运行时间 -->
-              <div v-else-if="col.key === 'uptime'" class="flex flex-col gap-0.5">
-                <span class="text-[10px] text-muted-foreground truncate">
+              <div v-else-if="col.key === 'uptime'" class="flex flex-col gap-0.5 min-w-0">
+                <span class="text-[11px] font-medium text-foreground/70 truncate">
                   {{ formatUptime(node.uptime ?? 0) }}
                 </span>
                 <NodePingListCell :uuid="node.uuid" :online="node.online" />
@@ -269,13 +429,13 @@ function getCustomTags(node: NodeData): Array<string> {
 
               <!-- 操作系统 -->
               <div v-else-if="col.key === 'os'" class="flex justify-center">
-                <img :src="getOSImage(node.os)" :alt="getOSName(node.os)" class="size-4">
+                <img :src="getOSImage(node.os)" :alt="getOSName(node.os)" class="size-4.5">
               </div>
 
               <!-- CPU -->
-              <div v-else-if="col.key === 'cpu'" class="group">
+              <div v-else-if="col.key === 'cpu'" class="group min-w-0">
                 <div class="space-y-1">
-                  <div class="text-[10px] text-muted-foreground truncate">
+                  <div class="text-[11px] font-medium text-foreground/75 truncate">
                     <span class="inline group-hover:hidden">
                       {{ (node.cpu ?? 0).toFixed(1) }}%
                     </span>
@@ -288,9 +448,9 @@ function getCustomTags(node: NodeData): Array<string> {
               </div>
 
               <!-- 内存 -->
-              <div v-else-if="col.key === 'mem'" class="group">
+              <div v-else-if="col.key === 'mem'" class="group min-w-0">
                 <div class="space-y-1">
-                  <div class="text-[10px] text-muted-foreground truncate">
+                  <div class="text-[11px] font-medium text-foreground/75 truncate">
                     <span class="inline group-hover:hidden">
                       {{ ((node.ram ?? 0) / (node.mem_total || 1) * 100).toFixed(1) }}%
                     </span>
@@ -306,9 +466,9 @@ function getCustomTags(node: NodeData): Array<string> {
               </div>
 
               <!-- 硬盘 -->
-              <div v-else-if="col.key === 'disk'" class="group">
+              <div v-else-if="col.key === 'disk'" class="group min-w-0">
                 <div class="space-y-1">
-                  <div class="text-[10px] text-muted-foreground truncate">
+                  <div class="text-[11px] font-medium text-foreground/75 truncate">
                     <span class="inline group-hover:hidden">
                       {{ ((node.disk ?? 0) / (node.disk_total || 1) * 100).toFixed(1) }}%
                     </span>
@@ -324,10 +484,10 @@ function getCustomTags(node: NodeData): Array<string> {
               </div>
 
               <!-- 流量 -->
-              <div v-else-if="col.key === 'traffic'" class="group">
+              <div v-else-if="col.key === 'traffic'" class="group min-w-0">
                 <DataTooltip placement="top" class="flex items-center gap-2" content-class="mb-1.5">
                   <div class="space-y-1 w-full">
-                    <div class="text-[10px] text-muted-foreground truncate">
+                    <div class="text-[11px] font-medium text-foreground/75 truncate">
                       <span class="inline group-hover:hidden">
                         {{ getTrafficUsedPercentage(node).toFixed(1) }}%
                       </span>
@@ -357,14 +517,14 @@ function getCustomTags(node: NodeData): Array<string> {
               </div>
 
               <!-- 速率 -->
-              <div v-else-if="col.key === 'rate'">
-                <div class="text-[10px] flex flex-col ">
-                  <span class="text-green-600 flex flex-row gap-1 items-center">
-                    <Icon icon="tabler:chevron-up" width="12" height="12" />
+              <div v-else-if="col.key === 'rate'" class="min-w-0">
+                <div class="text-[11px] font-medium flex flex-col">
+                  <span class="text-green-600 dark:text-green-400 flex flex-row gap-1 items-center truncate">
+                    <Icon icon="tabler:chevron-up" width="12" height="12" class="shrink-0" />
                     {{ formatBytesPerSecond(node.net_out ?? 0) }}
                   </span>
-                  <span class="text-blue-600 flex flex-row gap-1 items-center">
-                    <Icon icon="tabler:chevron-down" width="12" height="12" />
+                  <span class="text-blue-600 dark:text-blue-400 flex flex-row gap-1 items-center truncate">
+                    <Icon icon="tabler:chevron-down" width="12" height="12" class="shrink-0" />
                     {{ formatBytesPerSecond(node.net_in ?? 0) }}
                   </span>
                 </div>
@@ -381,7 +541,7 @@ function getCustomTags(node: NodeData): Array<string> {
                 <div class="text-sm font-semibold truncate">
                   <span class="text-red-500">离线</span> {{ node.name }}
                 </div>
-                <div class="text-xs text-muted-foreground">
+                <div class="text-xs font-medium text-foreground/65">
                   {{ formatOfflineTime(node) }}
                 </div>
               </div>

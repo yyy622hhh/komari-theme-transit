@@ -1552,6 +1552,28 @@ export const emojiToRegionMap: Record<string, { en: string, zh: string, code: st
   },
 }
 
+interface RegionEntry { emoji: string, en: string, zh: string, code: string, aliases: string[] }
+
+const CJK_UNIFIED_IDEOGRAPH_REGEX = /\p{Script=Han}/u
+
+function getRegionEntry(region: string | null | undefined): RegionEntry | null {
+  if (!region?.trim())
+    return null
+
+  const trimmed = region.trim()
+  const direct = emojiToRegionMap[trimmed]
+  if (direct)
+    return { emoji: trimmed, en: direct.en, zh: direct.zh, code: direct.code, aliases: direct.aliases }
+
+  const lowerRegion = trimmed.toLowerCase()
+  for (const [emoji, info] of Object.entries(emojiToRegionMap)) {
+    if (info.code.toLowerCase() === lowerRegion || info.aliases.some(alias => alias.toLowerCase() === lowerRegion))
+      return { emoji, en: info.en, zh: info.zh, code: info.code, aliases: info.aliases }
+  }
+
+  return null
+}
+
 /**
  * 检查地区emoji是否匹配搜索词
  * @param regionEmoji 地区emoji（如：🇭🇰）
@@ -1561,27 +1583,21 @@ export const emojiToRegionMap: Record<string, { en: string, zh: string, code: st
 export function isRegionMatch(regionEmoji: string, searchTerm: string): boolean {
   const lowerSearchTerm = searchTerm.toLowerCase().trim()
 
-  // 直接匹配emoji
-  if (regionEmoji === searchTerm) {
+  // 直接匹配emoji / 原始值，保留未知地区的搜索能力
+  if (regionEmoji === searchTerm)
     return true
-  }
 
-  // 从映射表中查找
-  const regionInfo = emojiToRegionMap[regionEmoji]
-  if (!regionInfo) {
-    // 如果映射表中没有，则只进行简单的包含匹配
+  const regionInfo = getRegionEntry(regionEmoji)
+  if (!regionInfo)
     return regionEmoji.toLowerCase().includes(lowerSearchTerm)
-  }
 
   // 检查英文名称
-  if (regionInfo.en.toLowerCase().includes(lowerSearchTerm)) {
+  if (regionInfo.en.toLowerCase().includes(lowerSearchTerm))
     return true
-  }
 
   // 检查中文名称
-  if (regionInfo.zh.includes(lowerSearchTerm)) {
+  if (regionInfo.zh.includes(lowerSearchTerm))
     return true
-  }
 
   // 检查别名
   return regionInfo.aliases.some(alias =>
@@ -1596,12 +1612,14 @@ export function isRegionMatch(regionEmoji: string, searchTerm: string): boolean 
  * @returns 地区名称
  */
 export function getRegionDisplayName(regionEmoji: string, language: 'en' | 'zh' = 'zh'): string {
-  const regionInfo = emojiToRegionMap[regionEmoji]
-  if (!regionInfo) {
-    return regionEmoji
-  }
+  const regionInfo = getRegionEntry(regionEmoji)
+  if (!regionInfo)
+    return ''
 
-  return language === 'zh' ? regionInfo.zh : regionInfo.en
+  if (language === 'en')
+    return regionInfo.en
+
+  return CJK_UNIFIED_IDEOGRAPH_REGEX.test(regionInfo.zh) ? regionInfo.zh : ''
 }
 
 /**
@@ -1618,10 +1636,9 @@ export function getSupportedRegions(): string[] {
  * @returns 地区代码（如：HK, CN, US）
  */
 export function getRegionCode(regionEmoji: string): string {
-  const regionInfo = emojiToRegionMap[regionEmoji]
-  if (!regionInfo) {
+  const regionInfo = getRegionEntry(regionEmoji)
+  if (!regionInfo)
     return regionEmoji
-  }
 
   return regionInfo.code
 }
@@ -1670,21 +1687,11 @@ export function searchRegions(searchTerm: string): Array<{ emoji: string, en: st
  * @returns 地区信息，如果未找到则返回 null
  */
 export function getRegionByAlias(aliasOrCode: string): { emoji: string, en: string, zh: string, code: string } | null {
-  const lowerAlias = aliasOrCode.toLowerCase().trim()
+  const regionInfo = getRegionEntry(aliasOrCode)
+  if (!regionInfo)
+    return null
 
-  for (const [emoji, info] of Object.entries(emojiToRegionMap)) {
-    // 直接匹配代码
-    if (info.code.toLowerCase() === lowerAlias) {
-      return { emoji, en: info.en, zh: info.zh, code: info.code }
-    }
-
-    // 匹配别名
-    if (info.aliases.some(alias => alias.toLowerCase() === lowerAlias)) {
-      return { emoji, en: info.en, zh: info.zh, code: info.code }
-    }
-  }
-
-  return null
+  return { emoji: regionInfo.emoji, en: regionInfo.en, zh: regionInfo.zh, code: regionInfo.code }
 }
 
 /**
