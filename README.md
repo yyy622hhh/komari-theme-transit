@@ -258,6 +258,11 @@ zip 包内包含 Komari 主题需要的 `komari-theme.json`、`preview.png` 和 
 
 ## 更新日志
 
+### v2.3.1
+
+- 修复节点状态轮询时实时上行 / 下行、CPU 等卡片数据需要刷新浏览器才更新的问题。
+- 确认节点卡片尺寸未配置时仍默认使用 `compact`；`mini` 仅作为可选高密度模式。
+
 ### v2.3.0
 
 - 新增 `mini` 节点卡片尺寸，高密度展示更多节点；保留原有 `compact`、`comfortable`、`large` 三档。

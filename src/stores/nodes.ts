@@ -120,7 +120,9 @@ const useNodesStore = defineStore('nodes', () => {
 
   function addIndexedNode(node: NodeData): void {
     nodes.value.push(node)
-    nodeIndex.set(node.uuid, node)
+    const reactiveNode = nodes.value.at(-1)
+    if (reactiveNode)
+      nodeIndex.set(reactiveNode.uuid, reactiveNode)
   }
 
   /** 按 UUID 索引的节点映射 */
