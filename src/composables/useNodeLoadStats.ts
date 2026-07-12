@@ -4,11 +4,11 @@ import type { StatusRecord } from '@/utils/rpc'
 import { computed, onScopeDispose, ref, shallowRef, toValue, watch } from 'vue'
 import { LOAD_CONFIG, LOAD_RECORD_MAX_COUNT } from '@/constants/load'
 import { abortLoadRecords, abortNodeLoadRecords, buildRecordsByClient, loadLoadRecords, loadNodeLoadRecords } from '@/services/history.service'
-import { buildDiskPrediction } from '@/services/prediction.service'
+import { analyzeDiskPrediction, buildDiskPrediction } from '@/services/prediction.service'
 import { useAppStore } from '@/stores/app'
 
-export { buildDiskPrediction, loadNodeLoadRecords }
-export type { NodeDiskPrediction } from '@/services/prediction.service'
+export { analyzeDiskPrediction, buildDiskPrediction, loadNodeLoadRecords }
+export type { DiskPredictionState, NodeDiskPrediction } from '@/services/prediction.service'
 
 interface SharedLoadRecordsState {
   recordsByClient: Map<string, StatusRecord[]>
@@ -281,7 +281,8 @@ export function useNodeLoadStats(
     return entry.data.value?.recordsByClient.get(nodeUuid) ?? []
   })
 
-  const diskPrediction = computed(() => buildDiskPrediction(records.value, resolved.value.diskTotal))
+  const diskPredictionState = computed(() => analyzeDiskPrediction(records.value, resolved.value.diskTotal))
+  const diskPrediction = computed(() => diskPredictionState.value.prediction)
 
   watch(
     resolved,
@@ -365,6 +366,7 @@ export function useNodeLoadStats(
     loading,
     error,
     diskPrediction,
+    diskPredictionState,
     hasData: computed(() => records.value.length > 0),
   }
 }

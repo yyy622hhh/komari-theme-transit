@@ -1,4 +1,6 @@
 import type { MetricDefinition, MetricQueryParams, MetricQueryResponse, PingMetricStatsParams, PingMetricStatsResponse, PingTaskInfo } from '@/utils/rpc'
+import { CACHE_CONFIG } from '@/constants/cache'
+import { SharedCache } from '@/services/cache.service'
 import { requestManager } from '@/services/request.service'
 import { getSharedRpc, RpcError } from '@/utils/rpc'
 
@@ -44,6 +46,12 @@ function normalizeMetricKeys(params: MetricQueryParams): string[] {
   ]
   return [...new Set(keys.filter(Boolean))].sort()
 }
+
+const metricDefinitionsCache = new SharedCache<MetricDefinition[]>({
+  maxSize: 1,
+  ttl: CACHE_CONFIG.request.ttl,
+  cleanupInterval: CACHE_CONFIG.cleanup.interval,
+})
 
 export function getMetricDefinitionsRequestKey(): string {
   return 'metrics:definitions'
@@ -93,11 +101,17 @@ export function abortPingMetricStats(params: PingMetricStatsParams): void {
 }
 
 export async function loadMetricDefinitions(): Promise<MetricDefinition[]> {
-  return requestManager.run(
-    getMetricDefinitionsRequestKey(),
+  const key = getMetricDefinitionsRequestKey()
+  const cached = metricDefinitionsCache.get(key)
+  if (cached)
+    return cached
+
+  const definitions = await requestManager.run(
+    key,
     async () => getSharedRpc().listPublicMetricDefinitions(),
     { shouldRetry: shouldRetryMetricRequest },
   )
+  return metricDefinitionsCache.set(key, definitions)
 }
 
 export async function queryMetrics(params: MetricQueryParams): Promise<MetricQueryResponse> {

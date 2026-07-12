@@ -1,14 +1,16 @@
 <script setup lang="ts">
 import type { ChartDashboardCardKey } from '@/stores/app'
 import type { RecordFormat } from '@/utils/recordHelper'
-import type { MetricSeries, StatusRecord } from '@/utils/rpc'
+import type { MetricQueryParams, MetricSeries, StatusRecord } from '@/utils/rpc'
 import { Icon } from '@iconify/vue'
 import { useIntervalFn } from '@vueuse/core'
 import dayjs from 'dayjs'
 import { computed, onMounted, ref, shallowRef, watch } from 'vue'
 import VChart from 'vue-echarts'
+import { Button } from '@/components/ui/button'
 import { CardX } from '@/components/ui/card-x'
 import { Empty } from '@/components/ui/empty'
+import { Input } from '@/components/ui/input'
 import { Spinner } from '@/components/ui/spinner'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { loadNodeLoadRecords, useNodeLoadStats } from '@/composables/useNodeLoadStats'
@@ -74,7 +76,15 @@ const LOAD_METRIC_KEYS = [
   'gpu.temperature',
 ] as const
 
+const CUSTOM_VIEW_LABEL = '自定义'
+
 type LoadMetricKey = typeof LOAD_METRIC_KEYS[number]
+
+interface CustomRange {
+  start: dayjs.Dayjs
+  end: dayjs.Dayjs
+  hours: number
+}
 
 // 图表主题相关颜色
 const chartThemeColors = computed(() => ({
@@ -155,16 +165,43 @@ const availableViews = computed(() => {
     views.push({ label, hours: maxHours })
   }
 
+  views.push({ label: CUSTOM_VIEW_LABEL })
   return views
 })
 
 // 当前选中的视图
 const selectedView = ref<string>('实时')
+const customStartInput = ref('')
+const customEndInput = ref('')
 const selectedHours = computed(() => {
   const view = availableViews.value.find(v => v.label === selectedView.value)
   return view?.hours
 })
 const isRealtime = computed(() => selectedView.value === '实时')
+const isCustomRange = computed(() => selectedView.value === CUSTOM_VIEW_LABEL)
+const customRange = computed<CustomRange | null>(() => {
+  if (!customStartInput.value || !customEndInput.value)
+    return null
+
+  const start = dayjs(customStartInput.value)
+  const end = dayjs(customEndInput.value)
+  if (!start.isValid() || !end.isValid() || !end.isAfter(start))
+    return null
+
+  return {
+    start,
+    end,
+    hours: Math.max(1, Math.ceil(end.diff(start, 'hour', true))),
+  }
+})
+const customRangeError = computed(() => {
+  if (!isCustomRange.value || (!customStartInput.value && !customEndInput.value))
+    return ''
+  if (!customStartInput.value || !customEndInput.value)
+    return '请选择开始和结束时间'
+  return customRange.value ? '' : '结束时间必须晚于开始时间'
+})
+const effectiveHistoryHours = computed(() => isCustomRange.value ? customRange.value?.hours ?? 4 : selectedHours.value ?? 4)
 
 // 数据状态
 const remoteData = shallowRef<StatusRecord[]>([])
@@ -439,7 +476,7 @@ function metricSeriesToRecordFormat(seriesList: MetricSeries[]): RecordFormat[] 
   return finalizeGpuRows([...rows.values()].sort((a, b) => dayjs(a.time).valueOf() - dayjs(b.time).valueOf()))
 }
 
-async function loadMetricHistoryRecords(hours: number): Promise<RecordFormat[] | null> {
+async function loadMetricHistoryRecords(params: Pick<MetricQueryParams, 'hours' | 'start' | 'end'>): Promise<RecordFormat[] | null> {
   const definitions = await loadMetricDefinitions()
   const availableKeys = new Set(definitions.map(definition => definition.name))
   const metricKeys = LOAD_METRIC_KEYS.filter(key => availableKeys.has(key))
@@ -449,7 +486,7 @@ async function loadMetricHistoryRecords(hours: number): Promise<RecordFormat[] |
   const result = await queryMetrics({
     metric_keys: metricKeys,
     entity_id: props.uuid,
-    hours,
+    ...params,
     downsample: true,
     fill_empty: true,
     max_points: LOAD_RECORD_MAX_COUNT,
@@ -493,13 +530,24 @@ async function fetchHistoryData() {
   if (!props.uuid)
     return
 
-  const hours = selectedHours.value || 4
+  if (isCustomRange.value && !customRange.value) {
+    metricData.value = null
+    remoteData.value = []
+    error.value = customRangeError.value || '请选择有效的自定义时间范围'
+    return
+  }
+
+  const range = customRange.value
+  const hours = effectiveHistoryHours.value
+  const metricParams: Pick<MetricQueryParams, 'hours' | 'start' | 'end'> = isCustomRange.value && range
+    ? { start: range.start.toDate().toISOString(), end: range.end.toDate().toISOString() }
+    : { hours }
 
   loading.value = true
   error.value = null
 
   try {
-    const metricRecords = await loadMetricHistoryRecords(hours).catch(() => null)
+    const metricRecords = await loadMetricHistoryRecords(metricParams).catch(() => null)
     if (metricRecords) {
       metricData.value = metricRecords
       remoteData.value = []
@@ -539,7 +587,7 @@ const chartData = computed(() => {
     return data
   }
 
-  const hours = selectedHours.value || 4
+  const hours = effectiveHistoryHours.value
   const minute = 60
   const hour = minute * 60
   let intervalSec: number
@@ -588,7 +636,7 @@ function formatTimeForTooltip(time: string, hours: number): string {
   return date.format('MM/DD HH:mm')
 }
 
-const showDateInAxis = computed(() => (selectedHours.value || 1) >= 24)
+const showDateInAxis = computed(() => (effectiveHistoryHours.value) >= 24)
 
 // 通用 X 轴配置
 const baseXAxisConfig = computed(() => ({
@@ -644,7 +692,7 @@ const cpuChartOption = computed(() => ({
       if (!record)
         return ''
 
-      const timeStr = formatTimeForTooltip(record.time, selectedHours.value || 1)
+      const timeStr = formatTimeForTooltip(record.time, effectiveHistoryHours.value)
       let html = `<div style="font-weight:600;margin-bottom:6px;color:${chartThemeColors.value.textSecondary}">${timeStr}</div>`
       html += '<div style="display:flex;flex-direction:column;gap:4px">'
 
@@ -739,7 +787,7 @@ const memoryChartOption = computed(() => ({
       const ramPercent = ramTotal > 0 ? ((ramUsed / ramTotal) * 100).toFixed(1) : '0'
       const swapPercent = swapTotal > 0 ? ((swapUsed / swapTotal) * 100).toFixed(1) : '0'
 
-      const timeStr = formatTimeForTooltip(record.time, selectedHours.value || 1)
+      const timeStr = formatTimeForTooltip(record.time, effectiveHistoryHours.value)
       let html = `<div style="font-weight:600;margin-bottom:6px;color:${chartThemeColors.value.textSecondary}">${timeStr}</div>`
       html += '<div style="display:flex;flex-direction:column;gap:4px">'
 
@@ -821,7 +869,7 @@ const diskChartOption = computed(() => ({
       const diskTotal = record.disk_total ?? nodeInfo.value?.disk_total ?? 0
       const diskPercent = diskTotal > 0 ? ((diskUsed / diskTotal) * 100).toFixed(1) : '0'
 
-      const timeStr = formatTimeForTooltip(record.time, selectedHours.value || 1)
+      const timeStr = formatTimeForTooltip(record.time, effectiveHistoryHours.value)
       const colorDot = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${firstParam.color};margin-right:8px;flex-shrink:0"></span>`
 
       let html = `<div style="font-weight:600;margin-bottom:6px;color:${chartThemeColors.value.textSecondary}">${timeStr}</div>`
@@ -884,7 +932,7 @@ const networkChartOption = computed(() => ({
       if (!record)
         return ''
 
-      const timeStr = formatTimeForTooltip(record.time, selectedHours.value || 1)
+      const timeStr = formatTimeForTooltip(record.time, effectiveHistoryHours.value)
       let html = `<div style="font-weight:600;margin-bottom:6px;color:${chartThemeColors.value.textSecondary}">${timeStr}</div>`
       html += '<div style="display:flex;flex-direction:column;gap:4px">'
 
@@ -954,7 +1002,7 @@ const gpuChartOption = computed(() => ({
       if (!record)
         return ''
 
-      const timeStr = formatTimeForTooltip(record.time, selectedHours.value || 1)
+      const timeStr = formatTimeForTooltip(record.time, effectiveHistoryHours.value)
       let html = `<div style="font-weight:600;margin-bottom:6px;color:${chartThemeColors.value.textSecondary}">${timeStr}</div>`
       html += '<div style="display:flex;flex-direction:column;gap:4px">'
 
@@ -1044,7 +1092,7 @@ const connectionsChartOption = computed(() => ({
       if (!record)
         return ''
 
-      const timeStr = formatTimeForTooltip(record.time, selectedHours.value || 1)
+      const timeStr = formatTimeForTooltip(record.time, effectiveHistoryHours.value)
       let html = `<div style="font-weight:600;margin-bottom:6px;color:${chartThemeColors.value.textSecondary}">${timeStr}</div>`
       html += '<div style="display:flex;flex-direction:column;gap:4px">'
 
@@ -1115,7 +1163,7 @@ const processChartOption = computed(() => ({
       if (!record)
         return ''
 
-      const timeStr = formatTimeForTooltip(record.time, selectedHours.value || 1)
+      const timeStr = formatTimeForTooltip(record.time, effectiveHistoryHours.value)
       const colorDot = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${firstParam.color};margin-right:8px;flex-shrink:0"></span>`
       const displayValue = firstParam.value != null ? Math.round(firstParam.value) : '-'
 
@@ -1186,7 +1234,8 @@ watch(isRealtime, (realtime) => {
 
 watch(selectedView, () => {
   isInitialLoad.value = true // 切换视图时重置首次加载状态
-  fetchData()
+  if (!isCustomRange.value || customRange.value)
+    fetchData()
 })
 
 watch(() => props.uuid, () => {
@@ -1203,16 +1252,48 @@ onMounted(() => {
 <template>
   <div class="flex flex-col gap-4">
     <!-- 时间选择器 -->
-    <Tabs v-model="selectedView" class="w-full items-center">
-      <TabsList class="h-8 bg-background/50 backdrop-blur-xl pointer-events-auto rounded-md">
-        <TabsTrigger
-          v-for="view in availableViews" :key="view.label" :value="view.label"
-          class="h-6.5 text-xs border-none data-[state=active]:text-green-600 shadow-none rounded-sm"
-        >
-          {{ view.label }}
-        </TabsTrigger>
-      </TabsList>
-    </Tabs>
+    <div class="flex flex-col items-center gap-2">
+      <Tabs v-model="selectedView" class="w-full items-center">
+        <TabsList class="h-8 bg-background/50 backdrop-blur-xl pointer-events-auto rounded-md">
+          <TabsTrigger
+            v-for="view in availableViews" :key="view.label" :value="view.label"
+            class="h-6.5 text-xs border-none data-[state=active]:text-green-600 shadow-none rounded-sm"
+          >
+            {{ view.label }}
+          </TabsTrigger>
+        </TabsList>
+      </Tabs>
+
+      <div v-if="isCustomRange" class="flex w-full flex-col items-center gap-2 sm:flex-row sm:justify-center">
+        <div class="grid w-full gap-2 sm:w-auto sm:grid-cols-[minmax(0,13rem)_minmax(0,13rem)_auto]">
+          <Input
+            v-model="customStartInput"
+            type="datetime-local"
+            aria-label="负载图开始时间"
+            class="h-8 bg-background/50 text-xs"
+          />
+          <Input
+            v-model="customEndInput"
+            type="datetime-local"
+            aria-label="负载图结束时间"
+            class="h-8 bg-background/50 text-xs"
+          />
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            :disabled="!customRange"
+            class="h-8 text-xs"
+            @click="fetchData"
+          >
+            应用
+          </Button>
+        </div>
+        <div v-if="customRangeError" class="text-[11px] text-orange-500">
+          {{ customRangeError }}
+        </div>
+      </div>
+    </div>
 
     <!-- 内容区域 -->
     <Spinner :show="loading">

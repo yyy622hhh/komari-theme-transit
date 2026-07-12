@@ -8,6 +8,7 @@ import { DataTooltip } from '@/components/ui/data-tooltip'
 import { ProgressThin } from '@/components/ui/progress-thin'
 import { useNodeLoadStats } from '@/composables/useNodeLoadStats'
 import { useNodePingDisplay } from '@/composables/useNodePingDisplay'
+import { LOAD_RECORD_MAX_COUNT } from '@/constants/load'
 import { useAppStore } from '@/stores/app'
 import { formatBytesPerSecondWithConfig, formatBytesWithConfig, formatDateTime, getStatus, getUptimeDays } from '@/utils/helper'
 import { getDiskPercentage, getMemoryPercentage, getTrafficUsed, getTrafficUsedPercentage, hasTrafficLimit } from '@/utils/nodeMetricsHelper'
@@ -56,10 +57,11 @@ const diskPercentage = computed(() => getDiskPercentage(props.node))
 const diskStatus = computed(() => getStatus(diskPercentage.value))
 
 const loadStatsHours = computed(() => appStore.publicSettings?.record_preserve_time || 720)
-const { diskPrediction } = useNodeLoadStats(
+const { diskPrediction, diskPredictionState } = useNodeLoadStats(
   () => props.node.uuid,
   {
     hours: () => loadStatsHours.value,
+    maxCount: () => LOAD_RECORD_MAX_COUNT,
     enabled: () => appStore.diskPredictionEnabled && appStore.privateFeaturesAllowed,
     diskTotal: () => props.node.disk_total,
     online: () => props.node.online,
@@ -75,6 +77,14 @@ const diskPredictionText = computed(() => {
   const days = Math.max(0, Math.ceil(prediction.daysUntilFull))
   return days <= 0 ? '预计已满' : `预计 ${days} 天后满`
 })
+const diskPredictionPendingText = computed(() => {
+  if (!appStore.diskPredictionEnabled || !appStore.privateFeaturesAllowed || diskPredictionText.value)
+    return ''
+  const state = diskPredictionState.value
+  if (state.reason === 'insufficient_samples' || state.reason === 'insufficient_duration' || state.reason === 'no_samples')
+    return '数据积累中'
+  return ''
+})
 
 const {
   latencyRenderBars,
@@ -87,6 +97,20 @@ const {
 
 const trafficUsedPercentage = computed(() => getTrafficUsedPercentage(props.node))
 const trafficUsed = computed(() => getTrafficUsed(props.node))
+const validPhysicalCores = computed(() => typeof props.node.cpu_physical_cores === 'number' && props.node.cpu_physical_cores > 0 ? props.node.cpu_physical_cores : 0)
+const validLogicalCores = computed(() => typeof props.node.cpu_cores === 'number' && props.node.cpu_cores > 0 ? props.node.cpu_cores : 0)
+const cpuCoreText = computed(() => {
+  if (validPhysicalCores.value > 0)
+    return `${validPhysicalCores.value} 物理核`
+  if (validLogicalCores.value > 0)
+    return `${validLogicalCores.value} 逻辑核`
+  return ''
+})
+const cpuCoreTooltip = computed(() => {
+  if (validPhysicalCores.value > 0 && validLogicalCores.value > 0 && validPhysicalCores.value !== validLogicalCores.value)
+    return `${validPhysicalCores.value} 物理核 / ${validLogicalCores.value} 逻辑核`
+  return cpuCoreText.value
+})
 const nodeMessage = computed(() => props.node.message?.trim() ?? '')
 const nodeMessageTooltip = computed(() => {
   const message = nodeMessage.value
@@ -298,8 +322,11 @@ function hasRegion(region: string | null | undefined): boolean {
               <span class="tabular-nums font-medium">{{ (props.node.cpu ?? 0).toFixed(1) }}%</span>
             </div>
             <ProgressThin :percentage="props.node.cpu ?? 0" :status="cpuStatus" :height="4" />
-            <div class="text-[11px] text-muted-foreground truncate">
+            <div class="text-[11px] text-muted-foreground truncate" :title="cpuCoreTooltip">
               {{ (props.node.load ?? 0).toFixed(2) }}, {{ (props.node.load5 ?? 0).toFixed(2) }}, {{ (props.node.load15 ?? 0).toFixed(2) }}
+              <template v-if="cpuCoreText">
+                · {{ cpuCoreText }}
+              </template>
             </div>
           </div>
 
@@ -327,6 +354,9 @@ function hasRegion(region: string | null | undefined): boolean {
             </div>
             <div v-if="diskPredictionText" class="text-[10px] text-orange-500 truncate">
               {{ diskPredictionText }}
+            </div>
+            <div v-else-if="diskPredictionPendingText" class="text-[10px] text-muted-foreground truncate">
+              {{ diskPredictionPendingText }}
             </div>
           </div>
 

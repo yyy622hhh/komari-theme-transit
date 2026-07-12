@@ -17,6 +17,8 @@ interface NodeValueRow {
   monthlyCostCNY: number
   cpuName: string
   cpuCores: number
+  cpuCoreLabel: string
+  logicalCpuCores: number
   memoryBytes: number
   trafficBytes: number
   costPerCore: number | null
@@ -67,6 +69,20 @@ function getTrafficComparableBytes(node: NodeData): number {
   return Number.isFinite(limit) && limit > 0 ? limit : 0
 }
 
+function getValidCoreCount(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0
+}
+
+function getEffectiveCpuCores(node: NodeData): { cores: number, label: string, logicalCores: number } {
+  const physicalCores = getValidCoreCount(node.cpu_physical_cores)
+  const logicalCores = getValidCoreCount(node.cpu_cores)
+
+  if (physicalCores > 0)
+    return { cores: physicalCores, label: '物理核', logicalCores }
+
+  return { cores: logicalCores, label: logicalCores > 0 ? '逻辑核' : '核', logicalCores }
+}
+
 function formatMoneyCNY(amountCNY: number): string {
   if (!Number.isFinite(amountCNY))
     return '-'
@@ -111,7 +127,8 @@ const nodeRows = computed<NodeValueRow[]>(() => props.nodes
   .filter(node => !shouldExcludeNode(node))
   .map((node) => {
     const monthlyCostCNY = financeHelper.calculateMonthlyCostCNY(node, exchangeRates.value)
-    const cpuCores = Math.max(0, node.cpu_cores || 0)
+    const effectiveCpuCores = getEffectiveCpuCores(node)
+    const cpuCores = effectiveCpuCores.cores
     const memoryBytes = Math.max(0, node.mem_total || 0)
     const trafficBytes = getTrafficComparableBytes(node)
     const memoryGb = memoryBytes / 1024 ** 3
@@ -124,6 +141,8 @@ const nodeRows = computed<NodeValueRow[]>(() => props.nodes
       monthlyCostCNY,
       cpuName: node.cpu_name || '-',
       cpuCores,
+      cpuCoreLabel: effectiveCpuCores.label,
+      logicalCpuCores: effectiveCpuCores.logicalCores,
       memoryBytes,
       trafficBytes,
       costPerCore: cpuCores > 0 ? monthlyCostCNY / cpuCores : null,
@@ -282,7 +301,10 @@ function sortMark(key: SortKey): string {
             </td>
             <td class="px-2 py-3 text-xs text-muted-foreground">
               <div class="font-medium text-foreground">
-                {{ row.cpuCores }} 核
+                {{ row.cpuCores }} {{ row.cpuCoreLabel }}
+              </div>
+              <div v-if="row.logicalCpuCores > 0 && row.logicalCpuCores !== row.cpuCores" class="text-[11px]">
+                {{ row.logicalCpuCores }} 逻辑核
               </div>
               <div class="max-w-[15rem] truncate" :title="row.cpuName">
                 {{ row.cpuName }}
@@ -301,7 +323,7 @@ function sortMark(key: SortKey): string {
               {{ formatCost(row.costPerTrafficGb) }}
             </td>
             <td class="px-2 py-3 text-xs text-muted-foreground">
-              <div>{{ row.cpuCores }} 核 · {{ formatBytes(row.memoryBytes) }} 内存</div>
+              <div>{{ row.cpuCores }} {{ row.cpuCoreLabel }} · {{ formatBytes(row.memoryBytes) }} 内存</div>
               <div>流量配额 {{ row.trafficBytes > 0 ? formatBytes(row.trafficBytes) : '未统计' }}</div>
             </td>
           </tr>

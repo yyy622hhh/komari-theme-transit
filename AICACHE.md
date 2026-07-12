@@ -12,13 +12,20 @@
 
 ## 当前任务
 
-- 状态：in-progress
-- 目标：准备 Glassmorphism v3.0.0 发布：README 删除预览图、重心改为实用扩展功能介绍、追加支持/赞助文案、版本提升到 v3.0.0，并推送 main 触发 GitHub Release。
-- 范围：`README.md`、`komari-theme.json`、此前 v3.0 功能改动、AICACHE 交接记录、git commit/push/release workflow。
-- 已完成：README 已重写为以 metric store、Ping 统计、LoadChart、GPU 开关、节点 message、磁盘预测、拓扑、健康摘要、快照导出等实用功能为重点；已移除 README 顶部和效果预览区的预览图片；已追加用户提供的“写在最后 / Support / Sponsor”文案；`komari-theme.json` 版本已改为 `3.0.0`。
-- 不做：不在 `package.json` 添加顶层 version、不改 zip 结构、不手动创建 release tag（由 GitHub workflow 根据版本变化创建）。
+- 状态：done
+- 目标：完成 v3.0.0 follow-up 后的发布收尾：提交并推送 main、重写 README 为更炫酷且更精简的版本、按发布契约发布 v3.0.1 latest release，并整理发帖文案。
+- 范围：此前 v3.0.0 frontend follow-up / AuditLogPanel / 数据积累提示相关源码、`README.md`、`komari-theme.json.version`、AICACHE 发布交接记录、GitHub release 资产。
+- 已完成：物理核心优先参与性价比每核成本并显示到 NodeCard；LoadChart 已增加自定义 start/end 时间范围；metric definitions 已加 5 分钟 TTL 缓存；`SharedCache.retain()` 已修复覆盖后 release 引用计数孤儿化；首页高级工具已新增 AuditLogPanel；磁盘预测/健康摘要已增加“数据积累中”提示；NodeCard 磁盘预测批量历史拉取显式传 `LOAD_RECORD_MAX_COUNT`；README 已重写为更短、更有设计感的版本，并按用户要求保留 Support / Support the Project / 写在最后，且“写在最后”位于致谢前；`komari-theme.json.version` 已更新为 `3.0.1`，准备推送 main 触发发布工作流。
+- 不做：不新增审计日志单独主题配置，旧后端 history fallback 仍保持按小时近似；不在 `package.json` 添加顶层 version。
 
 ## 执行日志
+
+### 2026-07-13 v3.0.0 frontend follow-up
+
+- 开始补完用户复查指出的 4 项：物理核心参与每核成本并展示到 NodeCard、LoadChart 增加 start/end 自定义时间范围、metric definitions 加 TTL 结果缓存、修复 `SharedCache.retain()` 覆盖后 release 引用计数孤儿化。
+- 约束：保持 v3.0.0 版本号和发布结构不变；自定义范围在 metric API 可用时精确传 `start` / `end`，旧后端 fallback 只做近 N 小时近似。
+- 已实现 AuditLogPanel：`admin:getLogs` RPC 类型和方法、`audit.service.ts` request key 去重、`auditLog` 权限 key、首页第 5 个高级工具入口、只读表格和分页；`limit` / `page` 调用时按官方文档转为 string。
+- 已实现磁盘预测体验补充：`prediction.service.ts` 新增 `analyzeDiskPrediction()` 返回不可用原因，NodeCard / HealthSummaryPanel 在样本不足或历史不足 2 天时显示“数据积累中”；NodeCard 调 `useNodeLoadStats` 时显式传 `LOAD_RECORD_MAX_COUNT`，避免未传 `maxCount` 走后端默认配额时体验不稳定。
 
 ### 2026-07-13 official metric-store feature port
 
@@ -54,6 +61,7 @@
 
 ## 验证记录
 
+- 2026-07-13 v3.0.1 release refresh：README 已重写为更短、更有设计感的功能介绍，致谢已收束到文末；`komari-theme.json.version` 已更新为 `3.0.1`，准备按发布契约推送 main 触发新 release。
 - `bun run lint`：通过；本脚本带 `--fix`，运行后已继续执行 build 验证。
 - `bun run build`：首次失败，原因是 `src/utils/rpc.ts` 的 `MetricQueryParams` / `PingMetricStatsParams` 传给 RPC `call()` 时缺少 `Record<string, unknown>` index signature；已补充 `[key: string]: unknown` 后重跑通过。
 - `bun run build`：最终通过；生成 `dist/` 与 `komari-theme-Glassmorphism-build-881385d.zip`。构建中仍有既有 Rollup 提示：`@vueuse/core` PURE 注释位置警告，以及 `globe` chunk 超过 600 kB 的体积警告。
@@ -63,11 +71,14 @@
 - 2026-07-13 settings compaction / GPU switch：`bun run lint && bun run build` 通过，生成 `dist/` 与 `komari-theme-Glassmorphism-build-881385d.zip`。构建仍有既有 `@vueuse/core` PURE 注释警告与 `globe` chunk 超过 600 kB 警告。
 - 2026-07-13 v3.0.0 release prep：README 已删除预览图并重写为实用功能介绍，`komari-theme.json.version` 已更新为 `3.0.0`；`bun run lint && bun run build` 通过，生成 `dist/` 与 `komari-theme-Glassmorphism-build-881385d.zip`。构建仍有既有 `@vueuse/core` PURE 注释警告与 `globe` chunk 超过 600 kB 警告。
 - v3.0.0 已提交并推送 main：commit `c50f6ed`；GitHub release workflow #34 已成功；Release `v3.0.0` 已发布，资产为 `komari-theme-Glassmorphism-build-c50f6ed.zip`。
+- 2026-07-13 v3.0.0 frontend follow-up / AuditLogPanel：`bun run lint` 通过；`bun run build` 通过，生成 `dist/` 与 `komari-theme-Glassmorphism-build-6ccc9d7.zip`。构建仍有既有 `@vueuse/core` PURE 注释警告与 `globe` chunk 超过 600 kB 警告。
 
 ## 风险点
 
 - `bun run lint` 当前脚本包含 `--fix`，会自动修改文件；如需运行，应在运行后检查 diff。
 - PingChart、首页 Ping 摘要、LoadChart 历史模式已优先尝试 public metric store，并保留 legacy fallback；HealthSummaryPanel 尚未迁移到 metric store。
+- AuditLogPanel 已按 `admin:getLogs` 接入但尚未在真实登录后端手动验证返回形态；若后端字段或分页语义变化，需按真实响应微调。
+- 自定义 LoadChart 时间范围在 metric API 可用时精确传 `start` / `end`；旧后端 fallback 仍只能近似为“最近 N 小时”。
 - `traffic_up` / `traffic_down` 当前只做字段接收与历史 normalize，不替换现有流量 UI 语义。
 - `message` 已在 NodeCard / NodeList 以纯文本 tooltip 展示，禁止 `v-html` 的约束仍需保持。
 - JSON 导出已经分片构建节点字符串，但最终字符串拼接和 Blob 创建仍是浏览器同步边界；相比原先整棵大对象 `JSON.stringify` 已降低主线程尖峰。
@@ -88,6 +99,7 @@
 - Komari 1.2.x 第一批兼容补丁已完成：RPC/API 类型补新字段、`common:getRecords` `maxCount` 兼容、public RPC/metric 方法壳、历史 records array/map normalize、节点 store 同步新字段、详情页展示物理核心。
 - 官方 komari-web 高价值功能移植第一批已完成：metric series 工具、metrics service、PingChart / 首页 Ping 摘要 metric 优先 + legacy fallback、NodeCard / NodeList 探针 `message` 纯文本提示。
 - 用户要求“全部上马”后的剩余官方功能已完成：LoadChart 历史模式 metric store 优先 + legacy fallback、GPU detail/per-device metric 图表、`chartDashboardTemplate` 托管配置读取和布局排序。
+- v3.0.0 复查 follow-up 已完成：物理核心 UI / 每核成本、自定义 LoadChart 时间范围、metric definitions TTL 缓存、`SharedCache.retain()` 修复、AuditLogPanel、磁盘预测数据积累提示、NodeCard 显式传 `LOAD_RECORD_MAX_COUNT`。
 
 未完成：
 

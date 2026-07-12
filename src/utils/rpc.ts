@@ -255,6 +255,20 @@ export interface PingTaskInfo {
   type?: string
 }
 
+export interface AuditLogEntry {
+  id: number
+  ip: string
+  uuid: string
+  message: string
+  msg_type: string
+  time: string
+}
+
+export interface AuditLogsResponse {
+  logs: AuditLogEntry[]
+  total: number
+}
+
 export interface MetricDefinition {
   name: string
   description: string | Record<string, string>
@@ -907,6 +921,12 @@ export class KomariRpc {
       maxCount,
       max_count: maxCount,
     }, signal)
+  }
+
+  // ==================== Admin 方法（需登录权限） ====================
+
+  async getAuditLogs(limit?: string, page?: string, signal?: AbortSignal): Promise<AuditLogsResponse> {
+    return this.client.call<AuditLogsResponse>('admin:getLogs', { limit, page }, signal)
   }
 
   // ==================== Public 方法（主题/公开页优先使用） ====================

@@ -75,7 +75,9 @@ export class SharedCache<T> {
       if (released)
         return
       released = true
-      entry.references = Math.max(0, entry.references - 1)
+      const current = this.entries.get(key)
+      if (current)
+        current.references = Math.max(0, current.references - 1)
       this.sweep()
     }
   }

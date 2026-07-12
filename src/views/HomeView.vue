@@ -31,7 +31,7 @@ interface QuickControlOption {
   icon: string
 }
 
-type HomeToolKey = 'nodes' | 'topology' | 'providerValue' | 'healthSummary' | 'snapshotExport'
+type HomeToolKey = 'nodes' | 'topology' | 'providerValue' | 'healthSummary' | 'snapshotExport' | 'auditLog'
 
 interface HomeToolOption {
   key: Exclude<HomeToolKey, 'nodes'>
@@ -42,6 +42,7 @@ interface HomeToolOption {
 
 defineOptions({ name: 'HomeView' })
 
+const AuditLogPanel = defineAsyncComponent(() => import('@/components/AuditLogPanel.vue'))
 const HealthSummaryPanel = defineAsyncComponent(() => import('@/components/HealthSummaryPanel.vue'))
 const NodeCard = defineAsyncComponent(() => import('@/components/NodeCard.vue'))
 const NodeGeneralCards = defineAsyncComponent(() => import('@/components/NodeGeneralCards.vue'))
@@ -80,6 +81,7 @@ const homeToolPermissionMap: Record<Exclude<HomeToolKey, 'nodes'>, PermissionKey
   providerValue: 'providerValue',
   healthSummary: 'healthSummary',
   snapshotExport: 'snapshotExport',
+  auditLog: 'auditLog',
 }
 
 const quickControlDefinitions: Record<HomeQuickControlKey, QuickControlOption> = {
@@ -103,6 +105,7 @@ const homeTools = computed<HomeToolOption[]>(() => {
     { key: 'providerValue', label: '性价比', icon: 'tabler:scale', description: '单机资源成本对比' },
     { key: 'healthSummary', label: '健康', icon: 'tabler:heartbeat', description: '日周月历史健康概览' },
     { key: 'snapshotExport', label: '导出', icon: 'tabler:download', description: 'CSV / JSON 数据快照' },
+    { key: 'auditLog', label: '日志', icon: 'tabler:list-details', description: '管理员操作审计日志' },
   ]
 })
 
@@ -464,6 +467,7 @@ const nodeCardGridClass = computed(() => {
             <ProviderValuePanel v-else-if="activeHomeTool === 'providerValue'" :nodes="groupNodeList" />
             <HealthSummaryPanel v-else-if="activeHomeTool === 'healthSummary'" :nodes="groupNodeList" />
             <SnapshotExportPanel v-else-if="activeHomeTool === 'snapshotExport'" :nodes="groupNodeList" />
+            <AuditLogPanel v-else-if="activeHomeTool === 'auditLog'" />
             <TransitionGroup
               v-else-if="nodeList.length !== 0 && appStore.nodeViewMode === 'card'"
               :appear="!appStore.disablePageAnimation"

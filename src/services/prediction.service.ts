@@ -11,11 +11,25 @@ export interface NodeDiskPrediction {
   confidence: number
 }
 
+export type DiskPredictionUnavailableReason
+  = | 'no_samples'
+    | 'insufficient_samples'
+    | 'insufficient_duration'
+    | 'no_growth'
+    | 'invalid_total'
+
+export interface DiskPredictionState {
+  prediction: NodeDiskPrediction | null
+  reason?: DiskPredictionUnavailableReason
+  sampleDays: number
+  sampleCount: number
+}
+
 function numberOrZero(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0
 }
 
-export function buildDiskPrediction(records: readonly StatusRecord[], fallbackDiskTotal = 0): NodeDiskPrediction | null {
+export function analyzeDiskPrediction(records: readonly StatusRecord[], fallbackDiskTotal = 0): DiskPredictionState {
   const samples = records
     .map((record) => {
       const timestamp = new Date(record.time).getTime()
@@ -26,17 +40,47 @@ export function buildDiskPrediction(records: readonly StatusRecord[], fallbackDi
     .filter(sample => Number.isFinite(sample.timestamp) && sample.disk > 0 && sample.diskTotal > 0)
     .sort((left, right) => left.timestamp - right.timestamp)
 
-  if (samples.length < 2)
-    return null
+  if (!samples.length) {
+    return {
+      prediction: null,
+      reason: 'no_samples',
+      sampleDays: 0,
+      sampleCount: 0,
+    }
+  }
 
   const first = samples[0]
   const latest = samples.at(-1)
-  if (!first || !latest)
-    return null
+  if (!first || !latest) {
+    return {
+      prediction: null,
+      reason: 'no_samples',
+      sampleDays: 0,
+      sampleCount: samples.length,
+    }
+  }
 
   const sampleDays = (latest.timestamp - first.timestamp) / TIME_MS.day
-  if (sampleDays < LOAD_CONFIG.diskPrediction.minSampleDays)
-    return null
+  const baseState = {
+    sampleDays,
+    sampleCount: samples.length,
+  }
+
+  if (samples.length < 2) {
+    return {
+      ...baseState,
+      prediction: null,
+      reason: 'insufficient_samples',
+    }
+  }
+
+  if (sampleDays < LOAD_CONFIG.diskPrediction.minSampleDays) {
+    return {
+      ...baseState,
+      prediction: null,
+      reason: 'insufficient_duration',
+    }
+  }
 
   const xs = samples.map(sample => (sample.timestamp - first.timestamp) / TIME_MS.day)
   const ys = samples.map(sample => sample.disk)
@@ -54,24 +98,45 @@ export function buildDiskPrediction(records: readonly StatusRecord[], fallbackDi
     totalVariance += (y - avgY) ** 2
   }
 
-  if (denominator <= 0)
-    return null
+  if (denominator <= 0) {
+    return {
+      ...baseState,
+      prediction: null,
+      reason: 'insufficient_duration',
+    }
+  }
 
   const dailyGrowthBytes = numerator / denominator
-  if (!Number.isFinite(dailyGrowthBytes) || dailyGrowthBytes <= 0)
-    return null
+  if (!Number.isFinite(dailyGrowthBytes) || dailyGrowthBytes <= 0) {
+    return {
+      ...baseState,
+      prediction: null,
+      reason: 'no_growth',
+    }
+  }
 
   const diskTotalBytes = latest.diskTotal || fallbackDiskTotal
+  if (!Number.isFinite(diskTotalBytes) || diskTotalBytes <= 0) {
+    return {
+      ...baseState,
+      prediction: null,
+      reason: 'invalid_total',
+    }
+  }
+
   const currentDiskBytes = latest.disk
   const remainingBytes = diskTotalBytes - currentDiskBytes
   if (remainingBytes <= 0) {
     return {
-      daysUntilFull: 0,
-      dailyGrowthBytes,
-      currentDiskBytes,
-      diskTotalBytes,
-      sampleDays,
-      confidence: 1,
+      ...baseState,
+      prediction: {
+        daysUntilFull: 0,
+        dailyGrowthBytes,
+        currentDiskBytes,
+        diskTotalBytes,
+        sampleDays,
+        confidence: 1,
+      },
     }
   }
 
@@ -88,11 +153,18 @@ export function buildDiskPrediction(records: readonly StatusRecord[], fallbackDi
     : Math.min(Math.max(1 - residualVariance / totalVariance, 0), 1)
 
   return {
-    daysUntilFull: remainingBytes / dailyGrowthBytes,
-    dailyGrowthBytes,
-    currentDiskBytes,
-    diskTotalBytes,
-    sampleDays,
-    confidence,
+    ...baseState,
+    prediction: {
+      daysUntilFull: remainingBytes / dailyGrowthBytes,
+      dailyGrowthBytes,
+      currentDiskBytes,
+      diskTotalBytes,
+      sampleDays,
+      confidence,
+    },
   }
+}
+
+export function buildDiskPrediction(records: readonly StatusRecord[], fallbackDiskTotal = 0): NodeDiskPrediction | null {
+  return analyzeDiskPrediction(records, fallbackDiskTotal).prediction
 }
