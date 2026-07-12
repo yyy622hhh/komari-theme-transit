@@ -2,7 +2,8 @@
 import type { CSSProperties } from 'vue'
 import type { NodeData } from '@/stores/nodes'
 import { Icon } from '@iconify/vue'
-import { computed, ref, watch } from 'vue'
+import { useVirtualList } from '@vueuse/core'
+import { computed, ref, TransitionGroup, watch } from 'vue'
 import NodePingListCell from '@/components/NodePingListCell.vue'
 import TrafficProgress from '@/components/TrafficProgress.vue'
 import { Badge } from '@/components/ui/badge'
@@ -133,6 +134,40 @@ const sortedNodes = computed(() => {
       default: return 0
     }
   })
+})
+
+const VIRTUAL_LIST_THRESHOLD = 30
+const VIRTUAL_ROW_HEIGHT = 68
+const shouldVirtualizeNodes = computed(() => sortedNodes.value.length > VIRTUAL_LIST_THRESHOLD)
+const {
+  list: virtualRows,
+  containerProps: virtualContainerProps,
+  wrapperProps: virtualWrapperProps,
+} = useVirtualList(sortedNodes, {
+  itemHeight: VIRTUAL_ROW_HEIGHT,
+  overscan: 8,
+})
+const renderedRows = computed(() => shouldVirtualizeNodes.value
+  ? virtualRows.value
+  : sortedNodes.value.map((node, index) => ({ data: node, index })))
+const nodeRowsViewportBind = computed(() => shouldVirtualizeNodes.value ? virtualContainerProps : {})
+const nodeRowsViewportClass = computed(() => shouldVirtualizeNodes.value ? 'max-h-[min(72vh,54rem)] overflow-y-auto pr-1' : '')
+const nodeRowsContainerComponent = computed(() => shouldVirtualizeNodes.value ? 'div' : TransitionGroup)
+const nodeRowsContainerBind = computed(() => {
+  if (shouldVirtualizeNodes.value) {
+    return {
+      ...virtualWrapperProps.value,
+      class: 'flex flex-col gap-1',
+    }
+  }
+
+  return {
+    appear: !appStore.disablePageAnimation,
+    css: !appStore.disablePageAnimation,
+    name: 'node-row-switch',
+    tag: 'div',
+    class: 'flex flex-col gap-1',
+  }
 })
 
 const formatBytes = (bytes: number) => formatBytesWithConfig(bytes, appStore.byteDecimals)
@@ -346,209 +381,205 @@ function buildNodeMetadataItems(node: NodeData): NodeMetadataItem[] {
         </div>
       </div>
 
-      <TransitionGroup
-        :appear="!appStore.disablePageAnimation"
-        :css="!appStore.disablePageAnimation"
-        name="node-row-switch"
-        tag="div"
-        class="flex flex-col gap-1"
-      >
-        <div
-          v-for="(node, index) in sortedNodes"
-          :key="getRowTransitionKey(node)"
-          class="flex flex-col relative h-16 justify-center px-2.5 cursor-pointer bg-background/40 rounded-lg backdrop-blur-sm shadow-[0_0_0_2px] shadow-transparent hover:shadow-slate-500/10 hover:bg-background/70 transition-all"
-          :class="[!node.online && '!shadow-red-600/10']"
-          :style="getRowTransitionStyle(index)"
-          role="button"
-          tabindex="0"
-          :aria-label="`查看节点 ${node.name} 详情`"
-          @click="handleClick(node)"
-          @keydown="handleRowKeydown($event, node)"
-        >
-          <div class="grid gap-2 items-center" :style="gridStyle">
-            <template v-for="col in columns" :key="col.key">
-              <!-- 在线状态指示器 -->
-              <div v-if="col.key === 'status'" class="flex justify-center">
-                <div class="size-2 rounded-full relative" :class="[node.online ? 'bg-green-600' : 'bg-red-600']">
+      <div v-bind="nodeRowsViewportBind" :class="nodeRowsViewportClass">
+        <component :is="nodeRowsContainerComponent" v-bind="nodeRowsContainerBind">
+          <div
+            v-for="({ data: node, index }) in renderedRows"
+            :key="getRowTransitionKey(node)"
+            class="flex flex-col relative h-16 justify-center px-2.5 cursor-pointer bg-background/40 rounded-lg backdrop-blur-sm shadow-[0_0_0_2px] shadow-transparent hover:shadow-slate-500/10 hover:bg-background/70 transition-all"
+            :class="[!node.online && '!shadow-red-600/10']"
+            :style="getRowTransitionStyle(index)"
+            role="button"
+            tabindex="0"
+            :aria-label="`查看节点 ${node.name} 详情`"
+            @click="handleClick(node)"
+            @keydown="handleRowKeydown($event, node)"
+          >
+            <div class="grid gap-2 items-center" :style="gridStyle">
+              <template v-for="col in columns" :key="col.key">
+                <!-- 在线状态指示器 -->
+                <div v-if="col.key === 'status'" class="flex justify-center">
+                  <div class="size-2 rounded-full relative" :class="[node.online ? 'bg-green-600' : 'bg-red-600']">
+                    <div
+                      class="animate-ping absolute inset-0 rounded-full opacity-50"
+                      :class="[node.online ? 'bg-green-600' : 'bg-red-600']"
+                    />
+                  </div>
+                </div>
+
+                <!-- 节点名称 -->
+                <div v-else-if="col.key === 'name'" class="space-y-0.5 min-w-0" :class="[!node.online && 'blur-sm opacity-30']">
+                  <div class="flex gap-1.5 items-center text-[13px] font-semibold text-foreground min-w-0">
+                    <img
+                      v-if="hasRegion(node.region)" :src="getFlagSrc(node.region)"
+                      :alt="getRegionAltText(node.region)" class="size-5 rounded-sm shrink-0"
+                    >
+                    <span class="truncate">{{ node.name }}</span>
+                  </div>
                   <div
-                    class="animate-ping absolute inset-0 rounded-full opacity-50"
-                    :class="[node.online ? 'bg-green-600' : 'bg-red-600']"
-                  />
-                </div>
-              </div>
-
-              <!-- 节点名称 -->
-              <div v-else-if="col.key === 'name'" class="space-y-0.5 min-w-0" :class="[!node.online && 'blur-sm opacity-30']">
-                <div class="flex gap-1.5 items-center text-[13px] font-semibold text-foreground min-w-0">
-                  <img
-                    v-if="hasRegion(node.region)" :src="getFlagSrc(node.region)"
-                    :alt="getRegionAltText(node.region)" class="size-5 rounded-sm shrink-0"
+                    v-if="showPrice && getPriceTags(node).length > 0"
+                    class="text-[11px] font-medium text-foreground/60 truncate"
                   >
-                  <span class="truncate">{{ node.name }}</span>
+                    <span v-for="(tag, tagIndex) in getPriceTags(node)" :key="tagIndex" :class="!!tagIndex && 'ml-3'">
+                      {{ tag }}
+                    </span>
+                  </div>
                 </div>
-                <div
-                  v-if="showPrice && getPriceTags(node).length > 0"
-                  class="text-[11px] font-medium text-foreground/60 truncate"
-                >
-                  <span v-for="(tag, tagIndex) in getPriceTags(node)" :key="tagIndex" :class="!!tagIndex && 'ml-3'">
-                    {{ tag }}
-                  </span>
-                </div>
-              </div>
 
-              <!-- 信息 / 标签 -->
-              <div v-else-if="col.key === 'metadata'" class="min-w-0">
-                <div v-if="getNodeMetadataItems(node).length > 0" class="flex flex-wrap gap-1 items-center max-h-11 overflow-hidden">
-                  <Badge
-                    v-for="item in getNodeMetadataItems(node)" :key="item.key"
-                    :variant="item.variant ?? 'secondary'"
-                    :title="item.title ?? item.value"
-                    :style="item.style"
-                    class="min-w-0 rounded-md px-1.5 text-[11px] font-medium shadow-none"
-                    :class="item.class"
-                  >
-                    <img v-if="item.flagSrc" :src="item.flagSrc" :alt="item.value" class="size-3.5 rounded-[2px] shrink-0">
-                    <Icon v-else-if="item.icon" :icon="item.icon" width="12" height="12" class="shrink-0" />
-                    <span class="truncate">{{ item.value }}</span>
-                  </Badge>
+                <!-- 信息 / 标签 -->
+                <div v-else-if="col.key === 'metadata'" class="min-w-0">
+                  <div v-if="getNodeMetadataItems(node).length > 0" class="flex flex-wrap gap-1 items-center max-h-11 overflow-hidden">
+                    <Badge
+                      v-for="item in getNodeMetadataItems(node)" :key="item.key"
+                      :variant="item.variant ?? 'secondary'"
+                      :title="item.title ?? item.value"
+                      :style="item.style"
+                      class="min-w-0 rounded-md px-1.5 text-[11px] font-medium shadow-none"
+                      :class="item.class"
+                    >
+                      <img v-if="item.flagSrc" :src="item.flagSrc" :alt="item.value" class="size-3.5 rounded-[2px] shrink-0">
+                      <Icon v-else-if="item.icon" :icon="item.icon" width="12" height="12" class="shrink-0" />
+                      <span class="truncate">{{ item.value }}</span>
+                    </Badge>
+                  </div>
                 </div>
-              </div>
 
-              <!-- 延迟/丢包 -->
-              <!-- <div v-else-if="col.key === 'ping'">
+                <!-- 延迟/丢包 -->
+                <!-- <div v-else-if="col.key === 'ping'">
               <NodePingListCell :uuid="node.uuid" :online="node.online" />
             </div> -->
 
-              <!-- 运行时间 -->
-              <div v-else-if="col.key === 'uptime'" class="flex flex-col gap-0.5 min-w-0">
-                <span class="text-[11px] font-medium text-foreground/70 truncate">
-                  {{ formatUptime(node.uptime ?? 0) }}
-                </span>
-                <NodePingListCell :uuid="node.uuid" :online="node.online" />
-              </div>
-
-              <!-- 操作系统 -->
-              <div v-else-if="col.key === 'os'" class="flex justify-center">
-                <img :src="getOSImage(node.os)" :alt="getOSName(node.os)" class="size-4.5">
-              </div>
-
-              <!-- CPU -->
-              <div v-else-if="col.key === 'cpu'" class="group min-w-0">
-                <div class="space-y-1">
-                  <div class="text-[11px] font-medium text-foreground/75 truncate">
-                    <span class="inline group-hover:hidden">
-                      {{ (node.cpu ?? 0).toFixed(1) }}%
-                    </span>
-                    <span class="hidden group-hover:inline">
-                      {{ (node.load ?? 0).toFixed(2) }}, {{ (node.load5 ?? 0).toFixed(2) }}, {{ (node.load15 ?? 0).toFixed(2) }}
-                    </span>
-                  </div>
-                  <ProgressThin :percentage="node.cpu ?? 0" :status="getStatus(node.cpu ?? 0)" :height="4" />
+                <!-- 运行时间 -->
+                <div v-else-if="col.key === 'uptime'" class="flex flex-col gap-0.5 min-w-0">
+                  <span class="text-[11px] font-medium text-foreground/70 truncate">
+                    {{ formatUptime(node.uptime ?? 0) }}
+                  </span>
+                  <NodePingListCell :uuid="node.uuid" :online="node.online" />
                 </div>
-              </div>
 
-              <!-- 内存 -->
-              <div v-else-if="col.key === 'mem'" class="group min-w-0">
-                <div class="space-y-1">
-                  <div class="text-[11px] font-medium text-foreground/75 truncate">
-                    <span class="inline group-hover:hidden">
-                      {{ ((node.ram ?? 0) / (node.mem_total || 1) * 100).toFixed(1) }}%
-                    </span>
-                    <span class="hidden group-hover:inline">
-                      {{ formatBytes(node.ram ?? 0) }} / {{ formatBytes(node.mem_total ?? 0) }}
-                    </span>
-                  </div>
-                  <ProgressThin
-                    :percentage="(node.ram ?? 0) / (node.mem_total || 1) * 100"
-                    :status="getStatus((node.ram ?? 0) / (node.mem_total || 1) * 100)" :height="4"
-                  />
+                <!-- 操作系统 -->
+                <div v-else-if="col.key === 'os'" class="flex justify-center">
+                  <img :src="getOSImage(node.os)" :alt="getOSName(node.os)" class="size-4.5">
                 </div>
-              </div>
 
-              <!-- 硬盘 -->
-              <div v-else-if="col.key === 'disk'" class="group min-w-0">
-                <div class="space-y-1">
-                  <div class="text-[11px] font-medium text-foreground/75 truncate">
-                    <span class="inline group-hover:hidden">
-                      {{ ((node.disk ?? 0) / (node.disk_total || 1) * 100).toFixed(1) }}%
-                    </span>
-                    <span class="hidden group-hover:inline">
-                      {{ formatBytes(node.disk ?? 0) }} / {{ formatBytes(node.disk_total ?? 0) }}
-                    </span>
-                  </div>
-                  <ProgressThin
-                    :percentage="(node.disk ?? 0) / (node.disk_total || 1) * 100"
-                    :status="getStatus((node.disk ?? 0) / (node.disk_total || 1) * 100)" :height="4"
-                  />
-                </div>
-              </div>
-
-              <!-- 流量 -->
-              <div v-else-if="col.key === 'traffic'" class="group min-w-0">
-                <DataTooltip placement="top" class="flex items-center gap-2" content-class="mb-1.5">
-                  <div class="space-y-1 w-full">
+                <!-- CPU -->
+                <div v-else-if="col.key === 'cpu'" class="group min-w-0">
+                  <div class="space-y-1">
                     <div class="text-[11px] font-medium text-foreground/75 truncate">
                       <span class="inline group-hover:hidden">
-                        {{ getTrafficUsedPercentage(node).toFixed(1) }}%
+                        {{ (node.cpu ?? 0).toFixed(1) }}%
                       </span>
                       <span class="hidden group-hover:inline">
-                        {{ formatBytes(getTrafficUsed(node)) }} /
-                        <template v-if="hasTrafficLimit(node)">{{ formatBytes(node.traffic_limit) }}</template>
-                        <template v-else>∞</template>
+                        {{ (node.load ?? 0).toFixed(2) }}, {{ (node.load5 ?? 0).toFixed(2) }}, {{ (node.load15 ?? 0).toFixed(2) }}
                       </span>
                     </div>
-                    <TrafficProgress
-                      :upload="node.net_total_up ?? 0" :download="node.net_total_down ?? 0"
-                      :traffic-limit="node.traffic_limit" :traffic-limit-type="(node.traffic_limit_type || 'sum')"
-                      height="4px"
+                    <ProgressThin :percentage="node.cpu ?? 0" :status="getStatus(node.cpu ?? 0)" :height="4" />
+                  </div>
+                </div>
+
+                <!-- 内存 -->
+                <div v-else-if="col.key === 'mem'" class="group min-w-0">
+                  <div class="space-y-1">
+                    <div class="text-[11px] font-medium text-foreground/75 truncate">
+                      <span class="inline group-hover:hidden">
+                        {{ ((node.ram ?? 0) / (node.mem_total || 1) * 100).toFixed(1) }}%
+                      </span>
+                      <span class="hidden group-hover:inline">
+                        {{ formatBytes(node.ram ?? 0) }} / {{ formatBytes(node.mem_total ?? 0) }}
+                      </span>
+                    </div>
+                    <ProgressThin
+                      :percentage="(node.ram ?? 0) / (node.mem_total || 1) * 100"
+                      :status="getStatus((node.ram ?? 0) / (node.mem_total || 1) * 100)" :height="4"
                     />
                   </div>
-                  <template #content>
-                    <span class="flex flex-row gap-0.5 items-center whitespace-nowrap">
-                      <Icon icon="tabler:chevron-up" width="12" height="12" />
-                      {{ formatBytes(node.net_total_up ?? 0) }}
-                    </span>
-                    <span class="flex flex-row gap-0.5 items-center whitespace-nowrap">
-                      <Icon icon="tabler:chevron-down" width="12" height="12" />
-                      {{ formatBytes(node.net_total_down ?? 0) }}
-                    </span>
-                  </template>
-                </DataTooltip>
-              </div>
-
-              <!-- 速率 -->
-              <div v-else-if="col.key === 'rate'" class="min-w-0">
-                <div class="text-[11px] font-medium flex flex-col">
-                  <span class="text-green-600 dark:text-green-400 flex flex-row gap-1 items-center truncate">
-                    <Icon icon="tabler:chevron-up" width="12" height="12" class="shrink-0" />
-                    {{ formatBytesPerSecond(node.net_out ?? 0) }}
-                  </span>
-                  <span class="text-blue-600 dark:text-blue-400 flex flex-row gap-1 items-center truncate">
-                    <Icon icon="tabler:chevron-down" width="12" height="12" class="shrink-0" />
-                    {{ formatBytesPerSecond(node.net_in ?? 0) }}
-                  </span>
                 </div>
-              </div>
-            </template>
-          </div>
 
-          <div
-            v-if="!node.online" class="absolute inset-0 z-2 p-2 bg-background/10 rounded-lg flex items-center"
-            aria-hidden="true"
-          >
-            <div class="grid gap-2 items-center justify-center" :style="gridStyle">
-              <div class="h-full space-y-1" :style="offlineOverlayContentStyle">
-                <div class="text-sm font-semibold truncate">
-                  <span class="text-red-500">离线</span> {{ node.name }}
+                <!-- 硬盘 -->
+                <div v-else-if="col.key === 'disk'" class="group min-w-0">
+                  <div class="space-y-1">
+                    <div class="text-[11px] font-medium text-foreground/75 truncate">
+                      <span class="inline group-hover:hidden">
+                        {{ ((node.disk ?? 0) / (node.disk_total || 1) * 100).toFixed(1) }}%
+                      </span>
+                      <span class="hidden group-hover:inline">
+                        {{ formatBytes(node.disk ?? 0) }} / {{ formatBytes(node.disk_total ?? 0) }}
+                      </span>
+                    </div>
+                    <ProgressThin
+                      :percentage="(node.disk ?? 0) / (node.disk_total || 1) * 100"
+                      :status="getStatus((node.disk ?? 0) / (node.disk_total || 1) * 100)" :height="4"
+                    />
+                  </div>
                 </div>
-                <div class="text-xs font-medium text-foreground/65">
-                  {{ formatOfflineTime(node) }}
+
+                <!-- 流量 -->
+                <div v-else-if="col.key === 'traffic'" class="group min-w-0">
+                  <DataTooltip placement="top" class="flex items-center gap-2" content-class="mb-1.5">
+                    <div class="space-y-1 w-full">
+                      <div class="text-[11px] font-medium text-foreground/75 truncate">
+                        <span class="inline group-hover:hidden">
+                          {{ getTrafficUsedPercentage(node).toFixed(1) }}%
+                        </span>
+                        <span class="hidden group-hover:inline">
+                          {{ formatBytes(getTrafficUsed(node)) }} /
+                          <template v-if="hasTrafficLimit(node)">{{ formatBytes(node.traffic_limit) }}</template>
+                          <template v-else>∞</template>
+                        </span>
+                      </div>
+                      <TrafficProgress
+                        :upload="node.net_total_up ?? 0" :download="node.net_total_down ?? 0"
+                        :traffic-limit="node.traffic_limit" :traffic-limit-type="(node.traffic_limit_type || 'sum')"
+                        height="4px"
+                      />
+                    </div>
+                    <template #content>
+                      <span class="flex flex-row gap-0.5 items-center whitespace-nowrap">
+                        <Icon icon="tabler:chevron-up" width="12" height="12" />
+                        {{ formatBytes(node.net_total_up ?? 0) }}
+                      </span>
+                      <span class="flex flex-row gap-0.5 items-center whitespace-nowrap">
+                        <Icon icon="tabler:chevron-down" width="12" height="12" />
+                        {{ formatBytes(node.net_total_down ?? 0) }}
+                      </span>
+                    </template>
+                  </DataTooltip>
+                </div>
+
+                <!-- 速率 -->
+                <div v-else-if="col.key === 'rate'" class="min-w-0">
+                  <div class="text-[11px] font-medium flex flex-col">
+                    <span class="text-green-600 dark:text-green-400 flex flex-row gap-1 items-center truncate">
+                      <Icon icon="tabler:chevron-up" width="12" height="12" class="shrink-0" />
+                      {{ formatBytesPerSecond(node.net_out ?? 0) }}
+                    </span>
+                    <span class="text-blue-600 dark:text-blue-400 flex flex-row gap-1 items-center truncate">
+                      <Icon icon="tabler:chevron-down" width="12" height="12" class="shrink-0" />
+                      {{ formatBytesPerSecond(node.net_in ?? 0) }}
+                    </span>
+                  </div>
+                </div>
+              </template>
+            </div>
+
+            <div
+              v-if="!node.online" class="absolute inset-0 z-2 p-2 bg-background/10 rounded-lg flex items-center"
+              aria-hidden="true"
+            >
+              <div class="grid gap-2 items-center justify-center" :style="gridStyle">
+                <div class="h-full space-y-1" :style="offlineOverlayContentStyle">
+                  <div class="text-sm font-semibold truncate">
+                    <span class="text-red-500">离线</span> {{ node.name }}
+                  </div>
+                  <div class="text-xs font-medium text-foreground/65">
+                    {{ formatOfflineTime(node) }}
+                  </div>
                 </div>
               </div>
             </div>
           </div>
-        </div>
-      </TransitionGroup>
+        </component>
+      </div>
     </div>
   </div>
 </template>

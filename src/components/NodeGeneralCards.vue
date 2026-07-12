@@ -618,8 +618,6 @@ const tiledDefaultCardKeys: GeneralCardKey[] = [
   'totalTraffic',
   'uploadSpeed',
   'downloadSpeed',
-  'trafficPeak',
-  'expiringNodes',
 ]
 const baseVisibleCards = computed(() => appStore.generalCardOrder.map(getCardDefinition))
 const tiledDefaultCards = computed(() => tiledDefaultCardKeys.map(getCardDefinition))

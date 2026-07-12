@@ -29,11 +29,24 @@ interface QuickControlOption {
   icon: string
 }
 
+type HomeToolKey = 'nodes' | 'topology' | 'providerValue' | 'healthSummary' | 'snapshotExport'
+
+interface HomeToolOption {
+  key: Exclude<HomeToolKey, 'nodes'>
+  label: string
+  icon: string
+  description: string
+}
+
 defineOptions({ name: 'HomeView' })
 
+const HealthSummaryPanel = defineAsyncComponent(() => import('@/components/HealthSummaryPanel.vue'))
 const NodeCard = defineAsyncComponent(() => import('@/components/NodeCard.vue'))
 const NodeGeneralCards = defineAsyncComponent(() => import('@/components/NodeGeneralCards.vue'))
 const NodeList = defineAsyncComponent(() => import('@/components/NodeList.vue'))
+const NodeTopologyPanel = defineAsyncComponent(() => import('@/components/NodeTopologyPanel.vue'))
+const ProviderValuePanel = defineAsyncComponent(() => import('@/components/ProviderValuePanel.vue'))
+const SnapshotExportPanel = defineAsyncComponent(() => import('@/components/SnapshotExportPanel.vue'))
 
 const nodeItemStaggerMs = 35
 const nodeItemStaggerLimit = 12
@@ -43,11 +56,10 @@ const nodesStore = useNodesStore()
 const router = useRouter()
 
 onActivated(() => {
-  if (appStore.homeScrollPosition > 0) {
-    nextTick(() => {
+  nextTick(() => {
+    if (appStore.homeScrollPosition > 0)
       window.scrollTo({ top: appStore.homeScrollPosition, behavior: 'instant' })
-    })
-  }
+  })
 })
 
 onDeactivated(() => {
@@ -56,6 +68,7 @@ onDeactivated(() => {
 
 const searchText = ref('')
 const debouncedSearchText = ref('')
+const activeHomeTool = ref<HomeToolKey>('nodes')
 const activeQuickControl = ref<HomeQuickControlKey>(appStore.homeQuickDefaultControl)
 const exchangeRates = ref(financeHelper.DEFAULT_EXCHANGE_RATES)
 const excludeFreeNodes = ref(true)
@@ -71,6 +84,18 @@ const quickControlDefinitions: Record<HomeQuickControlKey, QuickControlOption> =
   highLoad: { key: 'highLoad', label: '高负载', icon: 'tabler:alert-triangle' },
   expiring: { key: 'expiring', label: '即将到期', icon: 'tabler:calendar-exclamation' },
 }
+
+const homeTools = computed<HomeToolOption[]>(() => {
+  if (!appStore.isLoggedIn || !appStore.homeToolsEnabled)
+    return []
+
+  return [
+    { key: 'topology', label: '拓扑', icon: 'tabler:route', description: 'ASN / BGP / 上游根因' },
+    { key: 'providerValue', label: '性价比', icon: 'tabler:scale', description: '单机资源成本对比' },
+    { key: 'healthSummary', label: '健康', icon: 'tabler:heartbeat', description: '日周月历史健康概览' },
+    { key: 'snapshotExport', label: '导出', icon: 'tabler:download', description: 'CSV / JSON 数据快照' },
+  ]
+})
 
 const updateDebouncedSearch = useDebounceFn((value: string) => {
   debouncedSearchText.value = value
@@ -260,6 +285,23 @@ function setQuickControl(key: HomeQuickControlKey) {
   activeQuickControl.value = key
 }
 
+function toggleHomeTool(key: Exclude<HomeToolKey, 'nodes'>) {
+  if (!homeTools.value.some(tool => tool.key === key))
+    return
+  activeHomeTool.value = activeHomeTool.value === key ? 'nodes' : key
+}
+
+watch(homeTools, (tools) => {
+  if (activeHomeTool.value !== 'nodes' && !tools.some(tool => tool.key === activeHomeTool.value))
+    activeHomeTool.value = 'nodes'
+}, { immediate: true })
+
+const activeToolTitle = computed(() => {
+  if (activeHomeTool.value === 'nodes')
+    return ''
+  return homeTools.value.find(tool => tool.key === activeHomeTool.value)?.description ?? ''
+})
+
 const nodeCardGridClass = computed(() => {
   const sizeClass: Record<typeof appStore.nodeCardSize, string> = {
     mini: 'gap-3 sm:grid-cols-[repeat(auto-fill,minmax(270px,1fr))]',
@@ -299,10 +341,10 @@ const nodeCardGridClass = computed(() => {
     />
 
     <div class="node-info p-4 pt-0 flex flex-col gap-4 relative z-1 pointer-events-none" :class="!!appStore.hideGeneralCard && 'pt-4'">
-      <div class="nodes">
+      <div class="nodes min-w-0">
         <Tabs v-model="appStore.nodeSelectedGroup" class="w-full flex-col gap-4">
-          <div class="flex gap-2 items-center flex-nowrap">
-            <div class="home-controls-scroll min-w-0 flex-1 overflow-x-auto overscroll-x-contain rounded-sm pointer-events-auto touch-pan-x">
+          <div class="flex flex-col gap-2 xl:flex-row xl:items-center">
+            <div class="home-controls-scroll min-w-0 overflow-x-auto overscroll-x-contain rounded-sm pointer-events-auto touch-pan-x">
               <div class="flex w-max gap-2">
                 <TabsList class="w-max h-8 bg-background/50 backdrop-blur-xl rounded-md pointer-events-auto">
                   <TabsTrigger
@@ -314,7 +356,7 @@ const nodeCardGridClass = computed(() => {
                 </TabsList>
 
                 <div
-                  v-if="showQuickControls"
+                  v-if="showQuickControls && activeHomeTool === 'nodes'"
                   class="flex h-8 w-max items-center gap-1 rounded-md bg-background/50 px-1 backdrop-blur-xl pointer-events-auto"
                 >
                   <button
@@ -335,10 +377,25 @@ const nodeCardGridClass = computed(() => {
                 </div>
               </div>
             </div>
-            <div class="search flex gap-2 items-center pointer-events-auto">
+            <div class="search flex min-w-0 flex-wrap gap-2 items-center justify-end pointer-events-auto max-sm:justify-start xl:ml-auto">
+              <div v-if="homeTools.length" class="flex h-8 items-center gap-1 rounded-md bg-background/50 p-0.5 backdrop-blur-xs">
+                <Button
+                  v-for="tool in homeTools" :key="tool.key"
+                  variant="ghost" size="icon"
+                  class="size-7 rounded-sm text-muted-foreground shadow-none hover:bg-background/60"
+                  :class="[activeHomeTool === tool.key ? '!text-green-600 !bg-background' : '']"
+                  :aria-label="`${tool.label}：${tool.description}`"
+                  :aria-pressed="activeHomeTool === tool.key"
+                  :title="tool.description"
+                  @click="toggleHomeTool(tool.key)"
+                >
+                  <Icon :icon="tool.icon" :width="14" :height="14" />
+                </Button>
+              </div>
+
               <Button
                 variant="outline" size="icon" aria-label="卡片视图"
-                class="w-8 h-8 border-none  bg-background/50 backdrop-blur-xs shadow-none hover:bg-background/60 rounded-md"
+                class="w-8 h-8 border-none bg-background/50 backdrop-blur-xs shadow-none hover:bg-background/60 rounded-md"
                 :class="[appStore.nodeViewMode === 'card' ? '!text-green-600 !bg-background' : '']"
                 @click="appStore.nodeViewMode = 'card'"
               >
@@ -352,13 +409,13 @@ const nodeCardGridClass = computed(() => {
               >
                 <Icon icon="tabler:table" :width="14" :height="14" />
               </Button>
-              <div class="relative z-1 h-8" :class="searchText ? 'w-60' : 'w-8'">
-                <div class="absolute top-0 right-0">
+              <div class="relative z-1 h-8" :class="searchText ? 'w-full sm:w-60' : 'w-8'">
+                <div class="absolute top-0 right-0 w-full">
                   <Input
                     v-model="searchText" placeholder="搜索节点名称、地区、系统"
                     aria-label="搜索节点"
                     class="transition-all border-none shadow-none h-8 bg-background/50 backdrop-blur-xs rounded-md hover:!bg-background/60 focus:!pl-7.5 focus:placeholder:!text-muted-foreground focus:!bg-background/80 focus:!ring-slate-500/10"
-                    :class="searchText ? '!w-60 !pl-7.5 pr-7 placeholder:!text-muted-foreground' : 'w-8 placeholder:text-transparent focus:!w-60'"
+                    :class="searchText ? '!w-full sm:!w-60 !pl-7.5 pr-7 placeholder:!text-muted-foreground' : 'w-8 placeholder:text-transparent focus:!w-52 sm:focus:!w-60'"
                     @keydown.esc.prevent="clearSearch"
                   />
                   <Icon
@@ -379,8 +436,15 @@ const nodeCardGridClass = computed(() => {
             </div>
           </div>
           <TabsContent v-for="g in groups" :key="g.name" :value="g.name" class="pointer-events-auto">
+            <div v-if="activeHomeTool !== 'nodes'" class="mb-4 rounded-lg bg-background/50 px-3 py-2 text-sm text-muted-foreground">
+              {{ activeToolTitle }} · 当前分组：{{ g.tab }}（{{ groupNodeList.length }} 台）
+            </div>
+            <NodeTopologyPanel v-if="activeHomeTool === 'topology'" :nodes="groupNodeList" />
+            <ProviderValuePanel v-else-if="activeHomeTool === 'providerValue'" :nodes="groupNodeList" />
+            <HealthSummaryPanel v-else-if="activeHomeTool === 'healthSummary'" :nodes="groupNodeList" />
+            <SnapshotExportPanel v-else-if="activeHomeTool === 'snapshotExport'" :nodes="groupNodeList" />
             <TransitionGroup
-              v-if="nodeList.length !== 0 && appStore.nodeViewMode === 'card'"
+              v-else-if="nodeList.length !== 0 && appStore.nodeViewMode === 'card'"
               :appear="!appStore.disablePageAnimation"
               :css="!appStore.disablePageAnimation"
               name="node-card-switch"

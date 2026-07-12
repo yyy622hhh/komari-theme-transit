@@ -10,9 +10,9 @@
 
 :root {
   --background: oklch(1 0 0);
-  --foreground: oklch(0.141 0.005 285.823);
+  --foreground: oklch(0.11 0.01 285.823);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.141 0.005 285.823);
+  --card-foreground: oklch(0.11 0.01 285.823);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.141 0.005 285.823);
   --primary: oklch(0.21 0.006 285.885);
@@ -20,7 +20,7 @@
   --secondary: oklch(0.967 0.001 286.375);
   --secondary-foreground: oklch(0.21 0.006 285.885);
   --muted: oklch(0.967 0.001 286.375);
-  --muted-foreground: oklch(0.552 0.016 285.938);
+  --muted-foreground: oklch(0.34 0.02 285.938);
   --accent: oklch(0.967 0.001 286.375);
   --accent-foreground: oklch(0.21 0.006 285.885);
   --destructive: oklch(0.577 0.245 27.325);
@@ -55,7 +55,7 @@
   --secondary: oklch(0.274 0.006 286.033);
   --secondary-foreground: oklch(0.985 0 0);
   --muted: oklch(0.274 0.006 286.033);
-  --muted-foreground: oklch(0.705 0.015 286.067);
+  --muted-foreground: oklch(0.86 0.012 286.067);
   --accent: oklch(0.274 0.006 286.033);
   --accent-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.704 0.191 22.216);
@@ -157,19 +157,19 @@
 .node-card,
 .bg-card,
 [data-slot='card'] {
-  /* Slightly more translucent background and stronger blur/saturation for a clearer glass effect */
-  background-color: rgb(255 255 255 / 0.62) !important;
-  border: 1px solid rgb(255 255 255 / 0.34) !important;
-  backdrop-filter: blur(18px) saturate(170%) !important;
-  -webkit-backdrop-filter: blur(18px) saturate(170%) !important;
-  box-shadow: 0 6px 24px rgb(0 0 0 / 0.1) !important;
+  /* Keep the glass effect, but avoid making every card an overly expensive compositing layer. */
+  background-color: var(--glass-light-card, rgb(255 255 255 / 0.7)) !important;
+  border: 1px solid var(--glass-light-border, rgb(255 255 255 / 0.45)) !important;
+  backdrop-filter: blur(14px) saturate(145%) !important;
+  -webkit-backdrop-filter: blur(14px) saturate(145%) !important;
+  box-shadow: var(--glass-light-shadow, 0 8px 28px rgb(15 23 42 / 0.18)) !important;
 }
 
 .node-card:hover,
 .bg-card:hover,
 [data-slot='card']:hover {
-  background-color: rgb(255 255 255 / 0.72) !important;
-  box-shadow: 0 10px 36px rgb(0 0 0 / 0.16) !important;
+  background-color: var(--glass-light-card-hover, rgb(255 255 255 / 0.82)) !important;
+  box-shadow: var(--glass-light-shadow, 0 12px 38px rgb(15 23 42 / 0.2)) !important;
 }
 
 /* ===== 暗色模式 ===== */
@@ -178,41 +178,117 @@
 .dark .bg-card,
 .dark [data-slot='card'] {
   /* Dark mode: keep a translucent glass feel while improving foreground contrast */
-  background-color: rgb(15 15 25 / 0.72) !important;
-  border: 1px solid rgb(255 255 255 / 0.12) !important;
-  box-shadow: 0 6px 28px rgb(0 0 0 / 0.36) !important;
+  background-color: var(--glass-dark-card, rgb(10 14 22 / 0.82)) !important;
+  border: 1px solid var(--glass-dark-border, rgb(255 255 255 / 0.18)) !important;
+  box-shadow: var(--glass-dark-shadow, 0 8px 30px rgb(0 0 0 / 0.48)) !important;
 }
 
 .dark .node-card:hover,
 .dark .bg-card:hover,
 .dark [data-slot='card']:hover {
-  background-color: rgb(15 15 25 / 0.82) !important;
+  background-color: var(--glass-dark-card-hover, rgb(10 14 22 / 0.9)) !important;
+}
+
+.node-card,
+.bg-card,
+[data-slot='card'],
+.bg-background {
+  color: var(--glass-light-text, var(--color-foreground)) !important;
+}
+
+.node-card .text-muted-foreground,
+.bg-card .text-muted-foreground,
+[data-slot='card'] .text-muted-foreground,
+.bg-background .text-muted-foreground {
+  color: var(--glass-light-muted-text, var(--color-muted-foreground)) !important;
+}
+
+.node-card .text-foreground\/60,
+.bg-card .text-foreground\/60,
+[data-slot='card'] .text-foreground\/60 {
+  color: color-mix(in oklch, var(--glass-light-text, var(--color-foreground)) 78%, transparent) !important;
+}
+
+.node-card .text-foreground\/65,
+.bg-card .text-foreground\/65,
+[data-slot='card'] .text-foreground\/65 {
+  color: color-mix(in oklch, var(--glass-light-text, var(--color-foreground)) 82%, transparent) !important;
+}
+
+.node-card .text-foreground\/70,
+.bg-card .text-foreground\/70,
+[data-slot='card'] .text-foreground\/70 {
+  color: color-mix(in oklch, var(--glass-light-text, var(--color-foreground)) 86%, transparent) !important;
+}
+
+.node-card .text-foreground\/75,
+.bg-card .text-foreground\/75,
+[data-slot='card'] .text-foreground\/75 {
+  color: color-mix(in oklch, var(--glass-light-text, var(--color-foreground)) 90%, transparent) !important;
+}
+
+.dark .node-card,
+.dark .bg-card,
+.dark [data-slot='card'],
+.dark .bg-background {
+  color: var(--glass-dark-text, var(--color-foreground)) !important;
+}
+
+.dark .node-card .text-muted-foreground,
+.dark .bg-card .text-muted-foreground,
+.dark [data-slot='card'] .text-muted-foreground,
+.dark .bg-background .text-muted-foreground {
+  color: var(--glass-dark-muted-text, var(--color-muted-foreground)) !important;
+}
+
+.dark .node-card .text-foreground\/60,
+.dark .bg-card .text-foreground\/60,
+.dark [data-slot='card'] .text-foreground\/60 {
+  color: color-mix(in oklch, var(--glass-dark-text, var(--color-foreground)) 78%, transparent) !important;
+}
+
+.dark .node-card .text-foreground\/65,
+.dark .bg-card .text-foreground\/65,
+.dark [data-slot='card'] .text-foreground\/65 {
+  color: color-mix(in oklch, var(--glass-dark-text, var(--color-foreground)) 82%, transparent) !important;
+}
+
+.dark .node-card .text-foreground\/70,
+.dark .bg-card .text-foreground\/70,
+.dark [data-slot='card'] .text-foreground\/70 {
+  color: color-mix(in oklch, var(--glass-dark-text, var(--color-foreground)) 86%, transparent) !important;
+}
+
+.dark .node-card .text-foreground\/75,
+.dark .bg-card .text-foreground\/75,
+.dark [data-slot='card'] .text-foreground\/75 {
+  color: color-mix(in oklch, var(--glass-dark-text, var(--color-foreground)) 90%, transparent) !important;
 }
 
 /* ===== Header ===== */
 
 header {
-  background-color: rgb(255 255 255 / 0.55) !important;
+  background-color: var(--glass-light-header, rgb(255 255 255 / 0.7)) !important;
   backdrop-filter: blur(14px) saturate(150%) !important;
   -webkit-backdrop-filter: blur(14px) saturate(150%) !important;
   border-bottom: 1px solid rgb(255 255 255 / 0.3) !important;
 }
 
 .dark header {
-  background-color: rgb(10 10 20 / 0.6) !important;
+  background-color: var(--glass-dark-header, rgb(10 14 22 / 0.76)) !important;
   border-bottom: 1px solid rgb(255 255 255 / 0.08) !important;
 }
 
 /* ===== 顶部统计栏 ===== */
 
 .bg-background {
-  background-color: rgb(255 255 255 / 0.55) !important;
-  backdrop-filter: blur(12px) saturate(150%) !important;
-  -webkit-backdrop-filter: blur(12px) saturate(150%) !important;
+  background-color: var(--glass-light-control, rgb(255 255 255 / 0.72)) !important;
+  backdrop-filter: blur(14px) saturate(145%) !important;
+  -webkit-backdrop-filter: blur(14px) saturate(145%) !important;
 }
 
 .dark .bg-background {
-  background-color: rgb(20 20 35 / 0.55) !important;
+  background-color: var(--glass-dark-control, rgb(10 14 22 / 0.76)) !important;
 }
 
 /* ===== 小组件背景 ===== */
@@ -223,4 +299,56 @@ header {
 
 .dark .bg-slate-500\/5 {
   background-color: rgb(255 255 255 / 0.05) !important;
+}
+
+/* Firefox composites many backdrop-filter layers less efficiently than Chromium.
+   Use opaque-enough surfaces there so long node lists and animated globes stay smooth. */
+@supports (-moz-appearance: none) {
+  .node-card,
+  .bg-card,
+  [data-slot='card'] {
+    background-color: color-mix(in srgb, var(--glass-light-card, #ffffff) 86%, white) !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+
+  .node-card:hover,
+  .bg-card:hover,
+  [data-slot='card']:hover {
+    background-color: color-mix(in srgb, var(--glass-light-card-hover, #ffffff) 90%, white) !important;
+  }
+
+  .dark .node-card,
+  .dark .bg-card,
+  .dark [data-slot='card'] {
+    background-color: color-mix(in srgb, var(--glass-dark-card, #0f0f19) 92%, black) !important;
+  }
+
+  .dark .node-card:hover,
+  .dark .bg-card:hover,
+  .dark [data-slot='card']:hover {
+    background-color: color-mix(in srgb, var(--glass-dark-card-hover, #0f0f19) 94%, black) !important;
+  }
+
+  header,
+  .bg-background {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+
+  header {
+    background-color: rgb(255 255 255 / 0.86) !important;
+  }
+
+  .dark header {
+    background-color: rgb(10 10 20 / 0.9) !important;
+  }
+
+  .bg-background {
+    background-color: rgb(255 255 255 / 0.82) !important;
+  }
+
+  .dark .bg-background {
+    background-color: rgb(20 20 35 / 0.86) !important;
+  }
 }

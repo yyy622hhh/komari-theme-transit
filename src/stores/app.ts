@@ -61,6 +61,20 @@ type NodeViewMode = 'card' | 'list'
 type NodeCardSize = 'mini' | 'compact' | 'comfortable' | 'large'
 type RpcTransportMode = 'websocket' | 'http'
 type EarthRenderer = 'realistic' | 'cobe' | 'tiled'
+type GlassColorPreset = 'emerald' | 'soft' | 'contrast' | 'midnight' | 'custom'
+
+export interface GlassCustomColors {
+  lightCard: string
+  lightControl: string
+  lightText: string
+  lightMutedText: string
+  lightBorder: string
+  darkCard: string
+  darkControl: string
+  darkText: string
+  darkMutedText: string
+  darkBorder: string
+}
 
 type ThemeSettings = Record<string, unknown>
 
@@ -190,32 +204,37 @@ const ALL_NODE_LIST_METADATA_FIELDS = [
 const GENERAL_CARD_PRESETS: Record<GeneralCardPreset, GeneralCardKey[]> = {
   basic: DEFAULT_GENERAL_CARD_ORDER,
   ops: [
-    ...DEFAULT_GENERAL_CARD_ORDER,
     'onlineNodes',
     'offlineNodes',
     'highLoadNodes',
     'trafficWarnings',
-    'connectionPeakNode',
     'avgCpu',
     'avgLoad',
-    'cpuCores',
-    'trafficQuota',
   ],
   finance: [
-    ...DEFAULT_GENERAL_CARD_ORDER,
-    'expiringNodes',
+    'remainingValue',
     'monthlyCost',
     'yearlyCost',
-  ],
-  traffic: [
-    ...DEFAULT_GENERAL_CARD_ORDER,
-    'trafficPeak',
-    'uploadPeakNode',
-    'downloadPeakNode',
-    'trafficWarnings',
+    'expiringNodes',
+    'totalTraffic',
     'trafficQuota',
   ],
-  full: [...ALL_GENERAL_CARD_KEYS],
+  traffic: [
+    'totalTraffic',
+    'trafficQuota',
+    'uploadSpeed',
+    'downloadSpeed',
+    'trafficPeak',
+    'trafficWarnings',
+  ],
+  full: [
+    'onlineNodes',
+    'remainingValue',
+    'monthlyCost',
+    'totalTraffic',
+    'trafficPeak',
+    'highLoadNodes',
+  ],
   custom: DEFAULT_GENERAL_CARD_ORDER,
 }
 
@@ -255,6 +274,33 @@ const HOME_QUICK_CONTROL_PRESET_ALIASES: Record<string, HomeQuickControlPreset> 
   自定义: 'custom',
 }
 
+const GLASS_COLOR_PRESET_ALIASES: Record<string, GlassColorPreset> = {
+  emerald: 'emerald',
+  翡翠: 'emerald',
+  soft: 'soft',
+  柔和: 'soft',
+  contrast: 'contrast',
+  高对比: 'contrast',
+  midnight: 'midnight',
+  午夜: 'midnight',
+  custom: 'custom',
+  自定义: 'custom',
+}
+
+const DEFAULT_GLASS_CUSTOM_COLORS: GlassCustomColors = {
+  lightCard: '#ffffffb3',
+  lightControl: '#ffffffa6',
+  lightText: '#14151a',
+  lightMutedText: '#3f4552',
+  lightBorder: '#ffffff80',
+  darkCard: '#0d111ad9',
+  darkControl: '#101624cc',
+  darkText: '#f7f8fb',
+  darkMutedText: '#d6dae4',
+  darkBorder: '#ffffff2e',
+}
+
+const HEX_COLOR_REGEX = /^#[0-9a-f]{6}(?:[0-9a-f]{2})?$/i
 const EMPTY_THEME_SETTINGS: ThemeSettings = {}
 
 function isValidThemeMode(value: unknown): value is ThemeMode {
@@ -357,6 +403,20 @@ function readNumberSetting(settings: ThemeSettings, key: string, fallback: numbe
     return fallback
 
   return Math.min(Math.max(value, min), max)
+}
+
+function readColorSetting(settings: ThemeSettings, key: string, fallback: string): string {
+  const value = settings[key]
+  if (typeof value !== 'string')
+    return fallback
+  const trimmed = value.trim()
+  return HEX_COLOR_REGEX.test(trimmed) ? trimmed : fallback
+}
+
+function parseGlassColorPreset(value: unknown): GlassColorPreset {
+  if (typeof value !== 'string')
+    return 'emerald'
+  return GLASS_COLOR_PRESET_ALIASES[value.trim()] ?? 'emerald'
 }
 
 const useAppStore = defineStore('app', () => {
@@ -518,6 +578,26 @@ const useAppStore = defineStore('app', () => {
     return orderedKeys.filter(key => generalCardEnabledMap.value[key])
   })
 
+  const homeToolsEnabled = computed<boolean>(() => readBooleanSetting(themeSettings.value, 'homeToolsEnabled', true))
+
+  const glassColorPreset = computed<GlassColorPreset>(() => parseGlassColorPreset(themeSettings.value.glassColorPreset))
+
+  const glassCustomColors = computed<GlassCustomColors>(() => {
+    const settings = themeSettings.value
+    return {
+      lightCard: readColorSetting(settings, 'glassLightCardColor', DEFAULT_GLASS_CUSTOM_COLORS.lightCard),
+      lightControl: readColorSetting(settings, 'glassLightControlColor', DEFAULT_GLASS_CUSTOM_COLORS.lightControl),
+      lightText: readColorSetting(settings, 'glassLightTextColor', DEFAULT_GLASS_CUSTOM_COLORS.lightText),
+      lightMutedText: readColorSetting(settings, 'glassLightMutedTextColor', DEFAULT_GLASS_CUSTOM_COLORS.lightMutedText),
+      lightBorder: readColorSetting(settings, 'glassLightBorderColor', DEFAULT_GLASS_CUSTOM_COLORS.lightBorder),
+      darkCard: readColorSetting(settings, 'glassDarkCardColor', DEFAULT_GLASS_CUSTOM_COLORS.darkCard),
+      darkControl: readColorSetting(settings, 'glassDarkControlColor', DEFAULT_GLASS_CUSTOM_COLORS.darkControl),
+      darkText: readColorSetting(settings, 'glassDarkTextColor', DEFAULT_GLASS_CUSTOM_COLORS.darkText),
+      darkMutedText: readColorSetting(settings, 'glassDarkMutedTextColor', DEFAULT_GLASS_CUSTOM_COLORS.darkMutedText),
+      darkBorder: readColorSetting(settings, 'glassDarkBorderColor', DEFAULT_GLASS_CUSTOM_COLORS.darkBorder),
+    }
+  })
+
   const homeQuickControlsEnabled = computed<boolean>(() => readBooleanSetting(themeSettings.value, 'homeQuickControlsEnabled', true))
 
   const homeQuickControlOrder = computed<HomeQuickControlKey[]>(() => {
@@ -562,6 +642,10 @@ const useAppStore = defineStore('app', () => {
   const homeTrafficWarningThreshold = computed<number>(() => readNumberSetting(themeSettings.value, 'homeTrafficWarningThreshold', 80, 1, 100))
 
   const homeExpiringDays = computed<number>(() => readNumberSetting(themeSettings.value, 'homeExpiringDays', 30, 1, 3650))
+
+  const diskPredictionEnabled = computed<boolean>(() => readBooleanSetting(themeSettings.value, 'diskPredictionEnabled', false))
+
+  const diskPredictionThresholdDays = computed<number>(() => readNumberSetting(themeSettings.value, 'diskPredictionThresholdDays', 30, 1, 3650))
 
   const hideAdminEntryWhenLoggedOut = computed<boolean>(() => readBooleanSetting(themeSettings.value, 'hideAdminEntryWhenLoggedOut', false))
 
@@ -701,6 +785,9 @@ const useAppStore = defineStore('app', () => {
     visitorInfoEnabled,
     generalCardEnabledMap,
     generalCardOrder,
+    homeToolsEnabled,
+    glassColorPreset,
+    glassCustomColors,
     homeQuickControlsEnabled,
     homeQuickControlOrder,
     homeQuickDefaultControl,
@@ -712,6 +799,8 @@ const useAppStore = defineStore('app', () => {
     homeHighLoadThreshold,
     homeTrafficWarningThreshold,
     homeExpiringDays,
+    diskPredictionEnabled,
+    diskPredictionThresholdDays,
     hideAdminEntryWhenLoggedOut,
     hidePriceWhenLoggedOut,
     providerAliases,

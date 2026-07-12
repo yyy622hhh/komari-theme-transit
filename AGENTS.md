@@ -69,6 +69,15 @@ Current source of packaged preview:
 
 Do not change zip naming, manifest filename, or preview filename without updating the real build contract.
 
+## Project-specific safeguards
+
+- `komari-theme.json` is the **single release-version source**. `package.json` intentionally has no top-level `version`; do not re-add it just to satisfy tooling. `vite.config.ts` injects `__BUILD_VERSION__` from `komari-theme.json`.
+- GitHub release automation must read `komari-theme.json.version` only. After changing release/version workflow logic or bumping the theme version, verify the Actions run and the GitHub Release tag/assets, not just local `bun run build`.
+- Default node card size must remain `compact` in both `komari-theme.json` and `src/stores/app.ts`. `mini` is an optional high-density mode; do not repurpose or shrink the existing `compact` behavior.
+- Realtime node metrics must update without a browser refresh. When touching `src/stores/nodes.ts`, `src/utils/init.ts`, or card/general-card metric rendering, verify polling/WebSocket updates change `net_in`, `net_out`, CPU, etc. in the running app.
+- `src/stores/nodes.ts` keeps a UUID index for fast updates. That index must point at Vue-reactive node objects from `nodes.value`, not the raw object before insertion, or live updates mutate non-reactive data and the UI goes stale.
+- README screenshots should be captured from a built app driven by a realistic mocked Komari API; include enough different surfaces (home, mini cards, list, detail, mobile) when screenshots are requested.
+
 ## CI facts
 
 Source of truth: `.github/workflows/build-ci.yml`

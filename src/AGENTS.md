@@ -46,6 +46,8 @@ When you need a new piece of UI:
 - `@/stores/nodes` owns normalized node data, group derivation, WebSocket state, and node updates.
 - Components and views should read from stores, not recreate parallel state for the same domain.
 - When behavior depends on `publicSettings.theme_settings`, follow the existing defensive pattern in `@/stores/app`: `typeof` checks, guarded `JSON.parse`, valid-value filtering, and defaults. The settings schema lives in `komari-theme.json` (`configuration.data`).
+- Node status updates must remain reactive. If `@/stores/nodes` keeps an index/cache for fast UUID lookup, it must store the reactive object from `nodes.value`, not a raw object created before insertion; otherwise polling/WebSocket updates will not refresh card/general-card metrics such as realtime upload/download until a page reload.
+- `nodeCardSize` defaults to `compact` in `@/stores/app` and `komari-theme.json`. Keep `mini` as an additional optional high-density mode; do not alter existing `compact` semantics when adding or changing card sizes.
 
 ## Utils
 

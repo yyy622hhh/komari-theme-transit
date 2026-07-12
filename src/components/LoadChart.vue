@@ -10,6 +10,7 @@ import { CardX } from '@/components/ui/card-x'
 import { Empty } from '@/components/ui/empty'
 import { Spinner } from '@/components/ui/spinner'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { loadNodeLoadRecords, useNodeLoadStats } from '@/composables/useNodeLoadStats'
 import { useAppStore } from '@/stores/app'
 import { useNodesStore } from '@/stores/nodes'
 import { formatBytes, formatBytesSplit } from '@/utils/helper'
@@ -28,6 +29,7 @@ const nodesStore = useNodesStore()
 const maxRecordPreserveTime = computed(() => appStore.publicSettings?.record_preserve_time || 720)
 
 const dataUpdateInterval = computed(() => appStore.dataUpdateInterval * 1000)
+const detailLoadStatsHours = computed(() => appStore.publicSettings?.record_preserve_time || 720)
 
 // 使用 store 中的 isDark computed
 const isDark = computed(() => appStore.isDark)
@@ -145,6 +147,25 @@ const error = ref<string | null>(null)
 
 // 节点信息
 const nodeInfo = computed(() => nodesStore.nodesByUuid.get(props.uuid))
+const { diskPrediction } = useNodeLoadStats(
+  () => props.uuid,
+  {
+    hours: () => detailLoadStatsHours.value,
+    enabled: () => appStore.diskPredictionEnabled,
+    diskTotal: () => nodeInfo.value?.disk_total ?? 0,
+  },
+)
+const diskPredictionSummary = computed(() => {
+  const prediction = diskPrediction.value
+  if (!appStore.diskPredictionEnabled || !prediction)
+    return ''
+
+  const days = Math.max(0, Math.ceil(prediction.daysUntilFull))
+  const growth = formatBytesSplit(prediction.dailyGrowthBytes, appStore.byteDecimals)
+  return days <= 0
+    ? `按最近 ${prediction.sampleDays.toFixed(1)} 天趋势，磁盘预计已满`
+    : `按最近 ${prediction.sampleDays.toFixed(1)} 天趋势，预计 ${days} 天后满 · 日增 ${growth.value} ${growth.unit}`
+})
 
 // RPC 客户端
 const rpc = getSharedRpc()
@@ -214,22 +235,7 @@ async function fetchHistoryData() {
   error.value = null
 
   try {
-    const apiBase = import.meta.env.VITE_API_BASE
-    const response = await fetch(`${apiBase}/records/load?uuid=${props.uuid}&hours=${hours}`)
-
-    if (!response.ok) {
-      throw new Error(`HTTP error: ${response.status}`)
-    }
-
-    const resp = await response.json()
-    const records = resp.data?.records || []
-
-    // 按时间排序
-    records.sort((a: StatusRecord, b: StatusRecord) =>
-      dayjs(a.time).valueOf() - dayjs(b.time).valueOf(),
-    )
-
-    remoteData.value = records
+    remoteData.value = await loadNodeLoadRecords(props.uuid, hours)
   }
   catch (err) {
     error.value = err instanceof Error ? err.message : '获取数据失败'
@@ -900,9 +906,14 @@ onMounted(() => {
         <!-- 磁盘卡片 -->
         <CardX size="small" class="bg-background/50 border-none hover:bg-background transition-all rounded-md">
           <template #header>
-            <div class="flex items-center justify-between">
-              <span class="text-base font-bold">磁盘</span>
-              <div class="text-xs flex gap-1 items-baseline">
+            <div class="flex items-center justify-between gap-3">
+              <div class="min-w-0">
+                <span class="text-base font-bold">磁盘</span>
+                <div v-if="diskPredictionSummary" class="text-[10px] text-orange-500 truncate" :title="diskPredictionSummary">
+                  {{ diskPredictionSummary }}
+                </div>
+              </div>
+              <div class="text-xs flex gap-1 items-baseline shrink-0">
                 <template v-if="latestStatus?.disk != null">
                   <span>{{ formatBytesSplit(latestStatus.disk).value }}</span>
                   <span>{{ formatBytesSplit(latestStatus.disk).unit }}</span>

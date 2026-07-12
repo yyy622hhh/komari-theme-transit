@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge'
 import { CardX } from '@/components/ui/card-x'
 import { DataTooltip } from '@/components/ui/data-tooltip'
 import { ProgressThin } from '@/components/ui/progress-thin'
+import { useNodeLoadStats } from '@/composables/useNodeLoadStats'
 import { useNodePingDisplay } from '@/composables/useNodePingDisplay'
 import { useAppStore } from '@/stores/app'
 import { formatBytesPerSecondWithConfig, formatBytesWithConfig, formatDateTime, getStatus, getUptimeDays } from '@/utils/helper'
@@ -53,6 +54,25 @@ const memPercentage = computed(() => getMemoryPercentage(props.node))
 const memStatus = computed(() => getStatus(memPercentage.value))
 const diskPercentage = computed(() => getDiskPercentage(props.node))
 const diskStatus = computed(() => getStatus(diskPercentage.value))
+
+const loadStatsHours = computed(() => appStore.publicSettings?.record_preserve_time || 720)
+const { diskPrediction } = useNodeLoadStats(
+  () => props.node.uuid,
+  {
+    hours: () => loadStatsHours.value,
+    enabled: () => appStore.diskPredictionEnabled,
+    diskTotal: () => props.node.disk_total,
+  },
+)
+const diskPredictionText = computed(() => {
+  const prediction = diskPrediction.value
+  if (!appStore.diskPredictionEnabled || !prediction)
+    return ''
+  if (prediction.daysUntilFull > appStore.diskPredictionThresholdDays)
+    return ''
+  const days = Math.max(0, Math.ceil(prediction.daysUntilFull))
+  return days <= 0 ? '预计已满' : `预计 ${days} 天后满`
+})
 
 const {
   latencyRenderBars,
@@ -284,6 +304,9 @@ function hasRegion(region: string | null | undefined): boolean {
             <ProgressThin :percentage="diskPercentage" :status="diskStatus" :height="4" />
             <div class="text-[11px] text-muted-foreground truncate">
               {{ formatBytes(props.node.disk ?? 0) }} / {{ formatBytes(props.node.disk_total ?? 0) }}
+            </div>
+            <div v-if="diskPredictionText" class="text-[10px] text-orange-500 truncate">
+              {{ diskPredictionText }}
             </div>
           </div>
 

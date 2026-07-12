@@ -36,6 +36,12 @@ dist/               (Vite output)
 
 Vite injects two build-time constants via `define`: `__BUILD_VERSION__` (from [komari-theme.json](komari-theme.json), the single release-version source) and `__BUILD_GIT_HASH__`. Both are declared in [src/types/global.d.ts](src/types/global.d.ts) and may be referenced as globals in source.
 
+Version and release safeguards:
+
+- [komari-theme.json](komari-theme.json) is the **only** release-version source. [package.json](package.json) intentionally has no top-level `version`; do not re-add one just because a script/workflow used to read it.
+- Release automation must read `komari-theme.json.version`. After changing release/version workflow logic or bumping the theme version, verify the remote GitHub Actions run and the GitHub Release tag/assets.
+- If a released build is broken, bump [komari-theme.json](komari-theme.json) to the next patch release and publish a new Release instead of silently relying on an old failed tag.
+
 Manual chunks are configured in [vite.config.ts](vite.config.ts): `vue-vendor`, `echarts`, `reka-ui`, `vueuse`. Keep them aligned with actual usage when adding/removing large deps.
 
 ## UI stack (current — there is **no Naive UI** here)
@@ -61,6 +67,8 @@ Manual chunks are configured in [vite.config.ts](vite.config.ts): `vue-vendor`, 
 - [src/stores/app.ts](src/stores/app.ts) — public settings, theme-derived config, login state, layout flags, formatting prefs, theme mode. `publicSettings.theme_settings` comes from Komari and **must** be parsed defensively (`typeof` checks, guarded `JSON.parse`, valid-value filtering, defaults). The schema is declared in [komari-theme.json](komari-theme.json) under `configuration.data`.
 - [src/stores/nodes.ts](src/stores/nodes.ts) — normalized nodes, group derivation, WebSocket state, live updates.
 - Components/views should read from stores; do not maintain parallel state for the same domain.
+- `src/stores/nodes.ts` keeps a UUID index for update speed. Any indexed node must be the Vue-reactive object from `nodes.value`, not the raw object before insertion, or polling/WebSocket mutations will not refresh `net_in`, `net_out`, CPU, and other live UI values.
+- When changing node status transport/update code, verify in the running app that realtime metrics update without refreshing the browser.
 
 ### Transport & startup
 
@@ -93,6 +101,9 @@ Renaming, moving, or removing files under `public/images/` is a **code change**:
 ## Repo-grounded anti-patterns
 
 - Do not rename `komari-theme.json`, `docs/preview.png`, or the zip naming pattern `komari-theme-emerald-build-<sha>.zip`.
+- Do not re-add a top-level `version` to `package.json`; the release version belongs only in `komari-theme.json`.
+- Do not change the default node card size away from `compact`; `mini` is optional and must not replace/shrink existing `compact` behavior.
+- Do not trust local build success as proof a Release exists — check the remote Actions run and Release assets after release workflow changes.
 - Do not embed ad-hoc parsing of `theme_settings` inside components — normalize once in `stores/app.ts`.
 - Do not reintroduce Naive UI, UnoCSS, or SCSS — the project has migrated to reka-ui + Tailwind v4. Compose `src/components/ui/*` instead of pulling in a new component library.
 - Do not reintroduce `lucide-vue-next` (or any other icon-as-component package). All icons go through `@iconify/vue`; lucide icons are available via the `lucide:` prefix.

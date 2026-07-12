@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Icon } from '@iconify/vue'
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 
 interface VisitorData {
   ip: string
@@ -10,9 +10,58 @@ interface VisitorData {
   org: string
 }
 
+interface VisitorProvider {
+  url: string
+  normalize: (data: unknown) => VisitorData | null
+}
+
+type JsonRecord = Record<string, unknown>
+
+const visitorFetchTimeout = 8000
+
 const show = ref(false)
 const dismissed = ref(false)
-const visitor = ref<VisitorData | null>(null)
+const visitorLoading = ref(true)
+const visitorFailed = ref(false)
+const visitor = ref<VisitorData>({
+  ip: '',
+  city: '',
+  region: '',
+  country: '',
+  org: '',
+})
+
+const visitorProviders: VisitorProvider[] = [
+  {
+    url: 'https://ipwho.is/',
+    normalize: normalizeIpwhoData,
+  },
+  {
+    url: 'https://ipapi.co/json/',
+    normalize: normalizeIpapiData,
+  },
+  {
+    url: 'https://api.ip.sb/geoip',
+    normalize: normalizeIpSbData,
+  },
+]
+
+const compactLocation = computed(() => {
+  const parts = [visitor.value.city, visitor.value.region].filter(Boolean)
+  return parts.join(', ') || visitor.value.country || (visitorLoading.value ? '定位中' : '未知位置')
+})
+
+const displayIp = computed(() => visitor.value.ip || (visitorLoading.value ? '获取中' : '未获取到'))
+const displayCountry = computed(() => visitor.value.country || (visitorLoading.value ? '定位中' : '未知地区'))
+const displayOrg = computed(() => visitor.value.org || (visitorLoading.value ? '正在获取网络信息' : '运营商未知'))
+const welcomeLocation = computed(() => visitor.value.city || visitor.value.country || (visitorLoading.value ? 'your network' : 'unknown location'))
+const visitorStatusText = computed(() => {
+  if (visitorLoading.value)
+    return '正在获取访客信息'
+  if (visitorFailed.value)
+    return '已显示本地设备信息，公网定位暂未返回'
+  return `Welcome from ${welcomeLocation.value}!`
+})
 
 const windowsPattern = /Windows/i
 const macPattern = /Mac/i
@@ -26,29 +75,141 @@ const macOsPattern = /Mac OS X/i
 const linuxPattern = /Linux/i
 
 onMounted(async () => {
+  window.setTimeout(() => {
+    show.value = true
+  }, 600)
+
   try {
-    const res = await fetch('https://ipapi.co/json/')
-    const data = await res.json()
-    visitor.value = {
-      ip: data.ip,
-      city: data.city,
-      region: data.region,
-      country: data.country_name,
-      org: data.org,
+    const data = await fetchVisitorData()
+    if (data) {
+      visitor.value = data
+      return
     }
-  }
-  catch {
-    visitor.value = null
+
+    visitorFailed.value = true
   }
   finally {
-    setTimeout(() => {
-      show.value = true
-    }, 600)
+    visitorLoading.value = false
   }
 })
 
 function dismiss() {
   dismissed.value = true
+}
+
+async function fetchVisitorData(): Promise<VisitorData | null> {
+  for (const provider of visitorProviders) {
+    const data = await fetchProviderData(provider)
+    if (data)
+      return data
+  }
+
+  return null
+}
+
+async function fetchProviderData(provider: VisitorProvider): Promise<VisitorData | null> {
+  try {
+    const data = await fetchJsonWithTimeout(provider.url)
+    return provider.normalize(data)
+  }
+  catch {
+    return null
+  }
+}
+
+async function fetchJsonWithTimeout(url: string): Promise<unknown> {
+  const controller = new AbortController()
+  const timeoutId = window.setTimeout(() => controller.abort(), visitorFetchTimeout)
+
+  try {
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        Accept: 'application/json',
+      },
+    })
+
+    if (!response.ok)
+      throw new Error(`Visitor info request failed: ${response.status}`)
+
+    return await response.json()
+  }
+  finally {
+    window.clearTimeout(timeoutId)
+  }
+}
+
+function normalizeIpwhoData(data: unknown): VisitorData | null {
+  if (!isRecord(data) || data.success === false)
+    return null
+
+  const connection = isRecord(data.connection) ? data.connection : {}
+
+  return createVisitorData({
+    ip: data.ip,
+    city: data.city,
+    region: data.region,
+    country: data.country,
+    org: pickString(connection.org, connection.isp, connection.domain),
+  })
+}
+
+function normalizeIpapiData(data: unknown): VisitorData | null {
+  if (!isRecord(data) || data.error === true)
+    return null
+
+  return createVisitorData({
+    ip: data.ip,
+    city: data.city,
+    region: data.region,
+    country: data.country_name,
+    org: data.org,
+  })
+}
+
+function normalizeIpSbData(data: unknown): VisitorData | null {
+  if (!isRecord(data))
+    return null
+
+  return createVisitorData({
+    ip: data.ip,
+    city: data.city,
+    region: data.region,
+    country: data.country,
+    org: pickString(data.organization, data.isp, data.asn_organization),
+  })
+}
+
+function createVisitorData(data: Record<keyof VisitorData, unknown>): VisitorData | null {
+  const ip = readString(data.ip)
+  if (!ip)
+    return null
+
+  return {
+    ip,
+    city: readString(data.city),
+    region: readString(data.region),
+    country: readString(data.country),
+    org: readString(data.org),
+  }
+}
+
+function isRecord(data: unknown): data is JsonRecord {
+  return typeof data === 'object' && data !== null
+}
+
+function pickString(...values: unknown[]): string {
+  for (const value of values) {
+    const text = readString(value)
+    if (text)
+      return text
+  }
+
+  return ''
+}
+
+function readString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
 }
 
 function getOsIcon(): string {
@@ -108,29 +269,29 @@ const siteName = '访客'
   <!-- 底部居中 IP 条（桌面+手机都显示） -->
   <Transition name="slide-up">
     <div
-      v-if="show && !dismissed && visitor"
-      class="fixed bottom-4 left-1/2 -translate-x-1/2 z-50
-             flex items-center gap-2 px-4 py-1.5 rounded-full
+      v-if="show && !dismissed"
+      class="fixed bottom-4 inset-x-3 md:left-1/2 md:right-auto md:-translate-x-1/2 z-50
+             flex max-w-[calc(100vw-1.5rem)] items-center gap-2 rounded-full px-3 py-1.5 md:px-4
              bg-white/55 dark:bg-black/50
              backdrop-blur-md
              border border-white/40 dark:border-white/10
-             shadow-lg text-[13px] select-none whitespace-nowrap"
+             shadow-lg text-[12px] md:text-[13px] select-none whitespace-nowrap"
     >
       <Icon icon="icon-park-outline:earth" :width="14" :height="14" class="text-blue-500 shrink-0" />
-      <span class="text-muted-foreground">Your IP:</span>
-      <span class="font-semibold text-foreground">{{ visitor.ip }}</span>
-      <span class="text-muted-foreground/40">|</span>
-      <span class="text-muted-foreground">{{ visitor.country }}</span>
-      <span class="text-muted-foreground/40">|</span>
-      <span class="text-muted-foreground truncate max-w-[140px] md:max-w-[220px]">{{ visitor.org }}</span>
+      <span class="text-muted-foreground shrink-0">Your IP:</span>
+      <span class="font-semibold text-foreground shrink-0">{{ displayIp }}</span>
+      <span class="text-muted-foreground/40 shrink-0">|</span>
+      <span class="text-muted-foreground shrink-0">{{ displayCountry }}</span>
+      <span class="hidden sm:inline text-muted-foreground/40 shrink-0">|</span>
+      <span class="hidden sm:inline text-muted-foreground truncate max-w-[140px] md:max-w-[220px]">{{ displayOrg }}</span>
     </div>
   </Transition>
 
   <!-- 左下角详情卡片 — 模仿图二样式 -->
   <Transition name="slide-left">
     <div
-      v-if="show && !dismissed && visitor"
-      class="fixed bottom-16 left-3 z-50 w-56 rounded-2xl overflow-hidden
+      v-if="show && !dismissed"
+      class="fixed bottom-16 inset-x-3 sm:left-3 sm:right-auto z-50 w-auto max-w-[calc(100vw-1.5rem)] sm:w-56 rounded-2xl overflow-hidden
              bg-white/70 dark:bg-neutral-900/70
              backdrop-blur-xl
              border border-white/40 dark:border-white/10
@@ -145,7 +306,7 @@ const siteName = '访客'
           </div>
           <div class="flex flex-col leading-tight">
             <span class="text-[14px] font-bold text-violet-500 dark:text-violet-400">{{ siteName }}</span>
-            <span class="text-[11px] text-muted-foreground">{{ visitor.city }}, {{ visitor.region }}</span>
+            <span class="text-[11px] text-muted-foreground truncate max-w-[12rem] sm:max-w-32">{{ compactLocation }}</span>
           </div>
         </div>
         <button
@@ -160,7 +321,7 @@ const siteName = '访客'
       <!-- Welcome 文字 -->
       <div class="px-4 pb-2">
         <p class="text-[12px] text-foreground/70">
-          Welcome from {{ visitor.city }}!
+          {{ visitorStatusText }}
         </p>
       </div>
 
@@ -179,11 +340,11 @@ const siteName = '访客'
         </div>
         <div class="flex items-center gap-2.5 text-[12px] text-foreground/75">
           <Icon icon="icon-park-outline:local" :width="14" :height="14" class="text-blue-500 shrink-0" />
-          <span class="font-mono truncate">{{ visitor.ip }}</span>
+          <span class="font-mono truncate">{{ displayIp }}</span>
         </div>
         <div class="flex items-center gap-2.5 text-[12px] text-foreground/75">
           <Icon icon="icon-park-outline:protect" :width="14" :height="14" class="text-muted-foreground shrink-0" />
-          <span class="truncate">{{ visitor.org }}</span>
+          <span class="truncate">{{ displayOrg }}</span>
         </div>
         <div class="flex items-center gap-2.5 text-[12px] text-foreground/75">
           <Icon icon="icon-park-outline:time" :width="14" :height="14" class="text-muted-foreground shrink-0" />
