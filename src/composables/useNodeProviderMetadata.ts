@@ -2,7 +2,7 @@ import type { MaybeRefOrGetter } from 'vue'
 import type { PermissionKey } from '@/services/auth.service'
 import type { NodeProviderMetadata } from '@/services/provider.service'
 import type { NodeData } from '@/stores/nodes'
-import { ref, toValue, watch } from 'vue'
+import { markRaw, ref, toValue, watch } from 'vue'
 import { CACHE_CONFIG } from '@/constants/cache'
 import { SharedCache } from '@/services/cache.service'
 import { buildNodeProviderMetadata, getNodeIps, getNodeProviderFingerprint, lookupNodeGeo } from '@/services/provider.service'
@@ -31,6 +31,10 @@ const sharedMetadataCache = new SharedCache<SharedCacheEntry>({
   canEvict: entry => entry.subscribers.size === 0 && entry.promise === null,
 })
 
+function buildRawNodeProviderMetadata(...args: Parameters<typeof buildNodeProviderMetadata>): NodeProviderMetadata {
+  return markRaw(buildNodeProviderMetadata(...args))
+}
+
 function notifySharedEntry(entry: SharedCacheEntry): void {
   for (const subscriber of entry.subscribers)
     subscriber(entry.metadata)
@@ -49,7 +53,7 @@ function getSharedMetadataEntry(node: NodeData, customAliases: string, allowGeoL
 
   const hasIps = allowGeoLookup && getNodeIps(node).length > 0
   const entry: SharedCacheEntry = {
-    metadata: buildNodeProviderMetadata(node, customAliases, null, hasIps),
+    metadata: buildRawNodeProviderMetadata(node, customAliases, null, hasIps),
     subscribers: new Set(),
     promise: null,
   }
@@ -58,11 +62,11 @@ function getSharedMetadataEntry(node: NodeData, customAliases: string, allowGeoL
   if (hasIps) {
     entry.promise = lookupNodeGeo(node)
       .then((geo) => {
-        entry.metadata = buildNodeProviderMetadata(node, customAliases, geo, false)
+        entry.metadata = buildRawNodeProviderMetadata(node, customAliases, geo, false)
         notifySharedEntry(entry)
       })
       .catch(() => {
-        entry.metadata = buildNodeProviderMetadata(node, customAliases, null, false)
+        entry.metadata = buildRawNodeProviderMetadata(node, customAliases, null, false)
         notifySharedEntry(entry)
       })
       .finally(() => {

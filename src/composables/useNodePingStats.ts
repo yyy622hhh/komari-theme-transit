@@ -1,10 +1,13 @@
 import type { MaybeRefOrGetter } from 'vue'
 import type { PermissionKey } from '@/services/auth.service'
+import type { PingMetricTaskStats } from '@/utils/rpc'
 import { useThrottleFn } from '@vueuse/core'
 import { computed, onScopeDispose, ref, shallowRef, toValue, watch } from 'vue'
 import { PING_RECORD_MAX_COUNT } from '@/constants/load'
 import { abortPingRecords, loadPingRecords } from '@/services/history.service'
+import { loadPingMetricStats, queryMetrics } from '@/services/metrics.service'
 import { useAppStore } from '@/stores/app'
+import { isPingMetric, normalizeMetricSeriesList, PING_LATENCY_METRIC, pingTaskId } from '@/utils/metricSeries'
 
 export interface NodePingHistoryPoint {
   time: string
@@ -35,6 +38,7 @@ function normalizeMaxCount(maxCount: number | null | undefined): number | undefi
 
 interface SharedPingRecordsState {
   recordsByClient: Map<string, PingRecord[]>
+  source: 'metric' | 'legacy'
 }
 
 interface SharedPingRecordsEntry {
@@ -108,8 +112,8 @@ function getCacheKey(uuid: string, hours: number, maxCount?: number): string {
   return `${CACHE_KEY_PREFIX}:${uuid}:${hours}:${maxCount ?? 'all'}`
 }
 
-function getSharedPingRecordsKey(hours: number, maxCount?: number): string {
-  return `${hours}:${maxCount ?? 'all'}`
+function getSharedPingRecordsKey(hours: number, maxCount?: number, uuid?: string): string {
+  return `${uuid?.trim() || 'all'}:${hours}:${maxCount ?? 'all'}`
 }
 
 function isValidHistoryPoint(value: unknown): value is NodePingHistoryPoint {
@@ -188,8 +192,8 @@ function createSharedPingRecordsEntry(): SharedPingRecordsEntry {
   }
 }
 
-function getSharedPingRecordsEntry(hours: number, maxCount?: number): SharedPingRecordsEntry {
-  const key = getSharedPingRecordsKey(hours, maxCount)
+function getSharedPingRecordsEntry(hours: number, maxCount?: number, uuid?: string): SharedPingRecordsEntry {
+  const key = getSharedPingRecordsKey(hours, maxCount, uuid)
   const cachedEntry = sharedPingRecordsCache.get(key)
   if (cachedEntry)
     return cachedEntry
@@ -220,7 +224,84 @@ function buildRecordsByClient(records: PingRecord[]): Map<string, PingRecord[]> 
   return grouped
 }
 
-async function loadSharedPingRecords(entry: SharedPingRecordsEntry, hours: number, maxCount?: number): Promise<void> {
+function normalizeTaskId(taskId: string): number {
+  if (!taskId.trim())
+    return Number.NaN
+
+  const numericTaskId = Number(taskId)
+  if (Number.isFinite(numericTaskId))
+    return numericTaskId
+
+  let hash = 0
+  for (let index = 0; index < taskId.length; index++)
+    hash = (hash * 31 + taskId.charCodeAt(index)) | 0
+  return Math.abs(hash)
+}
+
+function buildMetricRecordsByClient(nodeUuid: string, stats: PingMetricTaskStats[], records: PingRecord[]): Map<string, PingRecord[]> {
+  const grouped = buildRecordsByClient(records)
+  if (grouped.size)
+    return grouped
+
+  const syntheticRecords = stats
+    .filter(stat => stat.entity_id === nodeUuid && typeof stat.latest === 'number' && Number.isFinite(stat.latest))
+    .map((stat): PingRecord => ({
+      client: nodeUuid,
+      task_id: normalizeTaskId(stat.task_id),
+      time: new Date().toISOString(),
+      value: stat.latest!,
+    }))
+
+  return buildRecordsByClient(syntheticRecords)
+}
+
+async function loadPingMetricRecords(nodeUuid: string, hours: number, maxCount?: number): Promise<SharedPingRecordsState | null> {
+  const [statsResult, metricsResult] = await Promise.allSettled([
+    loadPingMetricStats({ entity_id: nodeUuid, hours, max_points: maxCount }),
+    queryMetrics({
+      metric_keys: [PING_LATENCY_METRIC],
+      entity_id: nodeUuid,
+      hours,
+      downsample: true,
+      fill_empty: true,
+      max_points: maxCount,
+      aggregation: 'avg',
+    }),
+  ])
+
+  const stats = statsResult.status === 'fulfilled' ? statsResult.value.stats ?? [] : []
+  const metricRecords: PingRecord[] = []
+
+  if (metricsResult.status === 'fulfilled') {
+    const seriesList = normalizeMetricSeriesList(metricsResult.value.series).filter(isPingMetric)
+    for (const series of seriesList) {
+      const taskId = normalizeTaskId(pingTaskId(series))
+      if (!Number.isFinite(taskId))
+        continue
+
+      for (const point of series.points) {
+        metricRecords.push({
+          client: series.entity_id,
+          task_id: taskId,
+          time: point.time,
+          value: point.value === null ? -1 : point.value,
+        })
+      }
+    }
+  }
+
+  const recordsByClient = buildMetricRecordsByClient(nodeUuid, stats, metricRecords)
+  const records = recordsByClient.get(nodeUuid) ?? []
+  if (!records.length && !stats.length)
+    return null
+
+  return {
+    recordsByClient,
+    source: 'metric',
+  }
+}
+
+async function loadSharedPingRecords(entry: SharedPingRecordsEntry, hours: number, maxCount?: number, nodeUuid?: string): Promise<void> {
   if (entry.promise)
     return entry.promise
 
@@ -229,9 +310,16 @@ async function loadSharedPingRecords(entry: SharedPingRecordsEntry, hours: numbe
 
   entry.promise = (async () => {
     try {
-      const records = await loadPingRecords(hours, maxCount)
-      entry.data.value = {
-        recordsByClient: buildRecordsByClient(records),
+      const metricState = nodeUuid ? await loadPingMetricRecords(nodeUuid, hours, maxCount).catch(() => null) : null
+      if (metricState) {
+        entry.data.value = metricState
+      }
+      else {
+        const records = await loadPingRecords(hours, maxCount, nodeUuid)
+        entry.data.value = {
+          recordsByClient: buildRecordsByClient(records),
+          source: 'legacy',
+        }
       }
       entry.lastFetchedAt = Date.now()
     }
@@ -248,12 +336,12 @@ async function loadSharedPingRecords(entry: SharedPingRecordsEntry, hours: numbe
   return entry.promise
 }
 
-function startSharedPingRecordsRefresh(entry: SharedPingRecordsEntry, hours: number, maxCount?: number): void {
+function startSharedPingRecordsRefresh(entry: SharedPingRecordsEntry, hours: number, maxCount?: number, uuid?: string): void {
   if (entry.refreshTimer)
     return
 
   entry.refreshTimer = setInterval(() => {
-    void loadSharedPingRecords(entry, hours, maxCount).catch(() => {})
+    void loadSharedPingRecords(entry, hours, maxCount, uuid).catch(() => {})
   }, PING_RECORD_REFRESH_INTERVAL_MS)
 }
 
@@ -265,10 +353,10 @@ function stopSharedPingRecordsRefresh(entry: SharedPingRecordsEntry): void {
   entry.refreshTimer = null
 }
 
-function retainSharedPingRecordsEntry(hours: number, maxCount?: number): () => void {
-  const entry = getSharedPingRecordsEntry(hours, maxCount)
+function retainSharedPingRecordsEntry(hours: number, maxCount?: number, uuid?: string): () => void {
+  const entry = getSharedPingRecordsEntry(hours, maxCount, uuid)
   entry.subscribers += 1
-  startSharedPingRecordsRefresh(entry, hours, maxCount)
+  startSharedPingRecordsRefresh(entry, hours, maxCount, uuid)
 
   let released = false
   return () => {
@@ -279,7 +367,7 @@ function retainSharedPingRecordsEntry(hours: number, maxCount?: number): () => v
     entry.subscribers = Math.max(0, entry.subscribers - 1)
     if (entry.subscribers === 0) {
       stopSharedPingRecordsRefresh(entry)
-      abortPingRecords(hours, maxCount)
+      abortPingRecords(hours, maxCount, uuid)
     }
   }
 }
@@ -440,7 +528,7 @@ export function useNodePingStats(
       uuid: toValue(uuid),
       hours,
       maxCount,
-      cacheKey: getSharedPingRecordsKey(hours, maxCount),
+      cacheKey: getSharedPingRecordsKey(hours, maxCount, toValue(uuid)),
       enabled: toValue(options?.enabled) ?? true,
       authStatus: appStore.authStatus,
     }
@@ -449,8 +537,8 @@ export function useNodePingStats(
   let activeCacheKey: string | null = null
   let releaseSharedRecords: (() => void) | null = null
 
-  function syncSharedRecordsSubscription(hours: number | null, maxCount?: number): void {
-    const cacheKey = hours === null ? null : getSharedPingRecordsKey(hours, maxCount)
+  function syncSharedRecordsSubscription(hours: number | null, maxCount?: number, uuid?: string): void {
+    const cacheKey = hours === null ? null : getSharedPingRecordsKey(hours, maxCount, uuid)
     if (activeCacheKey === cacheKey)
       return
 
@@ -461,7 +549,7 @@ export function useNodePingStats(
     if (hours === null)
       return
 
-    releaseSharedRecords = retainSharedPingRecordsEntry(hours, maxCount)
+    releaseSharedRecords = retainSharedPingRecordsEntry(hours, maxCount, uuid)
     activeCacheKey = cacheKey
   }
 
@@ -477,7 +565,7 @@ export function useNodePingStats(
 
     // 通过 getSharedPingRecordsEntry 读取（不存在则创建），确保 computed 始终对
     // entry.data 这个 shallowRef 建立响应式依赖——即便首次加载尚未返回。
-    const entry = getSharedPingRecordsEntry(hours, maxCount)
+    const entry = getSharedPingRecordsEntry(hours, maxCount, nodeUuid)
     const state = entry.data.value
     if (!state)
       return readStatsCache(nodeUuid, hours, maxCount) ?? createEmptyStats()
@@ -513,8 +601,8 @@ export function useNodePingStats(
         }
       }
 
-      syncSharedRecordsSubscription(hours, maxCount)
-      const entry = getSharedPingRecordsEntry(hours, maxCount)
+      syncSharedRecordsSubscription(hours, maxCount, nodeUuid)
+      const entry = getSharedPingRecordsEntry(hours, maxCount, nodeUuid)
       const shouldLoadRecords = !entry.data.value
         || Date.now() - entry.lastFetchedAt >= PING_RECORD_REFRESH_INTERVAL_MS
 
@@ -529,7 +617,7 @@ export function useNodePingStats(
       error.value = null
 
       try {
-        await loadSharedPingRecords(entry, hours, maxCount)
+        await loadSharedPingRecords(entry, hours, maxCount, nodeUuid)
       }
       catch (err) {
         if (!cancelled && shouldShowLoading)

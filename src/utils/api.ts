@@ -37,10 +37,10 @@ export interface PublicSettings {
   disable_password_login: boolean
   oauth_enable: boolean
   oauth_provider: string | null
-  ping_record_preserve_time: number
+  ping_record_preserve_time?: number
   private_site: boolean
-  record_enabled: boolean
-  record_preserve_time: number
+  record_enabled?: boolean
+  record_preserve_time?: number
   sitename: string
   theme: string
   theme_settings?: Record<string, unknown> | null
@@ -62,6 +62,7 @@ export interface NodeInfo {
   virtualization: string
   arch: string
   cpu_cores: number
+  cpu_physical_cores?: number
   os: string
   kernel_version: string
   gpu_name: string
@@ -150,6 +151,8 @@ export interface LoadRecord {
   net_out: number
   net_total_up: number
   net_total_down: number
+  traffic_up?: number
+  traffic_down?: number
   process: number
   connections: number
   connections_udp: number

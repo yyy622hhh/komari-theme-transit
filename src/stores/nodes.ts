@@ -16,6 +16,7 @@ export interface NodeData {
   virtualization: string
   arch: string
   cpu_cores: number
+  cpu_physical_cores?: number
   os: string
   kernel_version: string
   gpu_name?: string
@@ -58,10 +59,14 @@ export interface NodeData {
   net_out: number
   net_total_up: number
   net_total_down: number
+  traffic_up?: number
+  traffic_down?: number
   process: number
   connections: number
   connections_udp: number
   uptime: number
+  message?: string
+  status_updated_at?: string
 }
 
 /** WebSocket 连接状态 */
@@ -84,10 +89,14 @@ interface StatusData {
   net_out: number
   net_total_up: number
   net_total_down: number
+  traffic_up?: number
+  traffic_down?: number
   process: number
   connections: number
   connections_udp: number
   uptime: number
+  message?: string
+  updated_at?: string
 }
 
 const useNodesStore = defineStore('nodes', () => {
@@ -118,6 +127,10 @@ const useNodesStore = defineStore('nodes', () => {
     return Array.from(groupSet)
   })
 
+  function areStringArraysEqual(left: string[], right: string[]): boolean {
+    return left.length === right.length && left.every((value, index) => value === right[index])
+  }
+
   function addIndexedNode(node: NodeData): void {
     nodes.value.push(node)
     const reactiveNode = nodes.value.at(-1)
@@ -145,7 +158,9 @@ const useNodesStore = defineStore('nodes', () => {
   // ===== 方法 =====
 
   /**
-   * 从 Client 对象创建节点数据
+   * 从 Client 对象创建节点数据。
+   * 节点对象本身必须保持响应式，实时 CPU / 流量 / 在线状态依赖这些字段触发 UI 更新；
+   * 若后续挂载复杂静态元数据，应在字段级使用 markRaw 或放入专用共享缓存。
    */
   function createNodeFromClient(client: Client): NodeData {
     return {
@@ -155,6 +170,7 @@ const useNodesStore = defineStore('nodes', () => {
       virtualization: client.virtualization,
       arch: client.arch,
       cpu_cores: client.cpu_cores,
+      cpu_physical_cores: client.cpu_physical_cores,
       os: client.os,
       kernel_version: client.kernel_version,
       gpu_name: client.gpu_name,
@@ -197,6 +213,8 @@ const useNodesStore = defineStore('nodes', () => {
       net_out: 0,
       net_total_up: 0,
       net_total_down: 0,
+      traffic_up: 0,
+      traffic_down: 0,
       process: 0,
       connections: 0,
       connections_udp: 0,
@@ -243,6 +261,10 @@ const useNodesStore = defineStore('nodes', () => {
       node.net_total_up = status.net_total_up
     if (node.net_total_down !== status.net_total_down)
       node.net_total_down = status.net_total_down
+    if (node.traffic_up !== status.traffic_up)
+      node.traffic_up = status.traffic_up
+    if (node.traffic_down !== status.traffic_down)
+      node.traffic_down = status.traffic_down
     if (node.process !== status.process)
       node.process = status.process
     if (node.connections !== status.connections)
@@ -251,6 +273,10 @@ const useNodesStore = defineStore('nodes', () => {
       node.connections_udp = status.connections_udp
     if (node.uptime !== status.uptime)
       node.uptime = status.uptime
+    if (node.message !== status.message)
+      node.message = status.message
+    if (node.status_updated_at !== status.updated_at)
+      node.status_updated_at = status.updated_at
   }
 
   /**
@@ -271,6 +297,8 @@ const useNodesStore = defineStore('nodes', () => {
       node.arch = client.arch
     if (node.cpu_cores !== client.cpu_cores)
       node.cpu_cores = client.cpu_cores
+    if (node.cpu_physical_cores !== client.cpu_physical_cores)
+      node.cpu_physical_cores = client.cpu_physical_cores
     if (node.os !== client.os)
       node.os = client.os
     if (node.kernel_version !== client.kernel_version)
@@ -309,7 +337,9 @@ const useNodesStore = defineStore('nodes', () => {
       node.expired_at = client.expired_at
     if (node.group !== client.group) {
       node.group = client.group
-      node.groups = parseNodeGroups(client.group)
+      const nextGroups = parseNodeGroups(client.group)
+      if (!areStringArraysEqual(node.groups, nextGroups))
+        node.groups = nextGroups
     }
     if (node.tags !== client.tags)
       node.tags = client.tags

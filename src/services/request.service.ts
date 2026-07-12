@@ -111,12 +111,21 @@ export class RequestManager {
         continue
       }
 
-      this.activeCount += 1
-      void this.execute(request).finally(() => {
+      this.startActiveRequest(request)
+    }
+  }
+
+  private startActiveRequest<T>(request: QueuedRequest<T>): void {
+    this.activeCount += 1
+    void (async () => {
+      try {
+        await this.execute(request)
+      }
+      finally {
         this.activeCount = Math.max(0, this.activeCount - 1)
         this.drainQueue()
-      })
-    }
+      }
+    })()
   }
 
   private async execute<T>(request: QueuedRequest<T>): Promise<void> {

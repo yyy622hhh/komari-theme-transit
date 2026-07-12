@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { CardX } from '@/components/ui/card-x'
 import { Input } from '@/components/ui/input'
 import { useNodeProviderMetadata } from '@/composables/useNodeProviderMetadata'
-import { buildSnapshotCsv, downloadText } from '@/services/snapshot.service'
+import { buildSnapshotCsvAsync, buildSnapshotJsonAsync, downloadText } from '@/services/snapshot.service'
 import { useAppStore } from '@/stores/app'
 import * as financeHelper from '@/utils/financeHelper'
 import { formatBytesPerSecondWithConfig, formatBytesWithConfig, formatDateTime, formatUptimeWithFormat } from '@/utils/helper'
@@ -60,6 +60,7 @@ const props = defineProps<{
 const appStore = useAppStore()
 const exchangeRates = ref(financeHelper.DEFAULT_EXCHANGE_RATES)
 const exportPasswordInput = ref('')
+const exporting = ref<null | 'json' | 'csv'>(null)
 
 const { getNodeProviderMetadata } = useNodeProviderMetadata({
   nodes: () => props.nodes,
@@ -151,45 +152,47 @@ function formatValueCost(value: number | null): string {
   return `${amount.symbol}${amount.value} CNY`
 }
 
+function buildRow(node: NodeData): SnapshotRow {
+  const providerMetadata = getNodeProviderMetadata(node)
+  return {
+    uuid: node.uuid,
+    name: node.name,
+    online: node.online,
+    group: node.group,
+    region: node.region,
+    ipv4: node.ipv4 || '',
+    ipv6: node.ipv6 || '',
+    provider: providerMetadata?.provider?.displayName || '',
+    asn: providerMetadata?.geo?.asn || '',
+    org: providerMetadata?.geo?.org || '',
+    os: node.os,
+    arch: node.arch,
+    virtualization: node.virtualization,
+    cpuName: node.cpu_name,
+    cpuCores: node.cpu_cores || 0,
+    cpuUsage: node.cpu || 0,
+    load1: node.load || 0,
+    memoryUsedBytes: node.ram || 0,
+    memoryTotalBytes: node.mem_total || 0,
+    diskUsedBytes: node.disk || 0,
+    diskTotalBytes: node.disk_total || 0,
+    trafficUsedBytes: getTrafficUsed(node),
+    trafficLimitBytes: node.traffic_limit || 0,
+    trafficUsedPercent: getTrafficUsedPercentage(node),
+    netInBytesPerSecond: node.net_in || 0,
+    netOutBytesPerSecond: node.net_out || 0,
+    uptimeSeconds: node.uptime || 0,
+    price: node.price || 0,
+    currency: node.currency,
+    billingCycleDays: node.billing_cycle || 0,
+    monthlyCostCNY: financeHelper.calculateMonthlyCostCNY(node, exchangeRates.value),
+    expiredAt: node.expired_at,
+    tags: node.tags,
+  }
+}
+
 function buildRows(): SnapshotRow[] {
-  return props.nodes.map((node) => {
-    const providerMetadata = getNodeProviderMetadata(node)
-    return {
-      uuid: node.uuid,
-      name: node.name,
-      online: node.online,
-      group: node.group,
-      region: node.region,
-      ipv4: node.ipv4 || '',
-      ipv6: node.ipv6 || '',
-      provider: providerMetadata?.provider?.displayName || '',
-      asn: providerMetadata?.geo?.asn || '',
-      org: providerMetadata?.geo?.org || '',
-      os: node.os,
-      arch: node.arch,
-      virtualization: node.virtualization,
-      cpuName: node.cpu_name,
-      cpuCores: node.cpu_cores || 0,
-      cpuUsage: node.cpu || 0,
-      load1: node.load || 0,
-      memoryUsedBytes: node.ram || 0,
-      memoryTotalBytes: node.mem_total || 0,
-      diskUsedBytes: node.disk || 0,
-      diskTotalBytes: node.disk_total || 0,
-      trafficUsedBytes: getTrafficUsed(node),
-      trafficLimitBytes: node.traffic_limit || 0,
-      trafficUsedPercent: getTrafficUsedPercentage(node),
-      netInBytesPerSecond: node.net_in || 0,
-      netOutBytesPerSecond: node.net_out || 0,
-      uptimeSeconds: node.uptime || 0,
-      price: node.price || 0,
-      currency: node.currency,
-      billingCycleDays: node.billing_cycle || 0,
-      monthlyCostCNY: financeHelper.calculateMonthlyCostCNY(node, exchangeRates.value),
-      expiredAt: node.expired_at,
-      tags: node.tags,
-    }
-  })
+  return props.nodes.map(buildRow)
 }
 
 const rows = computed(buildRows)
@@ -238,6 +241,28 @@ const csvColumns: CsvColumn[] = [
   { label: '到期时间', value: row => formatDate(row.expiredAt) },
   { label: '标签', value: row => row.tags || '-' },
 ]
+
+function yieldToBrowser(): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+      window.requestIdleCallback(() => resolve(), { timeout: 80 })
+      return
+    }
+    setTimeout(resolve, 0)
+  })
+}
+
+async function buildRowsAsync(chunkSize = 250): Promise<SnapshotRow[]> {
+  const result: SnapshotRow[] = []
+  for (let index = 0; index < props.nodes.length; index++) {
+    const node = props.nodes[index]
+    if (node)
+      result.push(buildRow(node))
+    if ((index + 1) % chunkSize === 0)
+      await yieldToBrowser()
+  }
+  return result
+}
 
 function buildJsonNode(row: SnapshotRow) {
   return {
@@ -320,40 +345,65 @@ async function verifySnapshotExportPermission(): Promise<boolean> {
 }
 
 async function exportJson(): Promise<void> {
+  if (exporting.value)
+    return
   if (!await verifySnapshotExportPermission())
     return
 
-  const exportedAt = new Date()
-  downloadText(
-    `komari-snapshot-${Date.now()}.json`,
-    JSON.stringify({
-      generatedAt: formatDateTime(exportedAt),
-      generatedAtIso: exportedAt.toISOString(),
-      summary: {
-        nodes: props.nodes.length,
-        online: onlineCount.value,
-        offline: props.nodes.length - onlineCount.value,
-        cpuCores: totalCpuCores.value,
-        memory: formatBytes(totalMemoryBytes.value),
-        disk: formatBytes(totalDiskBytes.value),
-        monthlyCost: financeHelper.formatFinanceAmount(totalMonthlyCostCNY.value, 'CNY'),
+  exporting.value = 'json'
+  try {
+    await yieldToBrowser()
+    const exportRows = await buildRowsAsync()
+    const exportedAt = new Date()
+    const content = await buildSnapshotJsonAsync(
+      {
+        generatedAt: formatDateTime(exportedAt),
+        generatedAtIso: exportedAt.toISOString(),
+        summary: {
+          nodes: props.nodes.length,
+          online: onlineCount.value,
+          offline: props.nodes.length - onlineCount.value,
+          cpuCores: totalCpuCores.value,
+          memory: formatBytes(totalMemoryBytes.value),
+          disk: formatBytes(totalDiskBytes.value),
+          monthlyCost: financeHelper.formatFinanceAmount(totalMonthlyCostCNY.value, 'CNY'),
+        },
       },
-      nodes: rows.value.map(buildJsonNode),
-    }, null, 2),
-    'application/json;charset=utf-8',
-  )
+      exportRows,
+      buildJsonNode,
+      yieldToBrowser,
+    )
+    downloadText(
+      `komari-snapshot-${Date.now()}.json`,
+      content,
+      'application/json;charset=utf-8',
+    )
+  }
+  finally {
+    exporting.value = null
+  }
 }
 
 async function exportCsv(): Promise<void> {
+  if (exporting.value)
+    return
   if (!await verifySnapshotExportPermission())
     return
 
-  downloadText(
-    `komari-snapshot-${Date.now()}.csv`,
-    buildSnapshotCsv(csvColumns, rows.value),
-    'text/csv;charset=utf-8',
-    { bom: true },
-  )
+  exporting.value = 'csv'
+  try {
+    await yieldToBrowser()
+    const exportRows = await buildRowsAsync()
+    downloadText(
+      `komari-snapshot-${Date.now()}.csv`,
+      await buildSnapshotCsvAsync(csvColumns, exportRows, yieldToBrowser),
+      'text/csv;charset=utf-8',
+      { bom: true },
+    )
+  }
+  finally {
+    exporting.value = null
+  }
 }
 </script>
 
@@ -430,13 +480,13 @@ async function exportCsv(): Promise<void> {
           />
         </div>
         <div class="flex gap-2">
-          <Button variant="outline" class="bg-background/60" @click="exportJson">
-            <Icon icon="tabler:braces" width="14" height="14" />
-            导出 JSON
+          <Button variant="outline" class="bg-background/60" :disabled="Boolean(exporting)" @click="exportJson">
+            <Icon :icon="exporting === 'json' ? 'tabler:loader-2' : 'tabler:braces'" width="14" height="14" :class="exporting === 'json' && 'animate-spin'" />
+            {{ exporting === 'json' ? '导出中' : '导出 JSON' }}
           </Button>
-          <Button variant="outline" class="bg-background/60" @click="exportCsv">
-            <Icon icon="tabler:file-spreadsheet" width="14" height="14" />
-            导出 CSV
+          <Button variant="outline" class="bg-background/60" :disabled="Boolean(exporting)" @click="exportCsv">
+            <Icon :icon="exporting === 'csv' ? 'tabler:loader-2' : 'tabler:file-spreadsheet'" width="14" height="14" :class="exporting === 'csv' && 'animate-spin'" />
+            {{ exporting === 'csv' ? '导出中' : '导出 CSV' }}
           </Button>
         </div>
       </div>

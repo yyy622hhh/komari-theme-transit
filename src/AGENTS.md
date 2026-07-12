@@ -1,111 +1,123 @@
-# Source Tree Guide
+# Source AGENTS.md
 
-This document applies to `/src` only. Keep changes aligned with the current Vue 3 + Vite + reka-ui + Tailwind CSS v4 structure already used here. **There is no Naive UI in this project** — do not reintroduce it.
+This guide applies to [src/](./). For full project context, read [../AIAGENTREADME.md](../AIAGENTREADME.md). For current work handoff, read/update [../AICACHE.md](../AICACHE.md).
 
-## Core architecture
+## Source-tree rule of thumb
 
-- `main.ts` is bootstrap only. It creates the Vue app, installs Pinia and the router, loads global styles, sets `window.$message`, kicks off `setupIconify()`, and mounts `App.vue`. Do not move feature logic into bootstrap.
-- `App.vue` is the app shell. It owns global layout, mounts `<Toaster>` (vue-sonner) and `Provider`, runs startup lifecycle wiring (`initApp()` / `destroyInitManager()` from `@/utils/init`), and `KeepAlive`s `HomeView`.
-- `src/router/index.ts` defines exactly two lazy routes:
-  - `/` → `@/views/HomeView.vue`
-  - `/instance/:id` → `@/views/InstanceDetail.vue`
-- The router has **no guards** today. Public home/detail routes must remain public; v3 privacy work gates sensitive actions/data paths instead of adding broad router guards.
-
-## v3 layering rules
-
-All new v3 app code should follow this ownership chain:
+All new app code should follow:
 
 ```text
 Component -> Composable -> Service -> RequestManager / CacheService -> API / RPC
 ```
 
-- Components render UI and call composables/services; do not put business logic, request orchestration, cache policy, or raw `theme_settings` parsing in components.
-- Composables own Vue state and lifecycle only: `ref`, `computed`, `watch`, subscriptions, `onScopeDispose`, and glue between stores/services.
-- Services in `@/services` own business and infrastructure logic: auth, provider metadata, history loading, prediction, snapshot export, request orchestration, cache lifecycle.
-- Shared limits, timings, cache policy, request policy, security settings, and UI constants belong in `@/constants`, preferably grouped config objects such as `CACHE_CONFIG` rather than scattered magic numbers.
-- `@/utils` should stay pure/helper-focused (formatting, CSV escaping, small transforms). Do not add new business workflows to generic utils.
-- Use docs as the architecture source of truth: `docs/Architecture.md`, `docs/DataFlow.md`, `docs/Auth.md`, `docs/Cache.md`, `docs/Migration-v3.md`, and `docs/Milestones-v3.md`.
+Do not bypass this chain unless you are editing bootstrap/transport glue that already lives at a lower layer.
 
-## Authoring conventions
+## Where code belongs
 
-- Use the Composition API with `<script setup lang="ts">`.
-- Prefer `@/` imports for source-local modules instead of long relative paths.
-- Keep files typed and repo-consistent with existing imports, computed state, and helper usage.
-
-## UI library (`src/components/ui/`)
-
-`src/components/ui/` is the local shadcn-vue-style component library (alert, avatar, back-top, badge, button, card-x, empty, input, progress-thin, sonner, spinner, tabs, tooltip). Each component:
-
-- Wraps a `reka-ui` primitive (or composes lower-level primitives) when applicable.
-- Declares variants with `class-variance-authority` and merges classes via `cn()` from `@/lib/utils` (which combines `clsx` + `tailwind-merge`).
-- Uses Tailwind utilities; design tokens are CSS variables defined in `@/styles/main.css` (OKLCH, with `.dark` overrides via `@custom-variant dark`).
-
-When you need a new piece of UI:
-
-1. Compose existing primitives from `src/components/ui/` first.
-2. If a primitive is missing, add it following the same pattern (reka-ui + cva + `cn()`), not by pulling in another component library.
-3. Do not introduce per-component SCSS files or scoped styles for things Tailwind already covers.
-
-## Views
-
-- Views orchestrate data already exposed by stores and utils.
-- `HomeView.vue` coordinates search, grouping, view-mode selection, scroll restore, and route navigation.
-- `InstanceDetail.vue` coordinates node detail presentation and chart tabs for a selected node.
-- Keep `HomeView` named with `defineOptions({ name: 'HomeView' })` so `App.vue`'s `KeepAlive :include="['HomeView']"` keeps working.
-- Heavy node and chart UI must stay lazily loaded with `defineAsyncComponent`, as already done for `NodeCard`, `NodeGeneralCards`, `NodeList`, `LoadChart`, and `PingChart`.
+- `main.ts` — bootstrap only: create Vue app, install Pinia/router, load styles, set `window.$message`, run `setupIconify()`, mount App.
+- `App.vue` — app shell: layout, `<Toaster>`, `Provider`, `initApp()` / `destroyInitManager()`, `KeepAlive` for `HomeView`.
+- `router/` — exactly two public lazy routes: `/` and `/instance/:id`. Do not add broad router guards.
+- `views/` — route-level orchestration only.
+- `components/` — presentation and local UI composition.
+- `components/ui/` — local shadcn-vue-style primitives based on reka-ui + cva + `cn()`.
+- `composables/` — Vue state/lifecycle glue: `ref`, `computed`, `watch`, subscriptions, `onScopeDispose`.
+- `services/` — auth, provider metadata, history loading, prediction, snapshot export, request/cache orchestration.
+- `constants/` — grouped limits, timeouts, cache/security/request/UI settings.
+- `stores/` — Pinia setup stores and source-of-truth app/node state.
+- `utils/` — pure helpers, formatting, CSV escaping, low-level API/RPC clients.
 
 ## Stores
 
-- Pinia stores are setup stores and are the source of truth for app state.
-- `@/stores/app` owns public settings, normalized theme-derived config, login/auth status, layout flags, formatting preferences, theme mode, and persisted UI state.
-- `@/stores/nodes` owns normalized node data, group derivation, WebSocket state, and node updates.
-- Components and views should read from stores, not recreate parallel state for the same domain.
-- When behavior depends on `publicSettings.theme_settings`, follow the existing defensive pattern in `@/stores/app`: `typeof` checks, guarded `JSON.parse`, valid-value filtering, and defaults. The settings schema lives in `komari-theme.json` (`configuration.data`), and components consume normalized store values rather than parsing raw settings.
-- Public home/detail rendering remains available when auth is missing or expired. Private surfaces should be hidden or blocked via `appStore.privateFeaturesAllowed` plus verified permission checks.
-- Node status updates must remain reactive. If `@/stores/nodes` keeps an index/cache for fast UUID lookup, it must store the reactive object from `nodes.value`, not a raw object created before insertion; otherwise polling/WebSocket updates will not refresh card/general-card metrics such as realtime upload/download until a page reload.
-- `nodeCardSize` defaults to `compact` in `@/stores/app` and `komari-theme.json`. Keep `mini` as an additional optional high-density mode; do not alter existing `compact` semantics when adding or changing card sizes.
+- [stores/app.ts](stores/app.ts) owns public settings, normalized theme settings, login/auth state, layout flags, formatting preferences, theme mode, persisted UI state, and permission helpers.
+- [stores/nodes.ts](stores/nodes.ts) owns normalized nodes, visible nodes, groups, WebSocket state, and live updates.
+
+Rules:
+
+- Components must not parse raw `publicSettings.theme_settings`; normalize once in `stores/app.ts`.
+- Public home/detail rendering remains available when auth is missing or expired.
+- Private surfaces use `appStore.privateFeaturesAllowed` plus verified permission checks.
+- Node UUID indexes must store the reactive object from `nodes.value`, not raw objects, so live CPU/network metrics update correctly.
+- `nodeCardSize` default stays `compact`; `mini` is optional high-density mode.
 
 ## Private features and export security
 
-- Sensitive operations must call `appStore.requireLoginPermission()` or `requirePermission({ force: true })` before work starts. Protected surfaces include home tools (`topology`, `providerValue`, `healthSummary`, `snapshotExport`), disk-prediction history loading, provider geo lookup, and snapshot export.
-- `exportSecondaryPassword` is an optional managed theme setting for snapshot export. If it is set, export UI must require it in addition to verified login.
-- Session expiry should downgrade to public behavior without breaking the public dashboard. Do not assume a stale `isLoggedIn` boolean is enough for private actions.
-- Hiding client UI is defense-in-depth only; backend permissions remain authoritative.
+Sensitive operations must call `appStore.requireLoginPermission()` or auth-service permission helpers before work starts.
 
-## Services, constants, and utils
+Protected paths include:
 
-- Keep API and RPC low-level clients in `@/utils/api` and `@/utils/rpc`; app code should normally reach them through services unless it is startup/transport glue.
-- Keep startup, transport selection, polling, reconnects, and WebSocket fallback in `@/utils/init` unless a dedicated service boundary already exists.
-- Use `@/services/auth.service` for verified auth/session state and `appStore.requireLoginPermission()` for private feature gates.
-- Use `@/services/cache.service` and `@/constants/cache` for shared cache lifecycle: TTL, LRU-style eviction, reference counting, cleanup, and promise deduplication. Do not add ad-hoc component caches for provider metadata, history records, or request deduplication.
-- Use `@/services/provider.service` for provider/geo metadata business rules. Public metadata-only resolution must not reuse private geo-enriched data; keep `allowGeoLookup` in provider cache keys and tie private geo lookup to `appStore.privateFeaturesAllowed`.
-- Use `@/services/history.service` and `@/services/prediction.service` for load/ping history and disk prediction. History cache keys must include both time range and `maxCount`; capped disk-prediction samples must not be reused as uncapped chart data.
-- Use `@/services/snapshot.service` plus `@/utils/csv` for exports. CSV export must keep formula-injection neutralization for cells beginning with `=`, `+`, `-`, or `@`.
-- Keep formatting in helpers such as `@/utils/helper` and record shaping in `@/utils/recordHelper`.
-- Keep region, OS, and tag lookup logic in their dedicated helper modules (`regionHelper`, `osImageHelper`, `tagHelper`).
-- `@/utils/message` is the wrapper exposed as `window.$message`. It calls into `vue-sonner`'s `toast`.
-- Views and components must reuse services/helpers instead of duplicating parsing, formatting, lookup, transport, cache, or permission logic.
+- Advanced home tools: topology, provider value, health summary, snapshot export.
+- Snapshot export and export-specific provider metadata.
+- Disk-prediction history loading.
+- Provider geo lookup.
+- Ping/history metric loading.
 
-## App globals
+Export rules:
 
-- Only one app global exists on `window`: `$message`. It is typed in `src/types/global.d.ts`. Keep that file in sync if you add/remove a global.
-- There is **no** `$dialog`, `$notification`, or `$loadingBar`. Do not assume Naive-UI-style provider APIs.
-- Theming: `Provider.vue` drives `useDark()` from `@vueuse/core` (storage key `vueuse-color-scheme`) and toggles `.dark` on `<html>`. Source of truth for the user-chosen mode is `useAppStore().themeMode` (`'auto' | 'light' | 'dark'`).
-- Build-time constants `__BUILD_VERSION__` and `__BUILD_GIT_HASH__` are also declared in `src/types/global.d.ts` and injected by `vite.config.ts`.
+- `exportSecondaryPassword` is optional and adds a client-side friction layer after verified login.
+- It is not a replacement for backend authorization.
+- CSV export must go through `services/snapshot.service.ts` and `utils/csv.ts`.
+- CSV cells starting with `=`, `+`, `-`, or `@` must be neutralized.
 
-## Icons
+## Services and request/cache rules
 
-- All icons go through `@iconify/vue` (`<Icon icon="icon-park-outline:sun" />`). Sets are fetched on demand from the Iconify CDN — `@/utils/iconify`'s `setupIconify()` is a no-op kept as a future extension point. Do not preregister whole icon sets in client bundles.
-- Lucide icons are available via the `lucide:` prefix (e.g. `lucide:x`, `lucide:minus`). Do **not** add `lucide-vue-next` or any other icon-as-component package — the project deliberately routes everything through Iconify so there is a single icon pipeline.
+- Use `services/auth.service.ts` for verified auth/session state.
+- Use `services/request.service.ts` for keyed request dedupe, concurrency, timeout, retry, and abort.
+- Use `services/cache.service.ts` for shared cache lifecycle and promise dedupe.
+- Use `services/history.service.ts` for load/ping history.
+- Use `services/prediction.service.ts` for disk prediction.
+- Use `services/provider.service.ts` for provider/geo metadata rules.
+- Use `services/snapshot.service.ts` for export composition/download boundary.
 
-## Styles
+Cache/request keys must include every dimension that changes the result, especially:
 
-- Single global stylesheet: `@/styles/main.css`. It imports `tailwindcss` and `tw-animate-css`, declares the `dark` custom variant, and defines OKLCH design tokens for both modes. **No SCSS, no UnoCSS.**
-- Component-level styling should be Tailwind utilities composed with `cn()`, not scoped `<style>` blocks, unless there is a genuine reason (e.g. animations or selectors Tailwind cannot express cleanly).
+- record type
+- node UUID
+- time range / hours
+- `maxCount`
+- public metadata-only vs private geo-enriched mode
+
+## UI rules
+
+- Use Composition API with `<script setup lang="ts">`.
+- Prefer `@/` imports for source-local files.
+- Compose existing primitives from `components/ui/` before adding new UI components.
+- If a primitive is missing, follow the existing pattern: reka-ui + class-variance-authority + `cn()`.
+- Do not introduce Naive UI, UnoCSS, SCSS, or a new component library.
+- Component styling should use Tailwind utilities and design tokens from `styles/main.css`.
+- Use `@iconify/vue` for all icons. Lucide icons use the `lucide:` prefix.
+- Only app global is `window.$message`; do not assume `$dialog`, `$notification`, `$loadingBar`, or `$modal`.
+
+## Views and async components
+
+- Keep `defineOptions({ name: 'HomeView' })` in `HomeView.vue`, because `App.vue` KeepAlive includes `HomeView` by name.
+- Heavy node/chart UI should stay lazy-loaded with `defineAsyncComponent` from views.
+- Views coordinate store/composable state; they should not own reusable business logic.
+
+## Transport and startup
+
+- Low-level HTTP API lives in `utils/api.ts`.
+- Low-level RPC lives in `utils/rpc.ts`.
+- Startup, polling, reconnects, transport selection, and WebSocket fallback live in `utils/init.ts` unless a clear service boundary exists.
+- `rpcTransportMode` is user-configurable through the theme manifest.
+
+## Runtime assets
+
+`public/images/` filenames are runtime contracts. Code builds URLs from values rather than importing assets.
+
+- Flags: `/images/flags/<UPPERCASE_CODE>.svg`, used by `utils/regionHelper.ts`.
+- OS logos: `/images/logo/os-*`, used by `utils/osImageHelper.ts`.
+
+Do not rename/move these files without updating helper mappings and checking all references.
 
 ## Validation
 
-- Validate source-tree changes with:
-  - `bun run lint`
-  - `bun run build`
-- There is no test suite. Do not invent one.
+For source changes, run from repo root:
+
+```bash
+bun run lint
+bun run build
+```
+
+There is no test suite. Do not invent one.
+
+Update [../AICACHE.md](../AICACHE.md) with validation results or explain why validation was skipped.

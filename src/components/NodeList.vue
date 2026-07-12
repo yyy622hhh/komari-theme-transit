@@ -240,6 +240,18 @@ function formatOfflineTime(node: NodeData): string {
   return formatDateTime(node.time)
 }
 
+function getNodeMessage(node: NodeData): string {
+  return node.message?.trim() ?? ''
+}
+
+function getNodeMessageTooltip(node: NodeData): string {
+  const message = getNodeMessage(node)
+  if (!message)
+    return ''
+  const updatedAt = node.status_updated_at ? `\n更新时间：${formatDateTime(node.status_updated_at)}` : ''
+  return `${message}${updatedAt}`
+}
+
 function getPriceTags(node: NodeData): Array<string> {
   const tags: Array<string> = []
   const lang = appStore.lang
@@ -389,7 +401,7 @@ function buildNodeMetadataItems(node: NodeData): NodeMetadataItem[] {
           <div
             v-for="({ data: node, index }) in renderedRows"
             :key="getRowTransitionKey(node)"
-            class="flex flex-col relative h-16 justify-center px-2.5 cursor-pointer bg-background/40 rounded-lg backdrop-blur-sm shadow-[0_0_0_2px] shadow-transparent hover:shadow-slate-500/10 hover:bg-background/70 transition-all"
+            class="flex flex-col relative h-16 min-h-16 max-h-16 overflow-hidden justify-center px-2.5 cursor-pointer bg-background/40 rounded-lg backdrop-blur-sm shadow-[0_0_0_2px] shadow-transparent hover:shadow-slate-500/10 hover:bg-background/70 transition-all"
             :class="[!node.online && '!shadow-red-600/10']"
             :style="getRowTransitionStyle(index)"
             role="button"
@@ -398,7 +410,7 @@ function buildNodeMetadataItems(node: NodeData): NodeMetadataItem[] {
             @click="handleClick(node)"
             @keydown="handleRowKeydown($event, node)"
           >
-            <div class="grid gap-2 items-center" :style="gridStyle">
+            <div class="grid gap-2 items-center overflow-hidden" :style="gridStyle">
               <template v-for="col in columns" :key="col.key">
                 <!-- 在线状态指示器 -->
                 <div v-if="col.key === 'status'" class="flex justify-center">
@@ -418,6 +430,16 @@ function buildNodeMetadataItems(node: NodeData): NodeMetadataItem[] {
                       :alt="getRegionAltText(node.region)" class="size-5 rounded-sm shrink-0"
                     >
                     <span class="truncate">{{ node.name }}</span>
+                    <DataTooltip
+                      v-if="getNodeMessage(node)"
+                      :content="getNodeMessageTooltip(node)"
+                      placement="top"
+                      as="span"
+                      class="inline-flex shrink-0 text-amber-500"
+                      content-class="w-56 whitespace-pre-line leading-snug text-left"
+                    >
+                      <Icon icon="tabler:alert-triangle-filled" width="13" height="13" aria-label="节点消息" />
+                    </DataTooltip>
                   </div>
                   <div
                     v-if="showPrice && getPriceTags(node).length > 0"
@@ -430,14 +452,14 @@ function buildNodeMetadataItems(node: NodeData): NodeMetadataItem[] {
                 </div>
 
                 <!-- 信息 / 标签 -->
-                <div v-else-if="col.key === 'metadata'" class="min-w-0">
+                <div v-else-if="col.key === 'metadata'" class="min-w-0 overflow-hidden">
                   <div v-if="getNodeMetadataItems(node).length > 0" class="flex flex-wrap gap-1 items-center max-h-11 overflow-hidden">
                     <Badge
                       v-for="item in getNodeMetadataItems(node)" :key="item.key"
                       :variant="item.variant ?? 'secondary'"
                       :title="item.title ?? item.value"
                       :style="item.style"
-                      class="min-w-0 rounded-md px-1.5 text-[11px] font-medium shadow-none"
+                      class="min-w-0 overflow-hidden whitespace-nowrap rounded-md px-1.5 text-[11px] font-medium shadow-none"
                       :class="item.class"
                     >
                       <img v-if="item.flagSrc" :src="item.flagSrc" :alt="item.value" class="size-3.5 rounded-[2px] shrink-0">

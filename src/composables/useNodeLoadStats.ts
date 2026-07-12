@@ -25,10 +25,12 @@ interface SharedLoadRecordsEntry {
   subscribers: number
   lastFetchedAt: number
   fullLoadUnavailable: boolean
+  fullLoadRetryAt: number
 }
 
 const LOAD_RECORD_REFRESH_INTERVAL_MS = LOAD_CONFIG.records.refreshInterval
 const sharedLoadRecordsCache = new Map<string, SharedLoadRecordsEntry>()
+const zeroSampleWarningKeys = new Set<string>()
 
 function normalizeMaxCount(maxCount: number | null | undefined): number | undefined {
   if (typeof maxCount !== 'number' || !Number.isFinite(maxCount) || maxCount <= 0)
@@ -38,6 +40,10 @@ function normalizeMaxCount(maxCount: number | null | undefined): number | undefi
 
 function getSharedLoadRecordsKey(hours: number, maxCount?: number): string {
   return `${hours}:${maxCount ?? 'all'}`
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError'
 }
 
 function createSharedLoadRecordsEntry(): SharedLoadRecordsEntry {
@@ -52,6 +58,7 @@ function createSharedLoadRecordsEntry(): SharedLoadRecordsEntry {
     subscribers: 0,
     lastFetchedAt: 0,
     fullLoadUnavailable: false,
+    fullLoadRetryAt: 0,
   }
 }
 
@@ -73,6 +80,22 @@ function setNodeRecords(entry: SharedLoadRecordsEntry, uuid: string, records: St
   entry.nodeFetchedAt.set(uuid, Date.now())
 }
 
+function warnZeroSamplesIfNeeded(entry: SharedLoadRecordsEntry, uuid: string, cacheKey: string, online: boolean, maxCount?: number): void {
+  if (!import.meta.env.DEV || !online || maxCount !== LOAD_RECORD_MAX_COUNT || entry.fullLoadUnavailable)
+    return
+
+  const records = entry.data.value?.recordsByClient.get(uuid)
+  if (records && records.length > 0)
+    return
+
+  const warningKey = `${cacheKey}:${uuid}`
+  if (zeroSampleWarningKeys.has(warningKey))
+    return
+
+  zeroSampleWarningKeys.add(warningKey)
+  console.warn(`[Komari Glassmorphism] capped shared load history returned zero samples for online node ${uuid}; maxCount=${LOAD_RECORD_MAX_COUNT}. This may indicate cap starvation or missing backend history.`)
+}
+
 async function loadNodeRecordsIntoEntry(entry: SharedLoadRecordsEntry, uuid: string, hours: number, maxCount?: number): Promise<StatusRecord[]> {
   const existingPromise = entry.nodePromises.get(uuid)
   if (existingPromise)
@@ -83,8 +106,14 @@ async function loadNodeRecordsIntoEntry(entry: SharedLoadRecordsEntry, uuid: str
       setNodeRecords(entry, uuid, records)
       return records
     })
+    .catch((error) => {
+      if (entry.nodePromises.get(uuid) === promise)
+        entry.nodePromises.delete(uuid)
+      throw error
+    })
     .finally(() => {
-      entry.nodePromises.delete(uuid)
+      if (entry.nodePromises.get(uuid) === promise)
+        entry.nodePromises.delete(uuid)
     })
 
   entry.nodePromises.set(uuid, promise)
@@ -92,7 +121,8 @@ async function loadNodeRecordsIntoEntry(entry: SharedLoadRecordsEntry, uuid: str
 }
 
 async function loadSharedLoadRecords(entry: SharedLoadRecordsEntry, hours: number, maxCount?: number): Promise<void> {
-  if (entry.fullLoadUnavailable)
+  const now = Date.now()
+  if (entry.fullLoadUnavailable && now < entry.fullLoadRetryAt)
     return
   if (entry.promise)
     return entry.promise
@@ -100,25 +130,35 @@ async function loadSharedLoadRecords(entry: SharedLoadRecordsEntry, hours: numbe
   entry.loading.value = true
   entry.error.value = null
 
-  entry.promise = (async () => {
+  let promise: Promise<void> | null = null
+  promise = (async () => {
     try {
       const records = await loadLoadRecords(undefined, hours, maxCount)
       entry.data.value = {
         recordsByClient: buildRecordsByClient(records),
       }
       entry.lastFetchedAt = Date.now()
+      entry.fullLoadUnavailable = false
+      entry.fullLoadRetryAt = 0
     }
     catch (err) {
+      if (isAbortError(err))
+        throw err
+
       entry.fullLoadUnavailable = true
+      entry.fullLoadRetryAt = Date.now() + LOAD_RECORD_REFRESH_INTERVAL_MS
       entry.error.value = err instanceof Error ? err.message : '获取负载历史失败'
     }
     finally {
       entry.loading.value = false
-      entry.promise = null
+      if (entry.promise === promise)
+        entry.promise = null
     }
   })()
 
-  return entry.promise
+  entry.promise = promise
+
+  return promise
 }
 
 function startSharedLoadRecordsRefresh(entry: SharedLoadRecordsEntry, hours: number, maxCount?: number): void {
@@ -184,6 +224,7 @@ export function useNodeLoadStats(
     enabled?: MaybeRefOrGetter<boolean>
     diskTotal?: MaybeRefOrGetter<number>
     maxCount?: MaybeRefOrGetter<number | undefined>
+    online?: MaybeRefOrGetter<boolean>
     permission?: PermissionKey
   },
 ) {
@@ -201,6 +242,7 @@ export function useNodeLoadStats(
       maxCount,
       cacheKey: getSharedLoadRecordsKey(hours, maxCount),
       enabled: toValue(options?.enabled) ?? true,
+      online: toValue(options?.online) ?? false,
       authStatus: appStore.authStatus,
       diskTotal: Math.max(0, toValue(options?.diskTotal) ?? 0),
     }
@@ -249,7 +291,7 @@ export function useNodeLoadStats(
         cancelled = true
       })
 
-      const { uuid: nodeUuid, hours, maxCount, cacheKey, enabled, authStatus } = next
+      const { uuid: nodeUuid, hours, maxCount, cacheKey, enabled, online, authStatus } = next
       if (!enabled || !nodeUuid.trim()) {
         recordsAllowed.value = false
         syncSharedRecordsSubscription(null)
@@ -296,6 +338,8 @@ export function useNodeLoadStats(
 
       try {
         await loadSharedLoadRecords(entry, hours, maxCount)
+        if (!cancelled)
+          warnZeroSamplesIfNeeded(entry, nodeUuid, cacheKey, online, maxCount)
         if (!cancelled && entry.fullLoadUnavailable) {
           const nodeFetchedAt = entry.nodeFetchedAt.get(nodeUuid) ?? 0
           const shouldLoadNodeRecords = !entry.data.value?.recordsByClient.has(nodeUuid)

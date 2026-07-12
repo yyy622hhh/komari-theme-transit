@@ -333,6 +333,10 @@ const hardwareSmallItems = computed<InfoItem[]>(() => {
   else
     items.push({ label: '架构', value: node?.arch ?? '-', icon: 'icon-park-outline:application-two' })
 
+  const physicalCores = node?.cpu_physical_cores
+  if (typeof physicalCores === 'number' && physicalCores > 0)
+    items.push({ label: '物理核心', value: `${physicalCores} 核`, icon: 'tabler:cpu' })
+
   items.push({ label: '虚拟化', value: node?.virtualization ?? '-', icon: 'icon-park-outline:server' })
 
   const gpu = node?.gpu_name?.trim()

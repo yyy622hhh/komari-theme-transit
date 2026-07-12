@@ -29,6 +29,25 @@ function shouldRetryHistoryRequest(error: unknown): boolean {
   return true
 }
 
+type StatusRecordsPayload = Array<Partial<StatusRecord>> | Record<string, Array<Partial<StatusRecord>>>
+
+function isStatusRecordsMap(records: StatusRecordsPayload): records is Record<string, Array<Partial<StatusRecord>>> {
+  return !Array.isArray(records)
+}
+
+export function normalizeStatusRecordsPayload(records: StatusRecordsPayload | undefined): StatusRecord[] {
+  if (!records)
+    return []
+
+  if (Array.isArray(records))
+    return normalizeStatusRecords(records)
+
+  if (isStatusRecordsMap(records))
+    return Object.values(records).flatMap(clientRecords => normalizeStatusRecords(clientRecords))
+
+  return []
+}
+
 export function getLoadRecordsRequestKey(uuid: string | undefined, hours: number, maxCount?: number): string {
   return `history:load:${cachePart(uuid)}:${normalizeHours(hours)}:${cachePart(normalizeMaxCount(maxCount))}`
 }
@@ -76,6 +95,8 @@ export function normalizeStatusRecord(record: Partial<StatusRecord>): StatusReco
     net_out: numberOrZero(record.net_out),
     net_total_up: numberOrZero(record.net_total_up),
     net_total_down: numberOrZero(record.net_total_down),
+    traffic_up: numberOrZero(record.traffic_up),
+    traffic_down: numberOrZero(record.traffic_down),
     process: numberOrZero(record.process),
     connections: numberOrZero(record.connections),
     connections_udp: numberOrZero(record.connections_udp),
@@ -106,7 +127,7 @@ export async function loadLoadRecords(uuid: string | undefined, hours: number, m
     getLoadRecordsRequestKey(uuid, safeHours, safeMaxCount),
     async (signal) => {
       const result = await getSharedRpc().getLoadRecords(uuid, safeHours, undefined, safeMaxCount, signal)
-      return normalizeStatusRecords(result.records)
+      return normalizeStatusRecordsPayload(result.records)
     },
     { shouldRetry: shouldRetryHistoryRequest },
   )
@@ -120,7 +141,7 @@ export async function loadNodeLoadRecords(uuid: string, hours: number, maxCount?
     async (signal) => {
       try {
         const result = await getSharedRpc().getLoadRecords(uuid, safeHours, undefined, safeMaxCount, signal)
-        return normalizeStatusRecords(result.records)
+        return normalizeStatusRecordsPayload(result.records)
       }
       catch {
         const result = await getSharedApi().getLoadRecords(uuid, safeHours, safeMaxCount, signal)

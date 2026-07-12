@@ -64,6 +64,7 @@ type NodeCardSize = 'mini' | 'compact' | 'comfortable' | 'large'
 type RpcTransportMode = 'websocket' | 'http'
 type EarthRenderer = 'realistic' | 'cobe' | 'tiled'
 type GlassColorPreset = 'emerald' | 'soft' | 'contrast' | 'midnight' | 'custom'
+export type ChartDashboardCardKey = 'cpu' | 'memory' | 'disk' | 'network' | 'gpu' | 'connections' | 'process'
 
 export interface GlassCustomColors {
   lightCard: string
@@ -76,6 +77,10 @@ export interface GlassCustomColors {
   darkText: string
   darkMutedText: string
   darkBorder: string
+}
+
+export interface ChartDashboardTemplate {
+  cards: ChartDashboardCardKey[]
 }
 
 type ThemeSettings = Record<string, unknown>
@@ -196,6 +201,9 @@ const DEFAULT_NODE_LIST_METADATA_FIELDS: NodeListMetadataField[] = [
   'region',
   'asn',
 ]
+
+const DEFAULT_CHART_DASHBOARD_CARDS: ChartDashboardCardKey[] = ['cpu', 'memory', 'disk', 'network', 'gpu', 'connections', 'process']
+const ALL_CHART_DASHBOARD_CARDS = [...DEFAULT_CHART_DASHBOARD_CARDS, 'gpu'] as const satisfies readonly ChartDashboardCardKey[]
 
 const ALL_NODE_LIST_METADATA_FIELDS = [
   ...DEFAULT_NODE_LIST_METADATA_FIELDS,
@@ -339,6 +347,10 @@ function isNodeListMetadataField(value: string): value is NodeListMetadataField 
   return (ALL_NODE_LIST_METADATA_FIELDS as readonly string[]).includes(value)
 }
 
+function isChartDashboardCardKey(value: string): value is ChartDashboardCardKey {
+  return (ALL_CHART_DASHBOARD_CARDS as readonly string[]).includes(value)
+}
+
 function parseGeneralCardPreset(value: unknown): GeneralCardPreset {
   if (typeof value !== 'string')
     return 'basic'
@@ -381,17 +393,44 @@ function parseKeyList<T extends string>(rawValue: unknown, isValid: (value: stri
   const parsedKeys: T[] = []
   const seenKeys = new Set<T>()
 
-  if (typeof rawValue === 'string') {
-    for (const item of rawValue.split(',')) {
-      const key = item.trim()
-      if (!isValid(key) || seenKeys.has(key))
-        continue
-      parsedKeys.push(key)
-      seenKeys.add(key)
-    }
+  const rawItems = Array.isArray(rawValue)
+    ? rawValue
+    : typeof rawValue === 'string'
+      ? rawValue.split(',')
+      : []
+
+  for (const item of rawItems) {
+    const key = typeof item === 'string' ? item.trim() : ''
+    if (!isValid(key) || seenKeys.has(key))
+      continue
+    parsedKeys.push(key)
+    seenKeys.add(key)
   }
 
   return parsedKeys.length > 0 ? parsedKeys : [...fallback]
+}
+
+function parseChartDashboardTemplate(rawValue: unknown): ChartDashboardTemplate {
+  if (!rawValue)
+    return { cards: [...DEFAULT_CHART_DASHBOARD_CARDS] }
+
+  let value: unknown = rawValue
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value) as unknown
+    }
+    catch {
+      return { cards: parseKeyList(value, isChartDashboardCardKey, DEFAULT_CHART_DASHBOARD_CARDS) }
+    }
+  }
+
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    return { cards: [...DEFAULT_CHART_DASHBOARD_CARDS] }
+
+  const record = value as Record<string, unknown>
+  return {
+    cards: parseKeyList(record.cards ?? record.layout, isChartDashboardCardKey, DEFAULT_CHART_DASHBOARD_CARDS),
+  }
 }
 
 function readBooleanSetting(settings: ThemeSettings, key: string, fallback: boolean): boolean {
@@ -415,6 +454,55 @@ function readStringSetting(settings: ThemeSettings, key: string, fallback = ''):
 function readColorSetting(settings: ThemeSettings, key: string, fallback: string): string {
   const trimmed = readStringSetting(settings, key, fallback)
   return HEX_COLOR_REGEX.test(trimmed) ? trimmed : fallback
+}
+
+function readColorValue(value: unknown, fallback: string): string {
+  if (typeof value !== 'string')
+    return fallback
+  const trimmed = value.trim()
+  return HEX_COLOR_REGEX.test(trimmed) ? trimmed : fallback
+}
+
+function parseGlassCustomColors(settings: ThemeSettings): GlassCustomColors {
+  const legacyColors: GlassCustomColors = {
+    lightCard: readColorSetting(settings, 'glassLightCardColor', DEFAULT_GLASS_CUSTOM_COLORS.lightCard),
+    lightControl: readColorSetting(settings, 'glassLightControlColor', DEFAULT_GLASS_CUSTOM_COLORS.lightControl),
+    lightText: readColorSetting(settings, 'glassLightTextColor', DEFAULT_GLASS_CUSTOM_COLORS.lightText),
+    lightMutedText: readColorSetting(settings, 'glassLightMutedTextColor', DEFAULT_GLASS_CUSTOM_COLORS.lightMutedText),
+    lightBorder: readColorSetting(settings, 'glassLightBorderColor', DEFAULT_GLASS_CUSTOM_COLORS.lightBorder),
+    darkCard: readColorSetting(settings, 'glassDarkCardColor', DEFAULT_GLASS_CUSTOM_COLORS.darkCard),
+    darkControl: readColorSetting(settings, 'glassDarkControlColor', DEFAULT_GLASS_CUSTOM_COLORS.darkControl),
+    darkText: readColorSetting(settings, 'glassDarkTextColor', DEFAULT_GLASS_CUSTOM_COLORS.darkText),
+    darkMutedText: readColorSetting(settings, 'glassDarkMutedTextColor', DEFAULT_GLASS_CUSTOM_COLORS.darkMutedText),
+    darkBorder: readColorSetting(settings, 'glassDarkBorderColor', DEFAULT_GLASS_CUSTOM_COLORS.darkBorder),
+  }
+
+  let rawValue = settings.glassCustomColors
+  if (typeof rawValue === 'string') {
+    try {
+      rawValue = JSON.parse(rawValue) as unknown
+    }
+    catch {
+      return legacyColors
+    }
+  }
+
+  if (!rawValue || typeof rawValue !== 'object' || Array.isArray(rawValue))
+    return legacyColors
+
+  const record = rawValue as Record<keyof GlassCustomColors, unknown>
+  return {
+    lightCard: readColorValue(record.lightCard, legacyColors.lightCard),
+    lightControl: readColorValue(record.lightControl, legacyColors.lightControl),
+    lightText: readColorValue(record.lightText, legacyColors.lightText),
+    lightMutedText: readColorValue(record.lightMutedText, legacyColors.lightMutedText),
+    lightBorder: readColorValue(record.lightBorder, legacyColors.lightBorder),
+    darkCard: readColorValue(record.darkCard, legacyColors.darkCard),
+    darkControl: readColorValue(record.darkControl, legacyColors.darkControl),
+    darkText: readColorValue(record.darkText, legacyColors.darkText),
+    darkMutedText: readColorValue(record.darkMutedText, legacyColors.darkMutedText),
+    darkBorder: readColorValue(record.darkBorder, legacyColors.darkBorder),
+  }
 }
 
 function parseGlassColorPreset(value: unknown): GlassColorPreset {
@@ -588,21 +676,7 @@ const useAppStore = defineStore('app', () => {
 
   const glassColorPreset = computed<GlassColorPreset>(() => parseGlassColorPreset(themeSettings.value.glassColorPreset))
 
-  const glassCustomColors = computed<GlassCustomColors>(() => {
-    const settings = themeSettings.value
-    return {
-      lightCard: readColorSetting(settings, 'glassLightCardColor', DEFAULT_GLASS_CUSTOM_COLORS.lightCard),
-      lightControl: readColorSetting(settings, 'glassLightControlColor', DEFAULT_GLASS_CUSTOM_COLORS.lightControl),
-      lightText: readColorSetting(settings, 'glassLightTextColor', DEFAULT_GLASS_CUSTOM_COLORS.lightText),
-      lightMutedText: readColorSetting(settings, 'glassLightMutedTextColor', DEFAULT_GLASS_CUSTOM_COLORS.lightMutedText),
-      lightBorder: readColorSetting(settings, 'glassLightBorderColor', DEFAULT_GLASS_CUSTOM_COLORS.lightBorder),
-      darkCard: readColorSetting(settings, 'glassDarkCardColor', DEFAULT_GLASS_CUSTOM_COLORS.darkCard),
-      darkControl: readColorSetting(settings, 'glassDarkControlColor', DEFAULT_GLASS_CUSTOM_COLORS.darkControl),
-      darkText: readColorSetting(settings, 'glassDarkTextColor', DEFAULT_GLASS_CUSTOM_COLORS.darkText),
-      darkMutedText: readColorSetting(settings, 'glassDarkMutedTextColor', DEFAULT_GLASS_CUSTOM_COLORS.darkMutedText),
-      darkBorder: readColorSetting(settings, 'glassDarkBorderColor', DEFAULT_GLASS_CUSTOM_COLORS.darkBorder),
-    }
-  })
+  const glassCustomColors = computed<GlassCustomColors>(() => parseGlassCustomColors(themeSettings.value))
 
   const homeQuickControlsEnabled = computed<boolean>(() => readBooleanSetting(themeSettings.value, 'homeQuickControlsEnabled', true))
 
@@ -641,6 +715,8 @@ const useAppStore = defineStore('app', () => {
 
   const nodeDetailSectionTabsEnabled = computed<boolean>(() => readBooleanSetting(themeSettings.value, 'nodeDetailSectionTabsEnabled', false))
 
+  const gpuChartEnabled = computed<boolean>(() => readBooleanSetting(themeSettings.value, 'gpuChartEnabled', false))
+
   const offlineNodesLast = computed<boolean>(() => readBooleanSetting(themeSettings.value, 'offlineNodesLast', false))
 
   const homeHighLoadThreshold = computed<number>(() => readNumberSetting(themeSettings.value, 'homeHighLoadThreshold', 80, 1, 100))
@@ -652,6 +728,8 @@ const useAppStore = defineStore('app', () => {
   const diskPredictionEnabled = computed<boolean>(() => readBooleanSetting(themeSettings.value, 'diskPredictionEnabled', false))
 
   const diskPredictionThresholdDays = computed<number>(() => readNumberSetting(themeSettings.value, 'diskPredictionThresholdDays', 30, 1, 3650))
+
+  const chartDashboardTemplate = computed<ChartDashboardTemplate>(() => parseChartDashboardTemplate(themeSettings.value.chartDashboardTemplate))
 
   const hideAdminEntryWhenLoggedOut = computed<boolean>(() => readBooleanSetting(themeSettings.value, 'hideAdminEntryWhenLoggedOut', false))
 
@@ -817,12 +895,14 @@ const useAppStore = defineStore('app', () => {
     nodeListMetadataFields,
     nodeListCustomTagsVisible,
     nodeDetailSectionTabsEnabled,
+    gpuChartEnabled,
     offlineNodesLast,
     homeHighLoadThreshold,
     homeTrafficWarningThreshold,
     homeExpiringDays,
     diskPredictionEnabled,
     diskPredictionThresholdDays,
+    chartDashboardTemplate,
     hideAdminEntryWhenLoggedOut,
     hidePriceWhenLoggedOut,
     providerAliases,

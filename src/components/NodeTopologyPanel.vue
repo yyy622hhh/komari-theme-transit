@@ -146,6 +146,35 @@ const topologyNodes = computed<TopologyNodeView[]>(() => props.nodes.map((node) 
 }))
 
 const topologyNodeByUuid = computed(() => new Map(topologyNodes.value.map(item => [item.node.uuid, item])))
+const nearestOfflineUpstreamByUuid = computed(() => {
+  const resolved = new Map<string, NodeData | undefined>()
+  const visiting = new Set<string>()
+
+  function resolveNearestOfflineUpstream(uuid: string): NodeData | undefined {
+    if (resolved.has(uuid))
+      return resolved.get(uuid)
+    if (visiting.has(uuid)) {
+      resolved.set(uuid, undefined)
+      return undefined
+    }
+
+    visiting.add(uuid)
+    const upstream = topologyNodeByUuid.value.get(uuid)?.upstream
+    const result = upstream
+      ? upstream.online
+        ? resolveNearestOfflineUpstream(upstream.uuid)
+        : upstream
+      : undefined
+    visiting.delete(uuid)
+    resolved.set(uuid, result)
+    return result
+  }
+
+  for (const item of topologyNodes.value)
+    resolveNearestOfflineUpstream(item.node.uuid)
+
+  return resolved
+})
 
 const tagEdges = computed<EdgeView[]>(() => topologyNodes.value
   .filter(item => item.upstream)
@@ -193,17 +222,7 @@ const totalOffline = computed(() => props.nodes.length - totalOnline.value)
 const asnEdges = computed(() => asnGroups.value.reduce((count, group) => count + group.nodes.length, 0))
 
 function getOfflineUpstream(node: NodeData): NodeData | undefined {
-  const seen = new Set<string>()
-  let current = topologyNodeByUuid.value.get(node.uuid)?.upstream
-
-  while (current && !seen.has(current.uuid)) {
-    if (!current.online)
-      return current
-    seen.add(current.uuid)
-    current = topologyNodeByUuid.value.get(current.uuid)?.upstream
-  }
-
-  return undefined
+  return nearestOfflineUpstreamByUuid.value.get(node.uuid)
 }
 
 const rootCauseGroups = computed<RootCauseGroup[]>(() => {

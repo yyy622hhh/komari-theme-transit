@@ -1,6 +1,7 @@
 <script setup lang="ts">
+import type { ChartDashboardCardKey } from '@/stores/app'
 import type { RecordFormat } from '@/utils/recordHelper'
-import type { StatusRecord } from '@/utils/rpc'
+import type { MetricSeries, StatusRecord } from '@/utils/rpc'
 import { Icon } from '@iconify/vue'
 import { useIntervalFn } from '@vueuse/core'
 import dayjs from 'dayjs'
@@ -11,9 +12,12 @@ import { Empty } from '@/components/ui/empty'
 import { Spinner } from '@/components/ui/spinner'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { loadNodeLoadRecords, useNodeLoadStats } from '@/composables/useNodeLoadStats'
+import { LOAD_RECORD_MAX_COUNT } from '@/constants/load'
+import { loadMetricDefinitions, queryMetrics } from '@/services/metrics.service'
 import { useAppStore } from '@/stores/app'
 import { useNodesStore } from '@/stores/nodes'
 import { formatBytes, formatBytesSplit } from '@/utils/helper'
+import { metricTags, normalizeMetricSeriesList } from '@/utils/metricSeries'
 import { fillMissingTimePoints } from '@/utils/recordHelper'
 import { getSharedRpc } from '@/utils/rpc'
 import '@/utils/echarts' // 共享 ECharts 配置
@@ -47,7 +51,30 @@ const chartColors = {
   quaternary: '#A78BFA',
   // 第五色 - 天蓝色
   quinary: '#60A5FA',
+  senary: '#34D399',
 }
+
+const LOAD_METRIC_KEYS = [
+  'cpu.usage',
+  'load.average',
+  'memory.used',
+  'swap.used',
+  'disk.used',
+  'net.in.rate',
+  'net.out.rate',
+  'net.total.down',
+  'net.total.up',
+  'process.count',
+  'connections.tcp',
+  'connections.udp',
+  'gpu.usage',
+  'gpu.device.usage',
+  'gpu.memory.used',
+  'gpu.memory.total',
+  'gpu.temperature',
+] as const
+
+type LoadMetricKey = typeof LOAD_METRIC_KEYS[number]
 
 // 图表主题相关颜色
 const chartThemeColors = computed(() => ({
@@ -141,6 +168,7 @@ const isRealtime = computed(() => selectedView.value === '实时')
 
 // 数据状态
 const remoteData = shallowRef<StatusRecord[]>([])
+const metricData = shallowRef<RecordFormat[] | null>(null)
 const loading = ref(false)
 const isInitialLoad = ref(true) // 是否为首次加载（用于控制实时模式下的 NSpin 显示）
 const error = ref<string | null>(null)
@@ -153,6 +181,7 @@ const { diskPrediction } = useNodeLoadStats(
     hours: () => detailLoadStatsHours.value,
     enabled: () => appStore.diskPredictionEnabled && appStore.privateFeaturesAllowed,
     diskTotal: () => nodeInfo.value?.disk_total ?? 0,
+    online: () => nodeInfo.value?.online ?? false,
     permission: 'diskPrediction',
   },
 )
@@ -173,35 +202,269 @@ const rpc = getSharedRpc()
 
 // ==================== 数据获取 ====================
 
+function gpuDetailsFromStatus(record: StatusRecord): RecordFormat['gpu_detailed'] {
+  if (!record.gpu_detailed_info?.length)
+    return undefined
+
+  const details: NonNullable<RecordFormat['gpu_detailed']> = {}
+  record.gpu_detailed_info.forEach((item, index) => {
+    const deviceIndex = item.device_index ?? index
+    const memUsed = metricValue(item.memory_used)
+    const memTotal = metricValue(item.memory_total)
+    details[deviceIndex] = {
+      usage: metricValue(item.utilization ?? item.usage),
+      memory: memUsed != null && memTotal && memTotal > 0 ? memUsed / memTotal * 100 : null,
+      temperature: metricValue(item.temperature),
+      device_index: deviceIndex,
+      device_name: item.device_name || item.name,
+      mem_total: memTotal ?? undefined,
+      mem_used: memUsed ?? undefined,
+    }
+  })
+  return details
+}
+
 function statusToRecordFormat(records: StatusRecord[]): RecordFormat[] {
-  return records.map(r => ({
-    client: r.client,
-    time: r.time,
-    cpu: r.cpu ?? null,
-    gpu: r.gpu ?? null,
+  return records.map((r) => {
+    const gpuDetailed = gpuDetailsFromStatus(r)
+    return {
+      client: r.client,
+      time: r.time,
+      cpu: r.cpu ?? null,
+      gpu: r.gpu_average_usage ?? r.gpu ?? null,
+      gpu_usage: r.gpu_average_usage ?? r.gpu ?? null,
+      gpu_memory: null,
+      gpu_detailed: gpuDetailed,
+      ram: r.ram ?? null,
+      ram_total: r.ram_total ?? null,
+      swap: r.swap ?? null,
+      swap_total: r.swap_total ?? null,
+      load: r.load ?? null,
+      temp: r.temp ?? null,
+      disk: r.disk ?? null,
+      disk_total: r.disk_total ?? null,
+      net_in: r.net_in ?? null,
+      net_out: r.net_out ?? null,
+      net_total_up: r.net_total_up ?? null,
+      net_total_down: r.net_total_down ?? null,
+      process: r.process ?? null,
+      connections: r.connections ?? null,
+      connections_udp: r.connections_udp ?? null,
+    }
+  })
+}
+
+function metricValue(value: number | null | undefined): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function getMetricDeviceKey(series: MetricSeries): string {
+  const tags = metricTags(series)
+  const index = tags.device_index ?? tags.gpu_index ?? tags.index
+  const name = tags.device_name ?? tags.gpu_name ?? tags.name
+  return String(index ?? name ?? '0')
+}
+
+function getMetricDeviceIndex(series: MetricSeries): number {
+  const tags = metricTags(series)
+  const rawIndex = tags.device_index ?? tags.gpu_index ?? tags.index
+  const numericIndex = Number(rawIndex)
+  return Number.isFinite(numericIndex) ? numericIndex : Math.abs(getMetricDeviceKey(series).split('').reduce((sum, char) => sum + char.charCodeAt(0), 0))
+}
+
+function getMetricDeviceName(series: MetricSeries): string | undefined {
+  const tags = metricTags(series)
+  const name = tags.device_name ?? tags.gpu_name ?? tags.name
+  return typeof name === 'string' && name.trim() ? name.trim() : undefined
+}
+
+function ensureMetricRow(rows: Map<string, RecordFormat>, time: string): RecordFormat {
+  const existing = rows.get(time)
+  if (existing)
+    return existing
+
+  const node = nodeInfo.value
+  const row: RecordFormat = {
+    client: props.uuid,
+    time,
+    cpu: null,
+    gpu: null,
     gpu_usage: null,
     gpu_memory: null,
-    ram: r.ram ?? null,
-    ram_total: r.ram_total ?? null,
-    swap: r.swap ?? null,
-    swap_total: r.swap_total ?? null,
-    load: r.load ?? null,
-    temp: r.temp ?? null,
-    disk: r.disk ?? null,
-    disk_total: r.disk_total ?? null,
-    net_in: r.net_in ?? null,
-    net_out: r.net_out ?? null,
-    net_total_up: r.net_total_up ?? null,
-    net_total_down: r.net_total_down ?? null,
-    process: r.process ?? null,
-    connections: r.connections ?? null,
-    connections_udp: r.connections_udp ?? null,
-  }))
+    ram: null,
+    ram_total: node?.mem_total ?? null,
+    swap: null,
+    swap_total: node?.swap_total ?? null,
+    load: null,
+    temp: null,
+    disk: null,
+    disk_total: node?.disk_total ?? null,
+    net_in: null,
+    net_out: null,
+    net_total_up: null,
+    net_total_down: null,
+    process: null,
+    connections: null,
+    connections_udp: null,
+  }
+  rows.set(time, row)
+  return row
+}
+
+function applyMetricPoint(row: RecordFormat, key: LoadMetricKey, value: number | null, series: MetricSeries): void {
+  switch (key) {
+    case 'cpu.usage':
+      row.cpu = value
+      break
+    case 'load.average':
+      row.load = value
+      break
+    case 'memory.used':
+      row.ram = value
+      break
+    case 'swap.used':
+      row.swap = value
+      break
+    case 'disk.used':
+      row.disk = value
+      break
+    case 'net.in.rate':
+      row.net_in = value
+      break
+    case 'net.out.rate':
+      row.net_out = value
+      break
+    case 'net.total.down':
+      row.net_total_down = value
+      break
+    case 'net.total.up':
+      row.net_total_up = value
+      break
+    case 'process.count':
+      row.process = value
+      break
+    case 'connections.tcp':
+      row.connections = value
+      break
+    case 'connections.udp':
+      row.connections_udp = value
+      break
+    case 'gpu.usage':
+      row.gpu = value
+      row.gpu_usage = value
+      break
+    case 'gpu.device.usage': {
+      const deviceIndex = getMetricDeviceIndex(series)
+      row.gpu_detailed ??= {}
+      row.gpu_detailed[deviceIndex] ??= { usage: null, memory: null, temperature: null, device_index: deviceIndex, device_name: getMetricDeviceName(series) }
+      row.gpu_detailed[deviceIndex].usage = value
+      row.gpu_usage = row.gpu_usage ?? value
+      row.gpu = row.gpu ?? value
+      break
+    }
+    case 'gpu.memory.used': {
+      const deviceIndex = getMetricDeviceIndex(series)
+      row.gpu_detailed ??= {}
+      row.gpu_detailed[deviceIndex] ??= { usage: null, memory: null, temperature: null, device_index: deviceIndex, device_name: getMetricDeviceName(series) }
+      row.gpu_detailed[deviceIndex].mem_used = value ?? undefined
+      row.gpu_memory = row.gpu_memory ?? value
+      break
+    }
+    case 'gpu.memory.total': {
+      const deviceIndex = getMetricDeviceIndex(series)
+      row.gpu_detailed ??= {}
+      row.gpu_detailed[deviceIndex] ??= { usage: null, memory: null, temperature: null, device_index: deviceIndex, device_name: getMetricDeviceName(series) }
+      row.gpu_detailed[deviceIndex].mem_total = value ?? undefined
+      break
+    }
+    case 'gpu.temperature': {
+      const deviceIndex = getMetricDeviceIndex(series)
+      row.gpu_detailed ??= {}
+      row.gpu_detailed[deviceIndex] ??= { usage: null, memory: null, temperature: null, device_index: deviceIndex, device_name: getMetricDeviceName(series) }
+      row.gpu_detailed[deviceIndex].temperature = value
+      break
+    }
+  }
+}
+
+function finalizeGpuRows(rows: RecordFormat[]): RecordFormat[] {
+  for (const row of rows) {
+    if (!row.gpu_detailed)
+      continue
+
+    const usages: number[] = []
+    const memories: number[] = []
+    for (const detail of Object.values(row.gpu_detailed)) {
+      if (detail.mem_used != null && detail.mem_total && detail.mem_total > 0)
+        detail.memory = detail.mem_used / detail.mem_total * 100
+      if (typeof detail.usage === 'number' && Number.isFinite(detail.usage))
+        usages.push(detail.usage)
+      if (typeof detail.memory === 'number' && Number.isFinite(detail.memory))
+        memories.push(detail.memory)
+    }
+
+    if (row.gpu_usage == null && usages.length)
+      row.gpu_usage = usages.reduce((sum, value) => sum + value, 0) / usages.length
+    row.gpu ??= row.gpu_usage
+    if (row.gpu_memory == null && memories.length)
+      row.gpu_memory = memories.reduce((sum, value) => sum + value, 0) / memories.length
+  }
+  return rows
+}
+
+function getGpuDeviceNames(record: RecordFormat | null): string {
+  if (!record?.gpu_detailed)
+    return nodeInfo.value?.gpu_name || ''
+  return Object.values(record.gpu_detailed)
+    .map(detail => detail.device_name || (detail.device_index === undefined ? '' : `GPU ${detail.device_index}`))
+    .filter(Boolean)
+    .join(' / ')
+}
+
+function metricSeriesToRecordFormat(seriesList: MetricSeries[]): RecordFormat[] {
+  const rows = new Map<string, RecordFormat>()
+  const normalizedSeriesList = normalizeMetricSeriesList(seriesList)
+
+  for (const series of normalizedSeriesList) {
+    if (!LOAD_METRIC_KEYS.includes(series.metric_key as LoadMetricKey))
+      continue
+
+    const key = series.metric_key as LoadMetricKey
+    for (const point of series.points) {
+      const row = ensureMetricRow(rows, point.time)
+      applyMetricPoint(row, key, metricValue(point.value), series)
+    }
+  }
+
+  return finalizeGpuRows([...rows.values()].sort((a, b) => dayjs(a.time).valueOf() - dayjs(b.time).valueOf()))
+}
+
+async function loadMetricHistoryRecords(hours: number): Promise<RecordFormat[] | null> {
+  const definitions = await loadMetricDefinitions()
+  const availableKeys = new Set(definitions.map(definition => definition.name))
+  const metricKeys = LOAD_METRIC_KEYS.filter(key => availableKeys.has(key))
+  if (!metricKeys.length)
+    return null
+
+  const result = await queryMetrics({
+    metric_keys: metricKeys,
+    entity_id: props.uuid,
+    hours,
+    downsample: true,
+    fill_empty: true,
+    max_points: LOAD_RECORD_MAX_COUNT,
+    aggregation: 'avg',
+  })
+
+  const records = metricSeriesToRecordFormat(result.series)
+  return records.length ? records : null
 }
 
 async function fetchRecentData() {
   if (!props.uuid)
     return
+
+  metricData.value = null
 
   // 只在首次加载时显示 loading
   if (isInitialLoad.value) {
@@ -236,11 +499,20 @@ async function fetchHistoryData() {
   error.value = null
 
   try {
-    remoteData.value = await loadNodeLoadRecords(props.uuid, hours)
+    const metricRecords = await loadMetricHistoryRecords(hours).catch(() => null)
+    if (metricRecords) {
+      metricData.value = metricRecords
+      remoteData.value = []
+    }
+    else {
+      metricData.value = null
+      remoteData.value = await loadNodeLoadRecords(props.uuid, hours)
+    }
   }
   catch (err) {
     error.value = err instanceof Error ? err.message : '获取数据失败'
     remoteData.value = []
+    metricData.value = null
   }
   finally {
     loading.value = false
@@ -259,7 +531,7 @@ async function fetchData() {
 // ==================== 数据处理 ====================
 
 const chartData = computed(() => {
-  const data = statusToRecordFormat(remoteData.value)
+  const data = metricData.value ?? statusToRecordFormat(remoteData.value)
   if (!data.length)
     return []
 
@@ -290,11 +562,13 @@ const chartData = computed(() => {
 })
 
 const latestStatus = computed(() => {
-  const data = remoteData.value
+  const data = chartData.value
   if (!data.length)
     return null
   return data.at(-1) ?? null
 })
+
+const hasGpuData = computed(() => chartData.value.some(record => record.gpu != null || record.gpu_usage != null || record.gpu_memory != null || record.gpu_detailed))
 
 // ==================== 工具函数 ====================
 
@@ -663,6 +937,96 @@ const networkChartOption = computed(() => ({
   ],
 }))
 
+// GPU 图表
+const gpuChartOption = computed(() => ({
+  animation: false,
+  color: [chartColors.senary, chartColors.quaternary],
+  tooltip: {
+    ...baseTooltipConfig.value,
+    formatter: (params: unknown) => {
+      const p = params as Array<{ dataIndex: number, seriesName: string, value: number, color: string }>
+      if (!p.length)
+        return ''
+      const firstParam = p[0]
+      if (!firstParam)
+        return ''
+      const record = chartData.value[firstParam.dataIndex]
+      if (!record)
+        return ''
+
+      const timeStr = formatTimeForTooltip(record.time, selectedHours.value || 1)
+      let html = `<div style="font-weight:600;margin-bottom:6px;color:${chartThemeColors.value.textSecondary}">${timeStr}</div>`
+      html += '<div style="display:flex;flex-direction:column;gap:4px">'
+
+      for (const item of p) {
+        const colorDot = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${item.color};margin-right:8px;flex-shrink:0"></span>`
+        html += `<div style="display:flex;align-items:center">${colorDot}<span>${item.seriesName}</span><span style="margin-left:auto;font-weight:600;margin-left:16px">${item.value?.toFixed(1) ?? '-'}%</span></div>`
+      }
+
+      if (record.gpu_detailed) {
+        html += `<div style="margin-top:4px;padding-top:4px;border-top:1px solid ${chartThemeColors.value.splitLineColor}">`
+        for (const detail of Object.values(record.gpu_detailed)) {
+          const name = detail.device_name || (detail.device_index === undefined ? 'GPU' : `GPU ${detail.device_index}`)
+          const usage = detail.usage == null ? '-' : `${detail.usage.toFixed(1)}%`
+          const memory = detail.memory == null ? '-' : `${detail.memory.toFixed(1)}%`
+          const temp = detail.temperature == null ? '' : ` · ${Math.round(detail.temperature)}℃`
+          html += `<div style="display:flex;align-items:center;gap:8px;color:${chartThemeColors.value.textSecondary}"><span>${name}</span><span style="margin-left:auto">${usage} / ${memory}${temp}</span></div>`
+        }
+        html += '</div>'
+      }
+
+      html += '</div>'
+      return html
+    },
+  },
+  legend: {
+    data: ['GPU 使用率', '显存使用率'],
+    bottom: 4,
+    itemWidth: 12,
+    itemHeight: 12,
+    itemGap: 20,
+    icon: 'roundRect',
+    textStyle: { fontSize: 11, color: chartThemeColors.value.textSecondary },
+  },
+  grid: chartMarginWithLegend,
+  xAxis: baseXAxisConfig.value,
+  yAxis: {
+    ...baseYAxisConfig.value,
+    name: 'GPU %',
+    nameTextStyle: { color: chartThemeColors.value.textSecondary, padding: [0, 40, 0, 0] },
+    min: 0,
+    max: 100,
+    axisLabel: { ...baseYAxisConfig.value.axisLabel, formatter: '{value}%' },
+  },
+  series: [
+    {
+      name: 'GPU 使用率',
+      type: 'line',
+      data: chartData.value.map(r => r.gpu_usage ?? r.gpu),
+      showSymbol: false,
+      lineStyle: { width: 1.5, color: chartColors.senary, cap: 'round' as const },
+    },
+    {
+      name: '显存使用率',
+      type: 'line',
+      data: chartData.value.map(r => r.gpu_memory),
+      showSymbol: false,
+      lineStyle: { width: 1.5, color: chartColors.quaternary, cap: 'round' as const },
+    },
+  ],
+}))
+
+const chartDashboardCards = computed(() => appStore.chartDashboardTemplate.cards)
+
+function isChartCardEnabled(key: ChartDashboardCardKey): boolean {
+  return chartDashboardCards.value.includes(key) && (key !== 'gpu' || (appStore.gpuChartEnabled && hasGpuData.value))
+}
+
+function getChartCardStyle(key: ChartDashboardCardKey): Record<string, string> {
+  const index = chartDashboardCards.value.indexOf(key)
+  return { order: String(index < 0 ? 99 : index) }
+}
+
 // 连接数图表
 const connectionsChartOption = computed(() => ({
   animation: false,
@@ -855,14 +1219,14 @@ onMounted(() => {
       <div v-if="error" class="text-red-500 py-8 text-center">
         {{ error }}
       </div>
-      <div v-else-if="remoteData.length === 0 && !loading" class="py-8">
+      <div v-else-if="chartData.length === 0 && !loading" class="py-8">
         <Empty description="暂无负载数据" />
       </div>
 
       <!-- 图表网格 -->
       <div v-else class="gap-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3">
         <!-- CPU 卡片 -->
-        <CardX size="small" class="bg-background/50 border-none hover:bg-background transition-all rounded-md">
+        <CardX v-if="isChartCardEnabled('cpu')" size="small" class="bg-background/50 border-none hover:bg-background transition-all rounded-md" :style="getChartCardStyle('cpu')">
           <template #header>
             <div class="flex items-center justify-between">
               <span class="text-base font-bold">CPU</span>
@@ -879,7 +1243,7 @@ onMounted(() => {
         </CardX>
 
         <!-- 内存卡片 -->
-        <CardX size="small" class="bg-background/50 border-none hover:bg-background transition-all rounded-md">
+        <CardX v-if="isChartCardEnabled('memory')" size="small" class="bg-background/50 border-none hover:bg-background transition-all rounded-md" :style="getChartCardStyle('memory')">
           <template #header>
             <div class="flex items-center justify-between">
               <span class="text-base font-bold">内存</span>
@@ -905,7 +1269,7 @@ onMounted(() => {
         </CardX>
 
         <!-- 磁盘卡片 -->
-        <CardX size="small" class="bg-background/50 border-none hover:bg-background transition-all rounded-md">
+        <CardX v-if="isChartCardEnabled('disk')" size="small" class="bg-background/50 border-none hover:bg-background transition-all rounded-md" :style="getChartCardStyle('disk')">
           <template #header>
             <div class="flex items-center justify-between gap-3">
               <div class="min-w-0">
@@ -935,7 +1299,7 @@ onMounted(() => {
         </CardX>
 
         <!-- 网络卡片 -->
-        <CardX size="small" class="bg-background/50 border-none hover:bg-background transition-all rounded-md">
+        <CardX v-if="isChartCardEnabled('network')" size="small" class="bg-background/50 border-none hover:bg-background transition-all rounded-md" :style="getChartCardStyle('network')">
           <template #header>
             <div class="flex items-center justify-between">
               <span class="text-base font-bold">网络</span>
@@ -964,8 +1328,32 @@ onMounted(() => {
           </div>
         </CardX>
 
+        <!-- GPU 卡片 -->
+        <CardX v-if="isChartCardEnabled('gpu')" size="small" class="bg-background/50 border-none hover:bg-background transition-all rounded-md" :style="getChartCardStyle('gpu')">
+          <template #header>
+            <div class="flex items-center justify-between gap-3">
+              <div class="min-w-0">
+                <span class="text-base font-bold">GPU</span>
+                <div v-if="getGpuDeviceNames(latestStatus)" class="text-[10px] text-foreground/55 truncate" :title="getGpuDeviceNames(latestStatus)">
+                  {{ getGpuDeviceNames(latestStatus) }}
+                </div>
+              </div>
+              <div class="text-xs flex gap-1 items-baseline shrink-0">
+                <template v-if="latestStatus?.gpu_usage != null || latestStatus?.gpu != null">
+                  <span>{{ (latestStatus.gpu_usage ?? latestStatus.gpu ?? 0).toFixed(1) }}</span>
+                  <span>%</span>
+                </template>
+                <span v-else>-</span>
+              </div>
+            </div>
+          </template>
+          <div class="h-48">
+            <VChart :option="gpuChartOption" autoresize />
+          </div>
+        </CardX>
+
         <!-- 连接数卡片 -->
-        <CardX size="small" class="bg-background/50 border-none hover:bg-background transition-all rounded-md">
+        <CardX v-if="isChartCardEnabled('connections')" size="small" class="bg-background/50 border-none hover:bg-background transition-all rounded-md" :style="getChartCardStyle('connections')">
           <template #header>
             <div class="flex items-center justify-between">
               <span class="text-base font-bold">连接</span>
@@ -982,7 +1370,7 @@ onMounted(() => {
         </CardX>
 
         <!-- 进程卡片 -->
-        <CardX size="small" class="bg-background/50 border-none hover:bg-background transition-all rounded-md">
+        <CardX v-if="isChartCardEnabled('process')" size="small" class="bg-background/50 border-none hover:bg-background transition-all rounded-md" :style="getChartCardStyle('process')">
           <template #header>
             <div class="flex items-center justify-between">
               <span class="text-base font-bold">进程</span>

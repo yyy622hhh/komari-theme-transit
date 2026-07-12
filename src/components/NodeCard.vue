@@ -62,6 +62,7 @@ const { diskPrediction } = useNodeLoadStats(
     hours: () => loadStatsHours.value,
     enabled: () => appStore.diskPredictionEnabled && appStore.privateFeaturesAllowed,
     diskTotal: () => props.node.disk_total,
+    online: () => props.node.online,
     permission: 'diskPrediction',
   },
 )
@@ -86,6 +87,14 @@ const {
 
 const trafficUsedPercentage = computed(() => getTrafficUsedPercentage(props.node))
 const trafficUsed = computed(() => getTrafficUsed(props.node))
+const nodeMessage = computed(() => props.node.message?.trim() ?? '')
+const nodeMessageTooltip = computed(() => {
+  const message = nodeMessage.value
+  if (!message)
+    return ''
+  const updatedAt = props.node.status_updated_at ? `\n更新时间：${formatDateTime(props.node.status_updated_at)}` : ''
+  return `${message}${updatedAt}`
+})
 
 // 流量状态颜色
 const trafficStatus = computed(() => {
@@ -196,6 +205,16 @@ function hasRegion(region: string | null | undefined): boolean {
           />
         </div>
         <span class="text-sm font-bold flex-1 min-w-0 truncate">{{ props.node.name }}</span>
+        <DataTooltip
+          v-if="nodeMessage"
+          :content="nodeMessageTooltip"
+          placement="top"
+          as="span"
+          class="inline-flex shrink-0 text-amber-500"
+          content-class="w-56 whitespace-pre-line leading-snug text-left"
+        >
+          <Icon icon="tabler:alert-triangle-filled" width="14" height="14" aria-label="节点消息" />
+        </DataTooltip>
       </div>
     </template>
 

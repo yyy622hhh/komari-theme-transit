@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { PingRecord, PingTaskInfo } from '@/utils/rpc'
+import type { MetricSeries, PingMetricTaskStats, PingRecord, PingTaskInfo } from '@/utils/rpc'
 import { Icon } from '@iconify/vue'
 import dayjs from 'dayjs'
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
@@ -11,7 +11,9 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { PING_RECORD_MAX_COUNT } from '@/constants/load'
 import { loadPingRecordsWithTasks } from '@/services/history.service'
+import { loadPingMetricStats, queryMetrics } from '@/services/metrics.service'
 import { useAppStore } from '@/stores/app'
+import { isPingMetric, normalizeMetricSeriesList, PING_LATENCY_METRIC, pingTaskId, pingTaskName } from '@/utils/metricSeries'
 import { cutPeakValues, interpolateNullsLinear } from '@/utils/recordHelper'
 import '@/utils/echarts' // 共享 ECharts 配置
 
@@ -149,6 +151,114 @@ function toggleSmoothInfoTooltip() {
   }
 }
 
+function normalizeMetricTaskId(taskId: string): number {
+  if (!taskId.trim())
+    return Number.NaN
+
+  const numericTaskId = Number(taskId)
+  if (Number.isFinite(numericTaskId))
+    return numericTaskId
+
+  let hash = 0
+  for (let index = 0; index < taskId.length; index++)
+    hash = (hash * 31 + taskId.charCodeAt(index)) | 0
+  return Math.abs(hash)
+}
+
+function normalizeMetricTask(stat: PingMetricTaskStats): PingTaskInfo {
+  return {
+    id: normalizeMetricTaskId(stat.task_id),
+    name: stat.name?.trim() || pingTaskName(stat) || `Task ${stat.task_id}`,
+    interval: stat.interval ?? 0,
+    loss: stat.loss,
+    min: stat.min,
+    max: stat.max,
+    avg: stat.avg,
+    latest: stat.latest,
+    p50: stat.p50,
+    p99: stat.p99,
+    p99_p50_ratio: stat.p99_p50_ratio,
+    stddev: stat.stddev,
+    total: stat.total,
+    valid: stat.valid,
+    loss_approximate: stat.loss_approximate,
+    type: stat.type,
+  }
+}
+
+function buildMetricRecords(seriesList: MetricSeries[]): PingRecord[] {
+  const records: PingRecord[] = []
+  const normalizedSeriesList = normalizeMetricSeriesList(seriesList).filter(isPingMetric)
+
+  for (const series of normalizedSeriesList) {
+    const taskId = normalizeMetricTaskId(pingTaskId(series))
+    if (!Number.isFinite(taskId))
+      continue
+
+    for (const point of series.points) {
+      records.push({
+        client: series.entity_id,
+        task_id: taskId,
+        time: point.time,
+        value: point.value === null ? -1 : point.value,
+      })
+    }
+  }
+
+  return records.sort((a, b) => dayjs(a.time).valueOf() - dayjs(b.time).valueOf())
+}
+
+async function loadMetricPingPayload(): Promise<{ records: PingRecord[], tasks: PingTaskInfo[] } | null> {
+  const [statsResult, metricsResult] = await Promise.allSettled([
+    loadPingMetricStats({ entity_id: props.uuid, hours: selectedHours.value, max_points: PING_RECORD_MAX_COUNT }),
+    queryMetrics({
+      metric_keys: [PING_LATENCY_METRIC],
+      entity_id: props.uuid,
+      hours: selectedHours.value,
+      downsample: true,
+      fill_empty: true,
+      max_points: PING_RECORD_MAX_COUNT,
+      aggregation: 'avg',
+    }),
+  ])
+
+  const metricStats = statsResult.status === 'fulfilled'
+    ? (statsResult.value.stats ?? []).filter(stat => stat.entity_id === props.uuid)
+    : []
+  const metricRecords = metricsResult.status === 'fulfilled'
+    ? buildMetricRecords(metricsResult.value.series)
+    : []
+
+  if (!metricStats.length && !metricRecords.length)
+    return null
+
+  const taskMap = new Map<number, PingTaskInfo>()
+  for (const stat of metricStats) {
+    const task = normalizeMetricTask(stat)
+    taskMap.set(task.id, task)
+  }
+
+  for (const series of normalizeMetricSeriesList(
+    metricsResult.status === 'fulfilled' ? metricsResult.value.series : [],
+  ).filter(isPingMetric)) {
+    const taskId = normalizeMetricTaskId(pingTaskId(series))
+    if (!taskId || taskMap.has(taskId))
+      continue
+
+    taskMap.set(taskId, {
+      id: taskId,
+      name: pingTaskName(series) || `Task ${taskId}`,
+      interval: series.interval_seconds ?? 0,
+      loss: 0,
+    })
+  }
+
+  return {
+    records: metricRecords,
+    tasks: [...taskMap.values()],
+  }
+}
+
 // ==================== 数据获取 ====================
 
 async function fetchRecords() {
@@ -168,7 +278,8 @@ async function fetchRecords() {
   error.value = null
 
   try {
-    const result = await loadPingRecordsWithTasks(selectedHours.value, PING_RECORD_MAX_COUNT, props.uuid)
+    const metricPayload = await loadMetricPingPayload().catch(() => null)
+    const result = metricPayload ?? await loadPingRecordsWithTasks(selectedHours.value, PING_RECORD_MAX_COUNT, props.uuid)
 
     const records = result.records
     records.sort((a, b) => dayjs(a.time).valueOf() - dayjs(b.time).valueOf())
@@ -644,9 +755,17 @@ onBeforeUnmount(() => {
                           <span class="text-muted-foreground">类型</span>
                           <span class="font-medium">{{ task.type.toUpperCase() }}</span>
                         </template>
+                        <template v-if="task.stddev !== undefined">
+                          <span class="text-muted-foreground">标准差</span>
+                          <span class="font-medium">{{ task.stddev.toFixed(1) }}</span>
+                        </template>
                         <template v-if="task.total !== undefined">
                           <span class="text-muted-foreground">总数</span>
                           <span class="font-medium">{{ task.total }}</span>
+                        </template>
+                        <template v-if="task.valid !== undefined">
+                          <span class="text-muted-foreground">有效</span>
+                          <span class="font-medium">{{ task.valid }}</span>
                         </template>
                       </div>
                     </TooltipContent>
@@ -658,7 +777,7 @@ onBeforeUnmount(() => {
                   {{ task.avg !== undefined ? `${Math.round(task.avg)}ms` : '-' }}
                 </span>
                 <span class="opacity-60">·</span>
-                <span title="丢包率">{{ task.loss.toFixed(2) }}%</span>
+                <span title="丢包率">{{ task.loss.toFixed(2) }}%{{ task.loss_approximate ? '≈' : '' }}</span>
                 <template v-if="task.p99_p50_ratio !== undefined">
                   <span class="opacity-60">·</span>
                   <span title="波动率">{{ task.p99_p50_ratio.toFixed(2) }}</span>

@@ -1,15 +1,20 @@
 const CSV_ESCAPE_NEEDED_REGEX = /[",\n\r]/
 const CSV_QUOTE_REGEX = /"/g
-const CSV_LINE_BREAK_REGEX = /\r?\n/g
-const CSV_FORMULA_INJECTION_REGEX = /^[\t\r ]*[=+\-@]/
+// Detect formula prefixes even when hidden behind leading whitespace, BOM, or NBSP.
+// eslint-disable-next-line regexp/no-useless-flag
+const CSV_FORMULA_INJECTION_REGEX = /^\s*[=+\-@|]/i
 
-export function sanitizeCsvValue(value: unknown): string {
-  const text = String(value ?? '').replace(CSV_LINE_BREAK_REGEX, ' / ')
+export function sanitizeCsvCell(value: unknown): string {
+  const text = String(value ?? '')
   return CSV_FORMULA_INJECTION_REGEX.test(text) ? `'${text}` : text
 }
 
+export function sanitizeCsvValue(value: unknown): string {
+  return sanitizeCsvCell(value)
+}
+
 export function escapeCsvCell(value: unknown): string {
-  const text = sanitizeCsvValue(value)
+  const text = sanitizeCsvCell(value)
   if (CSV_ESCAPE_NEEDED_REGEX.test(text))
     return `"${text.replace(CSV_QUOTE_REGEX, '""')}"`
   return text

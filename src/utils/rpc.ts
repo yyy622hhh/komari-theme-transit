@@ -80,6 +80,7 @@ export interface Client {
   virtualization: string
   arch: string
   cpu_cores: number
+  cpu_physical_cores?: number
   os: string
   kernel_version: string
   gpu_name?: string
@@ -116,10 +117,10 @@ export interface PublicInfo {
   disable_password_login: boolean
   oauth_enable: boolean
   oauth_provider: string
-  ping_record_preserve_time: number
+  ping_record_preserve_time?: number
   private_site: boolean
-  record_enabled: boolean
-  record_preserve_time: number
+  record_enabled?: boolean
+  record_preserve_time?: number
   sitename: string
   theme: string
   theme_settings: Record<string, unknown>
@@ -147,12 +148,26 @@ export interface NodeStatusPing {
   max: number
 }
 
+export interface GpuDetailedInfo {
+  name?: string
+  device_name?: string
+  device_index?: number
+  memory_total?: number
+  memory_used?: number
+  utilization?: number
+  usage?: number
+  temperature?: number
+}
+
 /** 节点状态 */
 export interface NodeStatus {
   client: string
   time: string
   cpu: number
   gpu: number
+  gpu_count?: number
+  gpu_average_usage?: number
+  gpu_detailed_info?: GpuDetailedInfo[]
   ram: number
   ram_total: number
   swap: number
@@ -167,11 +182,15 @@ export interface NodeStatus {
   net_out: number
   net_total_up: number
   net_total_down: number
+  traffic_up?: number
+  traffic_down?: number
   process: number
   connections: number
   connections_udp: number
   online: boolean
   uptime: number
+  message?: string
+  updated_at?: string
   /** 各 Ping 任务最新探测汇总，键为 task_id 字符串 */
   ping?: Record<string, NodeStatusPing>
 }
@@ -182,6 +201,9 @@ export interface StatusRecord {
   time: string
   cpu: number
   gpu: number
+  gpu_count?: number
+  gpu_average_usage?: number
+  gpu_detailed_info?: GpuDetailedInfo[]
   ram: number
   ram_total: number
   swap: number
@@ -196,6 +218,8 @@ export interface StatusRecord {
   net_out: number
   net_total_up: number
   net_total_down: number
+  traffic_up?: number
+  traffic_down?: number
   process: number
   connections: number
   connections_udp: number
@@ -215,6 +239,8 @@ export interface PingTaskInfo {
   name: string
   interval: number
   loss: number
+  default_on?: boolean
+  clients?: string[]
   p99?: number
   p50?: number
   p99_p50_ratio?: number
@@ -223,7 +249,131 @@ export interface PingTaskInfo {
   avg?: number
   latest?: number
   total?: number
+  valid?: number
+  stddev?: number
+  loss_approximate?: boolean
   type?: string
+}
+
+export interface MetricDefinition {
+  name: string
+  description: string | Record<string, string>
+  type: string
+  unit?: string
+  retention_days: number
+  metadata?: Record<string, string>
+  created_at?: string
+  updated_at?: string
+}
+
+export interface MetricPoint {
+  time: string
+  value: number | null
+  count?: number
+  tag?: Record<string, unknown>
+  tags?: Record<string, unknown>
+  labels?: Record<string, unknown>
+}
+
+export interface MetricSeries {
+  metric_key: string
+  entity_id: string
+  type?: string
+  unit?: string
+  retention_days?: number
+  tag?: Record<string, unknown>
+  tags?: Record<string, unknown>
+  downsampled: boolean
+  downsample_algorithm?: string
+  fill_empty?: boolean
+  max_points?: number
+  interval_seconds?: number
+  count: number
+  points: MetricPoint[]
+}
+
+export interface MetricQueryParams {
+  [key: string]: unknown
+  metric_key?: string
+  metric_keys?: string[]
+  metrics?: string[]
+  entity_id?: string
+  entity_ids?: string[]
+  start?: string | number
+  start_time?: string | number
+  end?: string | number
+  end_time?: string | number
+  hours?: number
+  tags?: Record<string, unknown>
+  downsample?: boolean
+  server_downsample?: boolean
+  downsample_by_metric?: Record<string, boolean>
+  server_downsample_by_metric?: Record<string, boolean>
+  fill_empty?: boolean
+  max_points?: number
+  downsample_points?: number
+  max_points_by_metric?: Record<string, number>
+  points_by_metric?: Record<string, number>
+  aggregation?: string
+  downsample_algorithm?: string
+  algorithm?: string
+  aggregation_by_metric?: Record<string, string>
+  downsample_algorithm_by_metric?: Record<string, string>
+  algorithm_by_metric?: Record<string, string>
+}
+
+export interface MetricQueryResponse {
+  start: string
+  end: string
+  server_downsample_default?: boolean
+  default_points?: number
+  series: MetricSeries[]
+  count: number
+}
+
+export interface PingMetricStatsParams {
+  [key: string]: unknown
+  uuid?: string
+  entity_id?: string
+  entity_ids?: string[]
+  task_id?: string | number
+  task_ids?: Array<string | number>
+  start?: string | number
+  start_time?: string | number
+  end?: string | number
+  end_time?: string | number
+  hours?: number
+  max_points?: number
+  downsample_points?: number
+}
+
+export interface PingMetricTaskStats {
+  entity_id: string
+  task_id: string
+  name?: string
+  type?: string
+  interval?: number
+  tags: Record<string, unknown>
+  total: number
+  valid: number
+  loss: number
+  loss_approximate: boolean
+  min?: number
+  max?: number
+  avg?: number
+  latest?: number
+  p50?: number
+  p99?: number
+  stddev?: number
+  p99_p50_ratio?: number
+}
+
+export interface PingMetricStatsResponse {
+  start: string
+  end: string
+  interval_seconds: number
+  stats: PingMetricTaskStats[]
+  count: number
 }
 
 /** RPC 错误 */
@@ -339,8 +489,6 @@ export class RpcClient {
         signal: controller.signal,
       })
 
-      clearTimeout(timeoutId)
-
       if (!response.ok) {
         throw new RpcError(response.status, `HTTP error: ${response.status}`)
       }
@@ -351,12 +499,12 @@ export class RpcClient {
       return this.handleResponse(data)
     }
     catch (error) {
-      clearTimeout(timeoutId)
       if (error instanceof RpcError)
         throw error
       throw new RpcError(-32000, `Network error: ${error instanceof Error ? error.message : String(error)}`)
     }
     finally {
+      clearTimeout(timeoutId)
       unlinkAbortSignal()
     }
   }
@@ -463,6 +611,11 @@ export class RpcClient {
     await this.ensureWebSocketReady()
 
     return new Promise((resolve, reject) => {
+      if (signal?.aborted) {
+        reject(new RpcError(-32000, 'Request aborted'))
+        return
+      }
+
       const id = ++this.requestId
       const request: JsonRpcRequest = {
         jsonrpc: '2.0',
@@ -471,19 +624,29 @@ export class RpcClient {
         id,
       }
 
+      let settled = false
       let timer: ReturnType<typeof setTimeout> | null = null
-      const abort = () => {
+      let abort = () => {}
+
+      const cleanup = (): boolean => {
+        if (settled)
+          return false
+        settled = true
         signal?.removeEventListener('abort', abort)
         this.pendingRequests.delete(id)
         if (timer)
           clearTimeout(timer)
-        reject(new RpcError(-32000, 'Request aborted'))
+        return true
       }
-      const cleanupAbort = () => signal?.removeEventListener('abort', abort)
+
+      abort = () => {
+        if (cleanup())
+          reject(new RpcError(-32000, 'Request aborted'))
+      }
+
       timer = setTimeout(() => {
-        cleanupAbort()
-        this.pendingRequests.delete(id)
-        reject(new RpcError(-32001, 'Request timeout'))
+        if (cleanup())
+          reject(new RpcError(-32001, 'Request timeout'))
       }, this.timeout)
 
       if (signal)
@@ -491,26 +654,28 @@ export class RpcClient {
 
       this.pendingRequests.set(id, {
         resolve: (value) => {
-          cleanupAbort()
-          resolve(value as T)
+          if (cleanup())
+            resolve(value as T)
         },
         reject: (reason) => {
-          cleanupAbort()
-          reject(reason)
+          if (cleanup())
+            reject(reason)
         },
         timer,
       })
 
-      // 此时 WebSocket 应该已经打开
-      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+        if (cleanup())
+          reject(new RpcError(-32000, 'WebSocket not connected'))
+        return
+      }
+
+      try {
         this.ws.send(JSON.stringify(request))
       }
-      else {
-        // 异常情况：连接断开了，拒绝请求
-        this.pendingRequests.delete(id)
-        clearTimeout(timer)
-        cleanupAbort()
-        reject(new RpcError(-32000, 'WebSocket not connected'))
+      catch (error) {
+        if (cleanup())
+          reject(new RpcError(-32000, `WebSocket send failed: ${error instanceof Error ? error.message : String(error)}`))
       }
     })
   }
@@ -710,6 +875,7 @@ export class KomariRpc {
     hours?: number
     task_id?: number
     load_type?: string
+    maxCount?: number
     max_count?: number
   }): Promise<unknown> {
     return this.client.call('common:getRecords', params)
@@ -718,12 +884,13 @@ export class KomariRpc {
   /**
    * 获取负载记录
    */
-  async getLoadRecords(uuid?: string, hours?: number, loadType?: string, maxCount?: number, signal?: AbortSignal): Promise<{ records: StatusRecord[] }> {
-    return this.client.call<{ records: StatusRecord[] }>('common:getRecords', {
+  async getLoadRecords(uuid?: string, hours?: number, loadType?: string, maxCount?: number, signal?: AbortSignal): Promise<{ records: StatusRecord[] | Record<string, StatusRecord[]> }> {
+    return this.client.call<{ records: StatusRecord[] | Record<string, StatusRecord[]> }>('common:getRecords', {
       type: 'load',
       uuid,
       hours,
       load_type: loadType,
+      maxCount,
       max_count: maxCount,
     }, signal)
   }
@@ -731,14 +898,61 @@ export class KomariRpc {
   /**
    * 获取 Ping 记录
    */
-  async getPingRecords(taskId?: number, hours?: number, maxCount?: number, signal?: AbortSignal, uuid?: string): Promise<{ records: PingRecord[], tasks?: PingTaskInfo[] }> {
-    return this.client.call<{ records: PingRecord[], tasks?: PingTaskInfo[] }>('common:getRecords', {
+  async getPingRecords(taskId?: number, hours?: number, maxCount?: number, signal?: AbortSignal, uuid?: string): Promise<{ records: PingRecord[], tasks?: PingTaskInfo[], basic_info?: Array<{ client: string, loss: number, min: number, max: number }> }> {
+    return this.client.call<{ records: PingRecord[], tasks?: PingTaskInfo[], basic_info?: Array<{ client: string, loss: number, min: number, max: number }> }>('common:getRecords', {
       type: 'ping',
       uuid,
       task_id: taskId,
       hours,
+      maxCount,
       max_count: maxCount,
     }, signal)
+  }
+
+  // ==================== Public 方法（主题/公开页优先使用） ====================
+
+  async getPublicMe(): Promise<unknown> {
+    return this.client.call('public:getMe')
+  }
+
+  async getPublicNodesInformation(): Promise<Client[]> {
+    return this.client.call<Client[]>('public:getNodesInformation')
+  }
+
+  async getPublicSettings(): Promise<PublicInfo> {
+    return this.client.call<PublicInfo>('public:getPublicSettings')
+  }
+
+  async getPublicVersion(): Promise<VersionInfo> {
+    return this.client.call<VersionInfo>('public:getVersion')
+  }
+
+  async getPublicClientRecentRecords(uuid: string, signal?: AbortSignal): Promise<StatusRecord[]> {
+    return this.client.call<StatusRecord[]>('public:getClientRecentRecords', { uuid }, signal)
+  }
+
+  async getPublicRecordsByUUID(params: { uuid: string, load_type?: string, hours?: number | string }, signal?: AbortSignal): Promise<{ count: number, records: Array<Partial<StatusRecord>>, load_type?: string, has_gpu_data?: boolean, gpu_devices?: Record<string, unknown> }> {
+    return this.client.call<{ count: number, records: Array<Partial<StatusRecord>>, load_type?: string, has_gpu_data?: boolean, gpu_devices?: Record<string, unknown> }>('public:getRecordsByUUID', params, signal)
+  }
+
+  async getPublicPingRecords(params: { uuid?: string, task_id?: string | number, hours?: number | string }, signal?: AbortSignal): Promise<{ count: number, records: PingRecord[], tasks?: PingTaskInfo[], basic_info?: Array<{ client: string, loss: number, min: number, max: number }> }> {
+    return this.client.call<{ count: number, records: PingRecord[], tasks?: PingTaskInfo[], basic_info?: Array<{ client: string, loss: number, min: number, max: number }> }>('public:getPingRecords', params, signal)
+  }
+
+  async getPublicPingTasks(): Promise<PingTaskInfo[]> {
+    return this.client.call<PingTaskInfo[]>('public:getPublicPingTasks')
+  }
+
+  async listPublicMetricDefinitions(): Promise<MetricDefinition[]> {
+    return this.client.call<MetricDefinition[]>('public:listMetricDefinitions')
+  }
+
+  async queryPublicMetrics(params: MetricQueryParams, signal?: AbortSignal): Promise<MetricQueryResponse> {
+    return this.client.call<MetricQueryResponse>('public:queryMetrics', params, signal)
+  }
+
+  async getPublicPingMetricStats(params: PingMetricStatsParams, signal?: AbortSignal): Promise<PingMetricStatsResponse> {
+    return this.client.call<PingMetricStatsResponse>('public:getPingMetricStats', params, signal)
   }
 
   /**

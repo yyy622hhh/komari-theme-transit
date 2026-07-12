@@ -143,9 +143,23 @@ export class PromiseCache<T> {
     if (cached)
       return cached
 
-    const promise = createPromise().finally(() => {
+    let sourcePromise: Promise<T>
+    try {
+      sourcePromise = createPromise()
+    }
+    catch (error) {
       this.cache.delete(key)
-    })
+      throw error
+    }
+
+    const promise = sourcePromise
+      .catch((error) => {
+        this.cache.delete(key)
+        throw error
+      })
+      .finally(() => {
+        this.cache.delete(key)
+      })
     this.cache.set(key, promise)
     return promise
   }
