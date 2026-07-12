@@ -212,7 +212,7 @@ const error = ref<string | null>(null)
 
 // 节点信息
 const nodeInfo = computed(() => nodesStore.nodesByUuid.get(props.uuid))
-const { diskPrediction } = useNodeLoadStats(
+const { diskPrediction, diskPredictionState } = useNodeLoadStats(
   () => props.uuid,
   {
     hours: () => detailLoadStatsHours.value,
@@ -223,15 +223,26 @@ const { diskPrediction } = useNodeLoadStats(
   },
 )
 const diskPredictionSummary = computed(() => {
-  const prediction = diskPrediction.value
-  if (!appStore.diskPredictionEnabled || !appStore.privateFeaturesAllowed || !prediction)
+  if (!appStore.diskPredictionEnabled || !appStore.privateFeaturesAllowed)
     return ''
 
-  const days = Math.max(0, Math.ceil(prediction.daysUntilFull))
-  const growth = formatBytesSplit(prediction.dailyGrowthBytes, appStore.byteDecimals)
-  return days <= 0
-    ? `按最近 ${prediction.sampleDays.toFixed(1)} 天趋势，磁盘预计已满`
-    : `按最近 ${prediction.sampleDays.toFixed(1)} 天趋势，预计 ${days} 天后满 · 日增 ${growth.value} ${growth.unit}`
+  const prediction = diskPrediction.value
+  if (prediction) {
+    const days = Math.max(0, Math.ceil(prediction.daysUntilFull))
+    const growth = formatBytesSplit(prediction.dailyGrowthBytes, appStore.byteDecimals)
+    return days <= 0
+      ? `按最近 ${prediction.sampleDays.toFixed(1)} 天趋势，磁盘预计已满`
+      : `按最近 ${prediction.sampleDays.toFixed(1)} 天趋势，预计 ${days} 天后满 · 日增 ${growth.value} ${growth.unit}`
+  }
+
+  const state = diskPredictionState.value
+  if (state.reason === 'no_samples')
+    return '磁盘预测数据积累中：暂无可用历史样本'
+  if (state.reason === 'insufficient_samples')
+    return '磁盘预测数据积累中：样本数量不足'
+  if (state.reason === 'insufficient_duration')
+    return `磁盘预测数据积累中：历史跨度 ${state.sampleDays.toFixed(1)} 天，至少需要约 2 天`
+  return ''
 })
 
 // RPC 客户端

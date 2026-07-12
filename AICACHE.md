@@ -15,7 +15,7 @@
 - 状态：done
 - 目标：完成 v3.0.0 follow-up 后的发布收尾：提交并推送 main、重写 README 为更炫酷且更精简的版本、按发布契约发布 v3.0.1 latest release，并整理发帖文案。
 - 范围：此前 v3.0.0 frontend follow-up / AuditLogPanel / 数据积累提示相关源码、`README.md`、`komari-theme.json.version`、AICACHE 发布交接记录、GitHub release 资产。
-- 已完成：物理核心优先参与性价比每核成本并显示到 NodeCard；LoadChart 已增加自定义 start/end 时间范围；metric definitions 已加 5 分钟 TTL 缓存；`SharedCache.retain()` 已修复覆盖后 release 引用计数孤儿化；首页高级工具已新增 AuditLogPanel；磁盘预测/健康摘要已增加“数据积累中”提示；NodeCard 磁盘预测批量历史拉取显式传 `LOAD_RECORD_MAX_COUNT`；README 已重写为更短、更有设计感的版本，并按用户要求保留 Support / Support the Project / 写在最后，且“写在最后”位于致谢前；`komari-theme.json.version` 已更新为 `3.0.1`；main 已推送，GitHub release workflow 已成功发布 v3.0.1。
+- 已完成：物理核心优先参与性价比每核成本；LoadChart 已增加自定义 start/end 时间范围；metric definitions 已加 5 分钟 TTL 缓存；`SharedCache.retain()` 已修复覆盖后 release 引用计数孤儿化；首页高级工具已新增 AuditLogPanel；磁盘预测“数据积累中”提示已按用户要求从首页卡片/健康摘要移到详情页磁盘模块，首页保持干净；README 已重写为更短、更有设计感的版本，并按用户要求保留 Support / Support the Project / 写在最后，且“写在最后”位于致谢前；`komari-theme.json.version` 已更新为 `3.0.2`，准备发布首页清理补丁。
 - 不做：不新增审计日志单独主题配置，旧后端 history fallback 仍保持按小时近似；不在 `package.json` 添加顶层 version。
 
 ## 执行日志
@@ -72,6 +72,7 @@
 - 2026-07-13 v3.0.0 release prep：README 已删除预览图并重写为实用功能介绍，`komari-theme.json.version` 已更新为 `3.0.0`；`bun run lint && bun run build` 通过，生成 `dist/` 与 `komari-theme-Glassmorphism-build-881385d.zip`。构建仍有既有 `@vueuse/core` PURE 注释警告与 `globe` chunk 超过 600 kB 警告。
 - v3.0.0 已提交并推送 main：commit `c50f6ed`；GitHub release workflow #34 已成功；Release `v3.0.0` 已发布，资产为 `komari-theme-Glassmorphism-build-c50f6ed.zip`。
 - 2026-07-13 v3.0.0 frontend follow-up / AuditLogPanel：`bun run lint` 通过；`bun run build` 通过，生成 `dist/` 与 `komari-theme-Glassmorphism-build-6ccc9d7.zip`。构建仍有既有 `@vueuse/core` PURE 注释警告与 `globe` chunk 超过 600 kB 警告。
+- 2026-07-13 v3.0.2 home card cleanup：按用户反馈移除首页 NodeCard 的物理核心文案和磁盘“数据积累中”提示，HealthSummaryPanel 也不再输出该提示；详情页 LoadChart 磁盘模块继续显示磁盘预测和样本不足原因；`bun run lint && bun run build` 通过，生成 `dist/` 与本地 `komari-theme-Glassmorphism-build-7be6c21.zip`（提交前短 SHA）。构建仍有既有 `@vueuse/core` PURE 注释警告与 `globe` chunk 超过 600 kB 警告。
 
 ## 风险点
 

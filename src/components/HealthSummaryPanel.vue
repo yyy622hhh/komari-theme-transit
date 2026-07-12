@@ -33,7 +33,6 @@ interface NodeHealthSummary {
   diskUsagePercentage: number
   diskPredictionDays: number | null
   diskDailyGrowthBytes: number
-  diskPredictionAccumulating: boolean
   avgLatency: number
   avgLoss: number
   avgVolatility: number
@@ -250,7 +249,6 @@ function buildNodeSummary(node: NodeData, recordsByClient: Map<string, StatusRec
     diskUsagePercentage: getDiskUsagePeak(records, node.disk || 0, node.disk_total || 0),
     diskPredictionDays: diskPrediction ? diskPrediction.daysUntilFull : null,
     diskDailyGrowthBytes: diskPrediction?.dailyGrowthBytes ?? 0,
-    diskPredictionAccumulating: diskPredictionState.reason === 'insufficient_samples' || diskPredictionState.reason === 'insufficient_duration' || diskPredictionState.reason === 'no_samples',
     avgLatency: pingStats.avgLatency,
     avgLoss: pingStats.avgLoss,
     avgVolatility: pingStats.avgVolatility,
@@ -315,7 +313,6 @@ const diskUsageRankNodes = computed(() => summaries.value.filter(item => item.di
 const diskRankMode = computed<'growth' | 'usage'>(() => diskGrowthRankNodes.value.length ? 'growth' : 'usage')
 const diskRankNodes = computed(() => diskRankMode.value === 'growth' ? diskGrowthRankNodes.value : diskUsageRankNodes.value)
 const diskFullSoon = computed(() => summaries.value.filter(item => item.diskPredictionDays !== null && item.diskPredictionDays <= appStore.diskPredictionThresholdDays).sort((a, b) => (a.diskPredictionDays ?? Infinity) - (b.diskPredictionDays ?? Infinity)))
-const diskPredictionAccumulatingCount = computed(() => summaries.value.filter(item => item.diskPredictionAccumulating).length)
 const trafficWarnings = computed(() => summaries.value.filter(item => item.trafficLimitBytes > 0 && item.trafficUsedPercentage >= appStore.homeTrafficWarningThreshold).sort((a, b) => b.trafficUsedPercentage - a.trafficUsedPercentage))
 const pingWarnings = computed(() => summaries.value.filter(item => item.pingHasData && (item.avgLoss >= 5 || item.avgLatency >= 200 || item.avgVolatility >= 3)).sort((a, b) => b.avgLoss - a.avgLoss))
 const fastestTrafficBurn = computed(() => props.nodes.filter(hasTrafficLimit).map(node => ({ node, speed: getTrafficBurnSpeed(node) })).sort((a, b) => b.speed - a.speed).slice(0, HEALTH_LIST_LIMIT))
@@ -330,8 +327,6 @@ const summaryLines = computed(() => {
     lines.push(`离线节点：${offlineNodes.value.slice(0, 6).map(node => node.name).join('、')}${offlineNodes.value.length > 6 ? '…' : ''}`)
   if (diskFullSoon.value.length)
     lines.push(`${diskFullSoon.value[0]?.name} 磁盘风险最高，预计 ${Math.ceil(diskFullSoon.value[0]?.diskPredictionDays ?? 0)} 天后满。`)
-  else if (diskPredictionAccumulatingCount.value > 0)
-    lines.push(`${diskPredictionAccumulatingCount.value} 台节点磁盘预测数据积累中，新节点或历史不足 2 天时属正常现象。`)
   if (trafficWarnings.value.length)
     lines.push(`${trafficWarnings.value[0]?.name} 流量使用率最高：${trafficWarnings.value[0]?.trafficUsedPercentage.toFixed(1)}%。`)
   if (pingWarnings.value.length)
