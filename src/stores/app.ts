@@ -1,8 +1,10 @@
-import type { PublicSettings } from '@/utils/api'
+import type { PermissionKey, VerifyLoginOptions } from '@/services/auth.service'
+import type { MeInfo, PublicSettings } from '@/utils/api'
 import type { ByteDecimalsConfig } from '@/utils/helper'
 import { useStorageAsync } from '@vueuse/core'
 import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
+import { getAuthSession, requirePermission, setAuthSessionFromLogin, verifyLogin } from '@/services/auth.service'
 
 export type ThemeMode = 'auto' | 'light' | 'dark'
 export type ManagedThemeMode = 'beijing' | 'light' | 'dark'
@@ -405,11 +407,13 @@ function readNumberSetting(settings: ThemeSettings, key: string, fallback: numbe
   return Math.min(Math.max(value, min), max)
 }
 
-function readColorSetting(settings: ThemeSettings, key: string, fallback: string): string {
+function readStringSetting(settings: ThemeSettings, key: string, fallback = ''): string {
   const value = settings[key]
-  if (typeof value !== 'string')
-    return fallback
-  const trimmed = value.trim()
+  return typeof value === 'string' ? value.trim() : fallback
+}
+
+function readColorSetting(settings: ThemeSettings, key: string, fallback: string): string {
+  const trimmed = readStringSetting(settings, key, fallback)
   return HEX_COLOR_REGEX.test(trimmed) ? trimmed : fallback
 }
 
@@ -427,7 +431,9 @@ const useAppStore = defineStore('app', () => {
   const lang = ref<Lang>('zh-CN')
   const publicSettings = ref<PublicSettings>()
   const nodeSelectedGroup = useStorageAsync<string>('nodeSelectedGroup', 'all', localStorage)
-  const isLoggedIn = ref<boolean>(false)
+  const isLoggedIn = ref<boolean>(getAuthSession().authenticated)
+  const authStatus = ref(getAuthSession().status)
+  const privateFeaturesAllowed = computed(() => authStatus.value === 'authenticated')
   const connectionError = ref<boolean>(false)
 
   const themeSettings = computed(() => normalizeThemeSettings(publicSettings.value?.theme_settings))
@@ -651,12 +657,9 @@ const useAppStore = defineStore('app', () => {
 
   const hidePriceWhenLoggedOut = computed<boolean>(() => readBooleanSetting(themeSettings.value, 'hidePriceWhenLoggedOut', false))
 
-  const providerAliases = computed<string>(() => {
-    const value = themeSettings.value.providerAliases
-    if (typeof value === 'string')
-      return value.trim()
-    return ''
-  })
+  const providerAliases = computed<string>(() => readStringSetting(themeSettings.value, 'providerAliases'))
+
+  const exportSecondaryPassword = computed<string>(() => readStringSetting(themeSettings.value, 'exportSecondaryPassword'))
 
   const disablePageAnimation = computed<boolean>(() => readBooleanSetting(themeSettings.value, 'disablePageAnimation', false))
 
@@ -756,8 +759,27 @@ const useAppStore = defineStore('app', () => {
     themeMode.value = nextMode[currentMode]
   }
 
-  function updateLoginState(loggedIn: boolean) {
-    isLoggedIn.value = loggedIn
+  function syncAuthState() {
+    const session = getAuthSession()
+    isLoggedIn.value = session.authenticated
+    authStatus.value = session.status
+    return session
+  }
+
+  function updateLoginState(loggedIn: boolean, user?: MeInfo | null) {
+    setAuthSessionFromLogin(loggedIn, user ?? null)
+    syncAuthState()
+  }
+
+  async function verifyLoginState(options?: VerifyLoginOptions): Promise<boolean> {
+    await verifyLogin(options)
+    return syncAuthState().authenticated
+  }
+
+  async function requireLoginPermission(permission: PermissionKey, options?: VerifyLoginOptions): Promise<boolean> {
+    const result = await requirePermission(permission, options)
+    syncAuthState()
+    return result.granted
   }
 
   return {
@@ -804,6 +826,7 @@ const useAppStore = defineStore('app', () => {
     hideAdminEntryWhenLoggedOut,
     hidePriceWhenLoggedOut,
     providerAliases,
+    exportSecondaryPassword,
     disablePageAnimation,
     backgroundEnabled,
     backgroundType,
@@ -813,11 +836,15 @@ const useAppStore = defineStore('app', () => {
     backgroundBlur,
     backgroundOverlay,
     isLoggedIn,
+    authStatus,
+    privateFeaturesAllowed,
     publicSettings,
     connectionError,
     homeScrollPosition,
     updateThemeMode,
     updateLoginState,
+    verifyLoginState,
+    requireLoginPermission,
   }
 })
 

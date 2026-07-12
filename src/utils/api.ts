@@ -1,3 +1,5 @@
+import { NETWORK_CONFIG } from '@/constants/network'
+
 /**
  * Komari API 客户端 SDK
  * 基于 REST API 的 Komari 客户端
@@ -221,19 +223,33 @@ async function safeJson(response: Response): Promise<unknown> {
   }
 }
 
+function linkAbortSignal(controller: AbortController, signal?: AbortSignal): () => void {
+  if (!signal)
+    return () => {}
+
+  const abort = () => controller.abort()
+  if (signal.aborted) {
+    abort()
+    return () => {}
+  }
+
+  signal.addEventListener('abort', abort, { once: true })
+  return () => signal.removeEventListener('abort', abort)
+}
+
 export class KomariApi {
   private baseUrl: string
   private timeout: number
 
   constructor(options: ApiClientOptions = {}) {
     this.baseUrl = options.baseUrl || import.meta.env.VITE_API_BASE || '/api'
-    this.timeout = options.timeout || 30000
+    this.timeout = options.timeout || NETWORK_CONFIG.timeout.request
   }
 
   /**
    * 发送 GET 请求
    */
-  private async get<T>(path: string, params?: Record<string, string | number>): Promise<T> {
+  private async get<T>(path: string, params?: Record<string, string | number | null | undefined>, signal?: AbortSignal): Promise<T> {
     let url = `${this.baseUrl}${path}`
     if (params) {
       const searchParams = new URLSearchParams()
@@ -249,6 +265,7 @@ export class KomariApi {
     }
 
     const controller = new AbortController()
+    const unlinkAbortSignal = linkAbortSignal(controller, signal)
     const timeoutId = setTimeout(() => controller.abort(), this.timeout)
 
     try {
@@ -276,15 +293,19 @@ export class KomariApi {
         throw error
       throw new ApiError(`Network error: ${error instanceof Error ? error.message : String(error)}`, 'error')
     }
+    finally {
+      unlinkAbortSignal()
+    }
   }
 
   /**
    * 发送 GET 请求（直接返回响应，不解析 ApiResponse 结构）
    */
-  private async getRaw<T>(path: string): Promise<T> {
+  private async getRaw<T>(path: string, signal?: AbortSignal): Promise<T> {
     const url = `${this.baseUrl}${path}`
 
     const controller = new AbortController()
+    const unlinkAbortSignal = linkAbortSignal(controller, signal)
     const timeoutId = setTimeout(() => controller.abort(), this.timeout)
 
     try {
@@ -311,15 +332,19 @@ export class KomariApi {
         throw error
       throw new ApiError(`Network error: ${error instanceof Error ? error.message : String(error)}`, 'error')
     }
+    finally {
+      unlinkAbortSignal()
+    }
   }
 
   /**
    * 发送 POST 请求
    */
-  private async post<T>(path: string, body?: unknown): Promise<T> {
+  private async post<T>(path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
     const url = `${this.baseUrl}${path}`
 
     const controller = new AbortController()
+    const unlinkAbortSignal = linkAbortSignal(controller, signal)
     const timeoutId = setTimeout(() => controller.abort(), this.timeout)
 
     try {
@@ -358,6 +383,9 @@ export class KomariApi {
       if (error instanceof ApiError)
         throw error
       throw new ApiError(`Network error: ${error instanceof Error ? error.message : String(error)}`, 'error')
+    }
+    finally {
+      unlinkAbortSignal()
     }
   }
 
@@ -411,8 +439,8 @@ export class KomariApi {
    * @param uuid 节点 UUID
    * @param hours 查询时间范围（小时）
    */
-  async getLoadRecords(uuid: string, hours: number): Promise<LoadRecordsResponse> {
-    return this.get<LoadRecordsResponse>('/records/load', { uuid, hours })
+  async getLoadRecords(uuid: string, hours: number, maxCount?: number, signal?: AbortSignal): Promise<LoadRecordsResponse> {
+    return this.get<LoadRecordsResponse>('/records/load', { uuid, hours, max_count: maxCount }, signal)
   }
 
   /**
@@ -420,8 +448,8 @@ export class KomariApi {
    * @param uuid 节点 UUID
    * @param hours 查询时间范围（小时）
    */
-  async getPingRecords(uuid: string, hours: number): Promise<PingRecordsResponse> {
-    return this.get<PingRecordsResponse>('/records/ping', { uuid, hours })
+  async getPingRecords(uuid: string, hours: number, signal?: AbortSignal): Promise<PingRecordsResponse> {
+    return this.get<PingRecordsResponse>('/records/ping', { uuid, hours }, signal)
   }
 }
 

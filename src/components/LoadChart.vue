@@ -151,13 +151,14 @@ const { diskPrediction } = useNodeLoadStats(
   () => props.uuid,
   {
     hours: () => detailLoadStatsHours.value,
-    enabled: () => appStore.diskPredictionEnabled,
+    enabled: () => appStore.diskPredictionEnabled && appStore.privateFeaturesAllowed,
     diskTotal: () => nodeInfo.value?.disk_total ?? 0,
+    permission: 'diskPrediction',
   },
 )
 const diskPredictionSummary = computed(() => {
   const prediction = diskPrediction.value
-  if (!appStore.diskPredictionEnabled || !prediction)
+  if (!appStore.diskPredictionEnabled || !appStore.privateFeaturesAllowed || !prediction)
     return ''
 
   const days = Math.max(0, Math.ceil(prediction.daysUntilFull))

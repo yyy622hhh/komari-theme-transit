@@ -59,7 +59,9 @@ const activeMode = ref<'asn' | 'tags' | 'rootcause'>('asn')
 const { metadataByUuid } = useNodeProviderMetadata({
   nodes: () => props.nodes,
   customAliases: () => appStore.providerAliases,
-  enabled: true,
+  enabled: () => appStore.privateFeaturesAllowed,
+  allowGeoLookup: () => appStore.privateFeaturesAllowed,
+  geoPermission: 'nodeTopology',
 })
 
 function normalizeRef(value: string): string {

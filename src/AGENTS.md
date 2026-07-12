@@ -9,7 +9,22 @@ This document applies to `/src` only. Keep changes aligned with the current Vue 
 - `src/router/index.ts` defines exactly two lazy routes:
   - `/` → `@/views/HomeView.vue`
   - `/instance/:id` → `@/views/InstanceDetail.vue`
-- The router has **no guards** today. Do not add one unless there is a real need.
+- The router has **no guards** today. Public home/detail routes must remain public; v3 privacy work gates sensitive actions/data paths instead of adding broad router guards.
+
+## v3 layering rules
+
+All new v3 app code should follow this ownership chain:
+
+```text
+Component -> Composable -> Service -> RequestManager / CacheService -> API / RPC
+```
+
+- Components render UI and call composables/services; do not put business logic, request orchestration, cache policy, or raw `theme_settings` parsing in components.
+- Composables own Vue state and lifecycle only: `ref`, `computed`, `watch`, subscriptions, `onScopeDispose`, and glue between stores/services.
+- Services in `@/services` own business and infrastructure logic: auth, provider metadata, history loading, prediction, snapshot export, request orchestration, cache lifecycle.
+- Shared limits, timings, cache policy, request policy, security settings, and UI constants belong in `@/constants`, preferably grouped config objects such as `CACHE_CONFIG` rather than scattered magic numbers.
+- `@/utils` should stay pure/helper-focused (formatting, CSV escaping, small transforms). Do not add new business workflows to generic utils.
+- Use docs as the architecture source of truth: `docs/Architecture.md`, `docs/DataFlow.md`, `docs/Auth.md`, `docs/Cache.md`, `docs/Migration-v3.md`, and `docs/Milestones-v3.md`.
 
 ## Authoring conventions
 
@@ -42,22 +57,34 @@ When you need a new piece of UI:
 ## Stores
 
 - Pinia stores are setup stores and are the source of truth for app state.
-- `@/stores/app` owns public settings, theme-derived config, login state, layout flags, formatting preferences, theme mode, and persisted UI state.
+- `@/stores/app` owns public settings, normalized theme-derived config, login/auth status, layout flags, formatting preferences, theme mode, and persisted UI state.
 - `@/stores/nodes` owns normalized node data, group derivation, WebSocket state, and node updates.
 - Components and views should read from stores, not recreate parallel state for the same domain.
-- When behavior depends on `publicSettings.theme_settings`, follow the existing defensive pattern in `@/stores/app`: `typeof` checks, guarded `JSON.parse`, valid-value filtering, and defaults. The settings schema lives in `komari-theme.json` (`configuration.data`).
+- When behavior depends on `publicSettings.theme_settings`, follow the existing defensive pattern in `@/stores/app`: `typeof` checks, guarded `JSON.parse`, valid-value filtering, and defaults. The settings schema lives in `komari-theme.json` (`configuration.data`), and components consume normalized store values rather than parsing raw settings.
+- Public home/detail rendering remains available when auth is missing or expired. Private surfaces should be hidden or blocked via `appStore.privateFeaturesAllowed` plus verified permission checks.
 - Node status updates must remain reactive. If `@/stores/nodes` keeps an index/cache for fast UUID lookup, it must store the reactive object from `nodes.value`, not a raw object created before insertion; otherwise polling/WebSocket updates will not refresh card/general-card metrics such as realtime upload/download until a page reload.
 - `nodeCardSize` defaults to `compact` in `@/stores/app` and `komari-theme.json`. Keep `mini` as an additional optional high-density mode; do not alter existing `compact` semantics when adding or changing card sizes.
 
-## Utils
+## Private features and export security
 
-- `src/utils` owns transport, formatting, lookups, and startup orchestration.
-- Keep API and RPC access in `@/utils/api` and `@/utils/rpc`.
-- Keep startup, transport selection, polling, reconnects, and WebSocket fallback in `@/utils/init`.
+- Sensitive operations must call `appStore.requireLoginPermission()` or `requirePermission({ force: true })` before work starts. Protected surfaces include home tools (`topology`, `providerValue`, `healthSummary`, `snapshotExport`), disk-prediction history loading, provider geo lookup, and snapshot export.
+- `exportSecondaryPassword` is an optional managed theme setting for snapshot export. If it is set, export UI must require it in addition to verified login.
+- Session expiry should downgrade to public behavior without breaking the public dashboard. Do not assume a stale `isLoggedIn` boolean is enough for private actions.
+- Hiding client UI is defense-in-depth only; backend permissions remain authoritative.
+
+## Services, constants, and utils
+
+- Keep API and RPC low-level clients in `@/utils/api` and `@/utils/rpc`; app code should normally reach them through services unless it is startup/transport glue.
+- Keep startup, transport selection, polling, reconnects, and WebSocket fallback in `@/utils/init` unless a dedicated service boundary already exists.
+- Use `@/services/auth.service` for verified auth/session state and `appStore.requireLoginPermission()` for private feature gates.
+- Use `@/services/cache.service` and `@/constants/cache` for shared cache lifecycle: TTL, LRU-style eviction, reference counting, cleanup, and promise deduplication. Do not add ad-hoc component caches for provider metadata, history records, or request deduplication.
+- Use `@/services/provider.service` for provider/geo metadata business rules. Public metadata-only resolution must not reuse private geo-enriched data; keep `allowGeoLookup` in provider cache keys and tie private geo lookup to `appStore.privateFeaturesAllowed`.
+- Use `@/services/history.service` and `@/services/prediction.service` for load/ping history and disk prediction. History cache keys must include both time range and `maxCount`; capped disk-prediction samples must not be reused as uncapped chart data.
+- Use `@/services/snapshot.service` plus `@/utils/csv` for exports. CSV export must keep formula-injection neutralization for cells beginning with `=`, `+`, `-`, or `@`.
 - Keep formatting in helpers such as `@/utils/helper` and record shaping in `@/utils/recordHelper`.
 - Keep region, OS, and tag lookup logic in their dedicated helper modules (`regionHelper`, `osImageHelper`, `tagHelper`).
 - `@/utils/message` is the wrapper exposed as `window.$message`. It calls into `vue-sonner`'s `toast`.
-- Views and components must reuse these helpers instead of duplicating parsing, formatting, lookup, or transport code.
+- Views and components must reuse services/helpers instead of duplicating parsing, formatting, lookup, transport, cache, or permission logic.
 
 ## App globals
 

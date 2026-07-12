@@ -4,7 +4,9 @@ import { Icon } from '@iconify/vue'
 import { computed, onMounted, ref } from 'vue'
 import { Button } from '@/components/ui/button'
 import { CardX } from '@/components/ui/card-x'
+import { Input } from '@/components/ui/input'
 import { useNodeProviderMetadata } from '@/composables/useNodeProviderMetadata'
+import { buildSnapshotCsv, downloadText } from '@/services/snapshot.service'
 import { useAppStore } from '@/stores/app'
 import * as financeHelper from '@/utils/financeHelper'
 import { formatBytesPerSecondWithConfig, formatBytesWithConfig, formatDateTime, formatUptimeWithFormat } from '@/utils/helper'
@@ -55,18 +57,16 @@ const props = defineProps<{
   nodes: NodeData[]
 }>()
 
-const CSV_ESCAPE_NEEDED_REGEX = /[",\n\r]/
-const CSV_QUOTE_REGEX = /"/g
-const CSV_LINE_BREAK_REGEX = /\r?\n/g
-const UTF8_BOM = String.fromCharCode(0xFEFF)
-
 const appStore = useAppStore()
 const exchangeRates = ref(financeHelper.DEFAULT_EXCHANGE_RATES)
+const exportPasswordInput = ref('')
 
 const { getNodeProviderMetadata } = useNodeProviderMetadata({
   nodes: () => props.nodes,
   customAliases: () => appStore.providerAliases,
-  enabled: true,
+  enabled: () => appStore.privateFeaturesAllowed,
+  allowGeoLookup: () => appStore.privateFeaturesAllowed,
+  geoPermission: 'snapshotExport',
 })
 
 onMounted(async () => {
@@ -149,10 +149,6 @@ function formatValueCost(value: number | null): string {
     return '-'
   const amount = financeHelper.formatFinanceAmount(value, 'CNY')
   return `${amount.symbol}${amount.value} CNY`
-}
-
-function cleanCsvText(value: unknown): string {
-  return String(value ?? '').replace(CSV_LINE_BREAK_REGEX, ' / ')
 }
 
 function buildRows(): SnapshotRow[] {
@@ -305,33 +301,28 @@ function buildJsonNode(row: SnapshotRow) {
   }
 }
 
-function escapeCsvCell(value: unknown): string {
-  const text = cleanCsvText(value)
-  if (CSV_ESCAPE_NEEDED_REGEX.test(text))
-    return `"${text.replace(CSV_QUOTE_REGEX, '""')}"`
-  return text
+async function verifySnapshotExportPermission(): Promise<boolean> {
+  const granted = await appStore.requireLoginPermission('snapshotExport', { force: true })
+  if (!granted) {
+    window.$message?.warning('登录状态已过期，请重新登录后导出快照。')
+    return false
+  }
+
+  if (!appStore.exportSecondaryPassword)
+    return true
+
+  if (exportPasswordInput.value !== appStore.exportSecondaryPassword) {
+    window.$message?.warning('导出二级密码错误。')
+    return false
+  }
+
+  return true
 }
 
-function toCsv(rowsToExport: SnapshotRow[]): string {
-  return [
-    csvColumns.map(column => escapeCsvCell(column.label)).join(','),
-    ...rowsToExport.map(row => csvColumns.map(column => escapeCsvCell(column.value(row))).join(',')),
-  ].join('\r\n')
-}
+async function exportJson(): Promise<void> {
+  if (!await verifySnapshotExportPermission())
+    return
 
-function downloadText(filename: string, content: string, type: string, options?: { bom?: boolean }): void {
-  const blob = new Blob([options?.bom ? UTF8_BOM : '', content], { type })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = filename
-  document.body.appendChild(link)
-  link.click()
-  link.remove()
-  URL.revokeObjectURL(url)
-}
-
-function exportJson(): void {
   const exportedAt = new Date()
   downloadText(
     `komari-snapshot-${Date.now()}.json`,
@@ -353,10 +344,13 @@ function exportJson(): void {
   )
 }
 
-function exportCsv(): void {
+async function exportCsv(): Promise<void> {
+  if (!await verifySnapshotExportPermission())
+    return
+
   downloadText(
     `komari-snapshot-${Date.now()}.csv`,
-    toCsv(rows.value),
+    buildSnapshotCsv(csvColumns, rows.value),
     'text/csv;charset=utf-8',
     { bom: true },
   )
@@ -424,8 +418,16 @@ function exportCsv(): void {
         </div>
       </template>
       <div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-        <div class="text-sm text-muted-foreground">
-          JSON 按节点分组并保留人类可读单位；CSV 使用中文表头、性价比指标和 UTF-8 BOM，直接用 Excel 打开不应乱码。
+        <div class="space-y-2 text-sm text-muted-foreground">
+          <div>JSON 按节点分组并保留人类可读单位；CSV 使用中文表头、性价比指标和 UTF-8 BOM，直接用 Excel 打开不应乱码。</div>
+          <Input
+            v-if="appStore.exportSecondaryPassword"
+            v-model="exportPasswordInput"
+            type="password"
+            autocomplete="off"
+            placeholder="导出二级密码"
+            class="max-w-xs border-none bg-background/60"
+          />
         </div>
         <div class="flex gap-2">
           <Button variant="outline" class="bg-background/60" @click="exportJson">

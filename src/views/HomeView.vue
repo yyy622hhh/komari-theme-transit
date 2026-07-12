@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { PermissionKey } from '@/services/auth.service'
 import type { HomeQuickControlKey } from '@/stores/app'
 import type { NodeData } from '@/stores/nodes'
 import { Icon } from '@iconify/vue'
@@ -11,6 +12,7 @@ import { Button } from '@/components/ui/button'
 import { Empty } from '@/components/ui/empty'
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { UI_CONFIG } from '@/constants/ui'
 import { useAppStore } from '@/stores/app'
 import { useNodesStore } from '@/stores/nodes'
 import * as financeHelper from '@/utils/financeHelper'
@@ -48,8 +50,8 @@ const NodeTopologyPanel = defineAsyncComponent(() => import('@/components/NodeTo
 const ProviderValuePanel = defineAsyncComponent(() => import('@/components/ProviderValuePanel.vue'))
 const SnapshotExportPanel = defineAsyncComponent(() => import('@/components/SnapshotExportPanel.vue'))
 
-const nodeItemStaggerMs = 35
-const nodeItemStaggerLimit = 12
+const nodeItemStaggerMs = UI_CONFIG.motion.staggerMs
+const nodeItemStaggerLimit = UI_CONFIG.motion.staggerLimit
 
 const appStore = useAppStore()
 const nodesStore = useNodesStore()
@@ -73,6 +75,13 @@ const activeQuickControl = ref<HomeQuickControlKey>(appStore.homeQuickDefaultCon
 const exchangeRates = ref(financeHelper.DEFAULT_EXCHANGE_RATES)
 const excludeFreeNodes = ref(true)
 
+const homeToolPermissionMap: Record<Exclude<HomeToolKey, 'nodes'>, PermissionKey> = {
+  topology: 'nodeTopology',
+  providerValue: 'providerValue',
+  healthSummary: 'healthSummary',
+  snapshotExport: 'snapshotExport',
+}
+
 const quickControlDefinitions: Record<HomeQuickControlKey, QuickControlOption> = {
   default: { key: 'default', label: '默认', icon: 'tabler:sort-ascending' },
   monthlyCost: { key: 'monthlyCost', label: '月成本', icon: 'tabler:calendar-dollar' },
@@ -86,7 +95,7 @@ const quickControlDefinitions: Record<HomeQuickControlKey, QuickControlOption> =
 }
 
 const homeTools = computed<HomeToolOption[]>(() => {
-  if (!appStore.isLoggedIn || !appStore.homeToolsEnabled)
+  if (!appStore.privateFeaturesAllowed || !appStore.homeToolsEnabled)
     return []
 
   return [
@@ -285,10 +294,22 @@ function setQuickControl(key: HomeQuickControlKey) {
   activeQuickControl.value = key
 }
 
-function toggleHomeTool(key: Exclude<HomeToolKey, 'nodes'>) {
+async function toggleHomeTool(key: Exclude<HomeToolKey, 'nodes'>) {
   if (!homeTools.value.some(tool => tool.key === key))
     return
-  activeHomeTool.value = activeHomeTool.value === key ? 'nodes' : key
+  if (activeHomeTool.value === key) {
+    activeHomeTool.value = 'nodes'
+    return
+  }
+
+  const granted = await appStore.requireLoginPermission(homeToolPermissionMap[key], { force: true })
+  if (!granted) {
+    activeHomeTool.value = 'nodes'
+    window.$message?.warning('登录状态已过期，请重新登录后使用高级工具。')
+    return
+  }
+
+  activeHomeTool.value = key
 }
 
 watch(homeTools, (tools) => {

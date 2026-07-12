@@ -1,8 +1,5 @@
 <script setup lang="ts">
-import type { NodeData } from '@/stores/nodes'
 import type { CurrencyCode } from '@/utils/financeHelper'
-import type { IpGeo } from '@/utils/ipGeoHelper'
-import type { ProviderResolveResult } from '@/utils/providerInfo'
 import { Icon } from '@iconify/vue'
 import { computed, defineAsyncComponent, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -12,17 +9,16 @@ import { CardX } from '@/components/ui/card-x'
 import { DataTooltip } from '@/components/ui/data-tooltip'
 import { Empty } from '@/components/ui/empty'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { useNodeProviderMetadata } from '@/composables/useNodeProviderMetadata'
+import { LOAD_RECORD_MAX_COUNT } from '@/constants/load'
+import { loadNodeLoadRecords } from '@/services/history.service'
 import { useAppStore } from '@/stores/app'
 import { useNodesStore } from '@/stores/nodes'
-import { getSharedApi } from '@/utils/api'
 import { formatCityNameZh } from '@/utils/cityNameHelper'
 import * as financeHelper from '@/utils/financeHelper'
 import { formatBytesPerSecondWithConfig, formatBytesWithConfig, formatUptimeWithFormat } from '@/utils/helper'
-import { lookupIpGeo } from '@/utils/ipGeoHelper'
 import { getOSImage, getOSName } from '@/utils/osImageHelper'
-import { resolveProviderInfo } from '@/utils/providerInfo'
 import { getRegionCode, getRegionDisplayName } from '@/utils/regionHelper'
-import { getSharedRpc } from '@/utils/rpc'
 
 import { formatPrice, formatPriceWithCycle, getExpireStatus, getExpireText, parseTags } from '@/utils/tagHelper'
 
@@ -37,10 +33,6 @@ const nodesStore = useNodesStore()
 const exchangeRates = ref(financeHelper.DEFAULT_EXCHANGE_RATES)
 const financeCurrency = ref<CurrencyCode>('CNY')
 
-// VPS 厂商识别
-const vpsProvider = ref<ProviderResolveResult | null>(null)
-// IP 解析结果（城市 / ASN 组织 / AS 号）
-const nodeGeo = ref<IpGeo | null>(null)
 // 近一天网速峰值（B/s）
 const peakNetOut = ref(0)
 const peakNetIn = ref(0)
@@ -117,56 +109,22 @@ function estimateCpuScore(cpuName: string): CpuScore {
   return { score: 35, tier: 'C', tierColor: 'text-orange-500', label: '通用' }
 }
 
-let providerResolveSeq = 0
 let trafficPeakSeq = 0
 
-async function lookupNodeGeo(node: NodeData): Promise<IpGeo | null> {
-  const ips = [node.ipv4, node.ipv6].filter((ip): ip is string => Boolean(ip?.trim()))
-  for (const ip of ips) {
-    const geo = await lookupIpGeo(ip)
-    if (geo)
-      return geo
-  }
-  return null
-}
-
-// 优先使用用户元数据识别实际商家，再回退到 ASN / org 网络信息。
-async function resolveProvider(node: NodeData): Promise<void> {
-  const seq = ++providerResolveSeq
-  const uuid = node.uuid
-  nodeGeo.value = null
-  vpsProvider.value = null
-
-  const metadata = [node.name, node.public_remark, node.remark, node.tags, node.group, node.region]
-    .filter(Boolean)
-    .join(' ')
-  const geo = await lookupNodeGeo(node)
-
-  if (seq !== providerResolveSeq || data.value?.uuid !== uuid)
-    return
-
-  nodeGeo.value = geo
-  vpsProvider.value = resolveProviderInfo({
-    metadata,
-    org: geo?.org,
-    asn: geo?.asn,
-    customAliases: appStore.providerAliases,
-  })
-}
+const { getNodeProviderMetadata } = useNodeProviderMetadata({
+  nodes: () => data.value ? [data.value] : [],
+  customAliases: () => appStore.providerAliases,
+  enabled: () => Boolean(data.value),
+  allowGeoLookup: () => appStore.privateFeaturesAllowed,
+  geoPermission: 'providerGeoLookup',
+})
 
 async function loadTrafficPeakRecords(uuid: string): Promise<Array<{ net_in?: number, net_out?: number }>> {
-  try {
-    const { records } = await getSharedRpc().getLoadRecords(uuid, 24)
-    if (records.length > 0)
-      return records
-  }
-  catch {
-    // RPC 历史记录在部分 Komari 版本或传输模式下可能不可用，继续回退 REST。
-  }
+  if (!appStore.privateFeaturesAllowed)
+    return []
 
   try {
-    const { records } = await getSharedApi().getLoadRecords(uuid, 24)
-    return records
+    return await loadNodeLoadRecords(uuid, 24, LOAD_RECORD_MAX_COUNT)
   }
   catch {
     return []
@@ -207,24 +165,24 @@ onMounted(async () => {
 // 如果 data.value 有 ip 字段则直接用，否则跳过
 watch(data, (node) => {
   activeDetailSection.value = 'overview'
-  if (node) {
-    void resolveProvider(node)
+  if (node)
     void fetchTrafficPeak(node.uuid)
-  }
 }, { immediate: true })
 
 const cpuScore = computed(() => estimateCpuScore(data.value?.cpu_name ?? ''))
 
 // 机房/厂商展示：城市 · 厂商 · ASN（缺项自动省略）
+const providerMetadata = computed(() => data.value ? getNodeProviderMetadata(data.value) : null)
+const vpsProvider = computed(() => providerMetadata.value?.provider ?? null)
 const providerDisplay = computed(() => {
   const parts: string[] = []
-  const cityName = formatCityNameZh(nodeGeo.value?.city)
+  const cityName = formatCityNameZh(providerMetadata.value?.geo?.city)
   if (cityName)
     parts.push(cityName)
-  if (vpsProvider.value?.displayName)
-    parts.push(vpsProvider.value.displayName)
-  if (nodeGeo.value?.asn)
-    parts.push(nodeGeo.value.asn)
+  if (providerMetadata.value?.provider?.displayName)
+    parts.push(providerMetadata.value.provider.displayName)
+  if (providerMetadata.value?.geo?.asn)
+    parts.push(providerMetadata.value.geo.asn)
   return parts.length ? parts.join(' · ') : '-'
 })
 
@@ -245,7 +203,7 @@ const ipSupport = computed(() => {
 const hasPeak = computed(() => peakNetOut.value > 0 || peakNetIn.value > 0)
 
 // 未登录且开启「未登录隐藏价格」时，屏蔽金额类指标（剩余时间为天数，仍显示）
-const showPrice = computed(() => appStore.isLoggedIn || !appStore.hidePriceWhenLoggedOut)
+const showPrice = computed(() => appStore.privateFeaturesAllowed || !appStore.hidePriceWhenLoggedOut)
 
 const formatBytes = (bytes: number) => formatBytesWithConfig(bytes, appStore.byteDecimals)
 const formatBytesPerSecond = (bytes: number) => formatBytesPerSecondWithConfig(bytes, appStore.byteDecimals)
@@ -370,7 +328,7 @@ const hardwareSmallItems = computed<InfoItem[]>(() => {
   const items: InfoItem[] = []
 
   const ip = node?.ipv4 || node?.ipv6
-  if (appStore.isLoggedIn && ip)
+  if (appStore.privateFeaturesAllowed && ip)
     items.push({ label: 'IP', value: ip, icon: 'tabler:world' })
   else
     items.push({ label: '架构', value: node?.arch ?? '-', icon: 'icon-park-outline:application-two' })

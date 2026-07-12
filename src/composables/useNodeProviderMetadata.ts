@@ -1,21 +1,21 @@
 import type { MaybeRefOrGetter } from 'vue'
+import type { PermissionKey } from '@/services/auth.service'
+import type { NodeProviderMetadata } from '@/services/provider.service'
 import type { NodeData } from '@/stores/nodes'
-import type { IpGeo } from '@/utils/ipGeoHelper'
-import type { ProviderResolveResult } from '@/utils/providerInfo'
 import { ref, toValue, watch } from 'vue'
-import { lookupIpGeo } from '@/utils/ipGeoHelper'
-import { resolveProviderInfo } from '@/utils/providerInfo'
+import { CACHE_CONFIG } from '@/constants/cache'
+import { SharedCache } from '@/services/cache.service'
+import { buildNodeProviderMetadata, getNodeIps, getNodeProviderFingerprint, lookupNodeGeo } from '@/services/provider.service'
+import { useAppStore } from '@/stores/app'
 
-export interface NodeProviderMetadata {
-  provider: ProviderResolveResult | null
-  geo: IpGeo | null
-  loading: boolean
-}
+export type { NodeProviderMetadata } from '@/services/provider.service'
 
 interface UseNodeProviderMetadataOptions {
   nodes: MaybeRefOrGetter<NodeData[]>
   customAliases: MaybeRefOrGetter<string>
   enabled?: MaybeRefOrGetter<boolean>
+  allowGeoLookup?: MaybeRefOrGetter<boolean>
+  geoPermission?: PermissionKey
 }
 
 interface SharedCacheEntry {
@@ -24,67 +24,30 @@ interface SharedCacheEntry {
   promise: Promise<void> | null
 }
 
-const sharedMetadataCache = new Map<string, SharedCacheEntry>()
-
-function getNodeIps(node: NodeData): string[] {
-  return [node.ipv4, node.ipv6].filter((ip): ip is string => Boolean(ip?.trim()))
-}
-
-function getProviderMetadataText(node: NodeData): string {
-  return [node.name, node.public_remark, node.remark, node.tags, node.group, node.region]
-    .filter(Boolean)
-    .join(' ')
-}
-
-function getFingerprint(node: NodeData, customAliases: string): string {
-  return [
-    node.uuid,
-    node.name,
-    node.public_remark,
-    node.remark,
-    node.tags,
-    node.group,
-    node.region,
-    node.ipv4,
-    node.ipv6,
-    customAliases,
-  ].join('')
-}
-
-async function lookupNodeGeo(node: NodeData): Promise<IpGeo | null> {
-  for (const ip of getNodeIps(node)) {
-    const geo = await lookupIpGeo(ip)
-    if (geo)
-      return geo
-  }
-  return null
-}
-
-function buildNodeProviderMetadata(node: NodeData, customAliases: string, geo: IpGeo | null, loading: boolean): NodeProviderMetadata {
-  return {
-    geo,
-    loading,
-    provider: resolveProviderInfo({
-      metadata: getProviderMetadataText(node),
-      org: geo?.org,
-      asn: geo?.asn,
-      customAliases,
-    }),
-  }
-}
+const sharedMetadataCache = new SharedCache<SharedCacheEntry>({
+  maxSize: CACHE_CONFIG.providerMetadata.maxSize,
+  ttl: CACHE_CONFIG.providerMetadata.ttl,
+  cleanupInterval: CACHE_CONFIG.cleanup.interval,
+  canEvict: entry => entry.subscribers.size === 0 && entry.promise === null,
+})
 
 function notifySharedEntry(entry: SharedCacheEntry): void {
   for (const subscriber of entry.subscribers)
     subscriber(entry.metadata)
 }
 
-function getSharedMetadataEntry(node: NodeData, customAliases: string): { fingerprint: string, entry: SharedCacheEntry } {
-  const fingerprint = getFingerprint(node, customAliases)
+function releaseSharedMetadataEntry(entry: SharedCacheEntry, subscriber: (metadata: NodeProviderMetadata) => void): void {
+  entry.subscribers.delete(subscriber)
+  sharedMetadataCache.sweep()
+}
+
+function getSharedMetadataEntry(node: NodeData, customAliases: string, allowGeoLookup: boolean): { fingerprint: string, entry: SharedCacheEntry } {
+  const fingerprint = getNodeProviderFingerprint(node, customAliases, allowGeoLookup)
   const cached = sharedMetadataCache.get(fingerprint)
   if (cached)
     return { fingerprint, entry: cached }
 
-  const hasIps = getNodeIps(node).length > 0
+  const hasIps = allowGeoLookup && getNodeIps(node).length > 0
   const entry: SharedCacheEntry = {
     metadata: buildNodeProviderMetadata(node, customAliases, null, hasIps),
     subscribers: new Set(),
@@ -104,6 +67,7 @@ function getSharedMetadataEntry(node: NodeData, customAliases: string): { finger
       })
       .finally(() => {
         entry.promise = null
+        sharedMetadataCache.sweep()
       })
   }
 
@@ -111,9 +75,11 @@ function getSharedMetadataEntry(node: NodeData, customAliases: string): { finger
 }
 
 export function useNodeProviderMetadata(options: UseNodeProviderMetadataOptions) {
+  const appStore = useAppStore()
   const metadataByUuid = ref<Record<string, NodeProviderMetadata>>({})
   const activeFingerprints = new Map<string, string>()
   let refreshSeq = 0
+  let geoPermissionVerified = false
 
   function getNodeProviderMetadata(node: NodeData): NodeProviderMetadata | null {
     return metadataByUuid.value[node.uuid] ?? null
@@ -124,20 +90,25 @@ export function useNodeProviderMetadata(options: UseNodeProviderMetadataOptions)
       const nodes = toValue(options.nodes)
       const customAliases = toValue(options.customAliases)
       const enabled = options.enabled === undefined ? true : toValue(options.enabled)
+      const allowGeoLookup = options.allowGeoLookup === undefined ? true : toValue(options.allowGeoLookup)
       return {
+        allowGeoLookup,
+        authStatus: appStore.authStatus,
         customAliases,
         enabled,
-        fingerprint: nodes.map(node => getFingerprint(node, customAliases)).join(''),
+        fingerprint: nodes.map(node => getNodeProviderFingerprint(node, customAliases, allowGeoLookup)).join(''),
       }
     },
-    ({ customAliases, enabled }, _previous, onCleanup) => {
+    async ({ allowGeoLookup, authStatus, customAliases, enabled }, _previous, onCleanup) => {
       const seq = ++refreshSeq
       const nodes = toValue(options.nodes)
       const nextMetadata: Record<string, NodeProviderMetadata> = {}
       const unsubscribers: Array<() => void> = []
+      let cancelled = false
       activeFingerprints.clear()
 
       onCleanup(() => {
+        cancelled = true
         for (const unsubscribe of unsubscribers)
           unsubscribe()
       })
@@ -147,8 +118,22 @@ export function useNodeProviderMetadata(options: UseNodeProviderMetadataOptions)
         return
       }
 
+      let effectiveAllowGeoLookup = allowGeoLookup
+      if (allowGeoLookup && options.geoPermission) {
+        if (authStatus !== 'authenticated')
+          geoPermissionVerified = false
+
+        if (!geoPermissionVerified) {
+          const granted = await appStore.requireLoginPermission(options.geoPermission, { force: false })
+          if (cancelled || seq !== refreshSeq)
+            return
+          geoPermissionVerified = granted
+          effectiveAllowGeoLookup = granted
+        }
+      }
+
       for (const node of nodes) {
-        const { fingerprint, entry } = getSharedMetadataEntry(node, customAliases)
+        const { fingerprint, entry } = getSharedMetadataEntry(node, customAliases, effectiveAllowGeoLookup)
         activeFingerprints.set(node.uuid, fingerprint)
         nextMetadata[node.uuid] = entry.metadata
 
@@ -162,7 +147,7 @@ export function useNodeProviderMetadata(options: UseNodeProviderMetadataOptions)
           }
         }
         entry.subscribers.add(subscriber)
-        unsubscribers.push(() => entry.subscribers.delete(subscriber))
+        unsubscribers.push(() => releaseSharedMetadataEntry(entry, subscriber))
       }
 
       metadataByUuid.value = nextMetadata

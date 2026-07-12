@@ -38,7 +38,7 @@ const actionButtons = computed(() => {
     },
   ]
 
-  if (!appStore.loading && (appStore.isLoggedIn || !appStore.hideAdminEntryWhenLoggedOut)) {
+  if (!appStore.loading && (appStore.privateFeaturesAllowed || !appStore.hideAdminEntryWhenLoggedOut)) {
     buttons.push({
       title: '后台管理',
       icon: 'icon-park-outline:setting',

@@ -43,6 +43,7 @@
       { "key": "hideAdminEntryWhenLoggedOut", "name": "隐藏后台入口", "type": "switch", "default": false, "help": "未登录时隐藏顶部后台管理入口" },
       { "key": "hidePriceWhenLoggedOut", "name": "未登录隐藏价格", "type": "switch", "default": false, "help": "未登录时隐藏节点卡片/列表中的价格、剩余价值和费用类卡片；在线天数仍会显示" },
       { "key": "providerAliases", "name": "厂商自定义别名", "type": "string", "default": "", "help": "每组用分号分隔，格式：厂商名:别名1,别名2。例如 RackNerd:rn,rack nerd;GreenCloudVPS:绿云,gc" },
+      { "key": "exportSecondaryPassword", "name": "导出二级密码", "type": "string", "default": "", "help": "可选。设置后，快照导出在已登录基础上还需要输入该二级密码；留空则只校验登录。" },
       { "key": "disablePageAnimation", "name": "减弱过渡动画", "type": "switch", "default": false, "help": "减少页面过渡动画效果，提升访问速度和响应性" },
 
       { "name": "节点与快捷控制", "type": "title" },

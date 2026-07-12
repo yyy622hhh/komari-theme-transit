@@ -98,6 +98,28 @@ function escapeHtml(text: string): string {
     .replace(GT_REGEX, '&gt;')
 }
 
+function sanitizeMarkdownUrl(url: string | undefined, type: 'link' | 'image'): string | undefined {
+  if (!url)
+    return undefined
+
+  const normalized = url.trim()
+  if (!normalized)
+    return undefined
+
+  if (normalized.startsWith('/') || normalized.startsWith('./') || normalized.startsWith('../') || normalized.startsWith('#'))
+    return normalized
+
+  try {
+    const parsed = new URL(normalized, window.location.origin)
+    if (type === 'image')
+      return ['http:', 'https:', 'data:'].includes(parsed.protocol) ? normalized : undefined
+    return ['http:', 'https:', 'mailto:', 'tel:'].includes(parsed.protocol) ? normalized : undefined
+  }
+  catch {
+    return undefined
+  }
+}
+
 const tokens = computed(() => parseMarkdown(props.content))
 </script>
 
@@ -106,7 +128,7 @@ const tokens = computed(() => parseMarkdown(props.content))
     <template v-for="(token, index) in tokens" :key="index">
       <img
         v-if="token.type === 'image'"
-        :src="token.url"
+        :src="sanitizeMarkdownUrl(token.url, 'image')"
         :alt="token.alt"
         loading="lazy"
         class="align-middle h-auto max-w-full inline-block rounded"
@@ -114,7 +136,7 @@ const tokens = computed(() => parseMarkdown(props.content))
       >
       <a
         v-else-if="token.type === 'link'"
-        :href="token.url"
+        :href="sanitizeMarkdownUrl(token.url, 'link')"
         target="_blank"
         rel="noopener noreferrer"
         class="text-primary underline-offset-4 hover:underline"

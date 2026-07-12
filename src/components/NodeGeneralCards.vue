@@ -8,6 +8,7 @@ import { computed, onMounted, ref } from 'vue'
 import NodeEarthGlobe from '@/components/NodeEarthGlobe.vue'
 import { CardX } from '@/components/ui/card-x'
 import { DataTooltip } from '@/components/ui/data-tooltip'
+import { UI_CONFIG } from '@/constants/ui'
 import { useAppStore } from '@/stores/app'
 import { useNodesStore } from '@/stores/nodes'
 import * as financeHelper from '@/utils/financeHelper'
@@ -60,7 +61,7 @@ const props = defineProps<{
 const appStore = useAppStore()
 const nodesStore = useNodesStore()
 // 未登录且开启「未登录隐藏价格」时，屏蔽金额类信息
-const showPrice = computed(() => appStore.isLoggedIn || !appStore.hidePriceWhenLoggedOut)
+const showPrice = computed(() => appStore.privateFeaturesAllowed || !appStore.hidePriceWhenLoggedOut)
 const exchangeRates = ref(financeHelper.DEFAULT_EXCHANGE_RATES)
 const exchangeRateSource = ref<ExchangeRateSource | 'loading'>('loading')
 const financeCurrency = ref<CurrencyCode>('CNY')
@@ -75,7 +76,7 @@ const metricSwitchTransitionProps = computed(() => ({
 
 function getMetricSwitchStyle(index: number): Record<string, string> {
   return {
-    '--metric-switch-delay': `${index * 35}ms`,
+    '--metric-switch-delay': `${index * UI_CONFIG.motion.staggerMs}ms`,
   }
 }
 

@@ -1,17 +1,18 @@
 <script setup lang="ts">
 import type { NodeData } from '@/stores/nodes'
-import type { StatusRecord } from '@/utils/rpc'
+import type { PingRecord, StatusRecord } from '@/utils/rpc'
 import { Icon } from '@iconify/vue'
 import { computed, ref } from 'vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { CardX } from '@/components/ui/card-x'
 import { Spinner } from '@/components/ui/spinner'
-import { buildDiskPrediction } from '@/composables/useNodeLoadStats'
+import { LOAD_RECORD_MAX_COUNT, PING_RECORD_MAX_COUNT } from '@/constants/load'
+import { loadLoadRecords, loadPingRecords } from '@/services/history.service'
+import { buildDiskPrediction } from '@/services/prediction.service'
 import { useAppStore } from '@/stores/app'
 import { formatBytesPerSecondWithConfig, formatBytesWithConfig } from '@/utils/helper'
 import { getTrafficUsed, getTrafficUsedPercentage, hasTrafficLimit } from '@/utils/nodeMetricsHelper'
-import { getSharedRpc } from '@/utils/rpc'
 
 interface HealthRangeOption {
   key: 'day' | 'week' | 'month' | 'all'
@@ -38,12 +39,7 @@ interface NodeHealthSummary {
   pingHasData: boolean
 }
 
-interface PingRecordLike {
-  client: string
-  task_id: number
-  time: string
-  value: number
-}
+type PingRecordLike = PingRecord
 
 interface PingHealthStats {
   avgLatency: number
@@ -80,8 +76,8 @@ const rangeOptions = computed<HealthRangeOption[]>(() => {
 
 const selectedHours = computed(() => rangeOptions.value.find(option => option.key === selectedRange.value)?.hours ?? 168)
 const HEALTH_LIST_LIMIT = 10
-const HEALTH_LOAD_MAX_COUNT = 6_000
-const HEALTH_PING_MAX_COUNT = 6_000
+const HEALTH_LOAD_MAX_COUNT = LOAD_RECORD_MAX_COUNT
+const HEALTH_PING_MAX_COUNT = PING_RECORD_MAX_COUNT
 
 function formatBytes(bytes: number): string {
   return formatBytesWithConfig(bytes, appStore.byteDecimals)
@@ -178,13 +174,9 @@ function buildPingHealthStats(records: PingRecordLike[]): PingHealthStats {
 }
 
 async function loadPingRecordsByClient(hours: number): Promise<Map<string, PingRecordLike[]>> {
-  const result = await getSharedRpc().getClient().call<{ records?: PingRecordLike[] }>('common:getRecords', {
-    type: 'ping',
-    hours,
-    max_count: HEALTH_PING_MAX_COUNT,
-  })
+  const records = await loadPingRecords(hours, HEALTH_PING_MAX_COUNT)
   const map = new Map<string, PingRecordLike[]>()
-  for (const record of result?.records ?? []) {
+  for (const record of records) {
     if (!record.client)
       continue
     const clientRecords = map.get(record.client) ?? []
@@ -226,9 +218,9 @@ function buildCurrentLoadRecordsByClient(): Map<string, StatusRecord[]> {
 }
 
 async function loadLoadRecordsByClient(hours: number): Promise<Map<string, StatusRecord[]>> {
-  const result = await getSharedRpc().getLoadRecords(undefined, hours, undefined, HEALTH_LOAD_MAX_COUNT)
+  const records = await loadLoadRecords(undefined, hours, HEALTH_LOAD_MAX_COUNT)
   const map = new Map<string, StatusRecord[]>()
-  for (const record of result.records ?? []) {
+  for (const record of records) {
     if (!record.client)
       continue
     const clientRecords = map.get(record.client) ?? []
@@ -264,6 +256,13 @@ function buildNodeSummary(node: NodeData, recordsByClient: Map<string, StatusRec
 }
 
 async function generateSummary(): Promise<void> {
+  const granted = await appStore.requireLoginPermission('healthSummary', { force: true })
+  if (!granted) {
+    error.value = '登录状态已过期，请重新登录后生成健康摘要。'
+    window.$message?.warning(error.value)
+    return
+  }
+
   const requestId = ++summaryRequestId
   loading.value = true
   historyLoading.value = false

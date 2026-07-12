@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { PingRecord, PingTaskInfo } from '@/utils/rpc'
 import { Icon } from '@iconify/vue'
 import dayjs from 'dayjs'
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
@@ -8,9 +9,10 @@ import { Empty } from '@/components/ui/empty'
 import { Spinner } from '@/components/ui/spinner'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
+import { PING_RECORD_MAX_COUNT } from '@/constants/load'
+import { loadPingRecordsWithTasks } from '@/services/history.service'
 import { useAppStore } from '@/stores/app'
 import { cutPeakValues, interpolateNullsLinear } from '@/utils/recordHelper'
-import { getSharedRpc } from '@/utils/rpc'
 import '@/utils/echarts' // 共享 ECharts 配置
 
 const props = defineProps<{
@@ -19,8 +21,6 @@ const props = defineProps<{
 
 const appStore = useAppStore()
 const isDark = computed(() => appStore.isDark)
-// 使用共享的 RPC 实例，避免重复创建连接
-const rpc = getSharedRpc()
 
 // 图表主题相关颜色
 const chartThemeColors = computed(() => ({
@@ -100,42 +100,9 @@ watch(availableViews, (views) => {
   }
 }, { immediate: true })
 
-// ==================== 类型定义 ====================
-
-interface PingRecord {
-  client: string
-  task_id: number
-  time: string
-  value: number
-}
-
-interface TaskInfo {
-  id: number
-  name: string
-  interval: number
-  loss: number
-  p99?: number
-  p50?: number
-  p99_p50_ratio?: number
-  min?: number
-  max?: number
-  avg?: number
-  latest?: number
-  total?: number
-  type?: string
-}
-
-interface PingRecordsResponse {
-  count: number
-  records: PingRecord[]
-  tasks?: TaskInfo[]
-  from?: string
-  to?: string
-}
-
-// 数据状态
+// ==================== 数据状态 ====================
 const remoteData = shallowRef<PingRecord[]>([])
-const tasks = shallowRef<TaskInfo[]>([])
+const tasks = shallowRef<PingTaskInfo[]>([])
 const loading = ref(false)
 const error = ref<string | null>(null)
 
@@ -188,21 +155,26 @@ async function fetchRecords() {
   if (!props.uuid)
     return
 
+  const granted = await appStore.requireLoginPermission('historyMetrics', { force: false })
+  if (!granted) {
+    remoteData.value = []
+    tasks.value = []
+    error.value = '登录后查看延迟历史'
+    loading.value = false
+    return
+  }
+
   loading.value = true
   error.value = null
 
   try {
-    const result = await rpc.getClient().call<PingRecordsResponse>('common:getRecords', {
-      uuid: props.uuid,
-      type: 'ping',
-      hours: selectedHours.value,
-    })
+    const result = await loadPingRecordsWithTasks(selectedHours.value, PING_RECORD_MAX_COUNT, props.uuid)
 
-    const records = result?.records || []
+    const records = result.records
     records.sort((a, b) => dayjs(a.time).valueOf() - dayjs(b.time).valueOf())
 
     remoteData.value = records
-    tasks.value = result?.tasks || []
+    tasks.value = result.tasks
 
     if (tasks.value.length > 0 && selectedTaskIds.value.length === 0) {
       selectedTaskIds.value = tasks.value.map(t => t.id)

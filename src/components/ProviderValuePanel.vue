@@ -40,7 +40,9 @@ const sortDir = ref<1 | -1>(1)
 const { getNodeProviderMetadata } = useNodeProviderMetadata({
   nodes: () => props.nodes,
   customAliases: () => appStore.providerAliases,
-  enabled: true,
+  enabled: () => appStore.privateFeaturesAllowed,
+  allowGeoLookup: () => appStore.privateFeaturesAllowed,
+  geoPermission: 'providerValue',
 })
 
 onMounted(async () => {

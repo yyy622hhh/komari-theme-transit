@@ -4,8 +4,8 @@ Repo guide for `komari-theme-Glassmorphism`.
 
 ## Snapshot
 
-- Generated: Wed May 27 2026, Asia/Shanghai
-- Branch: `master`
+- Updated: 2026-07-12
+- Branch: `main`
 - App: Vue 3 + Vite + reka-ui + Tailwind CSS v4 theme for Komari Monitor
 - Package manager: `bun` (>= 1.2)
 - Theme manifest: `komari-theme.json`
@@ -22,7 +22,7 @@ Repo guide for `komari-theme-Glassmorphism`.
 
 - `src/` app source
 - `public/images/` runtime image contract, especially flags and logos
-- `.github/` CI workflow and issue templates
+- `.github/` release workflow
 - `docs/preview.png` release preview image
 - `komari-theme.json` theme manifest consumed by the zip build
 - `vite.config.ts` build, chunking, zip packaging
@@ -78,16 +78,31 @@ Do not change zip naming, manifest filename, or preview filename without updatin
 - `src/stores/nodes.ts` keeps a UUID index for fast updates. That index must point at Vue-reactive node objects from `nodes.value`, not the raw object before insertion, or live updates mutate non-reactive data and the UI goes stale.
 - README screenshots should be captured from a built app driven by a realistic mocked Komari API; include enough different surfaces (home, mini cards, list, detail, mobile) when screenshots are requested.
 
-## CI facts
+## Release workflow facts
 
-Source of truth: `.github/workflows/build-ci.yml`
+Source of truth: `.github/workflows/release-on-version-bump.yml`
 
-CI does only:
+Release automation on `main`:
 
-1. `bun install --frozen-lockfile`
-2. `bun run build`
+1. Detects `komari-theme.json.version`
+2. Installs with `bun install --frozen-lockfile`
+3. Runs `bun run build` when the theme version changed or the release tag is missing
+4. Creates/updates a GitHub Release and uploads `komari-theme-Glassmorphism-build*.zip`
 
-CI does not run tests, because there is no test suite.
+There is no test suite in CI; do not add one without a concrete need.
+
+## v3 architecture orientation
+
+- v3 app code should follow `Component -> Composable -> Service -> RequestManager / CacheService -> API / RPC`.
+- Detailed source rules live in `src/AGENTS.md`; root guidance stays focused on repo contracts, packaging, and where to look.
+- Architecture docs:
+  - `docs/Architecture.md` — v3 layering and ownership rules
+  - `docs/DataFlow.md` — node/provider/history/snapshot data paths
+  - `docs/Auth.md` — verified auth and private feature gates
+  - `docs/Cache.md` — shared cache lifecycle rules
+  - `docs/Migration-v3.md` — migration notes and behavior changes
+  - `docs/Milestones-v3.md` — M2-M6 milestone acceptance scope
+- New business logic belongs under `src/services/`; shared limits/timings/security settings belong under `src/constants/`; `src/utils/` should remain helper-focused.
 
 ## Where to look
 
@@ -96,13 +111,14 @@ CI does not run tests, because there is no test suite.
 - Check `komari-theme.json` for theme metadata and managed configuration schema
 - Check `src/` for app behavior
 - Check `public/images/` when code references image filenames directly
-- Check `.github/workflows/build-ci.yml` for CI expectations
-- Check `.github/ISSUE_TEMPLATE/` for issue intake shape
+- Check `.github/workflows/release-on-version-bump.yml` for release automation expectations
 
 Contributor density, useful for triage:
 
 - `src/components/` is a dense UI change area
-- `src/utils/` is a dense logic and helper area
+- `src/services/` is the v3 business/infrastructure logic area
+- `src/constants/` is the v3 shared limits/timings/security configuration area
+- `src/utils/` is a helper area; avoid adding new business logic there
 - `src/stores/` is central state, usually affected by cross-cutting changes
 
 ## Conventions seen in this repo
@@ -113,7 +129,7 @@ Contributor density, useful for triage:
 - Preserve the `@` alias to `src` defined in `vite.config.ts`
 - Treat `komari-theme.json` as release input, not optional metadata
 - Treat `docs/preview.png` as release input, not just documentation art
-- Respect existing generated outputs and naming patterns, especially `komari-theme-emerald-build-<sha>.zip`
+- Respect existing generated outputs and naming patterns, especially `komari-theme-Glassmorphism-build-<sha>.zip`
 - Root verification is lint plus build, not tests
 - UI is built on `reka-ui` + Tailwind CSS v4 (shadcn-vue style under `src/components/ui/`). Do **not** reintroduce Naive UI, UnoCSS, or SCSS — they have been removed.
 
@@ -123,15 +139,14 @@ Contributor density, useful for triage:
 - Do not move or rename `docs/preview.png` casually
 - Do not rename files under `public/images/flags/` or `public/images/logo/` without checking code references in `src`
 - Do not change asset path conventions like `/images/flags/<code>.svg` or `/images/logo/...` blindly
-- Do not add generic framework advice here that belongs in `src/AGENTS.md`
-- Do not duplicate workflow specifics from `.github/AGENTS.md` or asset naming specifics from `public/images/AGENTS.md`
+- Do not add detailed app architecture rules here that belong in `src/AGENTS.md`
+- Do not bypass v3 service/cache/request layers by adding business logic directly to components or generic utils
+- Keep workflow-specific details in `.github/` docs if a scoped guide is added later; keep public image asset naming details in `public/images/` docs if a scoped guide is added later
 
 ## Child guides
 
 For local rules, defer to the nearest child guide:
 
-- `src/AGENTS.md` for app code, component, store, router, and utility changes
-- `.github/AGENTS.md` for workflow and issue template changes
-- `public/images/AGENTS.md` for runtime image asset naming and compatibility rules
+- `src/AGENTS.md` for app code, components, stores, router, services, constants, utilities, and v3 layering rules
 
-If a child guide exists, it overrides this root file for its subtree.
+If additional scoped guides are added later, the nearest child guide overrides this root file for its subtree.

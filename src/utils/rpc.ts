@@ -1,3 +1,5 @@
+import { NETWORK_CONFIG } from '@/constants/network'
+
 /**
  * Komari RPC2 Client SDK
  * @see https://www.komari.wiki/dev/rpc.html
@@ -38,6 +40,20 @@ const HTTP_PROTOCOL_PREFIX = 'http://'
 const HTTPS_PROTOCOL_PREFIX = 'https://'
 const WS_PROTOCOL_PREFIX = 'ws://'
 const WSS_PROTOCOL_PREFIX = 'wss://'
+
+function linkAbortSignal(controller: AbortController, signal?: AbortSignal): () => void {
+  if (!signal)
+    return () => {}
+
+  const abort = () => controller.abort()
+  if (signal.aborted) {
+    abort()
+    return () => {}
+  }
+
+  signal.addEventListener('abort', abort, { once: true })
+  return () => signal.removeEventListener('abort', abort)
+}
 
 /** RPC 方法元数据 */
 export interface MethodMeta {
@@ -193,6 +209,23 @@ export interface PingRecord {
   value: number
 }
 
+/** Ping 任务摘要 */
+export interface PingTaskInfo {
+  id: number
+  name: string
+  interval: number
+  loss: number
+  p99?: number
+  p50?: number
+  p99_p50_ratio?: number
+  min?: number
+  max?: number
+  avg?: number
+  latest?: number
+  total?: number
+  type?: string
+}
+
 /** RPC 错误 */
 export class RpcError extends Error {
   code: number
@@ -234,7 +267,7 @@ export class RpcClient {
   constructor(options: RpcClientOptions = {}) {
     const apiBase = import.meta.env.VITE_API_BASE || ''
     this.baseUrl = options.baseUrl || `${apiBase}/rpc2`
-    this.timeout = options.timeout || 30000
+    this.timeout = options.timeout || NETWORK_CONFIG.timeout.request
     this.useWebSocket = options.useWebSocket || false
   }
 
@@ -284,7 +317,7 @@ export class RpcClient {
   /**
    * 调用 RPC 方法（HTTP POST）
    */
-  private async callHttp<T>(method: string, params?: Record<string, unknown> | unknown[]): Promise<T> {
+  private async callHttp<T>(method: string, params?: Record<string, unknown> | unknown[], signal?: AbortSignal): Promise<T> {
     const id = ++this.requestId
     const request: JsonRpcRequest = {
       jsonrpc: '2.0',
@@ -294,12 +327,14 @@ export class RpcClient {
     }
 
     const controller = new AbortController()
+    const unlinkAbortSignal = linkAbortSignal(controller, signal)
     const timeoutId = setTimeout(() => controller.abort(), this.timeout)
 
     try {
       const response = await fetch(this.baseUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify(request),
         signal: controller.signal,
       })
@@ -320,6 +355,9 @@ export class RpcClient {
       if (error instanceof RpcError)
         throw error
       throw new RpcError(-32000, `Network error: ${error instanceof Error ? error.message : String(error)}`)
+    }
+    finally {
+      unlinkAbortSignal()
     }
   }
 
@@ -418,7 +456,10 @@ export class RpcClient {
   /**
    * 调用 RPC 方法（WebSocket）
    */
-  private async callWebSocket<T>(method: string, params?: Record<string, unknown> | unknown[]): Promise<T> {
+  private async callWebSocket<T>(method: string, params?: Record<string, unknown> | unknown[], signal?: AbortSignal): Promise<T> {
+    if (signal?.aborted)
+      throw new RpcError(-32000, 'Request aborted')
+
     await this.ensureWebSocketReady()
 
     return new Promise((resolve, reject) => {
@@ -430,14 +471,33 @@ export class RpcClient {
         id,
       }
 
-      const timer = setTimeout(() => {
+      let timer: ReturnType<typeof setTimeout> | null = null
+      const abort = () => {
+        signal?.removeEventListener('abort', abort)
+        this.pendingRequests.delete(id)
+        if (timer)
+          clearTimeout(timer)
+        reject(new RpcError(-32000, 'Request aborted'))
+      }
+      const cleanupAbort = () => signal?.removeEventListener('abort', abort)
+      timer = setTimeout(() => {
+        cleanupAbort()
         this.pendingRequests.delete(id)
         reject(new RpcError(-32001, 'Request timeout'))
       }, this.timeout)
 
+      if (signal)
+        signal.addEventListener('abort', abort, { once: true })
+
       this.pendingRequests.set(id, {
-        resolve: resolve as (value: unknown) => void,
-        reject,
+        resolve: (value) => {
+          cleanupAbort()
+          resolve(value as T)
+        },
+        reject: (reason) => {
+          cleanupAbort()
+          reject(reason)
+        },
         timer,
       })
 
@@ -449,6 +509,7 @@ export class RpcClient {
         // 异常情况：连接断开了，拒绝请求
         this.pendingRequests.delete(id)
         clearTimeout(timer)
+        cleanupAbort()
         reject(new RpcError(-32000, 'WebSocket not connected'))
       }
     })
@@ -467,11 +528,11 @@ export class RpcClient {
   /**
    * 调用 RPC 方法
    */
-  async call<T>(method: string, params?: Record<string, unknown> | unknown[]): Promise<T> {
+  async call<T>(method: string, params?: Record<string, unknown> | unknown[], signal?: AbortSignal): Promise<T> {
     if (this.useWebSocket) {
-      return this.callWebSocket<T>(method, params)
+      return this.callWebSocket<T>(method, params, signal)
     }
-    return this.callHttp<T>(method, params)
+    return this.callHttp<T>(method, params, signal)
   }
 
   /**
@@ -657,26 +718,27 @@ export class KomariRpc {
   /**
    * 获取负载记录
    */
-  async getLoadRecords(uuid?: string, hours?: number, loadType?: string, maxCount?: number): Promise<{ records: StatusRecord[] }> {
+  async getLoadRecords(uuid?: string, hours?: number, loadType?: string, maxCount?: number, signal?: AbortSignal): Promise<{ records: StatusRecord[] }> {
     return this.client.call<{ records: StatusRecord[] }>('common:getRecords', {
       type: 'load',
       uuid,
       hours,
       load_type: loadType,
       max_count: maxCount,
-    })
+    }, signal)
   }
 
   /**
    * 获取 Ping 记录
    */
-  async getPingRecords(taskId?: number, hours?: number, maxCount?: number): Promise<{ records: PingRecord[] }> {
-    return this.client.call<{ records: PingRecord[] }>('common:getRecords', {
+  async getPingRecords(taskId?: number, hours?: number, maxCount?: number, signal?: AbortSignal, uuid?: string): Promise<{ records: PingRecord[], tasks?: PingTaskInfo[] }> {
+    return this.client.call<{ records: PingRecord[], tasks?: PingTaskInfo[] }>('common:getRecords', {
       type: 'ping',
+      uuid,
       task_id: taskId,
       hours,
       max_count: maxCount,
-    })
+    }, signal)
   }
 
   /**

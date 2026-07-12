@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-A Komari Monitor theme called **Komari Emerald**, built with Vue 3 + Vite. The release artifact is a zip Komari can import, **not** a generic deployed web app. [komari-theme.json](komari-theme.json) is release input, not optional metadata.
+A Komari Monitor theme called **Komari Glassmorphism**, built with Vue 3 + Vite. The release artifact is a zip Komari can import, **not** a generic deployed web app. [komari-theme.json](komari-theme.json) is release input, not optional metadata.
 
 ## Commands
 
@@ -17,18 +17,18 @@ bun run preview   # preview production build
 bun run lint      # eslint --fix --cache
 ```
 
-There is **no test suite**. Do not invent `bun test` / Vitest commands. CI ([.github/workflows/build-ci.yml](.github/workflows/build-ci.yml)) only runs `bun install --frozen-lockfile && bun run build` and uploads `komari-theme-emerald-build*.zip`.
+There is **no test suite**. Do not invent `bun test` / Vitest commands. Release automation ([.github/workflows/release-on-version-bump.yml](.github/workflows/release-on-version-bump.yml)) installs with `bun install --frozen-lockfile`, runs `bun run build` when the theme version changes or the tag is missing, and uploads `komari-theme-Glassmorphism-build*.zip`.
 
 ## Build & release contract
 
 `bun run build` must preserve the Komari packaging flow defined by the `komariThemeZip` plugin in [vite.config.ts](vite.config.ts). After a successful build, the repo root must contain:
 
 - `dist/`
-- `komari-theme-emerald-build-<short-sha>.zip` (commit hash from `git rev-parse --short HEAD`)
+- `komari-theme-Glassmorphism-build-<short-sha>.zip` (commit hash from `git rev-parse --short HEAD`)
 
 Zip layout — **do not change names**:
 
-```
+```text
 komari-theme.json   (from repo root)
 preview.png         (renamed from docs/preview.png)
 dist/               (Vite output)
@@ -64,11 +64,21 @@ Manual chunks are configured in [vite.config.ts](vite.config.ts): `vue-vendor`, 
 
 ### State (Pinia setup stores)
 
-- [src/stores/app.ts](src/stores/app.ts) — public settings, theme-derived config, login state, layout flags, formatting prefs, theme mode. `publicSettings.theme_settings` comes from Komari and **must** be parsed defensively (`typeof` checks, guarded `JSON.parse`, valid-value filtering, defaults). The schema is declared in [komari-theme.json](komari-theme.json) under `configuration.data`.
+- [src/stores/app.ts](src/stores/app.ts) — public settings, theme-derived config, login state, layout flags, formatting prefs, theme mode. `publicSettings.theme_settings` comes from Komari and **must** be parsed defensively (`typeof` checks, guarded `JSON.parse`, valid-value filtering, defaults). The schema is declared in [komari-theme.json](komari-theme.json) under `configuration.data`; managed theme setting defaults also belong there.
 - [src/stores/nodes.ts](src/stores/nodes.ts) — normalized nodes, group derivation, WebSocket state, live updates.
 - Components/views should read from stores; do not maintain parallel state for the same domain.
 - `src/stores/nodes.ts` keeps a UUID index for update speed. Any indexed node must be the Vue-reactive object from `nodes.value`, not the raw object before insertion, or polling/WebSocket mutations will not refresh `net_in`, `net_out`, CPU, and other live UI values.
 - When changing node status transport/update code, verify in the running app that realtime metrics update without refreshing the browser.
+
+### v3 architecture foundation
+
+- New app code should follow the v3 chain documented in [docs/Architecture.md](docs/Architecture.md): **Component → Composable → Service → RequestManager / CacheService → API / RPC**.
+- Components render UI and call composables/services. Composables own Vue state/lifecycle (`ref`, `computed`, `watch`, cleanup). Business logic belongs in [src/services/](src/services/); shared limits/timings/security values belong in [src/constants/](src/constants/); [src/utils/](src/utils/) should stay pure/helper-focused.
+- Public home/detail routes remain public. Do **not** add router guards for v3 privacy work; gate sensitive actions and data paths instead.
+- Sensitive/private features must verify auth through the centralized auth service/store (`verifyLogin`, `requirePermission`, `appStore.requireLoginPermission`) before starting work. This includes snapshot export, provider value, topology, health summary, disk-prediction history loading, and provider/geo metadata lookup.
+- Shared caches should use [src/services/cache.service.ts](src/services/cache.service.ts) and [src/constants/cache.ts](src/constants/cache.ts). Do not add ad-hoc component caches for provider metadata, history records, or request deduplication.
+- Provider metadata cache keys must distinguish public metadata-only resolution from private geo-enriched resolution. History cache keys must include both time range and max-count so capped prediction samples are not reused as uncapped chart data.
+- CSV/spreadsheet export must go through [src/utils/csv.ts](src/utils/csv.ts) / snapshot services and keep formula-injection neutralization for `=`, `+`, `-`, and `@` prefixes. `exportSecondaryPassword` is an optional managed setting for snapshot export.
 
 ### Transport & startup
 
@@ -100,16 +110,14 @@ Renaming, moving, or removing files under `public/images/` is a **code change**:
 
 ## Repo-grounded anti-patterns
 
-- Do not rename `komari-theme.json`, `docs/preview.png`, or the zip naming pattern `komari-theme-emerald-build-<sha>.zip`.
+- Do not rename `komari-theme.json`, `docs/preview.png`, or the zip naming pattern `komari-theme-Glassmorphism-build-<sha>.zip`.
 - Do not re-add a top-level `version` to `package.json`; the release version belongs only in `komari-theme.json`.
 - Do not change the default node card size away from `compact`; `mini` is optional and must not replace/shrink existing `compact` behavior.
 - Do not trust local build success as proof a Release exists — check the remote Actions run and Release assets after release workflow changes.
 - Do not embed ad-hoc parsing of `theme_settings` inside components — normalize once in `stores/app.ts`.
 - Do not reintroduce Naive UI, UnoCSS, or SCSS — the project has migrated to reka-ui + Tailwind v4. Compose `src/components/ui/*` instead of pulling in a new component library.
 - Do not reintroduce `lucide-vue-next` (or any other icon-as-component package). All icons go through `@iconify/vue`; lucide icons are available via the `lucide:` prefix.
-- Do not add matrix builds, release automation, or test stages to CI without a concrete need (see [.github/AGENTS.md](.github/AGENTS.md)).
+- Do not add matrix builds, release automation, or test stages to GitHub workflows without a concrete need.
 - Do not duplicate AGENTS.md content here. The nearest `AGENTS.md` overrides this file for its subtree:
-  - [AGENTS.md](AGENTS.md) — root build/packaging
-  - [src/AGENTS.md](src/AGENTS.md) — app code rules
-  - [.github/AGENTS.md](.github/AGENTS.md) — CI and issue templates
-  - [public/images/AGENTS.md](public/images/AGENTS.md) — asset filename contract
+  - [AGENTS.md](AGENTS.md) — root build/packaging and repo map
+  - [src/AGENTS.md](src/AGENTS.md) — app code, v3 layering, components, stores, services, constants, and utility rules

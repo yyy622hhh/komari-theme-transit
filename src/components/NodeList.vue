@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/badge'
 import { DataTooltip } from '@/components/ui/data-tooltip'
 import { ProgressThin } from '@/components/ui/progress-thin'
 import { useNodeProviderMetadata } from '@/composables/useNodeProviderMetadata'
+import { UI_CONFIG } from '@/constants/ui'
 import { useAppStore } from '@/stores/app'
 import { formatCityNameZh } from '@/utils/cityNameHelper'
 import { formatBytesPerSecondWithConfig, formatBytesWithConfig, formatDateTime, formatUptimeWithFormat, getStatus } from '@/utils/helper'
@@ -44,13 +45,13 @@ const props = defineProps<{
 
 const emit = defineEmits<{ click: [node: NodeData] }>()
 
-const rowStaggerMs = 35
-const rowStaggerLimit = 12
+const rowStaggerMs = UI_CONFIG.motion.staggerMs
+const rowStaggerLimit = UI_CONFIG.motion.staggerLimit
 
 const appStore = useAppStore()
 
 // 未登录且开启「未登录隐藏价格」时，隐藏价格信息
-const showPrice = computed(() => appStore.isLoggedIn || !appStore.hidePriceWhenLoggedOut)
+const showPrice = computed(() => appStore.privateFeaturesAllowed || !appStore.hidePriceWhenLoggedOut)
 
 const baseColumns: ColumnConfig[] = [
   { key: 'status', label: '状态', width: '40px', sortable: false },
@@ -75,6 +76,8 @@ const { getNodeProviderMetadata } = useNodeProviderMetadata({
   nodes: () => props.nodes,
   customAliases: () => appStore.providerAliases,
   enabled: () => providerMetadataEnabled.value,
+  allowGeoLookup: () => appStore.privateFeaturesAllowed,
+  geoPermission: 'providerGeoLookup',
 })
 
 const sortKey = ref<string>('')
@@ -136,8 +139,8 @@ const sortedNodes = computed(() => {
   })
 })
 
-const VIRTUAL_LIST_THRESHOLD = 30
-const VIRTUAL_ROW_HEIGHT = 68
+const VIRTUAL_LIST_THRESHOLD = UI_CONFIG.virtualList.nodeThreshold
+const VIRTUAL_ROW_HEIGHT = UI_CONFIG.virtualList.nodeRowHeight
 const shouldVirtualizeNodes = computed(() => sortedNodes.value.length > VIRTUAL_LIST_THRESHOLD)
 const {
   list: virtualRows,
@@ -145,7 +148,7 @@ const {
   wrapperProps: virtualWrapperProps,
 } = useVirtualList(sortedNodes, {
   itemHeight: VIRTUAL_ROW_HEIGHT,
-  overscan: 8,
+  overscan: UI_CONFIG.virtualList.overscan,
 })
 const renderedRows = computed(() => shouldVirtualizeNodes.value
   ? virtualRows.value

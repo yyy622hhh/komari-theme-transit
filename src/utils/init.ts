@@ -4,6 +4,7 @@
  */
 
 import type { Client, KomariRpc, NodeStatus } from '@/utils/rpc'
+import { REALTIME_CONFIG } from '@/constants/realtime'
 import { useAppStore } from '@/stores/app'
 import { useNodesStore } from '@/stores/nodes'
 import { getSharedApi } from '@/utils/api'
@@ -22,13 +23,13 @@ interface InitConfig {
 }
 
 const DEFAULT_CONFIG: Required<InitConfig> = {
-  wsReconnectInterval: 3000,
-  wsMaxReconnectAttempts: 5,
-  healthCheckTimeout: 5000,
-  postFailureThreshold: 3,
+  wsReconnectInterval: REALTIME_CONFIG.websocket.reconnectInterval,
+  wsMaxReconnectAttempts: REALTIME_CONFIG.websocket.maxReconnectAttempts,
+  healthCheckTimeout: REALTIME_CONFIG.websocket.healthCheckTimeout,
+  postFailureThreshold: REALTIME_CONFIG.polling.postFailureThreshold,
 }
 
-const CLIENTS_REFRESH_INTERVAL_MS = 60_000
+const CLIENTS_REFRESH_INTERVAL_MS = REALTIME_CONFIG.polling.clientsRefreshInterval
 
 /** 初始化状态管理 */
 class InitManager {
@@ -146,7 +147,7 @@ class InitManager {
     try {
       const api = getSharedApi()
       const userInfo = await api.getMe()
-      this.appStore.updateLoginState(userInfo.logged_in)
+      this.appStore.updateLoginState(userInfo.logged_in, userInfo)
     }
     catch (error) {
       this.appStore.updateLoginState(false)

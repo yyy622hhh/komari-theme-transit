@@ -60,13 +60,14 @@ const { diskPrediction } = useNodeLoadStats(
   () => props.node.uuid,
   {
     hours: () => loadStatsHours.value,
-    enabled: () => appStore.diskPredictionEnabled,
+    enabled: () => appStore.diskPredictionEnabled && appStore.privateFeaturesAllowed,
     diskTotal: () => props.node.disk_total,
+    permission: 'diskPrediction',
   },
 )
 const diskPredictionText = computed(() => {
   const prediction = diskPrediction.value
-  if (!appStore.diskPredictionEnabled || !prediction)
+  if (!appStore.diskPredictionEnabled || !appStore.privateFeaturesAllowed || !prediction)
     return ''
   if (prediction.daysUntilFull > appStore.diskPredictionThresholdDays)
     return ''
@@ -113,7 +114,7 @@ const trafficPercentageClass = computed(() => {
 
 // 是否显示金额：未登录且开启「未登录隐藏价格」时不显示价格 / 剩余价值，
 // 但在线天数、剩余天数等非金额信息仍然展示
-const showPrice = computed(() => appStore.isLoggedIn || !appStore.hidePriceWhenLoggedOut)
+const showPrice = computed(() => appStore.privateFeaturesAllowed || !appStore.hidePriceWhenLoggedOut)
 
 const uptimeDaysText = computed(() => {
   const days = getUptimeDays(props.node.uptime)
