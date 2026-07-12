@@ -95,14 +95,14 @@ function formatRankValue(row: NodeValueRow, key: SortKey): string {
   }
 }
 
-function compareNullableCost(left: number | null, right: number | null): number {
+function compareNullableCost(left: number | null, right: number | null, dir: 1 | -1): number {
   if (left === null && right === null)
     return 0
   if (left === null)
     return 1
   if (right === null)
     return -1
-  return left - right
+  return dir * (left - right)
 }
 
 const nodeRows = computed<NodeValueRow[]>(() => props.nodes
@@ -140,7 +140,7 @@ const sortedRows = computed(() => {
       return dir * left.provider.localeCompare(right.provider, 'zh-CN')
     if (key === 'monthlyCostCNY')
       return dir * (left.monthlyCostCNY - right.monthlyCostCNY)
-    return dir * compareNullableCost(left[key], right[key])
+    return compareNullableCost(left[key], right[key], dir)
   })
 })
 

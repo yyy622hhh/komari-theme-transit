@@ -143,6 +143,8 @@ const topologyNodes = computed<TopologyNodeView[]>(() => props.nodes.map((node) 
   }
 }))
 
+const topologyNodeByUuid = computed(() => new Map(topologyNodes.value.map(item => [item.node.uuid, item])))
+
 const tagEdges = computed<EdgeView[]>(() => topologyNodes.value
   .filter(item => item.upstream)
   .map(item => ({ from: item.upstream!, to: item.node, source: 'tag' as const })))
@@ -189,15 +191,14 @@ const totalOffline = computed(() => props.nodes.length - totalOnline.value)
 const asnEdges = computed(() => asnGroups.value.reduce((count, group) => count + group.nodes.length, 0))
 
 function getOfflineUpstream(node: NodeData): NodeData | undefined {
-  const itemByUuid = new Map(topologyNodes.value.map(item => [item.node.uuid, item]))
   const seen = new Set<string>()
-  let current = itemByUuid.get(node.uuid)?.upstream
+  let current = topologyNodeByUuid.value.get(node.uuid)?.upstream
 
   while (current && !seen.has(current.uuid)) {
     if (!current.online)
       return current
     seen.add(current.uuid)
-    current = itemByUuid.get(current.uuid)?.upstream
+    current = topologyNodeByUuid.value.get(current.uuid)?.upstream
   }
 
   return undefined

@@ -12,16 +12,19 @@ export interface NodeProviderMetadata {
   loading: boolean
 }
 
-interface CacheEntry {
-  fingerprint: string
-  metadata: NodeProviderMetadata
-}
-
 interface UseNodeProviderMetadataOptions {
   nodes: MaybeRefOrGetter<NodeData[]>
   customAliases: MaybeRefOrGetter<string>
   enabled?: MaybeRefOrGetter<boolean>
 }
+
+interface SharedCacheEntry {
+  metadata: NodeProviderMetadata
+  subscribers: Set<(metadata: NodeProviderMetadata) => void>
+  promise: Promise<void> | null
+}
+
+const sharedMetadataCache = new Map<string, SharedCacheEntry>()
 
 function getNodeIps(node: NodeData): string[] {
   return [node.ipv4, node.ipv6].filter((ip): ip is string => Boolean(ip?.trim()))
@@ -70,9 +73,45 @@ function buildNodeProviderMetadata(node: NodeData, customAliases: string, geo: I
   }
 }
 
+function notifySharedEntry(entry: SharedCacheEntry): void {
+  for (const subscriber of entry.subscribers)
+    subscriber(entry.metadata)
+}
+
+function getSharedMetadataEntry(node: NodeData, customAliases: string): { fingerprint: string, entry: SharedCacheEntry } {
+  const fingerprint = getFingerprint(node, customAliases)
+  const cached = sharedMetadataCache.get(fingerprint)
+  if (cached)
+    return { fingerprint, entry: cached }
+
+  const hasIps = getNodeIps(node).length > 0
+  const entry: SharedCacheEntry = {
+    metadata: buildNodeProviderMetadata(node, customAliases, null, hasIps),
+    subscribers: new Set(),
+    promise: null,
+  }
+  sharedMetadataCache.set(fingerprint, entry)
+
+  if (hasIps) {
+    entry.promise = lookupNodeGeo(node)
+      .then((geo) => {
+        entry.metadata = buildNodeProviderMetadata(node, customAliases, geo, false)
+        notifySharedEntry(entry)
+      })
+      .catch(() => {
+        entry.metadata = buildNodeProviderMetadata(node, customAliases, null, false)
+        notifySharedEntry(entry)
+      })
+      .finally(() => {
+        entry.promise = null
+      })
+  }
+
+  return { fingerprint, entry }
+}
+
 export function useNodeProviderMetadata(options: UseNodeProviderMetadataOptions) {
   const metadataByUuid = ref<Record<string, NodeProviderMetadata>>({})
-  const cache = new Map<string, CacheEntry>()
   const activeFingerprints = new Map<string, string>()
   let refreshSeq = 0
 
@@ -91,11 +130,17 @@ export function useNodeProviderMetadata(options: UseNodeProviderMetadataOptions)
         fingerprint: nodes.map(node => getFingerprint(node, customAliases)).join(''),
       }
     },
-    ({ customAliases, enabled }) => {
+    ({ customAliases, enabled }, _previous, onCleanup) => {
       const seq = ++refreshSeq
       const nodes = toValue(options.nodes)
       const nextMetadata: Record<string, NodeProviderMetadata> = {}
+      const unsubscribers: Array<() => void> = []
       activeFingerprints.clear()
+
+      onCleanup(() => {
+        for (const unsubscribe of unsubscribers)
+          unsubscribe()
+      })
 
       if (!enabled) {
         metadataByUuid.value = nextMetadata
@@ -103,34 +148,21 @@ export function useNodeProviderMetadata(options: UseNodeProviderMetadataOptions)
       }
 
       for (const node of nodes) {
-        const fingerprint = getFingerprint(node, customAliases)
+        const { fingerprint, entry } = getSharedMetadataEntry(node, customAliases)
         activeFingerprints.set(node.uuid, fingerprint)
+        nextMetadata[node.uuid] = entry.metadata
 
-        const cached = cache.get(node.uuid)
-        if (cached?.fingerprint === fingerprint) {
-          nextMetadata[node.uuid] = cached.metadata
-          continue
-        }
-
-        const hasIps = getNodeIps(node).length > 0
-        const initialMetadata = buildNodeProviderMetadata(node, customAliases, null, hasIps)
-        nextMetadata[node.uuid] = initialMetadata
-        cache.set(node.uuid, { fingerprint, metadata: initialMetadata })
-
-        if (!hasIps)
-          continue
-
-        void lookupNodeGeo(node).then((geo) => {
+        const subscriber = (metadata: NodeProviderMetadata) => {
           if (seq !== refreshSeq || activeFingerprints.get(node.uuid) !== fingerprint)
             return
 
-          const resolvedMetadata = buildNodeProviderMetadata(node, customAliases, geo, false)
-          cache.set(node.uuid, { fingerprint, metadata: resolvedMetadata })
           metadataByUuid.value = {
             ...metadataByUuid.value,
-            [node.uuid]: resolvedMetadata,
+            [node.uuid]: metadata,
           }
-        })
+        }
+        entry.subscribers.add(subscriber)
+        unsubscribers.push(() => entry.subscribers.delete(subscriber))
       }
 
       metadataByUuid.value = nextMetadata
