@@ -14,7 +14,12 @@ import { getOSImage, getOSName } from '@/utils/osImageHelper'
 import { getRegionCode, getRegionDisplayName } from '@/utils/regionHelper'
 import { formatCurrencyValue, formatPriceWithCycle, getDaysUntilExpired, getExpireStatus, getRemainingValue, parseTags } from '@/utils/tagHelper'
 
-const props = defineProps<{ node: NodeData }>()
+const props = withDefaults(defineProps<{
+  node: NodeData
+  reduceMotion?: boolean
+}>(), {
+  reduceMotion: false,
+})
 const emit = defineEmits<{ click: [] }>()
 const appStore = useAppStore()
 
@@ -178,6 +183,7 @@ function hasRegion(region: string | null | undefined): boolean {
             :class="props.node.online ? 'bg-green-500' : 'bg-red-500'"
           />
           <span
+            v-if="!props.reduceMotion"
             class="animate-ping absolute inset-0 rounded-full opacity-60"
             :class="props.node.online ? 'bg-green-500' : 'bg-red-500'"
           />

@@ -45,14 +45,16 @@ const showMediaBackground = computed(() =>
   hasCustomBackground.value && !hasError.value && (backgroundType.value === 'video' || showLoadedBackground.value),
 )
 
-const showDefaultBackground = computed(() => !hasCustomBackground.value)
+const showDefaultBackground = computed(() =>
+  !hasCustomBackground.value || !showMediaBackground.value || hasError.value,
+)
 
 const showLoadingBackground = computed(() =>
-  hasCustomBackground.value && !isLoaded.value && !hasError.value,
+  hasCustomBackground.value && backgroundType.value === 'video' && !isLoaded.value && !hasError.value,
 )
 
 const showFallbackBackground = computed(() =>
-  hasCustomBackground.value && hasError.value,
+  hasCustomBackground.value && backgroundType.value === 'video' && hasError.value,
 )
 
 let imageLoader: HTMLImageElement | null = null
@@ -200,7 +202,9 @@ onUnmounted(() => {
   position: absolute;
   inset: 0;
   overflow: hidden;
-  background: rgb(248 250 252);
+  background:
+    radial-gradient(circle at 50% 0%, rgb(16 185 129 / 0.12), transparent 38%),
+    linear-gradient(180deg, rgb(226 232 240), rgb(203 213 225));
   transform: scale(1.5);
   transform-origin: top center;
 }
@@ -233,8 +237,8 @@ onUnmounted(() => {
 .default-background__emerald-surface {
   inset: 0;
   overflow: hidden;
-  background: linear-gradient(90deg, rgb(16 185 129 / 0.4), rgb(190 242 100 / 0.4));
-  opacity: 0.4;
+  background: linear-gradient(90deg, rgb(16 185 129 / 0.18), rgb(190 242 100 / 0.16));
+  opacity: 0.28;
   -webkit-mask-image: radial-gradient(farthest-side at top, white, transparent);
   mask-image: radial-gradient(farthest-side at top, white, transparent);
 }
@@ -280,7 +284,13 @@ onUnmounted(() => {
 .background-loading {
   position: absolute;
   inset: 0;
-  background-color: var(--background);
+  background-color: rgb(15 23 42);
+}
+
+:root:not(.dark) .background-loading {
+  background:
+    radial-gradient(circle at 50% 0%, rgb(16 185 129 / 0.08), transparent 36%),
+    linear-gradient(180deg, rgb(203 213 225), rgb(148 163 184));
 }
 
 .background-media {

@@ -6,6 +6,7 @@ import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vu
 import VChart from 'vue-echarts'
 import { Button } from '@/components/ui/button'
 import { Empty } from '@/components/ui/empty'
+import { Input } from '@/components/ui/input'
 import { Spinner } from '@/components/ui/spinner'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
@@ -23,6 +24,12 @@ const props = defineProps<{
 
 const appStore = useAppStore()
 const isDark = computed(() => appStore.isDark)
+
+interface CustomRange {
+  start: dayjs.Dayjs
+  end: dayjs.Dayjs
+  hours: number
+}
 
 // 图表主题相关颜色
 const chartThemeColors = computed(() => ({
@@ -58,10 +65,12 @@ const presetViews = [
   { label: '12 小时', hours: 12 },
   { label: '1 天', hours: 24 },
 ]
+const CUSTOM_VIEW_LABEL = '自定义'
+const DEFAULT_CUSTOM_RANGE_HOURS = 24
 
 // 可用视图列表
 const availableViews = computed(() => {
-  const views: { label: string, hours: number }[] = []
+  const views: { label: string, hours?: number }[] = []
   const maxHours = maxPingRecordPreserveTime.value
 
   for (const v of presetViews) {
@@ -84,15 +93,55 @@ const availableViews = computed(() => {
     views.push({ label, hours: maxHours })
   }
 
+  views.push({ label: CUSTOM_VIEW_LABEL })
   return views
 })
 
 // 当前选中的视图
 const selectedView = ref<string>('')
+const customStartInput = ref('')
+const customEndInput = ref('')
+const appliedCustomRange = shallowRef<CustomRange | null>(null)
+const isCustomRange = computed(() => selectedView.value === CUSTOM_VIEW_LABEL)
+const customRange = computed<CustomRange | null>(() => {
+  if (!customStartInput.value || !customEndInput.value)
+    return null
+
+  const start = dayjs(customStartInput.value)
+  const end = dayjs(customEndInput.value)
+  if (!start.isValid() || !end.isValid() || !end.isAfter(start))
+    return null
+
+  return {
+    start,
+    end,
+    hours: Math.max(1, Math.ceil(end.diff(start, 'hour', true))),
+  }
+})
+const customRangeError = computed(() => {
+  if (!isCustomRange.value || (!customStartInput.value && !customEndInput.value))
+    return ''
+  if (!customStartInput.value || !customEndInput.value)
+    return '请选择开始和结束时间'
+  return customRange.value ? '' : '结束时间必须晚于开始时间'
+})
 const selectedHours = computed(() => {
+  if (isCustomRange.value)
+    return appliedCustomRange.value?.hours ?? customRange.value?.hours ?? DEFAULT_CUSTOM_RANGE_HOURS
+
   const view = availableViews.value.find(v => v.label === selectedView.value)
   return view?.hours || 1
 })
+
+function ensureDefaultCustomRange() {
+  if (customStartInput.value && customEndInput.value)
+    return
+
+  const end = dayjs()
+  const hours = Math.max(1, Math.min(DEFAULT_CUSTOM_RANGE_HOURS, maxPingRecordPreserveTime.value))
+  customStartInput.value = end.subtract(hours, 'hour').format('YYYY-MM-DDTHH:mm')
+  customEndInput.value = end.format('YYYY-MM-DDTHH:mm')
+}
 
 // 初始化默认视图
 watch(availableViews, (views) => {
@@ -107,6 +156,7 @@ const remoteData = shallowRef<PingRecord[]>([])
 const tasks = shallowRef<PingTaskInfo[]>([])
 const loading = ref(false)
 const error = ref<string | null>(null)
+const legacyCustomRangeFallback = ref(false)
 
 // 任务选择
 const selectedTaskIds = ref<number[]>([])
@@ -196,11 +246,14 @@ function buildMetricRecords(seriesList: MetricSeries[]): PingRecord[] {
       continue
 
     for (const point of series.points) {
+      if (point.value === null)
+        continue
+
       records.push({
         client: series.entity_id,
         task_id: taskId,
         time: point.time,
-        value: point.value === null ? -1 : point.value,
+        value: point.value,
       })
     }
   }
@@ -209,12 +262,17 @@ function buildMetricRecords(seriesList: MetricSeries[]): PingRecord[] {
 }
 
 async function loadMetricPingPayload(): Promise<{ records: PingRecord[], tasks: PingTaskInfo[] } | null> {
+  const range = appliedCustomRange.value
+  const metricRangeParams = isCustomRange.value && range
+    ? { start: range.start.toDate().toISOString(), end: range.end.toDate().toISOString() }
+    : { hours: selectedHours.value }
+
   const [statsResult, metricsResult] = await Promise.allSettled([
-    loadPingMetricStats({ entity_id: props.uuid, hours: selectedHours.value, max_points: PING_RECORD_MAX_COUNT }),
+    loadPingMetricStats({ entity_id: props.uuid, ...metricRangeParams, max_points: PING_RECORD_MAX_COUNT }),
     queryMetrics({
       metric_keys: [PING_LATENCY_METRIC],
       entity_id: props.uuid,
-      hours: selectedHours.value,
+      ...metricRangeParams,
       downsample: true,
       fill_empty: true,
       max_points: PING_RECORD_MAX_COUNT,
@@ -229,7 +287,13 @@ async function loadMetricPingPayload(): Promise<{ records: PingRecord[], tasks: 
     ? buildMetricRecords(metricsResult.value.series)
     : []
 
-  if (!metricStats.length && !metricRecords.length)
+  const metricTaskIds = new Set(metricRecords.map(record => record.task_id))
+  const exactStatTaskIds = new Set(
+    metricStats
+      .filter(stat => stat.total > 0 && !stat.loss_approximate && Number.isFinite(stat.loss))
+      .map(stat => normalizeMetricTaskId(stat.task_id)),
+  )
+  if (!metricRecords.length || [...metricTaskIds].some(taskId => !exactStatTaskIds.has(taskId)))
     return null
 
   const taskMap = new Map<number, PingTaskInfo>()
@@ -265,11 +329,22 @@ async function fetchRecords() {
   if (!props.uuid)
     return
 
+  if (isCustomRange.value && !customRange.value) {
+    remoteData.value = []
+    tasks.value = []
+    error.value = customRangeError.value || '请选择有效的自定义时间范围'
+    legacyCustomRangeFallback.value = false
+    return
+  }
+
+  appliedCustomRange.value = isCustomRange.value ? customRange.value : null
+
   const granted = await appStore.requireLoginPermission('historyMetrics', { force: false })
   if (!granted) {
     remoteData.value = []
     tasks.value = []
     error.value = '登录后查看延迟历史'
+    legacyCustomRangeFallback.value = false
     loading.value = false
     return
   }
@@ -279,7 +354,15 @@ async function fetchRecords() {
 
   try {
     const metricPayload = await loadMetricPingPayload().catch(() => null)
-    const result = metricPayload ?? await loadPingRecordsWithTasks(selectedHours.value, PING_RECORD_MAX_COUNT, props.uuid)
+    legacyCustomRangeFallback.value = !metricPayload && isCustomRange.value
+    const range = appliedCustomRange.value
+    const legacyHours = range
+      ? Math.min(
+          maxPingRecordPreserveTime.value,
+          Math.max(range.hours, Math.ceil(dayjs().diff(range.start, 'hour', true))),
+        )
+      : selectedHours.value
+    const result = metricPayload ?? await loadPingRecordsWithTasks(legacyHours, PING_RECORD_MAX_COUNT, props.uuid)
 
     const records = result.records
     records.sort((a, b) => dayjs(a.time).valueOf() - dayjs(b.time).valueOf())
@@ -293,6 +376,7 @@ async function fetchRecords() {
   }
   catch (err) {
     error.value = err instanceof Error ? err.message : '获取数据失败'
+    legacyCustomRangeFallback.value = false
     remoteData.value = []
     tasks.value = []
   }
@@ -349,6 +433,16 @@ const mergedData = computed(() => {
   const merged = Array.from(grouped.values()).sort(
     (a, b) => dayjs(a.time as string).valueOf() - dayjs(b.time as string).valueOf(),
   )
+
+  const range = appliedCustomRange.value
+  if (isCustomRange.value && range) {
+    const fromTs = range.start.valueOf()
+    const toTs = range.end.valueOf()
+    return merged.filter((item) => {
+      const timestamp = dayjs(item.time as string).valueOf()
+      return timestamp >= fromTs && timestamp <= toTs
+    })
+  }
 
   const hours = selectedHours.value
   const lastItem = merged.at(-1)
@@ -617,6 +711,8 @@ const pingChartOption = computed(() => {
 
 watch(selectedView, () => {
   selectedTaskIds.value = []
+  if (isCustomRange.value)
+    ensureDefaultCustomRange()
   fetchRecords()
 })
 
@@ -649,35 +745,70 @@ onBeforeUnmount(() => {
 <template>
   <div class="flex flex-col gap-4">
     <!-- 时间选择器 -->
-    <Tabs v-model="selectedView" class="w-full items-center">
-      <div class="min-w-0 flex-1 overflow-x-auto rounded-sm pointer-events-auto">
-        <TabsList class="w-max h-8 bg-background/50 backdrop-blur-xl rounded-md">
-          <TabsTrigger
-            v-for="view in availableViews" :key="view.label" :value="view.label"
-            class="h-6.5 flex-none shrink-0 text-xs border-none data-[state=active]:text-green-600 shadow-none rounded-sm"
+    <div class="flex flex-col gap-2">
+      <Tabs v-model="selectedView" class="w-full items-center">
+        <div class="min-w-0 flex-1 overflow-x-auto rounded-sm pointer-events-auto">
+          <TabsList class="w-max h-8 bg-background/50 backdrop-blur-xl rounded-md">
+            <TabsTrigger
+              v-for="view in availableViews" :key="view.label" :value="view.label"
+              class="h-6.5 flex-none shrink-0 text-xs border-none data-[state=active]:text-green-600 shadow-none rounded-sm"
+            >
+              {{ view.label }}
+            </TabsTrigger>
+          </TabsList>
+        </div>
+        <div class="md:flex-1" />
+        <div class="flex gap-2 items-center">
+          <Button
+            variant="ghost" size="xs" class="h-7 rounded-sm bg-background/50 hover:bg-background border-none"
+            :class="selectedTaskIds.length === tasks.length ? 'shadow-[0_0_0_2px] shadow-green-600/10 text-green-600' : ''"
+            @click="showAllTasks"
           >
-            {{ view.label }}
-          </TabsTrigger>
-        </TabsList>
+            全选
+          </Button>
+          <Button
+            variant="ghost" size="xs" class="h-7 rounded-sm bg-background/50 hover:bg-background border-none"
+            :class="!selectedTaskIds.length && 'shadow-[0_0_0_2px] shadow-green-600/10 text-green-600'"
+            @click="hideAllTasks"
+          >
+            全不选
+          </Button>
+        </div>
+      </Tabs>
+
+      <div v-if="isCustomRange" class="flex w-full flex-col items-center gap-2 sm:flex-row sm:justify-center">
+        <div class="grid w-full gap-2 sm:w-auto sm:grid-cols-[minmax(0,13rem)_minmax(0,13rem)_auto]">
+          <Input
+            v-model="customStartInput"
+            type="datetime-local"
+            aria-label="延迟图开始时间"
+            class="h-8 bg-background/50 text-xs"
+          />
+          <Input
+            v-model="customEndInput"
+            type="datetime-local"
+            aria-label="延迟图结束时间"
+            class="h-8 bg-background/50 text-xs"
+          />
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            :disabled="!customRange"
+            class="h-8 text-xs"
+            @click="fetchRecords"
+          >
+            应用
+          </Button>
+        </div>
+        <div v-if="customRangeError" class="text-[11px] text-orange-500">
+          {{ customRangeError }}
+        </div>
+        <div v-else-if="legacyCustomRangeFallback" class="text-[11px] text-muted-foreground">
+          旧接口按可用保留时长回溯，再裁剪到所选区间
+        </div>
       </div>
-      <div class="md:flex-1" />
-      <div class="flex gap-2 items-center">
-        <Button
-          variant="ghost" size="xs" class="h-7 rounded-sm bg-background/50 hover:bg-background border-none"
-          :class="selectedTaskIds.length === tasks.length ? 'shadow-[0_0_0_2px] shadow-green-600/10 text-green-600' : ''"
-          @click="showAllTasks"
-        >
-          全选
-        </Button>
-        <Button
-          variant="ghost" size="xs" class="h-7 rounded-sm bg-background/50 hover:bg-background border-none"
-          :class="!selectedTaskIds.length && 'shadow-[0_0_0_2px] shadow-green-600/10 text-green-600'"
-          @click="hideAllTasks"
-        >
-          全不选
-        </Button>
-      </div>
-    </Tabs>
+    </div>
 
     <!-- 内容区域 -->
     <Spinner :show="loading" content-class="flex flex-col gap-4">

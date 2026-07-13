@@ -36,6 +36,8 @@ export interface RecordFormat {
   net_out: number | null
   net_total_up: number | null
   net_total_down: number | null
+  traffic_up: number | null
+  traffic_down: number | null
   process: number | null
   connections: number | null
   connections_udp: number | null

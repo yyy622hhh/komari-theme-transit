@@ -7,5 +7,7 @@ export const UI_CONFIG = {
   motion: {
     staggerMs: 35,
     staggerLimit: 12,
+    denseNodeAppearThreshold: 30,
+    denseNodePingAnimationThreshold: 60,
   },
 } as const

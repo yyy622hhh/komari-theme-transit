@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { DetailMetricCardKey } from '@/stores/app'
 import type { CurrencyCode } from '@/utils/financeHelper'
 import { Icon } from '@iconify/vue'
 import { computed, defineAsyncComponent, onMounted, ref, watch } from 'vue'
@@ -217,11 +218,13 @@ interface InfoItem {
 }
 
 interface MetricCard {
+  key: DetailMetricCardKey
   label: string
   value: string
   unit?: string
   icon: string
   valueClass?: string
+  tooltip?: string
 }
 
 const MONTH_DAYS = 30
@@ -304,21 +307,108 @@ const remainingTimeValueClass = computed(() => {
   return 'text-emerald-600 dark:text-emerald-400'
 })
 
-const metricCards = computed<MetricCard[]>(() => {
-  if (!data.value)
-    return []
+function usagePercentage(used: number, total: number): number | null {
+  if (!Number.isFinite(used) || !Number.isFinite(total) || total <= 0)
+    return null
+  return Math.min(100, Math.max(0, used / total * 100))
+}
+
+function splitMeasurement(value: string): { value: string, unit?: string } {
+  const separatorIndex = value.lastIndexOf(' ')
+  if (separatorIndex <= 0)
+    return { value }
+  return {
+    value: value.slice(0, separatorIndex),
+    unit: value.slice(separatorIndex + 1),
+  }
+}
+
+function getDetailMetricCard(key: DetailMetricCardKey): MetricCard {
+  const node = data.value
   const masked = !showPrice.value
   const nodePrice = splitMetricValue(nodePriceText.value)
   const monthlyAverageCost = splitMetricValue(monthlyAverageCostText.value)
   const remainingTime = splitMetricValue(remainingTimeText.value)
   const remainingValue = splitMetricValue(remainingValueText.value)
-  return [
-    { label: '节点价格', value: masked ? '***' : nodePrice.value, unit: masked ? undefined : nodePrice.unit, icon: 'tabler:cash' },
-    { label: '月均支出', value: masked ? '***' : monthlyAverageCost.value, unit: masked ? undefined : monthlyAverageCost.unit, icon: 'tabler:receipt-2' },
-    { label: '剩余时间', value: remainingTime.value, unit: remainingTime.unit, icon: 'tabler:calendar-dollar', valueClass: remainingTimeValueClass.value },
-    { label: '剩余价值', value: masked ? '***' : remainingValue.value, unit: masked ? undefined : remainingValue.unit, icon: 'tabler:coins' },
-  ]
-})
+  const memoryUsage = usagePercentage(node?.ram ?? 0, node?.mem_total ?? 0)
+  const swapUsage = usagePercentage(node?.swap ?? 0, node?.swap_total ?? 0)
+  const diskUsage = usagePercentage(node?.disk ?? 0, node?.disk_total ?? 0)
+  const nodeTrafficUsed = (() => {
+    const up = node?.net_total_up ?? 0
+    const down = node?.net_total_down ?? 0
+    switch (node?.traffic_limit_type) {
+      case 'up': return up
+      case 'down': return down
+      case 'min': return Math.min(up, down)
+      case 'max': return Math.max(up, down)
+      case 'sum':
+      default: return up + down
+    }
+  })()
+  const nodeTrafficLimit = node?.traffic_limit ?? 0
+  const nodeHasTrafficLimit = nodeTrafficLimit > 0
+  const nodeTrafficPercentage = nodeHasTrafficLimit
+    ? Math.min(nodeTrafficUsed / nodeTrafficLimit * 100, 100)
+    : 0
+
+  switch (key) {
+    case 'nodePrice':
+      return { key, label: '节点价格', value: masked ? '***' : nodePrice.value, unit: masked ? undefined : nodePrice.unit, icon: 'tabler:cash' }
+    case 'monthlyCost':
+      return { key, label: '月均支出', value: masked ? '***' : monthlyAverageCost.value, unit: masked ? undefined : monthlyAverageCost.unit, icon: 'tabler:receipt-2' }
+    case 'remainingTime':
+      return { key, label: '剩余时间', value: remainingTime.value, unit: remainingTime.unit, icon: 'tabler:calendar-dollar', valueClass: remainingTimeValueClass.value }
+    case 'remainingValue':
+      return { key, label: '剩余价值', value: masked ? '***' : remainingValue.value, unit: masked ? undefined : remainingValue.unit, icon: 'tabler:coins' }
+    case 'cpuUsage':
+      return { key, label: 'CPU 使用率', value: (node?.cpu ?? 0).toFixed(1), unit: '%', icon: 'tabler:cpu' }
+    case 'gpuUsage': {
+      const hasGpu = Boolean(node?.gpu_name?.trim()) || (node?.gpu ?? 0) > 0
+      return { key, label: 'GPU 使用率', value: hasGpu ? (node?.gpu ?? 0).toFixed(1) : '-', unit: hasGpu ? '%' : undefined, icon: 'tabler:device-desktop-analytics', tooltip: node?.gpu_name?.trim() || undefined }
+    }
+    case 'memoryUsage':
+      return { key, label: '内存使用率', value: memoryUsage === null ? '-' : memoryUsage.toFixed(1), unit: memoryUsage === null ? undefined : '%', icon: 'icon-park-outline:memory', tooltip: `${formatBytes(node?.ram ?? 0)} / ${formatBytes(node?.mem_total ?? 0)}` }
+    case 'swapUsage':
+      return { key, label: '交换内存', value: swapUsage === null ? '-' : swapUsage.toFixed(1), unit: swapUsage === null ? undefined : '%', icon: 'icon-park-outline:switch', tooltip: `${formatBytes(node?.swap ?? 0)} / ${formatBytes(node?.swap_total ?? 0)}` }
+    case 'diskUsage':
+      return { key, label: '硬盘使用率', value: diskUsage === null ? '-' : diskUsage.toFixed(1), unit: diskUsage === null ? undefined : '%', icon: 'tabler:server-2', tooltip: `${formatBytes(node?.disk ?? 0)} / ${formatBytes(node?.disk_total ?? 0)}` }
+    case 'load':
+      return { key, label: '系统负载', value: (node?.load ?? 0).toFixed(2), unit: '1m', icon: 'tabler:chart-line', tooltip: `5m ${(node?.load5 ?? 0).toFixed(2)} / 15m ${(node?.load15 ?? 0).toFixed(2)}` }
+    case 'temperature': {
+      const temperature = node?.temp ?? 0
+      return { key, label: '系统温度', value: temperature > 0 ? temperature.toFixed(1) : '-', unit: temperature > 0 ? '°C' : undefined, icon: 'tabler:temperature' }
+    }
+    case 'processes':
+      return { key, label: '进程数', value: Math.round(node?.process ?? 0).toLocaleString('zh-CN'), icon: 'tabler:list-numbers' }
+    case 'connections':
+      return { key, label: '连接数', value: Math.round((node?.connections ?? 0) + (node?.connections_udp ?? 0)).toLocaleString('zh-CN'), icon: 'tabler:plug-connected', tooltip: `TCP ${node?.connections ?? 0} / UDP ${node?.connections_udp ?? 0}` }
+    case 'uptime':
+      return { key, label: '运行时间', value: formatUptime(node?.uptime ?? 0), icon: 'tabler:clock-up' }
+    case 'uploadSpeed': {
+      const speed = splitMeasurement(formatBytesPerSecond(node?.net_out ?? 0))
+      return { key, label: '实时上行', value: speed.value, unit: speed.unit, icon: 'tabler:chevrons-up' }
+    }
+    case 'downloadSpeed': {
+      const speed = splitMeasurement(formatBytesPerSecond(node?.net_in ?? 0))
+      return { key, label: '实时下行', value: speed.value, unit: speed.unit, icon: 'tabler:chevrons-down' }
+    }
+    case 'totalTraffic': {
+      const traffic = splitMeasurement(formatBytes((node?.net_total_up ?? 0) + (node?.net_total_down ?? 0)))
+      return { key, label: '累计流量', value: traffic.value, unit: traffic.unit, icon: 'tabler:arrows-transfer-up-down', tooltip: `↑ ${formatBytes(node?.net_total_up ?? 0)} / ↓ ${formatBytes(node?.net_total_down ?? 0)}` }
+    }
+    case 'trafficQuota':
+      return {
+        key,
+        label: '流量配额',
+        value: nodeHasTrafficLimit ? nodeTrafficPercentage.toFixed(1) : '∞',
+        unit: nodeHasTrafficLimit ? '%' : undefined,
+        icon: 'tabler:gauge',
+        tooltip: nodeHasTrafficLimit ? `${formatBytes(nodeTrafficUsed)} / ${formatBytes(nodeTrafficLimit)}` : '无限流量',
+      }
+    default:
+      return { key: 'cpuUsage', label: 'CPU 使用率', value: (node?.cpu ?? 0).toFixed(1), unit: '%', icon: 'tabler:cpu' }
+  }
+}
 
 // 硬件信息小卡：CPU 单独全宽展示，这里是其余小格。
 // - 「架构」格：登录后改显节点 IP（避免未登录访客扫到 IP），未登录或无 IP 时回退显示架构
@@ -402,6 +492,8 @@ const trafficProgressClass = computed(() => {
     return 'bg-amber-500/25'
   return 'bg-emerald-500/20'
 })
+
+const metricCards = computed<MetricCard[]>(() => appStore.detailMetricCardOrder.map(getDetailMetricCard))
 </script>
 
 <template>
@@ -476,13 +568,13 @@ const trafficProgressClass = computed(() => {
       </div>
 
       <!-- 价格指标卡片 -->
-      <div v-if="!appStore.nodeDetailSectionTabsEnabled || activeDetailSection === 'overview'" class="px-4 grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div v-if="!appStore.nodeDetailSectionTabsEnabled || activeDetailSection === 'overview'" class="px-4 grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-4">
         <CardX
-          v-for="item in metricCards" :key="item.label" hoverable size="small"
+          v-for="item in metricCards" :key="item.key" hoverable size="small"
           class="group h-full bg-background/50 border-none hover:bg-background transition-all rounded-md"
           content-class="h-full !p-3"
         >
-          <div class="flex h-full min-h-10 md:min-h-18 flex-col justify-between gap-3">
+          <div :title="item.tooltip" class="flex h-full min-h-10 md:min-h-18 flex-col justify-between gap-3">
             <div class="flex items-center justify-between gap-2">
               <span class="text-xs font-medium tracking-wider text-muted-foreground">{{ item.label }}</span>
               <Icon :icon="item.icon" :width="20" :height="20" class="text-slate-500/25 transition-colors group-hover:text-slate-500" />

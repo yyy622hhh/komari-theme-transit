@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import type { ChartDashboardCardKey } from '@/stores/app'
+import type { NormalizedMetricSeries } from '@/utils/metricSeries'
 import type { RecordFormat } from '@/utils/recordHelper'
-import type { MetricQueryParams, MetricSeries, StatusRecord } from '@/utils/rpc'
+import type { MetricQueryParams, MetricSeries, PingTaskInfo, StatusRecord } from '@/utils/rpc'
 import { Icon } from '@iconify/vue'
 import { useIntervalFn } from '@vueuse/core'
 import dayjs from 'dayjs'
 import { computed, onMounted, ref, shallowRef, watch } from 'vue'
 import VChart from 'vue-echarts'
+import MetricChartHeader from '@/components/MetricChartHeader.vue'
+import MetricSeriesChartCard from '@/components/MetricSeriesChartCard.vue'
 import { Button } from '@/components/ui/button'
 import { CardX } from '@/components/ui/card-x'
 import { Empty } from '@/components/ui/empty'
@@ -15,7 +18,7 @@ import { Spinner } from '@/components/ui/spinner'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { loadNodeLoadRecords, useNodeLoadStats } from '@/composables/useNodeLoadStats'
 import { LOAD_RECORD_MAX_COUNT } from '@/constants/load'
-import { loadMetricDefinitions, queryMetrics } from '@/services/metrics.service'
+import { loadMetricDefinitions, loadPublicPingTasks, queryMetrics } from '@/services/metrics.service'
 import { useAppStore } from '@/stores/app'
 import { useNodesStore } from '@/stores/nodes'
 import { formatBytes, formatBytesSplit } from '@/utils/helper'
@@ -60,12 +63,18 @@ const LOAD_METRIC_KEYS = [
   'cpu.usage',
   'load.average',
   'memory.used',
+  'memory.total',
   'swap.used',
+  'swap.total',
+  'temperature',
   'disk.used',
+  'disk.total',
   'net.in.rate',
   'net.out.rate',
   'net.total.down',
   'net.total.up',
+  'traffic.down',
+  'traffic.up',
   'process.count',
   'connections.tcp',
   'connections.udp',
@@ -74,9 +83,22 @@ const LOAD_METRIC_KEYS = [
   'gpu.memory.used',
   'gpu.memory.total',
   'gpu.temperature',
+  'ping.latency_ms',
+  'ping.loss',
 ] as const
 
 const CUSTOM_VIEW_LABEL = '自定义'
+const PING_METRIC_KEYS = ['ping.latency_ms', 'ping.loss'] as const
+const METRIC_HISTORY_MAX_POINTS = 700
+const REALTIME_METRIC_REFRESH_MS = 30_000
+
+interface MetricChartSeriesData {
+  name: string
+  color: string
+  kind: 'bytes' | 'bytesPerSecond' | 'count' | 'milliseconds' | 'percent' | 'temperature'
+  data: Array<[string, number | null]>
+  dashed?: boolean
+}
 
 type LoadMetricKey = typeof LOAD_METRIC_KEYS[number]
 
@@ -206,9 +228,13 @@ const effectiveHistoryHours = computed(() => isCustomRange.value ? customRange.v
 // 数据状态
 const remoteData = shallowRef<StatusRecord[]>([])
 const metricData = shallowRef<RecordFormat[] | null>(null)
+const rawMetricSeries = shallowRef<NormalizedMetricSeries[]>([])
+const availableMetricKeys = shallowRef<Set<string>>(new Set())
+const pingTasks = shallowRef<PingTaskInfo[]>([])
 const loading = ref(false)
 const isInitialLoad = ref(true) // 是否为首次加载（用于控制实时模式下的 NSpin 显示）
 const error = ref<string | null>(null)
+let lastRealtimeMetricFetchAt = 0
 
 // 节点信息
 const nodeInfo = computed(() => nodesStore.nodesByUuid.get(props.uuid))
@@ -295,6 +321,8 @@ function statusToRecordFormat(records: StatusRecord[]): RecordFormat[] {
       net_out: r.net_out ?? null,
       net_total_up: r.net_total_up ?? null,
       net_total_down: r.net_total_down ?? null,
+      traffic_up: r.traffic_up ?? null,
+      traffic_down: r.traffic_down ?? null,
       process: r.process ?? null,
       connections: r.connections ?? null,
       connections_udp: r.connections_udp ?? null,
@@ -351,6 +379,8 @@ function ensureMetricRow(rows: Map<string, RecordFormat>, time: string): RecordF
     net_out: null,
     net_total_up: null,
     net_total_down: null,
+    traffic_up: null,
+    traffic_down: null,
     process: null,
     connections: null,
     connections_udp: null,
@@ -370,11 +400,23 @@ function applyMetricPoint(row: RecordFormat, key: LoadMetricKey, value: number |
     case 'memory.used':
       row.ram = value
       break
+    case 'memory.total':
+      row.ram_total = value
+      break
     case 'swap.used':
       row.swap = value
       break
+    case 'swap.total':
+      row.swap_total = value
+      break
+    case 'temperature':
+      row.temp = value
+      break
     case 'disk.used':
       row.disk = value
+      break
+    case 'disk.total':
+      row.disk_total = value
       break
     case 'net.in.rate':
       row.net_in = value
@@ -387,6 +429,12 @@ function applyMetricPoint(row: RecordFormat, key: LoadMetricKey, value: number |
       break
     case 'net.total.up':
       row.net_total_up = value
+      break
+    case 'traffic.down':
+      row.traffic_down = value
+      break
+    case 'traffic.up':
+      row.traffic_up = value
       break
     case 'process.count':
       row.process = value
@@ -478,6 +526,9 @@ function metricSeriesToRecordFormat(seriesList: MetricSeries[]): RecordFormat[] 
       continue
 
     const key = series.metric_key as LoadMetricKey
+    if (key === 'ping.latency_ms' || key === 'ping.loss')
+      continue
+
     for (const point of series.points) {
       const row = ensureMetricRow(rows, point.time)
       applyMetricPoint(row, key, metricValue(point.value), series)
@@ -487,9 +538,24 @@ function metricSeriesToRecordFormat(seriesList: MetricSeries[]): RecordFormat[] 
   return finalizeGpuRows([...rows.values()].sort((a, b) => dayjs(a.time).valueOf() - dayjs(b.time).valueOf()))
 }
 
-async function loadMetricHistoryRecords(params: Pick<MetricQueryParams, 'hours' | 'start' | 'end'>): Promise<RecordFormat[] | null> {
+interface MetricHistoryData {
+  records: RecordFormat[]
+  series: NormalizedMetricSeries[]
+}
+
+async function loadMetricCatalog(): Promise<void> {
+  const [definitions, tasks] = await Promise.all([
+    loadMetricDefinitions().catch(() => []),
+    loadPublicPingTasks().catch(() => []),
+  ])
+  availableMetricKeys.value = new Set(definitions.map(definition => definition.name))
+  pingTasks.value = tasks
+}
+
+async function loadMetricHistoryRecords(params: Pick<MetricQueryParams, 'hours' | 'start' | 'end'>): Promise<MetricHistoryData | null> {
   const definitions = await loadMetricDefinitions()
   const availableKeys = new Set(definitions.map(definition => definition.name))
+  availableMetricKeys.value = availableKeys
   const metricKeys = LOAD_METRIC_KEYS.filter(key => availableKeys.has(key))
   if (!metricKeys.length)
     return null
@@ -500,12 +566,60 @@ async function loadMetricHistoryRecords(params: Pick<MetricQueryParams, 'hours' 
     ...params,
     downsample: true,
     fill_empty: true,
-    max_points: LOAD_RECORD_MAX_COUNT,
+    max_points: METRIC_HISTORY_MAX_POINTS,
     aggregation: 'avg',
   })
 
-  const records = metricSeriesToRecordFormat(result.series)
-  return records.length ? records : null
+  const series = normalizeMetricSeriesList(result.series)
+  if (!series.some(item => item.points.length > 0))
+    return null
+
+  return {
+    records: metricSeriesToRecordFormat(result.series),
+    series,
+  }
+}
+
+async function refreshRealtimeMetricSeries(force = false): Promise<void> {
+  const cards = appStore.chartDashboardTemplate.cards
+  if (!cards.includes('ping') && !cards.includes('pingLoss')) {
+    rawMetricSeries.value = []
+    return
+  }
+
+  const now = Date.now()
+  if (!force && now - lastRealtimeMetricFetchAt < REALTIME_METRIC_REFRESH_MS)
+    return
+  lastRealtimeMetricFetchAt = now
+  const requestedUuid = props.uuid
+
+  try {
+    if (!availableMetricKeys.value.size)
+      await loadMetricCatalog()
+
+    const metricKeys = PING_METRIC_KEYS.filter(key => availableMetricKeys.value.has(key))
+    if (!metricKeys.length) {
+      rawMetricSeries.value = []
+      return
+    }
+
+    const result = await queryMetrics({
+      metric_keys: [...metricKeys],
+      entity_id: props.uuid,
+      hours: 1,
+      downsample: true,
+      fill_empty: true,
+      max_points: 150,
+      aggregation: 'avg',
+    })
+    if (!isRealtime.value || props.uuid !== requestedUuid)
+      return
+    rawMetricSeries.value = normalizeMetricSeriesList(result.series)
+  }
+  catch {
+    if (isRealtime.value && props.uuid === requestedUuid)
+      rawMetricSeries.value = []
+  }
 }
 
 async function fetchRecentData() {
@@ -513,6 +627,7 @@ async function fetchRecentData() {
     return
 
   metricData.value = null
+  void refreshRealtimeMetricSeries()
 
   // 只在首次加载时显示 loading
   if (isInitialLoad.value) {
@@ -543,6 +658,7 @@ async function fetchHistoryData() {
 
   if (isCustomRange.value && !customRange.value) {
     metricData.value = null
+    rawMetricSeries.value = []
     remoteData.value = []
     error.value = customRangeError.value || '请选择有效的自定义时间范围'
     return
@@ -558,13 +674,15 @@ async function fetchHistoryData() {
   error.value = null
 
   try {
-    const metricRecords = await loadMetricHistoryRecords(metricParams).catch(() => null)
-    if (metricRecords) {
-      metricData.value = metricRecords
+    const metricHistory = await loadMetricHistoryRecords(metricParams).catch(() => null)
+    if (metricHistory) {
+      metricData.value = metricHistory.records
+      rawMetricSeries.value = metricHistory.series
       remoteData.value = []
     }
     else {
       metricData.value = null
+      rawMetricSeries.value = []
       remoteData.value = await loadNodeLoadRecords(props.uuid, hours, LOAD_RECORD_MAX_COUNT)
     }
   }
@@ -572,6 +690,7 @@ async function fetchHistoryData() {
     error.value = err instanceof Error ? err.message : '获取数据失败'
     remoteData.value = []
     metricData.value = null
+    rawMetricSeries.value = []
   }
   finally {
     loading.value = false
@@ -628,6 +747,111 @@ const latestStatus = computed(() => {
 })
 
 const hasGpuData = computed(() => chartData.value.some(record => record.gpu != null || record.gpu_usage != null || record.gpu_memory != null || record.gpu_detailed))
+
+const metricSeriesColors = ['#38BDF8', '#A78BFA', '#34D399', '#FB7185', '#FBBF24', '#22D3EE', '#F97316', '#94A3B8']
+
+const pingTaskNameMap = computed(() => new Map(pingTasks.value.map(task => [String(task.id), task.name])))
+
+function seriesHasData(series: MetricChartSeriesData): boolean {
+  return series.data.some(([, value]) => value !== null && Number.isFinite(value))
+}
+
+function recordMetricSeries(
+  name: string,
+  color: string,
+  kind: MetricChartSeriesData['kind'],
+  getter: (record: RecordFormat) => number | null | undefined,
+  dashed = false,
+): MetricChartSeriesData {
+  return {
+    name,
+    color,
+    kind,
+    dashed,
+    data: chartData.value.map(record => [record.time, metricValue(getter(record))]),
+  }
+}
+
+function gpuDeviceEntries(): Array<{ index: number, name: string }> {
+  const devices = new Map<number, string>()
+  for (const record of chartData.value) {
+    for (const [rawIndex, detail] of Object.entries(record.gpu_detailed ?? {})) {
+      const index = detail.device_index ?? Number(rawIndex)
+      devices.set(index, detail.device_name || `GPU ${index + 1}`)
+    }
+  }
+  return [...devices.entries()]
+    .sort(([left], [right]) => left - right)
+    .map(([index, name]) => ({ index, name }))
+}
+
+const trafficChartSeries = computed<MetricChartSeriesData[]>(() => [
+  recordMetricSeries('累计下载', chartColors.quinary, 'bytes', record => record.net_total_down),
+  recordMetricSeries('累计上传', chartColors.quaternary, 'bytes', record => record.net_total_up),
+  recordMetricSeries('周期下载', chartColors.tertiary, 'bytes', record => record.traffic_down, true),
+  recordMetricSeries('周期上传', chartColors.secondary, 'bytes', record => record.traffic_up, true),
+].filter(seriesHasData))
+
+const gpuMemoryChartSeries = computed<MetricChartSeriesData[]>(() => gpuDeviceEntries().flatMap((device, index) => {
+  const used = recordMetricSeries(
+    `${device.name} 已用`,
+    metricSeriesColors[index * 2 % metricSeriesColors.length]!,
+    'bytes',
+    record => record.gpu_detailed?.[device.index]?.mem_used,
+  )
+  const total = recordMetricSeries(
+    `${device.name} 总量`,
+    metricSeriesColors[(index * 2 + 1) % metricSeriesColors.length]!,
+    'bytes',
+    record => record.gpu_detailed?.[device.index]?.mem_total,
+    true,
+  )
+  return [used, total].filter(seriesHasData)
+}))
+
+const temperatureChartSeries = computed<MetricChartSeriesData[]>(() => {
+  const series = [recordMetricSeries('系统温度', chartColors.secondary, 'temperature', record => record.temp)]
+  if (appStore.gpuChartEnabled) {
+    series.push(...gpuDeviceEntries().map((device, index) => recordMetricSeries(
+      `${device.name} 温度`,
+      metricSeriesColors[index % metricSeriesColors.length]!,
+      'temperature',
+      record => record.gpu_detailed?.[device.index]?.temperature,
+    )))
+  }
+  return series.filter(seriesHasData)
+})
+
+function pingSeries(metricKey: 'ping.latency_ms' | 'ping.loss'): MetricChartSeriesData[] {
+  return rawMetricSeries.value
+    .filter(series => series.metric_key === metricKey)
+    .map<MetricChartSeriesData>((series, index) => {
+      const tags = metricTags(series)
+      const taskId = String(tags.task_id ?? tags.task ?? '')
+      const taskName = pingTaskNameMap.value.get(taskId) || (taskId ? `任务 ${taskId}` : `Ping ${index + 1}`)
+      return {
+        name: taskName,
+        color: metricSeriesColors[index % metricSeriesColors.length]!,
+        kind: metricKey === 'ping.loss' ? 'percent' : 'milliseconds',
+        data: series.points.map(point => [
+          point.time,
+          point.value === null || !Number.isFinite(point.value)
+            ? null
+            : metricKey === 'ping.loss' ? point.value * 100 : point.value,
+        ] as [string, number | null]),
+      }
+    })
+    .filter(seriesHasData)
+}
+
+const pingChartSeries = computed<MetricChartSeriesData[]>(() => pingSeries('ping.latency_ms'))
+const pingLossChartSeries = computed<MetricChartSeriesData[]>(() => pingSeries('ping.loss'))
+
+const hasTrafficData = computed(() => trafficChartSeries.value.length > 0)
+const hasGpuMemoryData = computed(() => gpuMemoryChartSeries.value.length > 0)
+const hasTemperatureData = computed(() => temperatureChartSeries.value.length > 0)
+const hasPingData = computed(() => pingChartSeries.value.length > 0)
+const hasPingLossData = computed(() => pingLossChartSeries.value.length > 0)
 
 // ==================== 工具函数 ====================
 
@@ -777,7 +1001,7 @@ const cpuChartOption = computed(() => ({
 // 内存图表
 const memoryChartOption = computed(() => ({
   animation: false,
-  color: [chartColors.primary, chartColors.secondary],
+  color: [chartColors.primary, chartColors.quinary, chartColors.secondary, chartColors.quaternary],
   tooltip: {
     ...baseTooltipConfig.value,
     formatter: (params: unknown) => {
@@ -810,12 +1034,25 @@ const memoryChartOption = computed(() => ({
         else if (item.seriesName === 'Swap') {
           html += `<div style="display:flex;align-items:center">${colorDot}<span>Swap</span><span style="margin-left:auto;font-weight:600;margin-left:16px">${formatBytes(swapUsed)} (${swapPercent}%)</span></div>`
         }
+        else if (item.seriesName === 'RAM 总量') {
+          html += `<div style="display:flex;align-items:center">${colorDot}<span>RAM 总量</span><span style="margin-left:auto;font-weight:600;margin-left:16px">${formatBytes(ramTotal)}</span></div>`
+        }
+        else if (item.seriesName === 'Swap 总量') {
+          html += `<div style="display:flex;align-items:center">${colorDot}<span>Swap 总量</span><span style="margin-left:auto;font-weight:600;margin-left:16px">${formatBytes(swapTotal)}</span></div>`
+        }
       }
       html += '</div>'
       return html
     },
   },
-  grid: chartMargin,
+  legend: {
+    data: ['RAM', 'RAM 总量', 'Swap', 'Swap 总量'],
+    bottom: 4,
+    itemWidth: 10,
+    itemHeight: 8,
+    textStyle: { fontSize: 10, color: chartThemeColors.value.textSecondary },
+  },
+  grid: chartMarginWithLegend,
   xAxis: baseXAxisConfig.value,
   yAxis: {
     ...baseYAxisConfig.value,
@@ -830,7 +1067,7 @@ const memoryChartOption = computed(() => ({
     {
       name: 'RAM',
       type: 'line',
-      data: chartData.value.map(r => r.ram ?? 0),
+      data: chartData.value.map(r => r.ram),
 
       showSymbol: false,
       lineStyle: { width: 1.5, color: chartColors.primary, cap: 'round' as const },
@@ -849,12 +1086,26 @@ const memoryChartOption = computed(() => ({
       },
     },
     {
+      name: 'RAM 总量',
+      type: 'line',
+      data: chartData.value.map(r => r.ram_total ?? nodeInfo.value?.mem_total ?? null),
+      showSymbol: false,
+      lineStyle: { width: 1.2, type: 'dashed' as const, color: chartColors.quinary, cap: 'round' as const },
+    },
+    {
       name: 'Swap',
       type: 'line',
-      data: chartData.value.map(r => r.swap ?? 0),
+      data: chartData.value.map(r => r.swap),
 
       showSymbol: false,
       lineStyle: { width: 1.5, color: chartColors.secondary, cap: 'round' as const },
+    },
+    {
+      name: 'Swap 总量',
+      type: 'line',
+      data: chartData.value.map(r => r.swap_total ?? nodeInfo.value?.swap_total ?? null),
+      showSymbol: false,
+      lineStyle: { width: 1.2, type: 'dashed' as const, color: chartColors.quaternary, cap: 'round' as const },
     },
   ],
 }))
@@ -862,11 +1113,11 @@ const memoryChartOption = computed(() => ({
 // 磁盘图表
 const diskChartOption = computed(() => ({
   animation: false,
-  color: [chartColors.tertiary],
+  color: [chartColors.tertiary, chartColors.quinary],
   tooltip: {
     ...baseTooltipConfig.value,
     formatter: (params: unknown) => {
-      const p = params as Array<{ dataIndex: number, value: number, color: string }>
+      const p = params as Array<{ dataIndex: number, seriesName: string, value: number, color: string }>
       if (!p.length)
         return ''
       const firstParam = p[0]
@@ -881,16 +1132,25 @@ const diskChartOption = computed(() => ({
       const diskPercent = diskTotal > 0 ? ((diskUsed / diskTotal) * 100).toFixed(1) : '0'
 
       const timeStr = formatTimeForTooltip(record.time, effectiveHistoryHours.value)
-      const colorDot = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${firstParam.color};margin-right:8px;flex-shrink:0"></span>`
-
       let html = `<div style="font-weight:600;margin-bottom:6px;color:${chartThemeColors.value.textSecondary}">${timeStr}</div>`
       html += '<div style="display:flex;flex-direction:column;gap:4px">'
-      html += `<div style="display:flex;align-items:center">${colorDot}<span>磁盘已用</span><span style="margin-left:auto;font-weight:600;margin-left:16px">${formatBytes(diskUsed)} (${diskPercent}%)</span></div>`
+      for (const item of p) {
+        const colorDot = `<span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${item.color};margin-right:8px;flex-shrink:0"></span>`
+        const text = item.seriesName === '磁盘总量' ? formatBytes(diskTotal) : `${formatBytes(diskUsed)} (${diskPercent}%)`
+        html += `<div style="display:flex;align-items:center">${colorDot}<span>${item.seriesName}</span><span style="margin-left:auto;font-weight:600;margin-left:16px">${text}</span></div>`
+      }
       html += '</div>'
       return html
     },
   },
-  grid: chartMargin,
+  legend: {
+    data: ['磁盘已用', '磁盘总量'],
+    bottom: 4,
+    itemWidth: 10,
+    itemHeight: 8,
+    textStyle: { fontSize: 10, color: chartThemeColors.value.textSecondary },
+  },
+  grid: chartMarginWithLegend,
   xAxis: baseXAxisConfig.value,
   yAxis: {
     ...baseYAxisConfig.value,
@@ -905,7 +1165,7 @@ const diskChartOption = computed(() => ({
     {
       name: '磁盘已用',
       type: 'line',
-      data: chartData.value.map(r => r.disk ?? 0),
+      data: chartData.value.map(r => r.disk),
 
       showSymbol: false,
       lineStyle: { width: 1.5, color: chartColors.tertiary, cap: 'round' as const },
@@ -922,6 +1182,13 @@ const diskChartOption = computed(() => ({
           ],
         },
       },
+    },
+    {
+      name: '磁盘总量',
+      type: 'line',
+      data: chartData.value.map(r => r.disk_total ?? nodeInfo.value?.disk_total ?? null),
+      showSymbol: false,
+      lineStyle: { width: 1.2, type: 'dashed' as const, color: chartColors.quinary, cap: 'round' as const },
     },
   ],
 }))
@@ -996,6 +1263,19 @@ const networkChartOption = computed(() => ({
   ],
 }))
 
+const gpuDeviceUsageEChartSeries = computed(() => gpuDeviceEntries().map((device, index) => ({
+  name: device.name,
+  type: 'line',
+  data: chartData.value.map(record => record.gpu_detailed?.[device.index]?.usage ?? null),
+  showSymbol: false,
+  lineStyle: {
+    width: 1.2,
+    type: 'dashed' as const,
+    color: metricSeriesColors[index % metricSeriesColors.length]!,
+    cap: 'round' as const,
+  },
+})).filter(series => series.data.some(value => value !== null)))
+
 // GPU 图表
 const gpuChartOption = computed(() => ({
   animation: false,
@@ -1039,7 +1319,7 @@ const gpuChartOption = computed(() => ({
     },
   },
   legend: {
-    data: ['GPU 使用率', '显存使用率'],
+    data: ['GPU 使用率', '显存使用率', ...gpuDeviceUsageEChartSeries.value.map(series => series.name)],
     bottom: 4,
     itemWidth: 12,
     itemHeight: 12,
@@ -1072,18 +1352,41 @@ const gpuChartOption = computed(() => ({
       showSymbol: false,
       lineStyle: { width: 1.5, color: chartColors.quaternary, cap: 'round' as const },
     },
+    ...gpuDeviceUsageEChartSeries.value,
   ],
 }))
 
 const chartDashboardCards = computed(() => appStore.chartDashboardTemplate.cards)
 
 function isChartCardEnabled(key: ChartDashboardCardKey): boolean {
-  return chartDashboardCards.value.includes(key) && (key !== 'gpu' || (appStore.gpuChartEnabled && hasGpuData.value))
+  if (!chartDashboardCards.value.includes(key))
+    return false
+
+  switch (key) {
+    case 'gpu':
+      return appStore.gpuChartEnabled && hasGpuData.value
+    case 'gpuMemory':
+      return appStore.gpuChartEnabled && hasGpuMemoryData.value
+    case 'traffic':
+      return hasTrafficData.value
+    case 'temperature':
+      return hasTemperatureData.value
+    case 'ping':
+      return hasPingData.value
+    case 'pingLoss':
+      return hasPingLossData.value
+    default:
+      return true
+  }
+}
+
+function getChartCardOrder(key: ChartDashboardCardKey): number {
+  const index = chartDashboardCards.value.indexOf(key)
+  return index < 0 ? 99 : index
 }
 
 function getChartCardStyle(key: ChartDashboardCardKey): Record<string, string> {
-  const index = chartDashboardCards.value.indexOf(key)
-  return { order: String(index < 0 ? 99 : index) }
+  return { order: String(getChartCardOrder(key)) }
 }
 
 // 连接数图表
@@ -1251,11 +1554,22 @@ watch(selectedView, () => {
 
 watch(() => props.uuid, () => {
   remoteData.value = []
+  metricData.value = null
+  rawMetricSeries.value = []
+  lastRealtimeMetricFetchAt = 0
   isInitialLoad.value = true // 切换节点时重置首次加载状态
   fetchData()
 })
 
+watch(chartDashboardCards, () => {
+  if (isRealtime.value) {
+    lastRealtimeMetricFetchAt = 0
+    void refreshRealtimeMetricSeries(true)
+  }
+})
+
 onMounted(() => {
+  void loadMetricCatalog()
   fetchData()
 })
 </script>
@@ -1320,14 +1634,13 @@ onMounted(() => {
         <!-- CPU 卡片 -->
         <CardX v-if="isChartCardEnabled('cpu')" size="small" class="bg-background/50 border-none hover:bg-background transition-all rounded-md" :style="getChartCardStyle('cpu')">
           <template #header>
-            <div class="flex items-center justify-between">
-              <span class="text-base font-bold">CPU</span>
+            <MetricChartHeader title="CPU 与负载" icon="tabler:cpu" tone="rose">
               <div v-if="latestStatus?.cpu != null" class="text-xs flex gap-0.5 items-baseline">
                 <span>{{ latestStatus.cpu.toFixed(1) }}</span>
                 <span>%</span>
               </div>
               <span v-else>-</span>
-            </div>
+            </MetricChartHeader>
           </template>
           <div class="h-48">
             <VChart :option="cpuChartOption" autoresize />
@@ -1337,8 +1650,7 @@ onMounted(() => {
         <!-- 内存卡片 -->
         <CardX v-if="isChartCardEnabled('memory')" size="small" class="bg-background/50 border-none hover:bg-background transition-all rounded-md" :style="getChartCardStyle('memory')">
           <template #header>
-            <div class="flex items-center justify-between">
-              <span class="text-base font-bold">内存</span>
+            <MetricChartHeader title="内存与 Swap" icon="tabler:database" tone="violet">
               <div class="text-xs flex gap-1 items-baseline">
                 <template v-if="latestStatus?.ram != null">
                   <span>{{ formatBytesSplit(latestStatus.ram).value }}</span>
@@ -1353,7 +1665,7 @@ onMounted(() => {
                 </template>
                 <span v-else>-</span>
               </div>
-            </div>
+            </MetricChartHeader>
           </template>
           <div class="h-48">
             <VChart :option="memoryChartOption" autoresize />
@@ -1363,13 +1675,7 @@ onMounted(() => {
         <!-- 磁盘卡片 -->
         <CardX v-if="isChartCardEnabled('disk')" size="small" class="bg-background/50 border-none hover:bg-background transition-all rounded-md" :style="getChartCardStyle('disk')">
           <template #header>
-            <div class="flex items-center justify-between gap-3">
-              <div class="min-w-0">
-                <span class="text-base font-bold">磁盘</span>
-                <div v-if="diskPredictionSummary" class="text-[10px] text-orange-500 truncate" :title="diskPredictionSummary">
-                  {{ diskPredictionSummary }}
-                </div>
-              </div>
+            <MetricChartHeader title="磁盘" icon="tabler:device-floppy" tone="emerald" :subtitle="diskPredictionSummary">
               <div class="text-xs flex gap-1 items-baseline shrink-0">
                 <template v-if="latestStatus?.disk != null">
                   <span>{{ formatBytesSplit(latestStatus.disk).value }}</span>
@@ -1383,7 +1689,7 @@ onMounted(() => {
                 </template>
                 <span v-else>-</span>
               </div>
-            </div>
+            </MetricChartHeader>
           </template>
           <div class="h-48">
             <VChart :option="diskChartOption" autoresize />
@@ -1393,8 +1699,7 @@ onMounted(() => {
         <!-- 网络卡片 -->
         <CardX v-if="isChartCardEnabled('network')" size="small" class="bg-background/50 border-none hover:bg-background transition-all rounded-md" :style="getChartCardStyle('network')">
           <template #header>
-            <div class="flex items-center justify-between">
-              <span class="text-base font-bold">网络</span>
+            <MetricChartHeader title="实时网络" icon="tabler:network" tone="sky">
               <div class="text-xs flex gap-2 items-baseline">
                 <span class="flex flex-row items-center justify-center gap-0.5">
                   <Icon icon="tabler:chevron-up" width="12" height="12" />
@@ -1413,23 +1718,26 @@ onMounted(() => {
                   <template v-else>-</template>
                 </span>
               </div>
-            </div>
+            </MetricChartHeader>
           </template>
           <div class="h-48">
             <VChart :option="networkChartOption" autoresize />
           </div>
         </CardX>
 
+        <MetricSeriesChartCard
+          v-if="isChartCardEnabled('traffic')"
+          title="累计与周期流量"
+          icon="tabler:arrows-transfer-up-down"
+          tone="sky"
+          :series="trafficChartSeries"
+          :order="getChartCardOrder('traffic')"
+        />
+
         <!-- GPU 卡片 -->
         <CardX v-if="isChartCardEnabled('gpu')" size="small" class="bg-background/50 border-none hover:bg-background transition-all rounded-md" :style="getChartCardStyle('gpu')">
           <template #header>
-            <div class="flex items-center justify-between gap-3">
-              <div class="min-w-0">
-                <span class="text-base font-bold">GPU</span>
-                <div v-if="getGpuDeviceNames(latestStatus)" class="text-[10px] text-foreground/55 truncate" :title="getGpuDeviceNames(latestStatus)">
-                  {{ getGpuDeviceNames(latestStatus) }}
-                </div>
-              </div>
+            <MetricChartHeader title="GPU 利用率" icon="tabler:device-desktop-analytics" tone="cyan" :subtitle="getGpuDeviceNames(latestStatus)">
               <div class="text-xs flex gap-1 items-baseline shrink-0">
                 <template v-if="latestStatus?.gpu_usage != null || latestStatus?.gpu != null">
                   <span>{{ (latestStatus.gpu_usage ?? latestStatus.gpu ?? 0).toFixed(1) }}</span>
@@ -1437,24 +1745,41 @@ onMounted(() => {
                 </template>
                 <span v-else>-</span>
               </div>
-            </div>
+            </MetricChartHeader>
           </template>
           <div class="h-48">
             <VChart :option="gpuChartOption" autoresize />
           </div>
         </CardX>
 
+        <MetricSeriesChartCard
+          v-if="isChartCardEnabled('gpuMemory')"
+          title="GPU 显存"
+          icon="tabler:stack-2"
+          tone="violet"
+          :series="gpuMemoryChartSeries"
+          :order="getChartCardOrder('gpuMemory')"
+        />
+
+        <MetricSeriesChartCard
+          v-if="isChartCardEnabled('temperature')"
+          title="温度"
+          icon="tabler:temperature"
+          tone="orange"
+          :series="temperatureChartSeries"
+          :order="getChartCardOrder('temperature')"
+        />
+
         <!-- 连接数卡片 -->
         <CardX v-if="isChartCardEnabled('connections')" size="small" class="bg-background/50 border-none hover:bg-background transition-all rounded-md" :style="getChartCardStyle('connections')">
           <template #header>
-            <div class="flex items-center justify-between">
-              <span class="text-base font-bold">连接</span>
+            <MetricChartHeader title="网络连接" icon="tabler:binary-tree" tone="amber">
               <div class="text-xs flex gap-1 items-baseline">
                 <span>TCP: {{ latestStatus?.connections ?? '-' }}</span>
                 <span>·</span>
                 <span>UDP: {{ latestStatus?.connections_udp ?? '-' }}</span>
               </div>
-            </div>
+            </MetricChartHeader>
           </template>
           <div class="h-48">
             <VChart :option="connectionsChartOption" autoresize />
@@ -1464,17 +1789,35 @@ onMounted(() => {
         <!-- 进程卡片 -->
         <CardX v-if="isChartCardEnabled('process')" size="small" class="bg-background/50 border-none hover:bg-background transition-all rounded-md" :style="getChartCardStyle('process')">
           <template #header>
-            <div class="flex items-center justify-between">
-              <span class="text-base font-bold">进程</span>
+            <MetricChartHeader title="进程" icon="tabler:activity" tone="slate">
               <span class="text-xs">
                 {{ latestStatus?.process ?? '-' }}
               </span>
-            </div>
+            </MetricChartHeader>
           </template>
           <div class="h-48">
             <VChart :option="processChartOption" autoresize />
           </div>
         </CardX>
+
+        <MetricSeriesChartCard
+          v-if="isChartCardEnabled('ping')"
+          title="Ping 延迟"
+          icon="tabler:radar"
+          tone="cyan"
+          :series="pingChartSeries"
+          :order="getChartCardOrder('ping')"
+        />
+
+        <MetricSeriesChartCard
+          v-if="isChartCardEnabled('pingLoss')"
+          title="Ping 丢包"
+          icon="tabler:cloud-exclamation"
+          tone="rose"
+          :series="pingLossChartSeries"
+          :order="getChartCardOrder('pingLoss')"
+          percent-scale
+        />
       </div>
     </Spinner>
   </div>

@@ -9,7 +9,8 @@ import { getAuthSession, requirePermission, setAuthSessionFromLogin, verifyLogin
 export type ThemeMode = 'auto' | 'light' | 'dark'
 export type ManagedThemeMode = 'beijing' | 'light' | 'dark'
 export type GeneralCardKey
-  = | 'memory'
+  = | 'currentTime'
+    | 'memory'
     | 'disk'
     | 'remainingValue'
     | 'totalTraffic'
@@ -17,11 +18,14 @@ export type GeneralCardKey
     | 'downloadSpeed'
     | 'onlineNodes'
     | 'avgCpu'
+    | 'avgGpu'
     | 'avgLoad'
     | 'swap'
     | 'processes'
     | 'connections'
     | 'cpuCores'
+    | 'gpuNodes'
+    | 'gpuPeakNode'
     | 'trafficQuota'
     | 'trafficPeak'
     | 'uploadPeakNode'
@@ -48,6 +52,26 @@ export type HomeQuickControlKey
     | 'highLoad'
     | 'expiring'
 
+export type DetailMetricCardKey
+  = | 'nodePrice'
+    | 'monthlyCost'
+    | 'remainingTime'
+    | 'remainingValue'
+    | 'cpuUsage'
+    | 'gpuUsage'
+    | 'memoryUsage'
+    | 'swapUsage'
+    | 'diskUsage'
+    | 'load'
+    | 'temperature'
+    | 'processes'
+    | 'connections'
+    | 'uptime'
+    | 'uploadSpeed'
+    | 'downloadSpeed'
+    | 'totalTraffic'
+    | 'trafficQuota'
+
 export type NodeListMetadataField
   = | 'provider'
     | 'region'
@@ -56,15 +80,29 @@ export type NodeListMetadataField
     | 'tags'
     | 'group'
 
-type GeneralCardPreset = 'basic' | 'ops' | 'finance' | 'traffic' | 'full' | 'custom'
+type GeneralCardPreset = 'official' | 'basic' | 'ops' | 'resource' | 'finance' | 'traffic' | 'gpu' | 'asset' | 'full' | 'custom'
 type HomeQuickControlPreset = 'basic' | 'traffic' | 'ops' | 'full' | 'custom'
+type DetailMetricCardPreset = 'finance' | 'status' | 'resource' | 'network' | 'gpu' | 'full' | 'custom'
+type ChartDashboardPreset = 'all' | 'compact' | 'resource' | 'network' | 'gpu' | 'latency' | 'ops' | 'full' | 'custom' | 'advanced'
 type Lang = 'zh-CN' | 'en-US'
 type NodeViewMode = 'card' | 'list'
 type NodeCardSize = 'mini' | 'compact' | 'comfortable' | 'large'
 type RpcTransportMode = 'websocket' | 'http'
 type EarthRenderer = 'realistic' | 'cobe' | 'tiled'
 type GlassColorPreset = 'emerald' | 'soft' | 'contrast' | 'midnight' | 'custom'
-export type ChartDashboardCardKey = 'cpu' | 'memory' | 'disk' | 'network' | 'gpu' | 'connections' | 'process'
+export type ChartDashboardCardKey
+  = | 'cpu'
+    | 'memory'
+    | 'disk'
+    | 'network'
+    | 'traffic'
+    | 'gpu'
+    | 'gpuMemory'
+    | 'temperature'
+    | 'connections'
+    | 'process'
+    | 'ping'
+    | 'pingLoss'
 
 export interface GlassCustomColors {
   lightCard: string
@@ -104,6 +142,7 @@ const DEFAULT_GENERAL_CARD_ORDER: GeneralCardKey[] = [
 ]
 
 const ALL_GENERAL_CARD_KEYS = [
+  'currentTime',
   'memory',
   'disk',
   'remainingValue',
@@ -114,11 +153,14 @@ const ALL_GENERAL_CARD_KEYS = [
   'onlineNodes',
   'offlineNodes',
   'avgCpu',
+  'avgGpu',
   'avgLoad',
   'swap',
   'processes',
   'connections',
   'cpuCores',
+  'gpuNodes',
+  'gpuPeakNode',
   'trafficQuota',
   'trafficPeak',
   'uploadPeakNode',
@@ -130,10 +172,12 @@ const ALL_GENERAL_CARD_KEYS = [
   'regionDistribution',
   'systemDistribution',
   'virtualizationDistribution',
+  'monthlyCost',
   'yearlyCost',
 ] as const satisfies readonly GeneralCardKey[]
 
 const DEFAULT_GENERAL_CARD_ENABLED: Record<GeneralCardKey, boolean> = {
+  currentTime: false,
   memory: true,
   disk: true,
   remainingValue: true,
@@ -142,11 +186,14 @@ const DEFAULT_GENERAL_CARD_ENABLED: Record<GeneralCardKey, boolean> = {
   downloadSpeed: true,
   onlineNodes: false,
   avgCpu: false,
+  avgGpu: false,
   avgLoad: false,
   swap: false,
   processes: false,
   connections: false,
   cpuCores: false,
+  gpuNodes: false,
+  gpuPeakNode: false,
   trafficQuota: false,
   trafficPeak: false,
   uploadPeakNode: false,
@@ -203,7 +250,39 @@ const DEFAULT_NODE_LIST_METADATA_FIELDS: NodeListMetadataField[] = [
 ]
 
 const DEFAULT_CHART_DASHBOARD_CARDS: ChartDashboardCardKey[] = ['cpu', 'memory', 'disk', 'network', 'gpu', 'connections', 'process']
-const ALL_CHART_DASHBOARD_CARDS = [...DEFAULT_CHART_DASHBOARD_CARDS, 'gpu'] as const satisfies readonly ChartDashboardCardKey[]
+const ALL_CHART_DASHBOARD_CARDS = [
+  ...DEFAULT_CHART_DASHBOARD_CARDS,
+  'traffic',
+  'gpuMemory',
+  'temperature',
+  'ping',
+  'pingLoss',
+] as const satisfies readonly ChartDashboardCardKey[]
+
+const DEFAULT_DETAIL_METRIC_CARD_ORDER: DetailMetricCardKey[] = [
+  'nodePrice',
+  'monthlyCost',
+  'remainingTime',
+  'remainingValue',
+]
+
+const ALL_DETAIL_METRIC_CARD_KEYS = [
+  ...DEFAULT_DETAIL_METRIC_CARD_ORDER,
+  'cpuUsage',
+  'gpuUsage',
+  'memoryUsage',
+  'swapUsage',
+  'diskUsage',
+  'load',
+  'temperature',
+  'processes',
+  'connections',
+  'uptime',
+  'uploadSpeed',
+  'downloadSpeed',
+  'totalTraffic',
+  'trafficQuota',
+] as const satisfies readonly DetailMetricCardKey[]
 
 const ALL_NODE_LIST_METADATA_FIELDS = [
   ...DEFAULT_NODE_LIST_METADATA_FIELDS,
@@ -212,6 +291,14 @@ const ALL_NODE_LIST_METADATA_FIELDS = [
 ] as const satisfies readonly NodeListMetadataField[]
 
 const GENERAL_CARD_PRESETS: Record<GeneralCardPreset, GeneralCardKey[]> = {
+  official: [
+    'currentTime',
+    'onlineNodes',
+    'regionDistribution',
+    'totalTraffic',
+    'uploadSpeed',
+    'downloadSpeed',
+  ],
   basic: DEFAULT_GENERAL_CARD_ORDER,
   ops: [
     'onlineNodes',
@@ -220,6 +307,14 @@ const GENERAL_CARD_PRESETS: Record<GeneralCardPreset, GeneralCardKey[]> = {
     'trafficWarnings',
     'avgCpu',
     'avgLoad',
+  ],
+  resource: [
+    'avgCpu',
+    'avgLoad',
+    'memory',
+    'disk',
+    'swap',
+    'cpuCores',
   ],
   finance: [
     'remainingValue',
@@ -236,6 +331,22 @@ const GENERAL_CARD_PRESETS: Record<GeneralCardPreset, GeneralCardKey[]> = {
     'downloadSpeed',
     'trafficPeak',
     'trafficWarnings',
+  ],
+  gpu: [
+    'gpuNodes',
+    'avgGpu',
+    'gpuPeakNode',
+    'avgCpu',
+    'memory',
+    'trafficPeak',
+  ],
+  asset: [
+    'onlineNodes',
+    'regionDistribution',
+    'systemDistribution',
+    'virtualizationDistribution',
+    'cpuCores',
+    'gpuNodes',
   ],
   full: [
     'onlineNodes',
@@ -256,19 +367,162 @@ const HOME_QUICK_CONTROL_PRESETS: Record<HomeQuickControlPreset, HomeQuickContro
   custom: DEFAULT_HOME_QUICK_CONTROL_ORDER,
 }
 
+const DETAIL_METRIC_CARD_PRESETS: Record<DetailMetricCardPreset, DetailMetricCardKey[]> = {
+  finance: ['nodePrice', 'monthlyCost', 'remainingTime', 'remainingValue', 'totalTraffic', 'trafficQuota', 'uptime', 'connections'],
+  status: ['cpuUsage', 'memoryUsage', 'diskUsage', 'load', 'temperature', 'uptime', 'processes', 'connections'],
+  resource: ['cpuUsage', 'gpuUsage', 'memoryUsage', 'swapUsage', 'diskUsage', 'load', 'temperature', 'processes', 'connections', 'uptime', 'uploadSpeed', 'downloadSpeed'],
+  network: ['uploadSpeed', 'downloadSpeed', 'totalTraffic', 'trafficQuota', 'connections', 'processes', 'uptime', 'remainingTime'],
+  gpu: ['gpuUsage', 'cpuUsage', 'memoryUsage', 'temperature', 'load', 'processes', 'connections', 'uptime'],
+  full: ['nodePrice', 'monthlyCost', 'remainingTime', 'remainingValue', 'cpuUsage', 'gpuUsage', 'memoryUsage', 'swapUsage', 'diskUsage', 'load', 'temperature', 'processes', 'connections', 'uploadSpeed', 'downloadSpeed', 'totalTraffic'],
+  custom: DEFAULT_DETAIL_METRIC_CARD_ORDER,
+}
+
+const CHART_DASHBOARD_PRESETS: Record<Exclude<ChartDashboardPreset, 'advanced'>, ChartDashboardCardKey[]> = {
+  all: DEFAULT_CHART_DASHBOARD_CARDS,
+  compact: ['cpu', 'memory', 'network'],
+  resource: ['cpu', 'memory', 'disk', 'temperature', 'process'],
+  network: ['network', 'traffic', 'connections'],
+  gpu: ['gpu', 'gpuMemory', 'temperature', 'cpu', 'memory'],
+  latency: ['ping', 'pingLoss', 'network'],
+  ops: ['cpu', 'memory', 'disk', 'network', 'temperature', 'connections', 'process', 'ping', 'pingLoss'],
+  full: ['cpu', 'memory', 'disk', 'network', 'traffic', 'gpu', 'gpuMemory', 'temperature', 'connections', 'process', 'ping', 'pingLoss'],
+  custom: DEFAULT_CHART_DASHBOARD_CARDS,
+}
+
 const GENERAL_CARD_PRESET_ALIASES: Record<string, GeneralCardPreset> = {
+  official: 'official',
+  官方: 'official',
   basic: 'basic',
   基础: 'basic',
   ops: 'ops',
   运维: 'ops',
+  resource: 'resource',
+  资源: 'resource',
   finance: 'finance',
   财务: 'finance',
   traffic: 'traffic',
   流量: 'traffic',
+  gpu: 'gpu',
+  GPU: 'gpu',
+  asset: 'asset',
+  资产: 'asset',
   full: 'full',
   完整: 'full',
   custom: 'custom',
   自定义: 'custom',
+}
+
+const GENERAL_CARD_SLOT_COUNT = 8
+const GENERAL_CARD_LABEL_ALIASES: Record<string, GeneralCardKey> = {
+  当前时间: 'currentTime',
+  内存用量: 'memory',
+  硬盘用量: 'disk',
+  剩余价值: 'remainingValue',
+  累计流量: 'totalTraffic',
+  实时上行: 'uploadSpeed',
+  实时下行: 'downloadSpeed',
+  在线节点: 'onlineNodes',
+  离线节点: 'offlineNodes',
+  平均CPU: 'avgCpu',
+  平均GPU: 'avgGpu',
+  平均负载: 'avgLoad',
+  交换内存: 'swap',
+  进程总数: 'processes',
+  连接数: 'connections',
+  CPU核心: 'cpuCores',
+  GPU节点: 'gpuNodes',
+  GPU峰值: 'gpuPeakNode',
+  流量配额: 'trafficQuota',
+  实时峰值: 'trafficPeak',
+  上行最高: 'uploadPeakNode',
+  下行最高: 'downloadPeakNode',
+  高负载节点: 'highLoadNodes',
+  即将到期: 'expiringNodes',
+  流量预警: 'trafficWarnings',
+  连接峰值: 'connectionPeakNode',
+  地区分布: 'regionDistribution',
+  系统分布: 'systemDistribution',
+  虚拟化分布: 'virtualizationDistribution',
+  月费用估算: 'monthlyCost',
+  年费用估算: 'yearlyCost',
+}
+
+const DETAIL_METRIC_CARD_SLOT_COUNT = 8
+const DETAIL_METRIC_CARD_PRESET_ALIASES: Record<string, DetailMetricCardPreset> = {
+  finance: 'finance',
+  财务: 'finance',
+  status: 'status',
+  状态: 'status',
+  resource: 'resource',
+  资源: 'resource',
+  network: 'network',
+  网络: 'network',
+  gpu: 'gpu',
+  GPU: 'gpu',
+  full: 'full',
+  综合: 'full',
+  custom: 'custom',
+  自定义: 'custom',
+}
+
+const DETAIL_METRIC_CARD_LABEL_ALIASES: Record<string, DetailMetricCardKey> = {
+  节点价格: 'nodePrice',
+  月均支出: 'monthlyCost',
+  剩余时间: 'remainingTime',
+  剩余价值: 'remainingValue',
+  CPU使用率: 'cpuUsage',
+  GPU使用率: 'gpuUsage',
+  内存使用率: 'memoryUsage',
+  交换内存使用率: 'swapUsage',
+  硬盘使用率: 'diskUsage',
+  系统负载: 'load',
+  系统温度: 'temperature',
+  进程数: 'processes',
+  连接数: 'connections',
+  运行时间: 'uptime',
+  实时上行: 'uploadSpeed',
+  实时下行: 'downloadSpeed',
+  累计流量: 'totalTraffic',
+  流量配额: 'trafficQuota',
+}
+
+const CHART_DASHBOARD_SLOT_COUNT = 7
+const CHART_DASHBOARD_PRESET_ALIASES: Record<string, ChartDashboardPreset> = {
+  all: 'all',
+  默认: 'all',
+  compact: 'compact',
+  精简: 'compact',
+  resource: 'resource',
+  资源: 'resource',
+  network: 'network',
+  网络: 'network',
+  gpu: 'gpu',
+  GPU: 'gpu',
+  latency: 'latency',
+  延迟: 'latency',
+  ops: 'ops',
+  运维: 'ops',
+  full: 'full',
+  完整: 'full',
+  custom: 'custom',
+  自定义: 'custom',
+  advanced: 'advanced',
+  高级JSON: 'advanced',
+}
+
+const CHART_DASHBOARD_LABEL_ALIASES: Record<string, ChartDashboardCardKey> = {
+  CPU: 'cpu',
+  内存: 'memory',
+  硬盘: 'disk',
+  网络: 'network',
+  流量: 'traffic',
+  GPU: 'gpu',
+  GPU显存: 'gpuMemory',
+  温度: 'temperature',
+  连接: 'connections',
+  进程: 'process',
+  延迟: 'ping',
+  丢包: 'pingLoss',
 }
 
 const HOME_QUICK_CONTROL_PRESET_ALIASES: Record<string, HomeQuickControlPreset> = {
@@ -298,11 +552,11 @@ const GLASS_COLOR_PRESET_ALIASES: Record<string, GlassColorPreset> = {
 }
 
 const DEFAULT_GLASS_CUSTOM_COLORS: GlassCustomColors = {
-  lightCard: '#ffffffb3',
-  lightControl: '#ffffffa6',
+  lightCard: '#f1f5f9bd',
+  lightControl: '#e2e8f0c2',
   lightText: '#14151a',
   lightMutedText: '#3f4552',
-  lightBorder: '#ffffff80',
+  lightBorder: '#cbd5e199',
   darkCard: '#0d111ad9',
   darkControl: '#101624cc',
   darkText: '#f7f8fb',
@@ -311,6 +565,7 @@ const DEFAULT_GLASS_CUSTOM_COLORS: GlassCustomColors = {
 }
 
 const HEX_COLOR_REGEX = /^#[0-9a-f]{6}(?:[0-9a-f]{2})?$/i
+const KEY_LIST_SEPARATOR_REGEX = /[\s,，;；]+/u
 const EMPTY_THEME_SETTINGS: ThemeSettings = {}
 
 function isValidThemeMode(value: unknown): value is ThemeMode {
@@ -339,6 +594,10 @@ function isGeneralCardKey(value: string): value is GeneralCardKey {
   return (ALL_GENERAL_CARD_KEYS as readonly string[]).includes(value)
 }
 
+function isDetailMetricCardKey(value: string): value is DetailMetricCardKey {
+  return (ALL_DETAIL_METRIC_CARD_KEYS as readonly string[]).includes(value)
+}
+
 function isHomeQuickControlKey(value: string): value is HomeQuickControlKey {
   return (ALL_HOME_QUICK_CONTROL_KEYS as readonly string[]).includes(value)
 }
@@ -356,6 +615,89 @@ function parseGeneralCardPreset(value: unknown): GeneralCardPreset {
     return 'basic'
 
   return GENERAL_CARD_PRESET_ALIASES[value.trim()] ?? 'basic'
+}
+
+function parseDetailMetricCardPreset(value: unknown): DetailMetricCardPreset {
+  if (typeof value !== 'string')
+    return 'finance'
+
+  return DETAIL_METRIC_CARD_PRESET_ALIASES[value.trim()] ?? 'finance'
+}
+
+function parseChartDashboardPreset(value: unknown): ChartDashboardPreset {
+  if (typeof value !== 'string')
+    return 'all'
+
+  return CHART_DASHBOARD_PRESET_ALIASES[value.trim()] ?? 'all'
+}
+
+function parseGeneralCardSlots(settings: ThemeSettings): GeneralCardKey[] {
+  const keys: GeneralCardKey[] = []
+  const seenKeys = new Set<GeneralCardKey>()
+
+  for (let index = 1; index <= GENERAL_CARD_SLOT_COUNT; index += 1) {
+    const value = settings[`generalCardSlot${index}`]
+    if (typeof value !== 'string')
+      continue
+
+    const normalized = value.trim()
+    const key = isGeneralCardKey(normalized)
+      ? normalized
+      : GENERAL_CARD_LABEL_ALIASES[normalized]
+    if (!key || seenKeys.has(key))
+      continue
+
+    keys.push(key)
+    seenKeys.add(key)
+  }
+
+  return keys
+}
+
+function parseDetailMetricCardSlots(settings: ThemeSettings): DetailMetricCardKey[] {
+  const keys: DetailMetricCardKey[] = []
+  const seenKeys = new Set<DetailMetricCardKey>()
+
+  for (let index = 1; index <= DETAIL_METRIC_CARD_SLOT_COUNT; index += 1) {
+    const value = settings[`detailMetricCardSlot${index}`]
+    if (typeof value !== 'string')
+      continue
+
+    const normalized = value.trim()
+    const key = isDetailMetricCardKey(normalized)
+      ? normalized
+      : DETAIL_METRIC_CARD_LABEL_ALIASES[normalized]
+    if (!key || seenKeys.has(key))
+      continue
+
+    keys.push(key)
+    seenKeys.add(key)
+  }
+
+  return keys
+}
+
+function parseChartDashboardSlots(settings: ThemeSettings): ChartDashboardCardKey[] {
+  const keys: ChartDashboardCardKey[] = []
+  const seenKeys = new Set<ChartDashboardCardKey>()
+
+  for (let index = 1; index <= CHART_DASHBOARD_SLOT_COUNT; index += 1) {
+    const value = settings[`chartDashboardSlot${index}`]
+    if (typeof value !== 'string')
+      continue
+
+    const normalized = value.trim()
+    const key = isChartDashboardCardKey(normalized)
+      ? normalized
+      : CHART_DASHBOARD_LABEL_ALIASES[normalized]
+    if (!key || seenKeys.has(key))
+      continue
+
+    keys.push(key)
+    seenKeys.add(key)
+  }
+
+  return keys
 }
 
 function parseHomeQuickControlPreset(value: unknown): HomeQuickControlPreset {
@@ -396,7 +738,7 @@ function parseKeyList<T extends string>(rawValue: unknown, isValid: (value: stri
   const rawItems = Array.isArray(rawValue)
     ? rawValue
     : typeof rawValue === 'string'
-      ? rawValue.split(',')
+      ? rawValue.split(KEY_LIST_SEPARATOR_REGEX)
       : []
 
   for (const item of rawItems) {
@@ -651,8 +993,16 @@ const useAppStore = defineStore('app', () => {
     const preset = parseGeneralCardPreset(settings.generalCardPreset)
 
     if (hasNewPreset) {
-      if (preset === 'custom')
-        return parseKeyList(settings.generalCardKeys, isGeneralCardKey, DEFAULT_GENERAL_CARD_ORDER)
+      if (preset === 'custom') {
+        const advancedKeys = typeof settings.generalCardKeys === 'string'
+          ? settings.generalCardKeys.trim()
+          : ''
+        if (advancedKeys)
+          return parseKeyList(advancedKeys, isGeneralCardKey, DEFAULT_GENERAL_CARD_ORDER)
+
+        const slotKeys = parseGeneralCardSlots(settings)
+        return slotKeys.length > 0 ? slotKeys : [...DEFAULT_GENERAL_CARD_ORDER]
+      }
 
       return [...GENERAL_CARD_PRESETS[preset]]
     }
@@ -717,6 +1067,22 @@ const useAppStore = defineStore('app', () => {
 
   const gpuChartEnabled = computed<boolean>(() => readBooleanSetting(themeSettings.value, 'gpuChartEnabled', false))
 
+  const detailMetricCardOrder = computed<DetailMetricCardKey[]>(() => {
+    const settings = themeSettings.value
+    const preset = parseDetailMetricCardPreset(settings.detailMetricCardPreset)
+    if (preset !== 'custom')
+      return [...DETAIL_METRIC_CARD_PRESETS[preset]]
+
+    const advancedKeys = typeof settings.detailMetricCardKeys === 'string'
+      ? settings.detailMetricCardKeys.trim()
+      : ''
+    if (advancedKeys)
+      return parseKeyList(advancedKeys, isDetailMetricCardKey, DEFAULT_DETAIL_METRIC_CARD_ORDER)
+
+    const slotKeys = parseDetailMetricCardSlots(settings)
+    return slotKeys.length > 0 ? slotKeys : [...DEFAULT_DETAIL_METRIC_CARD_ORDER]
+  })
+
   const offlineNodesLast = computed<boolean>(() => readBooleanSetting(themeSettings.value, 'offlineNodesLast', false))
 
   const homeHighLoadThreshold = computed<number>(() => readNumberSetting(themeSettings.value, 'homeHighLoadThreshold', 80, 1, 100))
@@ -729,7 +1095,34 @@ const useAppStore = defineStore('app', () => {
 
   const diskPredictionThresholdDays = computed<number>(() => readNumberSetting(themeSettings.value, 'diskPredictionThresholdDays', 30, 1, 3650))
 
-  const chartDashboardTemplate = computed<ChartDashboardTemplate>(() => parseChartDashboardTemplate(themeSettings.value.chartDashboardTemplate))
+  const chartDashboardTemplate = computed<ChartDashboardTemplate>(() => {
+    const settings = themeSettings.value
+
+    // 旧配置没有 preset 字段时继续以原 JSON/key 列表为准。
+    if (typeof settings.chartDashboardPreset !== 'string')
+      return parseChartDashboardTemplate(settings.chartDashboardTemplate)
+
+    const preset = parseChartDashboardPreset(settings.chartDashboardPreset)
+    if (preset === 'advanced')
+      return parseChartDashboardTemplate(settings.chartDashboardTemplate)
+
+    if (preset === 'custom') {
+      // 旧版托管设置使用 7 个独立卡位，升级后优先保留原有顺序。
+      const slotKeys = parseChartDashboardSlots(settings)
+      if (slotKeys.length > 0)
+        return { cards: slotKeys }
+
+      const customKeys = typeof settings.chartDashboardTemplate === 'string'
+        ? settings.chartDashboardTemplate.trim()
+        : ''
+      if (customKeys)
+        return parseChartDashboardTemplate(customKeys)
+
+      return { cards: [...DEFAULT_CHART_DASHBOARD_CARDS] }
+    }
+
+    return { cards: [...CHART_DASHBOARD_PRESETS[preset]] }
+  })
 
   const hideAdminEntryWhenLoggedOut = computed<boolean>(() => readBooleanSetting(themeSettings.value, 'hideAdminEntryWhenLoggedOut', false))
 
@@ -896,6 +1289,7 @@ const useAppStore = defineStore('app', () => {
     nodeListCustomTagsVisible,
     nodeDetailSectionTabsEnabled,
     gpuChartEnabled,
+    detailMetricCardOrder,
     offlineNodesLast,
     homeHighLoadThreshold,
     homeTrafficWarningThreshold,

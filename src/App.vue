@@ -34,30 +34,41 @@ onUnmounted(() => {
   <Provider>
     <Background />
     <Transition
-      enter-active-class="transition-all duration-100 ease-out" enter-from-class="opacity-0 backdrop-blur-0"
-      enter-to-class="opacity-100 backdrop-blur-sm" leave-active-class="transition-all duration-100 ease-in"
-      leave-from-class="opacity-100 backdrop-blur-sm" leave-to-class="opacity-0 backdrop-blur-0"
+      :css="!appStore.disablePageAnimation"
+      enter-active-class="transition-opacity duration-200 ease-out" enter-from-class="opacity-0"
+      enter-to-class="opacity-100" leave-active-class="transition-opacity duration-300 ease-in"
+      leave-from-class="opacity-100" leave-to-class="opacity-0"
     >
       <LoadingCover v-if="appStore.loading" />
     </Transition>
     <Header />
-    <main v-if="!appStore.loading" class="min-h-screen overflow-hidden">
-      <div class="max-w-[1280px] mx-auto">
-        <RouterView v-slot="{ Component }">
-          <Transition
-            enter-active-class="transition-all duration-200 ease-out"
-            enter-from-class="opacity-0 translate-x-4 blur-sm" enter-to-class="opacity-100 translate-x-0 blur-0"
-            leave-active-class="transition-all duration-200 ease-in" leave-from-class="opacity-100 translate-x-0 blur-0"
-            leave-to-class="opacity-0 -translate-x-4 blur-sm" mode="out-in"
-          >
-            <KeepAlive :include="['HomeView']">
-              <component :is="Component" />
-            </KeepAlive>
-          </Transition>
-        </RouterView>
+    <Transition
+      :css="!appStore.disablePageAnimation"
+      enter-active-class="transition-all duration-300 ease-out"
+      enter-from-class="opacity-0 translate-y-2"
+      enter-to-class="opacity-100 translate-y-0"
+    >
+      <div v-if="!appStore.loading" class="app-shell">
+        <main class="min-h-screen overflow-hidden">
+          <div class="max-w-[1280px] mx-auto">
+            <RouterView v-slot="{ Component }">
+              <Transition
+                :css="!appStore.disablePageAnimation"
+                enter-active-class="transition-all duration-300 ease-out"
+                enter-from-class="opacity-0 translate-y-2" enter-to-class="opacity-100 translate-y-0"
+                leave-active-class="transition-opacity duration-150 ease-in" leave-from-class="opacity-100"
+                leave-to-class="opacity-0" mode="out-in"
+              >
+                <KeepAlive :include="['HomeView']">
+                  <component :is="Component" />
+                </KeepAlive>
+              </Transition>
+            </RouterView>
+          </div>
+        </main>
+        <Footer />
       </div>
-    </main>
-    <Footer v-if="!appStore.loading" />
+    </Transition>
     <Toaster rich-colors close-button position="top-center" />
   </Provider>
 </template>

@@ -47,10 +47,10 @@ watch(
 )
 
 watch(
-  () => appStore.backgroundEnabled,
-  (enabled) => {
+  () => [appStore.backgroundEnabled, appStore.currentBackgroundUrl] as const,
+  ([enabled, backgroundUrl]) => {
     const body = document.body
-    if (enabled)
+    if (enabled && backgroundUrl)
       body.style.setProperty('background-color', 'transparent', 'important')
     else
       body.style.removeProperty('background-color')

@@ -53,6 +53,8 @@ const SnapshotExportPanel = defineAsyncComponent(() => import('@/components/Snap
 
 const nodeItemStaggerMs = UI_CONFIG.motion.staggerMs
 const nodeItemStaggerLimit = UI_CONFIG.motion.staggerLimit
+const denseNodeAppearThreshold = UI_CONFIG.motion.denseNodeAppearThreshold
+const denseNodePingAnimationThreshold = UI_CONFIG.motion.denseNodePingAnimationThreshold
 
 const appStore = useAppStore()
 const nodesStore = useNodesStore()
@@ -251,6 +253,10 @@ const nodeList = computed(() => {
   return getQuickControlNodes(filtered, activeQuickControl.value)
 })
 
+const isDenseNodeGrid = computed(() => appStore.nodeViewMode === 'card' && nodeList.value.length > denseNodeAppearThreshold)
+const enableNodeCardTransition = computed(() => !appStore.disablePageAnimation && !isDenseNodeGrid.value)
+const reduceDenseNodeEffects = computed(() => appStore.nodeViewMode === 'card' && nodeList.value.length > denseNodePingAnimationThreshold)
+
 const quickControlCounts = computed<Record<HomeQuickControlKey, number>>(() => {
   let base = groupNodeList.value
   if (debouncedSearchText.value.trim())
@@ -338,7 +344,7 @@ const nodeCardGridClass = computed(() => {
 </script>
 
 <template>
-  <div class="home-view">
+  <div class="home-view" :class="!appStore.disablePageAnimation && 'home-view--motion'">
     <div v-if="appStore.connectionError" class="alert px-4">
       <Alert variant="destructive" class="border-none backdrop-blur-xs bg-red-400/10 rounded-md">
         <AlertTitle>RPC 服务错误</AlertTitle>
@@ -470,8 +476,8 @@ const nodeCardGridClass = computed(() => {
             <AuditLogPanel v-else-if="activeHomeTool === 'auditLog'" />
             <TransitionGroup
               v-else-if="nodeList.length !== 0 && appStore.nodeViewMode === 'card'"
-              :appear="!appStore.disablePageAnimation"
-              :css="!appStore.disablePageAnimation"
+              :appear="enableNodeCardTransition"
+              :css="enableNodeCardTransition"
               name="node-card-switch"
               tag="div"
               :class="nodeCardGridClass"
@@ -482,7 +488,7 @@ const nodeCardGridClass = computed(() => {
                 class="min-w-0"
                 :style="getNodeItemTransitionStyle(index)"
               >
-                <NodeCard :node="node" @click="handleNodeClick(node)" />
+                <NodeCard :node="node" :reduce-motion="reduceDenseNodeEffects" @click="handleNodeClick(node)" />
               </div>
             </TransitionGroup>
             <NodeList
@@ -503,6 +509,22 @@ const nodeCardGridClass = computed(() => {
 </template>
 
 <style scoped>
+.home-view--motion {
+  animation: home-view-enter 300ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes home-view-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .home-controls-scroll {
   scrollbar-width: none;
 }
@@ -540,6 +562,10 @@ const nodeCardGridClass = computed(() => {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .home-view--motion {
+    animation: none;
+  }
+
   .node-card-switch-enter-active,
   .node-card-switch-leave-active,
   .node-card-switch-move {

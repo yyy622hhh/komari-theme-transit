@@ -9,11 +9,11 @@
 }
 
 :root {
-  --background: oklch(1 0 0);
+  --background: oklch(0.935 0.015 252);
   --foreground: oklch(0.11 0.01 285.823);
-  --card: oklch(1 0 0);
+  --card: oklch(0.965 0.008 252);
   --card-foreground: oklch(0.11 0.01 285.823);
-  --popover: oklch(1 0 0);
+  --popover: oklch(0.965 0.008 252);
   --popover-foreground: oklch(0.141 0.005 285.823);
   --primary: oklch(0.21 0.006 285.885);
   --primary-foreground: oklch(0.985 0 0);
@@ -120,14 +120,79 @@
   }
 
   html {
+    background-color: var(--color-background);
+    font-family: var(--font-sans);
+  }
+
+  body,
+  #app {
+    min-height: 100vh;
+    color: var(--color-foreground);
     font-family: var(--font-sans);
   }
 
   body {
     background-color: var(--color-background);
-    color: var(--color-foreground);
-    font-family: var(--font-sans);
   }
+}
+
+/* iOS 15.4-16.3 can run the app but lacks Tailwind v4's modern color stack. */
+html.legacy-webkit {
+  --background: #e8edf4;
+  --foreground: #17181c;
+  --card: #f1f5f9;
+  --card-foreground: #17181c;
+  --popover: #f1f5f9;
+  --popover-foreground: #202126;
+  --primary: #303239;
+  --primary-foreground: #fafafa;
+  --secondary: #eef0f3;
+  --secondary-foreground: #303239;
+  --muted: #eef0f3;
+  --muted-foreground: #4d5260;
+  --accent: #eef0f3;
+  --accent-foreground: #303239;
+  --destructive: #dc2626;
+  --destructive-foreground: #fafafa;
+  --border: #d9dde3;
+  --input: #d9dde3;
+  --ring: #a8adb5;
+}
+
+html.legacy-webkit.dark {
+  --background: #15161a;
+  --foreground: #fafafa;
+  --card: #27282d;
+  --card-foreground: #fafafa;
+  --popover: #27282d;
+  --popover-foreground: #fafafa;
+  --primary: #e5e7eb;
+  --primary-foreground: #27282d;
+  --secondary: #33343a;
+  --secondary-foreground: #fafafa;
+  --muted: #33343a;
+  --muted-foreground: #d1d5db;
+  --accent: #33343a;
+  --accent-foreground: #fafafa;
+  --destructive: #f87171;
+  --destructive-foreground: #fafafa;
+  --border: #3f4046;
+  --input: #47484f;
+  --ring: #777982;
+}
+
+html.legacy-webkit,
+html.legacy-webkit body {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+html.legacy-webkit .node-card,
+html.legacy-webkit .bg-card,
+html.legacy-webkit [data-slot='card'] {
+  background-color: var(--card) !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
 }
 
 @layer utilities {
@@ -158,8 +223,8 @@
 .bg-card,
 [data-slot='card'] {
   /* Keep the glass effect, but avoid making every card an overly expensive compositing layer. */
-  background-color: var(--glass-light-card, rgb(255 255 255 / 0.7)) !important;
-  border: 1px solid var(--glass-light-border, rgb(255 255 255 / 0.45)) !important;
+  background-color: var(--glass-light-card, rgb(241 245 249 / 0.74)) !important;
+  border: 1px solid var(--glass-light-border, rgb(226 232 240 / 0.68)) !important;
   backdrop-filter: blur(14px) saturate(145%) !important;
   -webkit-backdrop-filter: blur(14px) saturate(145%) !important;
   box-shadow: var(--glass-light-shadow, 0 8px 28px rgb(15 23 42 / 0.18)) !important;
@@ -168,7 +233,7 @@
 .node-card:hover,
 .bg-card:hover,
 [data-slot='card']:hover {
-  background-color: var(--glass-light-card-hover, rgb(255 255 255 / 0.82)) !important;
+  background-color: var(--glass-light-card-hover, rgb(248 250 252 / 0.8)) !important;
   box-shadow: var(--glass-light-shadow, 0 12px 38px rgb(15 23 42 / 0.2)) !important;
 }
 
@@ -268,10 +333,10 @@
 /* ===== Header ===== */
 
 header {
-  background-color: var(--glass-light-header, rgb(255 255 255 / 0.7)) !important;
+  background-color: var(--glass-light-header, rgb(241 245 249 / 0.76)) !important;
   backdrop-filter: blur(14px) saturate(150%) !important;
   -webkit-backdrop-filter: blur(14px) saturate(150%) !important;
-  border-bottom: 1px solid rgb(255 255 255 / 0.3) !important;
+  border-bottom: 1px solid rgb(226 232 240 / 0.58) !important;
 }
 
 .dark header {
@@ -282,7 +347,7 @@ header {
 /* ===== 顶部统计栏 ===== */
 
 .bg-background {
-  background-color: var(--glass-light-control, rgb(255 255 255 / 0.72)) !important;
+  background-color: var(--glass-light-control, rgb(241 245 249 / 0.76)) !important;
   backdrop-filter: blur(14px) saturate(145%) !important;
   -webkit-backdrop-filter: blur(14px) saturate(145%) !important;
 }
@@ -307,7 +372,7 @@ header {
   .node-card,
   .bg-card,
   [data-slot='card'] {
-    background-color: color-mix(in srgb, var(--glass-light-card, #ffffff) 86%, white) !important;
+    background-color: color-mix(in srgb, var(--glass-light-card, #f1f5f9) 88%, rgb(226 232 240)) !important;
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
   }
@@ -315,7 +380,7 @@ header {
   .node-card:hover,
   .bg-card:hover,
   [data-slot='card']:hover {
-    background-color: color-mix(in srgb, var(--glass-light-card-hover, #ffffff) 90%, white) !important;
+    background-color: color-mix(in srgb, var(--glass-light-card-hover, #f8fafc) 88%, rgb(226 232 240)) !important;
   }
 
   .dark .node-card,
@@ -337,7 +402,7 @@ header {
   }
 
   header {
-    background-color: rgb(255 255 255 / 0.86) !important;
+    background-color: rgb(226 232 240 / 0.88) !important;
   }
 
   .dark header {
@@ -345,7 +410,7 @@ header {
   }
 
   .bg-background {
-    background-color: rgb(255 255 255 / 0.82) !important;
+    background-color: rgb(226 232 240 / 0.84) !important;
   }
 
   .dark .bg-background {

@@ -127,6 +127,8 @@ export default defineConfig({
     host: '0.0.0.0',
   },
   build: {
+    target: ['es2018', 'safari15.4'],
+    cssTarget: 'safari15.4',
     chunkSizeWarningLimit: 600,
     rollupOptions: {
       output: {
