@@ -565,7 +565,7 @@ async function fetchHistoryData() {
     }
     else {
       metricData.value = null
-      remoteData.value = await loadNodeLoadRecords(props.uuid, hours)
+      remoteData.value = await loadNodeLoadRecords(props.uuid, hours, LOAD_RECORD_MAX_COUNT)
     }
   }
   catch (err) {
