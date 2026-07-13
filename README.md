@@ -264,4 +264,4 @@ bun run preview
 
 ## 🙏 致谢
 
-感谢原始主题作者 **Tokinx**，感谢 **可乐杯里泡枸杞**、**Leo Lin** 的捐赠支持，感谢 [Komari](https://github.com/komari-monitor/komari)、[Komari Naive](https://github.com/tonyliuzj/komari-naive)、Vue、Vite、reka-ui、Tailwind CSS 以及所有反馈 Issue / PR / 建议的朋友。
+感谢原始主题作者 **Tokinx**，感谢 **可乐杯里泡枸杞**、**Leo Lin**、**HelloWorldx**的捐赠支持，感谢 [Komari](https://github.com/komari-monitor/komari)、[Komari Naive](https://github.com/tonyliuzj/komari-naive)、Vue、Vite、reka-ui、Tailwind CSS 以及所有反馈 Issue / PR / 建议的朋友。
