@@ -167,6 +167,7 @@ const smoothInfoTooltipOpen = ref(false)
 
 const chartMargin = { top: 30, right: 24, bottom: 52, left: 56 }
 let coarsePointerMediaQuery: MediaQueryList | null = null
+let fetchRecordsSequence = 0
 
 function syncTouchTooltipMode() {
   if (typeof window === 'undefined') {
@@ -261,17 +262,17 @@ function buildMetricRecords(seriesList: MetricSeries[]): PingRecord[] {
   return records.sort((a, b) => dayjs(a.time).valueOf() - dayjs(b.time).valueOf())
 }
 
-async function loadMetricPingPayload(): Promise<{ records: PingRecord[], tasks: PingTaskInfo[] } | null> {
+async function loadMetricPingPayload(nodeUuid: string): Promise<{ records: PingRecord[], tasks: PingTaskInfo[] } | null> {
   const range = appliedCustomRange.value
   const metricRangeParams = isCustomRange.value && range
     ? { start: range.start.toDate().toISOString(), end: range.end.toDate().toISOString() }
     : { hours: selectedHours.value }
 
   const [statsResult, metricsResult] = await Promise.allSettled([
-    loadPingMetricStats({ entity_id: props.uuid, ...metricRangeParams, max_points: PING_RECORD_MAX_COUNT }),
+    loadPingMetricStats({ entity_id: nodeUuid, ...metricRangeParams, max_points: PING_RECORD_MAX_COUNT }),
     queryMetrics({
       metric_keys: [PING_LATENCY_METRIC],
-      entity_id: props.uuid,
+      entity_id: nodeUuid,
       ...metricRangeParams,
       downsample: true,
       fill_empty: true,
@@ -281,7 +282,7 @@ async function loadMetricPingPayload(): Promise<{ records: PingRecord[], tasks: 
   ])
 
   const metricStats = statsResult.status === 'fulfilled'
-    ? (statsResult.value.stats ?? []).filter(stat => stat.entity_id === props.uuid)
+    ? (statsResult.value.stats ?? []).filter(stat => stat.entity_id === nodeUuid)
     : []
   const metricRecords = metricsResult.status === 'fulfilled'
     ? buildMetricRecords(metricsResult.value.series)
@@ -326,7 +327,9 @@ async function loadMetricPingPayload(): Promise<{ records: PingRecord[], tasks: 
 // ==================== 数据获取 ====================
 
 async function fetchRecords() {
-  if (!props.uuid)
+  const sequence = ++fetchRecordsSequence
+  const requestedUuid = props.uuid
+  if (!requestedUuid)
     return
 
   if (isCustomRange.value && !customRange.value) {
@@ -334,26 +337,20 @@ async function fetchRecords() {
     tasks.value = []
     error.value = customRangeError.value || '请选择有效的自定义时间范围'
     legacyCustomRangeFallback.value = false
+    loading.value = false
     return
   }
 
   appliedCustomRange.value = isCustomRange.value ? customRange.value : null
 
-  const granted = await appStore.requireLoginPermission('historyMetrics', { force: false })
-  if (!granted) {
-    remoteData.value = []
-    tasks.value = []
-    error.value = '登录后查看延迟历史'
-    legacyCustomRangeFallback.value = false
-    loading.value = false
-    return
-  }
-
   loading.value = true
   error.value = null
 
   try {
-    const metricPayload = await loadMetricPingPayload().catch(() => null)
+    const metricPayload = await loadMetricPingPayload(requestedUuid).catch(() => null)
+    if (sequence !== fetchRecordsSequence || requestedUuid !== props.uuid)
+      return
+
     legacyCustomRangeFallback.value = !metricPayload && isCustomRange.value
     const range = appliedCustomRange.value
     const legacyHours = range
@@ -362,7 +359,9 @@ async function fetchRecords() {
           Math.max(range.hours, Math.ceil(dayjs().diff(range.start, 'hour', true))),
         )
       : selectedHours.value
-    const result = metricPayload ?? await loadPingRecordsWithTasks(legacyHours, PING_RECORD_MAX_COUNT, props.uuid)
+    const result = metricPayload ?? await loadPingRecordsWithTasks(legacyHours, PING_RECORD_MAX_COUNT, requestedUuid)
+    if (sequence !== fetchRecordsSequence || requestedUuid !== props.uuid)
+      return
 
     const records = result.records
     records.sort((a, b) => dayjs(a.time).valueOf() - dayjs(b.time).valueOf())
@@ -375,13 +374,17 @@ async function fetchRecords() {
     }
   }
   catch (err) {
+    if (sequence !== fetchRecordsSequence || requestedUuid !== props.uuid)
+      return
+
     error.value = err instanceof Error ? err.message : '获取数据失败'
     legacyCustomRangeFallback.value = false
     remoteData.value = []
     tasks.value = []
   }
   finally {
-    loading.value = false
+    if (sequence === fetchRecordsSequence)
+      loading.value = false
   }
 }
 
@@ -411,7 +414,10 @@ const mergedData = computed(() => {
     const ts = dayjs(rec.time).valueOf()
     let anchor: number | null = null
 
-    for (const a of anchors) {
+    for (let index = anchors.length - 1; index >= 0; index--) {
+      const a = anchors[index]
+      if (a === undefined || ts - a > toleranceMs)
+        break
       if (Math.abs(a - ts) <= toleranceMs) {
         anchor = a
         break

@@ -238,6 +238,19 @@ function getQuickControlNodes(nodes: NodeData[], control: HomeQuickControlKey): 
   return placeOfflineNodesLast(result)
 }
 
+function getQuickControlCount(nodes: NodeData[], control: HomeQuickControlKey): number {
+  switch (control) {
+    case 'offline':
+      return nodes.reduce((count, node) => count + (node.online ? 0 : 1), 0)
+    case 'highLoad':
+      return nodes.reduce((count, node) => count + (isHighLoadNode(node, appStore.homeHighLoadThreshold) ? 1 : 0), 0)
+    case 'expiring':
+      return nodes.reduce((count, node) => count + (isExpiringNode(node, appStore.homeExpiringDays) ? 1 : 0), 0)
+    default:
+      return nodes.length
+  }
+}
+
 const groupNodeList = computed(() => {
   const selectedGroup = appStore.nodeSelectedGroup
   if (selectedGroup === 'all')
@@ -264,7 +277,7 @@ const quickControlCounts = computed<Record<HomeQuickControlKey, number>>(() => {
 
   const counts = {} as Record<HomeQuickControlKey, number>
   for (const key of appStore.homeQuickControlOrder)
-    counts[key] = getQuickControlNodes(base, key).length
+    counts[key] = getQuickControlCount(base, key)
   return counts
 })
 

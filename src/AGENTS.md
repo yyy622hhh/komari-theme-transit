@@ -49,7 +49,8 @@ Protected paths include:
 - Snapshot export and export-specific provider metadata.
 - Disk-prediction history loading.
 - Provider geo lookup.
-- Ping/history metric loading.
+
+Public node monitoring, including Ping latency/loss history, must remain available without login.
 
 Export rules:
 

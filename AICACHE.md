@@ -12,13 +12,29 @@
 
 ## 当前任务
 
-- 状态：done
-- 目标：发布 `v3.1.0`，将 Komari 1.2.6 详情图表、主题设置、Ping/iOS/视觉兼容改动合并到 `main` 并生成 GitHub Release。
-- 范围：更新 `komari-theme.json` 唯一版本源、README 功能与更新日志、发布交接记录；执行 lint/build，提交并推送 `main`，验证 GitHub Actions、tag、Release 和 zip 资产。
-- 计划：本地验证 -> 提交全部产品/文档改动（排除 `.claude/settings.local.json`）-> 推送 `main` -> 等待 release workflow -> 核对 `v3.1.0` 资产。
-- 不做：不手工创建重复 tag，不修改 release workflow，不提交本机代理配置，不在 `package.json` 增加版本。
+- 状态：in-progress
+- 目标：发布 `v3.1.1`，将默认背景、列表模式、公开 Ping 和快速性能修复推送到 `main` 并生成 GitHub Release。
+- 范围：更新 `komari-theme.json` 唯一版本源和 README 更新日志；lint/build；提交并重放远端 README 提交；推送 `main`；核对 Actions、tag、Release 和 zip 资产。
+- 计划：版本与文档 -> 本地验证 -> 提交 -> rebase `origin/main` -> 推送 -> GitHub Release 验证。
+- 不做：不提交 `.claude/` 本机配置，不手工创建重复 tag，不扩大本次快速修复范围。
 
 ## 执行日志
+
+### 2026-07-14 v3.1.1 release preparation
+
+- 已将唯一版本源 `komari-theme.json.version` 更新为 `3.1.1`，README 当前版本与更新日志同步。
+- 发布前 `bun run lint`、`bun run build` 和 zip 清单检查通过；本地 zip 内版本为 `3.1.1`，顶层包含 `komari-theme.json`、`preview.png`、`dist/`。
+- `.claude/` 为本机配置，继续排除；远端 `91f46ac` 仅修改 README 赞助名单，将在发布提交后 rebase 合入。
+
+### 2026-07-14 v3.1.0 background/list/Ping regression quick fix
+
+- 修复默认背景被 `body` 实色层遮挡：页面可见背景统一由 `Background.vue` 负责，`html` 继续提供无 JS/加载失败时的底色。
+- 列表模式小 Ping 条移除每行 40 个绝对定位气泡，改用原生提示，避免气泡压住运行时间，同时降低列表 DOM/hover 合成开销。
+- 首页快捷控制计数改为直接计数；月成本、流量、上下行、峰值等只显示数量的入口不再每轮实时更新重复排序全部节点。
+- 普通节点 Ping 延迟/丢包恢复公开访问，移除 `historyMetrics` 登录权限；高级工具、Geo、导出、审计和磁盘预测权限保持不变，相关开发文档已同步。
+- Ping 详情请求增加序列保护，快速切换时间范围/节点时旧请求不再覆盖新结果；时间锚点合并从遍历全部历史锚点改为只回看最近候选，避免大样本下退化为 O(n²)。
+- 验证：`bun run lint` 通过；`bun run build` 通过并生成 `komari-theme-Glassmorphism-build-771c363.zip`。仍有既有 `@vueuse/core` PURE 注释提示和 `globe` chunk 体积警告。
+- 暂不扩展：按用户要求放弃全量审查；卡片模式全量挂载、首页小 Ping 按节点请求仍可作为后续性能优化项。
 
 ### 2026-07-14 v3.1.0 release
 

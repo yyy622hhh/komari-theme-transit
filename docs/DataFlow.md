@@ -37,7 +37,7 @@ Component
   -> PredictionService
 ```
 
-Disk prediction uses `LOAD_RECORD_MAX_COUNT` by default, verifies the `diskPrediction` permission before loading private history, and does not run for logged-out public cards. Ping history surfaces verify `historyMetrics` and share capped request-manager-backed loads keyed by time range and `maxCount`.
+Disk prediction uses `LOAD_RECORD_MAX_COUNT` by default, verifies the `diskPrediction` permission before loading private history, and does not run for logged-out public cards. Ping history is public and shares capped request-manager-backed loads keyed by node, time range, and `maxCount`.
 
 ## Snapshot export
 

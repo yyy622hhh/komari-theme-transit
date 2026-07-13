@@ -25,7 +25,6 @@ Sensitive actions call `requirePermission()` / `appStore.requireLoginPermission(
 - `nodeTopology` — topology panel metadata.
 - `diskPrediction` — disk-prediction history loading.
 - `providerGeoLookup` — detail/list provider geo metadata lookups.
-- `historyMetrics` — ping/history metric surfaces, including mini ping bars and detail ping history.
 
 ## Protected surfaces
 
@@ -33,9 +32,8 @@ Sensitive actions call `requirePermission()` / `appStore.requireLoginPermission(
 - Snapshot export: login verification plus optional export secondary password.
 - Health summary generation.
 - Disk prediction history loading.
-- Ping/history metric loading.
 - Provider geo lookup for sensitive metadata.
 
 ## Public behavior
 
-The home page and instance detail route stay public. When auth is missing or expired, the theme hides private surfaces and continues rendering public node data.
+The home page and instance detail route stay public. Public node monitoring includes load charts, mini Ping bars, and detail Ping latency/loss history. When auth is missing or expired, the theme hides only advanced/private surfaces and continues rendering public node data.

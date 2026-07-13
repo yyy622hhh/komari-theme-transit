@@ -12,7 +12,6 @@ export type PermissionKey
     | 'auditLog'
     | 'diskPrediction'
     | 'providerGeoLookup'
-    | 'historyMetrics'
 
 export interface AuthSession {
   status: AuthStatus

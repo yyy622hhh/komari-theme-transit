@@ -13,7 +13,7 @@ This document records the acceptance scope for the post-foundation v3 milestones
 ## M3 — Security and permissions only
 
 - Verify sensitive actions through `appStore.requireLoginPermission()` or the auth service before work starts.
-- Protected surfaces include advanced home tools, snapshot export, provider geo lookup, disk prediction history, and ping/history metrics.
+- Protected surfaces include advanced home tools, snapshot export, provider geo lookup, and disk prediction history; ordinary node metrics and Ping history stay public.
 - Keep public rendering available for logged-out visitors; degrade to public metadata instead of blocking routes.
 - Snapshot export keeps CSV formula neutralization for `=`, `+`, `-`, and `@` prefixes.
 - The optional export secondary password is a client-side friction layer in addition to verified login, not a replacement for backend authorization.

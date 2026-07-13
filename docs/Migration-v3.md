@@ -24,7 +24,6 @@ Private metadata and history-heavy operations now require verified login:
 - snapshot export
 - health summary generation
 - disk prediction history loading
-- ping/history metric loading
 - provider geo metadata lookup
 
 Public home/detail rendering still works without login; private data paths degrade to public metadata-only behavior instead of blocking the route.

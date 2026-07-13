@@ -43,7 +43,7 @@ Vue Component
 M2-M6 build on the v3 foundation without changing the public route contract:
 
 - M2 keeps user interactions stable while routing history-heavy paths through shared request/cache infrastructure and virtualizing dense lists.
-- M3 gates private tools, sensitive metadata, snapshot export, disk prediction, and history metrics through verified auth.
+- M3 gates private tools, sensitive metadata, snapshot export, and disk prediction through verified auth; ordinary node and Ping history metrics stay public.
 - M4 adds configurable presentation options such as card density, quick controls, detail tabs, list metadata, glass colors, and privacy display toggles.
 - M5 adds advanced home tools: topology, provider value, health summary, snapshot export, disk prediction, and richer summary cards.
 - M6 documents the architecture, auth, cache, data flow, migration behavior, and milestone acceptance points.

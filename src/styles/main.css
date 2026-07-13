@@ -132,7 +132,8 @@
   }
 
   body {
-    background-color: var(--color-background);
+    /* Background.vue owns the visible canvas; html keeps the no-JS fallback color. */
+    background-color: transparent;
   }
 }
 

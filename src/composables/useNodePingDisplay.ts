@@ -66,8 +66,7 @@ export function useNodePingDisplay(
 
   const pingStats = useNodePingStats(uuid, {
     hours: pingStatsHours,
-    enabled: () => pingStatsEnabled.value && appStore.privateFeaturesAllowed,
-    permission: 'historyMetrics',
+    enabled: pingStatsEnabled,
   })
 
   function buildPingBars(metric: NodePingMetric): NodePingBar[] {

@@ -219,7 +219,6 @@ Vue Component
 - `nodeTopology`
 - `diskPrediction`
 - `providerGeoLookup`
-- `historyMetrics`
 
 ### 9.2 RequestManager
 
@@ -414,7 +413,7 @@ HomeView tool button
 - 敏感数据和敏感动作在数据/动作入口 gate。
 - `isLoggedIn` 不等于权限；使用 `requireLoginPermission()`。
 - session 过期时要降级到公共展示，不要让 dashboard 崩掉。
-- Provider Geo、snapshot export、history metrics、disk prediction、advanced tools 都是敏感路径。
+- Provider Geo、snapshot export、disk prediction、advanced tools 都是敏感路径；公开节点的普通监控与 Ping 历史保持公开。
 - Managed markdown 不用 `v-html`，链接/图片要限制 URL scheme。
 - CSV 导出必须防公式注入。
 

@@ -1,12 +1,10 @@
 import type { MaybeRefOrGetter } from 'vue'
-import type { PermissionKey } from '@/services/auth.service'
 import type { PingMetricTaskStats } from '@/utils/rpc'
 import { useThrottleFn } from '@vueuse/core'
 import { computed, onScopeDispose, ref, shallowRef, toValue, watch } from 'vue'
 import { PING_RECORD_MAX_COUNT } from '@/constants/load'
 import { abortPingRecords, loadPingRecords } from '@/services/history.service'
 import { loadPingMetricStats, queryMetrics } from '@/services/metrics.service'
-import { useAppStore } from '@/stores/app'
 import { isPingMetric, normalizeMetricSeriesList, PING_LATENCY_METRIC, pingTaskId } from '@/utils/metricSeries'
 
 export interface NodePingHistoryPoint {
@@ -561,10 +559,8 @@ export function useNodePingStats(
     hours?: MaybeRefOrGetter<number>
     enabled?: MaybeRefOrGetter<boolean>
     maxCount?: MaybeRefOrGetter<number | undefined>
-    permission?: PermissionKey
   },
 ) {
-  const appStore = useAppStore()
   const loading = ref(false)
   const error = ref<string | null>(null)
 
@@ -577,7 +573,6 @@ export function useNodePingStats(
       maxCount,
       cacheKey: getSharedPingRecordsKey(hours, maxCount, toValue(uuid)),
       enabled: toValue(options?.enabled) ?? true,
-      authStatus: appStore.authStatus,
     }
   })
 
@@ -636,16 +631,6 @@ export function useNodePingStats(
         loading.value = false
         error.value = null
         return
-      }
-
-      if (options?.permission) {
-        const granted = await appStore.requireLoginPermission(options.permission, { force: false })
-        if (!granted || cancelled) {
-          syncSharedRecordsSubscription(null)
-          loading.value = false
-          error.value = granted ? null : '需要登录后查看 Ping 历史'
-          return
-        }
       }
 
       syncSharedRecordsSubscription(hours, maxCount, nodeUuid)
