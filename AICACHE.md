@@ -12,14 +12,21 @@
 
 ## 当前任务
 
-- 状态：in-progress
-- 目标：发布 `v3.1.2`，修复启动健康检查单点失败导致用户、节点和实时连接全部跳过的问题，并让所有路由都能看到连接错误和手动重试入口。
-- 里程碑：M4 用户可见可靠性 / 错误反馈修复；不新增业务功能，不改变公开路由和权限边界。
-- 范围：`src/utils/init.ts` 启动任务隔离、健康检查重试和恢复；`src/App.vue` 全局错误提示；移除 `HomeView.vue` 重复提示；必要的 RPC/常量调整；快速复查明显 bug 与高收益性能点；更新 `komari-theme.json` / README；lint/build；提交推送并验证 GitHub Release。
-- 计划：并行独立初始化 -> 后台轮询恢复 -> 全局可重试提示 -> 快速仓库复查 -> v3.1.2 版本与文档 -> 最终验证 -> 推送与 Release 核对。
-- 不做：不提交 `.claude/` 本机配置，不在本次补丁中混入卡片虚拟化、地球纹理重制等需要专项性能/视觉回归的改动。
+- 状态：done
+- 目标：在 `v3.1.2` 已发布后，按公开发帖式叙事重构项目 README，并以 Markdown-only 提交单独推送。
+- 里程碑：M6 文档 / DX；不修改运行时代码、主题版本或 Release 资产。
+- 范围：重组 `README.md` 的启动可靠性、详情 Metric、自定义、Ping、高级工具、架构、安全、兼容、安装和更新日志；更新本交接记录；执行 Markdown lint / diff 检查；单独提交并推送。
+- 计划：README 重构 -> 技术事实复核 -> Markdown lint -> Markdown-only 提交 -> 推送并确认版本未变。
+- 不做：不提交 `.claude/` 本机配置，不修改 `komari-theme.json`，不触发或创建重复 `v3.1.2` Release。
 
 ## 执行日志
+
+### 2026-07-14 post-release README restructure
+
+- 按用户提供的发帖结构重写 README：突出 `v3.1.2` 启动自愈，并重新组织详情指标、自定义、Metric / Ping、首页、高级工具、架构、安全、WebKit / Firefox 兼容和安装说明。
+- 事实边界：普通 Load / Ping 历史继续公开；敏感高级工具、Geo、导出和磁盘预测保持登录校验；Safari 15.4 是构建基础边界，Tailwind CSS v4 完整视觉基线仍为 Safari 16.4+。
+- 本轮仅计划提交 `README.md` 与 `AICACHE.md`；主题版本继续保持 `3.1.2`。
+- 验证：`bun run lint` 通过；`git diff --check` 通过；lint 后差异仍只有两个 Markdown 文件，`komari-theme.json` 和运行时代码均未修改。
 
 ### 2026-07-14 startup single-point-of-failure fix
 
@@ -31,6 +38,8 @@
 - 快速复查：未发现新的发布阻断 bug；Firefox 毛玻璃回退、列表虚拟化、共享 Ping/负载缓存已存在。后续高收益专项候选为卡片模式 30+ 节点全量挂载，以及约 2.98 MB 地球纹理和 1.98 MB `globe` chunk 的传输/解析成本。
 - 发布准备：`komari-theme.json.version` 已更新为 `3.1.2`，README 当前版本与更新日志已同步。
 - 最终验证：版本更新后 `bun run lint`、`bun run build` 通过，生成 `komari-theme-Glassmorphism-build-bb52e94.zip`；zip 顶层契约为 `komari-theme.json`、`preview.png`、`dist/`，包内版本为 `3.1.2`。构建仍仅有既有 `@vueuse/core` PURE 注释和 `globe` 大 chunk 警告。
+- 已发布：提交 `aed8626` 已推送到 `main`；GitHub Actions `Release On Version Bump` run `#29305550352` 成功；tag `v3.1.2` 指向该提交，Release 为正式发布（非 draft / prerelease）。
+- 线上资产：`komari-theme-Glassmorphism-build-aed8626.zip`，大小 5,114,600 bytes，SHA-256 `71155874add7df49ee0cbe14b403f5d959767e754ffbe21b0a8259c6bf7014d9`；下载后复核顶层结构与包内 `3.1.2` 版本均符合契约。
 
 ### 2026-07-14 v3.1.1 release preparation
 

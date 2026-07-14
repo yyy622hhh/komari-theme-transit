@@ -4,7 +4,7 @@
 
 ## 给 Komari Monitor 的一套「玻璃拟态 · 运维驾驶舱」主题
 
-好看只是外壳，v3 真正的重点是把 metric store、Ping 统计、审计日志、健康摘要、拓扑、费用、流量和磁盘预测，整合成一套日常真的会打开来看的监控面板。
+从好看的监控首页，逐步成长为好用、可配置、适合长期运行的 Komari 主题。
 
 ![Version](https://img.shields.io/github/v/release/sanrokamlan-prog/komari-theme-Glassmorphism?style=for-the-badge&label=release&color=10b981)
 ![Vue](https://img.shields.io/badge/Vue-3-42b883?style=for-the-badge&logo=vue.js)
@@ -14,8 +14,8 @@
 ![License](https://img.shields.io/badge/license-MIT-blue?style=for-the-badge)
 
 **[📥 下载 Release](https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism/releases)** ·
-**[🚀 安装](#-安装)** ·
-**[✨ 功能](#-功能雷达)** ·
+**[🚀 安装](#-安装--升级)** ·
+**[✨ 功能](#-节点详情页全面升级)** ·
 **[⚙️ 设置](#️-主题设置)** ·
 **[🛠️ 开发](#️-本地开发)**
 
@@ -27,126 +27,285 @@
 
 <div align="center">
 
-<img src="docs/preview-home.png" width="49%" alt="首页预览" />
-<img src="docs/preview-detail.png" width="49%" alt="详情页预览" />
+<img src="docs/preview-home.png" width="49%" alt="Komari Glassmorphism 首页预览" />
+<img src="docs/preview-detail.png" width="49%" alt="Komari Glassmorphism 节点详情预览" />
 
 </div>
 
 ---
 
-## 🚀 一眼定位
+## 🚀 项目定位
 
-| 项目     | 说明                                                                  |
-| -------- | --------------------------------------------------------------------- |
-| 当前版本 | **v3.1.2**                                                            |
-| 主题定位 | Komari Monitor 可导入 zip 主题，不是普通 Web App 部署包               |
-| 视觉风格 | 毛玻璃卡片、动态背景、浅色 / 深色 / 北京时间自动日夜模式              |
-| 数据能力 | 新版 metric store 优先，旧接口自动 fallback，兼容 Komari 1.2.x 新字段 |
-| 高级工具 | 拓扑、性价比、健康摘要、快照导出、审计日志                            |
-| 发布产物 | `komari-theme-Glassmorphism-build-*.zip`                              |
+| 项目     | 说明                                                      |
+| :------- | :-------------------------------------------------------- |
+| 当前版本 | **v3.1.2**                                                |
+| 主题定位 | Komari Monitor 可导入 zip 主题，不是普通 Web App 部署包   |
+| 视觉风格 | 毛玻璃卡片、动态背景、浅色 / 深色 / 北京时间自动日夜模式  |
+| 数据能力 | Metric Store 优先，旧接口自动 fallback，兼容 Komari 1.2.x |
+| 高级工具 | 拓扑、性价比、健康摘要、快照导出、审计日志                |
+| 发布产物 | `komari-theme-Glassmorphism-build-<short-sha>.zip`        |
+
+> 好看只是外壳。v3 真正的重点，是把 Metric、Ping、流量、费用、健康分析和运维工具整合成日常真的会打开来看的监控面板。
 
 ---
 
-## ✨ 功能雷达
+## 🛟 v3.1.2 启动可靠性更新
 
-### 🪟 玻璃拟态驾驶舱
+`v3.1.2` 修复了一个会同时影响登录状态、节点详情和实时连接的启动单点故障。
 
-- 首页支持 **地球 / 点阵地球 / 平铺地图** 三种视觉模式
-- 卡片 / 列表双视图自由切换，`mini` / `compact` / `comfortable` / `large` 四档密度
-- 总览卡片支持官方、基础、运维、资源、财务、流量、GPU、资产、完整和自定义方案
-- 快捷筛选：默认、月成本、总流量、上下行、峰值、离线、高负载、即将到期
-- 节点 `message` 会在卡片 / 列表以纯文本 tooltip 提示，避免 HTML 注入
+旧流程中，首次 `rpc.ping()` 只要超时或遇到瞬时抖动，后面的公开设置、用户信息、节点数据和 WebSocket / 轮询就全部不会执行。现在这些请求已经拆开，单项失败不再拖垮整个应用。
 
-### 📈 Metric Store 图表增强
+```text
+健康检查 ─┐
+公开设置 ─┼─> 独立并行初始化 ─> 公共页面可用
+用户信息 ─┤                     ├─> WebSocket / HTTP 轮询恢复
+节点数据 ─┘                     └─> 全局错误提示与手动重试
+```
 
-- 对齐 Komari 1.2.6 的 25 个 Metric Store definition，归并为 12 个适合监控面板的图表族
-- 覆盖 CPU / Load、RAM / Swap / Total、Disk / Total、实时网络、累计 / 周期流量、GPU / 设备、显存、温度、TCP / UDP、进程、Ping 延迟与丢包
-- 提供默认、精简、资源、网络、GPU、延迟、运维、完整、自定义 9 套详情图表方案，英文 keys 支持逗号、空格和换行
-- GPU 设备与 Ping 任务按标签拆分多序列；无 definition 或无数据的扩展图表自动隐藏
-- LoadChart 和独立 Ping 图都支持 **自定义开始 / 结束时间范围**；新接口精确传 `start/end`，旧接口自动 fallback
-- 新 metric 的 `null` 保持图表断点，不再误报丢包；legacy records 继续按 `value < 0` 识别丢包
+| 修复项       | 当前行为                                                  |
+| :----------- | :-------------------------------------------------------- |
+| 健康检查     | 5 秒超时，最多 3 次递增间隔重试                           |
+| 超时请求     | 通过 `AbortSignal` 主动取消，不残留悬挂请求               |
+| 初始化       | `Promise.allSettled()` 隔离健康检查、设置、用户和节点请求 |
+| 节点首拉失败 | 仍启动实时连接和轮询，网络恢复后自动补齐数据              |
+| 错误提示     | 首页和 `/instance/:id` 等所有公开路由统一显示             |
+| 手动恢复     | 全局提示提供重试按钮，并防止重复创建连接与定时器          |
 
-### 🧩 节点详情自定义
+> 这不是 Komari 1.2.5 / 1.2.6 的专属兼容补丁。新版后端响应变慢可能提高触发概率，但根因是前端启动链过度串行，现已从设计上修复。
 
-- 详情概览支持财务、状态、资源、网络、GPU、综合、自定义 7 套方案和 18 类指标卡
-- 概览卡按移动端 2 列、中屏 3 列、宽屏 4 列响应式排列，预设使用 8 / 12 / 16 张卡片
-- 图表卡使用统一语义图标和颜色头部，保留旧图表 keys、旧卡位和 JSON 配置兼容
-- 主题设置按 8 个区段重构，复杂 key 列表改为多行输入，help 写明每个英文 key 的含义
+---
 
-### 🧭 首页高级工具
+## ✨ 节点详情页全面升级
 
-登录后可在主题设置中整体开关：
+主题已适配新版 Komari / komari-web Metric 能力，并将官方指标重新整理成适合监控场景的图表族。
 
-| 工具        | 用途                                                      |
-| ----------- | --------------------------------------------------------- |
-| 🗺️ 拓扑     | 查看分组、离线上游和节点关系，快速判断异常集中点          |
-| 💰 性价比   | 结合价格、周期、物理 / 逻辑核心、内存和流量做成本分析     |
-| 🩺 健康摘要 | 按日 / 周 / 月 / 有史以来聚合负载、流量、磁盘和 Ping 风险 |
-| 📤 快照导出 | 导出 JSON / CSV，CSV 内置公式注入防护                     |
-| 📜 审计日志 | 只读查看管理员操作日志，支持分页                          |
+| 分类        | 支持指标                                                       |
+| :---------- | :------------------------------------------------------------- |
+| 💻 CPU      | CPU、Load、Processes                                           |
+| 🧠 内存     | RAM、RAM Total、Swap、Swap Total                               |
+| 💾 存储     | Disk、Disk Total、磁盘耗尽预测                                 |
+| 🚀 GPU      | GPU、GPU Device、GPU Memory、GPU Memory Total、GPU Temperature |
+| 🌐 网络     | Download、Upload、周期流量、累计流量、TCP、UDP                 |
+| 📡 网络质量 | Ping Latency、Packet Loss、多任务统计                          |
+| 🌡️ 环境状态 | System Temperature、GPU Temperature                            |
 
-### 🧠 运维预测与统计
+> 不是简单堆叠 25 张单指标图，而是归并成 12 个稳定图表族，减少碎片化信息和无意义的重复展示。
 
-- **磁盘耗尽预测**：基于历史磁盘增长趋势估算剩余天数，新节点或历史不足时显示「数据积累中」，不会让人误以为功能坏了
-- Ping 支持 min / max / avg / latest、P50 / P99、波动率、丢包率
-- 首页节点卡片保持干净，延迟、丢包和关键资源一屏展示
-- 健康摘要主动提示离线、磁盘风险、流量预警和网络质量异常
+### 📐 详情页布局
 
-### 💰 财务 / 流量 / 隐私
+| 优化方向 | 当前能力                               |
+| :------- | :------------------------------------- |
+| 概览卡   | 18 类指标，7 套预设                    |
+| 图表面板 | 12 个图表族，9 套预设                  |
+| 响应式   | 移动端 2 列、中屏 3 列、宽屏 4 列      |
+| 分区模式 | 可选概览 / 负载 / 延迟标签页           |
+| 兼容配置 | 保留旧图表 key、旧卡位和 JSON 模板解析 |
 
-- 支持价格、周期、到期、剩余价值、月成本、年成本，多货币格式化和汇率换算
-- 支持厂商别名、地区、城市、ASN、标签、分组元数据
-- 未登录可隐藏价格、费用类卡片和后台入口
-- Hidden 节点仅登录后显示，公开首页和详情仍保持公开访问
+---
 
-### 🔒 安全加固
+## 🎨 详情页自定义能力
 
-- 高级工具、历史指标、Geo 查询全部纳入登录权限校验
-- 快照导出防 CSV 公式注入，可选二级密码
-- 公告 Markdown 渲染加了 URL scheme 白名单，`javascript:` 链接直接拦截
+主题设置不要求修改源码。预设适合快速启用，英文 key 适合高级用户精确控制顺序和内容。
+
+| 功能                | 状态 |
+| :------------------ | :--- |
+| 概览卡预设          | ✅   |
+| 图表预设            | ✅   |
+| 英文 key 自定义     | ✅   |
+| 英文 / 中文逗号解析 | ✅   |
+| 空格 / 分号解析     | ✅   |
+| 多行粘贴解析        | ✅   |
+| 后台 help key 说明  | ✅   |
+| 旧配置兼容          | ✅   |
+
+### 推荐配置方向
+
+| 类型       | 适合场景                             |
+| :--------- | :----------------------------------- |
+| Resource   | CPU / 内存 / 磁盘资源监控            |
+| Network    | 实时速率、累计流量、连接与 Ping 分析 |
+| GPU        | GPU 利用率、设备、显存与温度         |
+| Operations | 资源、连接、进程、温度与网络质量     |
+| Full       | 覆盖完整官方 Metric 能力             |
+| Custom     | 自己决定卡片和图表顺序               |
+
+---
+
+## 📈 Metric 接口升级
+
+新版接口优先，旧版 Komari 后端继续保持兼容。
+
+```text
+新版 Metric API 有效
+        ↓
+public:queryMetrics / public:getPingMetricStats
+        ↓
+无数据或接口不可用
+        ↓
+common:getRecords / legacy records fallback
+        ↓
+保持图表与 Ping 正常展示
+```
+
+| 项目                        | 状态                |
+| :-------------------------- | :------------------ |
+| `public:queryMetrics`       | ✅ 优先使用         |
+| `public:getPingMetricStats` | ✅ 优先使用         |
+| `common:getRecords`         | ✅ 自动 fallback    |
+| 自定义 `start` / `end`      | ✅                  |
+| Metric `null` 断点          | ✅ 保留，不误判丢包 |
+| 旧接口负值丢包哨兵          | ✅ 兼容             |
+
+---
+
+## 📶 Ping 模块增强
+
+| 优化项目                 | 状态 |
+| :----------------------- | :--- |
+| Min / Max / Avg / Latest | ✅   |
+| P50 / P99 / 波动率       | ✅   |
+| 多任务丢包统计           | ✅   |
+| 100% 丢包任务保留        | ✅   |
+| Null 点不再误判丢包      | ✅   |
+| 自定义起止时间           | ✅   |
+| 新旧接口自动切换         | ✅   |
+| 快速切换请求防旧数据覆盖 | ✅   |
+
+适用于网络抖动分析、短时丢包排查和特定时间段异常定位。
+
+---
+
+## 🪟 首页驾驶舱
+
+- 地球、点阵地球、平铺地图三种视觉模式
+- 卡片 / 列表双视图，列表在密集节点下自动虚拟化
+- `mini` / `compact` / `comfortable` / `large` 四档卡片密度，默认保持 `compact`
+- 官方、基础、运维、资源、财务、流量、GPU、资产、完整和自定义总览方案
+- 月成本、总流量、上下行、峰值、离线、高负载、即将到期等快捷控制
+- 节点 `message` 在卡片 / 列表以纯文本提示，不使用 `v-html`
+- 自定义图片 / 视频背景、毛玻璃配色预设和动画减弱选项
+
+---
+
+## 🧰 首页高级工具
+
+高级工具仅在登录验证通过后显示和执行。
+
+| 工具          | 用途                                               |
+| :------------ | :------------------------------------------------- |
+| 🗺️ 拓扑分析   | 根据 ASN、厂商、分组和标签分析节点关系与异常集中点 |
+| 💰 性价比排行 | 比较每核、每 GB 内存、流量额度和周期成本           |
+| 🩺 健康摘要   | 聚合负载、磁盘、流量、离线状态和 Ping 风险         |
+| 📤 快照导出   | 导出 JSON / CSV，内置 CSV 公式注入防护             |
+| 📜 审计日志   | 分页查看管理员操作记录                             |
+
+---
+
+## 🧱 底层架构
+
+新功能遵循统一调用链：
+
+```text
+Component
+    ↓
+Composable
+    ↓
+Service
+    ↓
+RequestManager / CacheService
+    ↓
+API / RPC
+```
+
+同步具备：
+
+- [x] 请求去重与并发限制
+- [x] 超时、重试和 Abort 清理
+- [x] TTL / LRU-like / 引用计数缓存
+- [x] Metric Store 优先与旧接口 fallback
+- [x] 共享 Ping / 负载历史数据流
+- [x] 登录权限与敏感操作校验
+- [x] Vue 响应式节点索引和实时更新
+
+---
+
+## 🔒 公开访问与安全边界
+
+首页和节点详情页始终保持公开，不使用全局路由守卫阻断普通监控。
+
+| 公开能力               | 登录后能力                   |
+| :--------------------- | :--------------------------- |
+| 普通节点状态与实时指标 | Hidden 节点                  |
+| Load / Ping 历史图表   | 拓扑、性价比、健康摘要       |
+| Ping 延迟与丢包统计    | 快照导出与审计日志           |
+| 公开厂商元数据         | Geo 增强、磁盘预测等敏感路径 |
+
+安全细节包括：
+
+- 快照导出需要登录验证，可选二级密码
+- CSV 中和 `=`、`+`、`-`、`@`、`|` 等公式注入前缀
+- Markdown 链接和图片限制 URL scheme，拦截 `javascript:`
+- 未登录可隐藏价格、费用卡片和后台入口
+- 登录过期时降级到公共展示，不让整个 dashboard 崩溃
+
+---
+
+## 📱 WebKit / iOS 兼容
+
+| 环境                       | 策略                                         |
+| :------------------------- | :------------------------------------------- |
+| Safari 15.4+               | 构建语法目标与基础可用边界                   |
+| Safari 16.4+               | Tailwind CSS v4 完整视觉基线                 |
+| 缺少 `oklch` / `color-mix` | 使用 sRGB token 和可读降级样式               |
+| 旧 WebKit                  | 关闭高成本毛玻璃，避免透明或不可读界面       |
+| Firefox                    | 对密集卡片和控制层关闭多层 `backdrop-filter` |
+
+> 兼容策略的目标是保证基础功能和文字可读，不承诺老旧内核拥有与现代浏览器完全一致的视觉效果。
 
 ---
 
 ## ⚙️ 主题设置
 
-所有设置都由 [`komari-theme.json`](komari-theme.json) 托管到 Komari 后台，**无需改代码**。
+全部设置由 [`komari-theme.json`](komari-theme.json) 托管到 Komari 后台，无需修改代码。
 
-| 分类 | 代表设置                                                    |
-| ---- | ----------------------------------------------------------- |
-| 基础 | 主题模式、刷新间隔、RPC 连接模式、默认视图、卡片尺寸        |
-| 首页 | 公告、地球样式、总览卡片、快捷按钮、高级工具、隐藏后台入口  |
-| 外观 | 毛玻璃预设、自定义玻璃颜色、自定义图片 / 视频背景、动画减弱 |
-| 节点 | 列表字段、离线置底、高负载阈值、流量预警阈值、厂商别名      |
-| 详情 | 18 类概览卡、12 个图表族、GPU 图表、分区标签页、磁盘预测    |
-| 高级 | 导出二级密码、自定义配色、英文 keys 多行模板                |
+| 分类           | 代表设置                                            |
+| :------------- | :-------------------------------------------------- |
+| 基础与外观     | 主题模式、更新间隔、RPC 模式、默认视图、卡片尺寸    |
+| 首页布局       | 公告、地球样式、访客信息、毛玻璃配色、自定义背景    |
+| 总览卡片       | 10 套方案、自定义 keys 和显示顺序                   |
+| 高级工具与隐私 | 工具总开关、隐藏后台 / 价格、厂商别名、导出二级密码 |
+| 快捷控制与列表 | 快捷按钮、列表元数据、离线置底、预警阈值            |
+| 详情概览       | 18 类指标卡、7 套方案、分区标签页                   |
+| 详情图表       | 12 个图表族、9 套方案、GPU 图表和自定义 keys        |
+| 自定义背景     | 亮 / 暗 URL、图片 / 视频、模糊和遮罩                |
 
 ---
 
-## 📦 安装
+## 📦 安装 / 升级
 
-**方式一：GitHub 地址自动导入**
+### 方式一：使用 GitHub 仓库地址
 
-Komari 后台的主题导入现在支持直接粘贴仓库地址，自动拉取最新 Release 安装：
+Komari 后台支持直接填写仓库地址并拉取最新 Release：
 
-```
+```text
 https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism
 ```
 
-**方式二：手动下载**
+### 方式二：手动安装 Release
 
 1. 打开 [Releases](https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism/releases)
 2. 下载最新的 `komari-theme-Glassmorphism-build-*.zip`
 3. 登录 Komari Monitor 后台，进入 **设置 → 主题管理**
-4. 上传 zip，启用主题
-5. 在主题设置里按需调整视觉、卡片、快捷按钮和高级工具
+4. 上传 zip 并启用主题
+5. 在主题设置中调整视觉、卡片、快捷控制和高级工具
 
-> ⚠️ 请上传 Release 附件里的主题 zip，不要上传源码压缩包。
+> 请上传 Release 附件中的主题 zip，不要上传 GitHub 自动生成的源码压缩包。
 
 ---
 
 ## 🛠️ 本地开发
 
-环境：Node.js `^20.19.0` 或 `>=22.12.0`，Bun `>=1.2.0`。
+环境要求：Node.js `^20.19.0` 或 `>=22.12.0`，Bun `>=1.2.0`。
 
 ```bash
 bun install
@@ -161,85 +320,51 @@ bun run preview
 - `dist/`
 - `komari-theme-Glassmorphism-build-<short-sha>.zip`
 
-> 发布版本只改 [`komari-theme.json`](komari-theme.json) 顶层 `version` 字段，不要给 [`package.json`](package.json) 添加顶层 `version`。
+发布包固定包含：
+
+```text
+komari-theme.json
+preview.png
+dist/
+```
+
+> 发布版本只改 [`komari-theme.json`](komari-theme.json) 顶层 `version`，不要给 `package.json` 添加顶层 `version`。
 
 ---
 
 ## 📝 更新日志
 
 <details open>
-<summary><strong>v3.1.2</strong></summary>
+<summary><strong>v3.1.2 · 启动恢复与全局错误反馈</strong></summary>
 
-- 修复启动健康检查偶发失败时跳过用户信息、节点数据和实时连接，导致登录状态错误及详情页无数据的问题
-- 健康检查增加 5 秒超时和 3 次递增间隔重试，超时请求会被主动取消
-- 公开设置、用户信息、节点数据与健康检查改为独立并行初始化，单项失败不再拖垮整条启动链
-- 节点首次加载失败时仍启动 WebSocket / HTTP 轮询自动恢复；连接错误提示提升到全局并支持手动重试
-
-</details>
-
-<details>
-<summary><strong>v3.1.1</strong></summary>
-
-- 修复升级后默认背景被页面实色层遮挡、暗色模式显示全黑的问题
-- 修复列表模式 Ping 气泡遮挡运行时间，并减少列表小 Ping 条的 DOM 与 hover 合成开销
-- 普通节点 Ping 延迟和丢包历史恢复公开访问，高级工具、Geo、导出、审计和磁盘预测权限保持不变
-- 修复详情 Ping 快速切换节点或时间范围时旧请求覆盖新结果，并优化大样本时间合并性能
-- 首页快捷控制计数不再为只取数量重复排序全部节点
+- 修复健康检查偶发失败时跳过用户、节点和实时连接的问题
+- 健康检查增加 5 秒超时、3 次递增间隔重试和请求取消
+- 设置、用户、节点与健康检查改为独立并行初始化
+- 节点首拉失败后仍启动轮询自愈；所有路由统一显示错误和重试入口
 
 </details>
 
 <details>
-<summary><strong>v3.1.0</strong></summary>
+<summary><strong>v3.1.1 · 首页、列表与公开 Ping 修复</strong></summary>
 
-- 对齐 Komari / komari-web 1.2.6，将官方 25 个 metric definition 归并为 12 个可配置图表族
-- 新增累计 / 周期流量、GPU 设备、显存、温度、Ping 延迟与丢包图表，统一图标头部并按数据自动隐藏
-- 详情概览恢复宽屏四列，新增 7 套概览预设与 9 套图表预设，英文 keys 支持多行配置
-- Ping 图增加自定义起止时间；修复 metric `null` 丢包误报、100% 丢包任务过滤和多任务等权汇总问题
-- 重构主题设置分区和 help，补充旧 WebKit / iOS 15.4 可读 fallback，并优化亮色刷新过渡
-
-</details>
-
-<details>
-<summary><strong>v3.0.3</strong></summary>
-
-- 合并共享服务 chunk，统一详情历史请求缓存维度，降低重复请求与资源碎片
+- 修复默认背景被实色层遮挡和暗色模式全黑
+- 修复列表 Ping 提示遮挡，并降低 DOM / hover 合成开销
+- 普通 Ping 历史恢复公开访问，修复详情快速切换的旧请求覆盖
+- 优化首页快捷控制计数和大样本时间合并
 
 </details>
 
 <details>
-<summary><strong>v3.0.2</strong></summary>
+<summary><strong>v3.1.0 · 节点详情 Metric 驾驶舱</strong></summary>
 
-- 首页节点卡片移除物理核心和"数据积累中"等诊断文案，保持公开首页干净
-- 磁盘预测样本不足提示移动到详情页磁盘模块展示
-
-</details>
-
-<details>
-<summary><strong>v3.0.1</strong></summary>
-
-- 新增审计日志高级工具，支持分页
-- LoadChart 增加自定义时间范围；metric definitions 增加 TTL 缓存
-- 性价比分析补齐物理核心，每核成本优先按物理核计算
-- 修复 `SharedCache.retain()` 覆盖同 key 后的引用计数释放问题
-
-</details>
-
-<details>
-<summary><strong>v3.0.0</strong></summary>
-
-- 接入官方新版 metric store：Ping、负载历史、GPU 指标优先走 public metric API，旧后端自动 fallback
-- 新增节点 `message` 提示、GPU 图表、`chartDashboardTemplate`、Ping 统计增强
-- 强化拓扑、健康摘要、快照导出、CSV 安全、厂商元数据、请求缓存和 Komari 1.2.x 兼容
+- 对齐 Komari 1.2.6 的 25 个 Metric definition，归并为 12 个图表族
+- 新增累计 / 周期流量、GPU 设备、显存、温度和 Ping 图表
+- 增加详情概览 / 图表预设、自定义时间范围和多行 keys 配置
+- 修复 Metric null、100% 丢包任务和多任务汇总问题
 
 </details>
 
 更多历史版本请查看 [Releases](https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism/releases)。
-
----
-
-## 📄 License
-
-[MIT](LICENSE)
 
 ---
 
@@ -252,37 +377,22 @@ bun run preview
 - 💬 提交 Issue 或 Feature Request
 - 📢 分享给更多 Komari 用户
 
-你的每一个 Star，都是继续更新下去最大的动力。
+你的每一个 Star，都是继续维护更新的动力。
 
-## ☕ Support the Project
+---
 
-如果你喜欢这个项目，并希望支持后续开发，也欢迎请我喝杯咖啡 ☕。
+## ☕ Donation / Sponsor
 
-你的每一份支持，都将用于：
+如果你喜欢这个项目，也欢迎支持后续开发。每一份支持都会用于功能开发、Bug 修复、性能优化、文档和长期维护。
 
-- 🚀 持续开发新功能
-- 🐛 修复 Bug 与性能优化
-- 📖 完善文档与教程
-- 💻 项目长期维护与服务器开销
-
-### 💖 Donation / Sponsor
-
-> 如果觉得这个项目值得支持，欢迎以任何方式赞助作者。
-
-每一份支持，无论金额大小，都是项目持续更新的动力 ❤️
-
-## ❤️ 写在最后
-
-从最初的一个简单主题，到现在的 **Glassmorphism v3.1**。
-
-感谢每一位提出 Issue、提交 PR、反馈 Bug、提出建议的朋友。
-
-因为有你们，这个项目才能不断成长。
-
-未来，我仍会持续维护和更新它，带来更多高质量的新功能与优化。
+感谢 **可乐杯里泡枸杞**、**Leo Lin**、**HelloWorldx** 的捐赠支持。
 
 ---
 
 ## 🙏 致谢
 
-感谢原始主题作者 **Tokinx**，感谢 **可乐杯里泡枸杞**、**Leo Lin**、**HelloWorldx**的捐赠支持，感谢 [Komari](https://github.com/komari-monitor/komari)、[Komari Naive](https://github.com/tonyliuzj/komari-naive)、Vue、Vite、reka-ui、Tailwind CSS 以及所有反馈 Issue / PR / 建议的朋友。
+感谢原始主题作者 **Tokinx**，感谢 [Komari](https://github.com/komari-monitor/komari)、[Komari Naive](https://github.com/tonyliuzj/komari-naive)、Vue、Vite、reka-ui、Tailwind CSS，以及所有反馈 Issue、提交 PR 和分享建议的朋友。
+
+## 📄 License
+
+[MIT](LICENSE)
