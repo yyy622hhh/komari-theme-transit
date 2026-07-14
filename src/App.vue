@@ -95,7 +95,8 @@ onUnmounted(() => {
                 enter-active-class="transition-all duration-300 ease-out"
                 enter-from-class="opacity-0 translate-y-2" enter-to-class="opacity-100 translate-y-0"
                 leave-active-class="transition-opacity duration-150 ease-in" leave-from-class="opacity-100"
-                leave-to-class="opacity-0" mode="out-in"
+                leave-to-class="opacity-0"
+                :mode="appStore.disablePageAnimation ? 'default' : 'out-in'"
               >
                 <KeepAlive :include="['HomeView']">
                   <component :is="Component" />

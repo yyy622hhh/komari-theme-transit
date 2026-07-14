@@ -12,14 +12,24 @@
 
 ## 当前任务
 
-- 状态：done
-- 目标：在 `v3.1.2` 已发布后，按公开发帖式叙事重构项目 README，并以 Markdown-only 提交单独推送。
-- 里程碑：M6 文档 / DX；不修改运行时代码、主题版本或 Release 资产。
-- 范围：重组 `README.md` 的启动可靠性、详情 Metric、自定义、Ping、高级工具、架构、安全、兼容、安装和更新日志；更新本交接记录；执行 Markdown lint / diff 检查；单独提交并推送。
-- 计划：README 重构 -> 技术事实复核 -> Markdown lint -> Markdown-only 提交 -> 推送并确认版本未变。
-- 不做：不提交 `.claude/` 本机配置，不修改 `komari-theme.json`，不触发或创建重复 `v3.1.2` Release。
+- 状态：in-progress
+- 目标：修复开启“减弱过渡动画”后路由切换只剩背景的问题，并发布 `v3.1.3`。
+- 里程碑：M4 UI/UX 热修复；不改变正常动画视觉、数据流或权限边界。
+- 范围：调整 App 路由 Transition 模式；更新唯一版本源和 README；执行 lint/build、zip 检查、推送与 GitHub Release 验证。
+- 计划：路由过渡修复 -> 版本/说明 -> lint/build/zip -> 提交推送 -> Actions/Release/资产验证。
+- 不做：不提交 `.claude/` 本机配置，不改 `package.json.version`，不扩展其他动画或页面逻辑。
 
 ## 执行日志
+
+### 2026-07-14 v3.1.3 reduced-motion route transition fix
+
+- 线上复现：`tz.yisaw.com` 开启减弱过渡动画时，点击节点后 URL 已进入详情但 `<main>` 为空；`km.ydao.de` 使用同一构建且未触发配置时，详情和返回首页均正常。
+- 根因：路由 `Transition` 在 `css=false` 时仍使用 `mode="out-in"`；同步离场的 `afterLeave` 与 `KeepAlive` 更新重入后，Vue 访问空 DOM 锚点并抛出 `nextSibling` / `parentNode`。
+- 修复：减弱动画时路由 Transition 改用默认并行模式；正常动画继续使用 `out-in`，首页缓存策略保持不变。
+- 发布准备：唯一版本源更新为 `3.1.3`，README 当前版本、专项说明和更新日志已同步；`.claude/` 继续排除。
+- 本地验证：`bun run lint`、`bun run build` 和 `git diff --check` 均通过；构建仅有既有 `@vueuse/core` PURE 注释与 `globe` 大 chunk 警告。
+- 本地资产：`komari-theme-Glassmorphism-build-4716f15.zip`，大小 5,105,653 bytes，SHA-256 `e202ce28508a3dc0c9b1a4a1e8c5c7706dd1f281ef72d8f4d73d429b891bac11`；顶层为 `komari-theme.json`、`preview.png`、`dist/`，包内版本为 `3.1.3`。
+- 远端验证：待推送后检查 Actions、tag、Release 和正式发布资产。
 
 ### 2026-07-14 post-release README restructure
 
