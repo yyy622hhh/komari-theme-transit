@@ -1,6 +1,7 @@
 import type { MetricPoint, MetricSeries, PingMetricTaskStats } from '@/utils/rpc'
 
 export const PING_LATENCY_METRIC = 'ping.latency_ms'
+export const PING_LOSS_METRIC = 'ping.loss'
 
 export interface NormalizedMetricSeries extends Omit<MetricSeries, 'points'> {
   tags: Record<string, unknown>

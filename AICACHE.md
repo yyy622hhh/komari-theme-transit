@@ -13,13 +13,23 @@
 ## 当前任务
 
 - 状态：in-progress
-- 目标：修复开启“减弱过渡动画”后路由切换只剩背景的问题，并发布 `v3.1.3`。
-- 里程碑：M4 UI/UX 热修复；不改变正常动画视觉、数据流或权限边界。
-- 范围：调整 App 路由 Transition 模式；更新唯一版本源和 README；执行 lint/build、zip 检查、推送与 GitHub Release 验证。
-- 计划：路由过渡修复 -> 版本/说明 -> lint/build/zip -> 提交推送 -> Actions/Release/资产验证。
-- 不做：不提交 `.claude/` 本机配置，不改 `package.json.version`，不扩展其他动画或页面逻辑。
+- 目标：修复 Issue #18 首页节点卡丢包时间格被整段平均值覆盖的问题，并发布 `v3.1.4`。
+- 里程碑：M4 UI/UX 热修复；只修正 Metric Store 分时丢包显示，不改变权限、路由或 legacy records 语义。
+- 范围：首页 Ping 统计 composable 消费 `ping.loss` 分桶序列；更新唯一版本源和 README；执行 lint/build、zip 检查、推送与 GitHub Release 验证。
+- 计划：分桶丢包合并 -> 版本/说明 -> lint/build/zip -> 提交推送 -> Actions/Release/资产验证。
+- 不做：不提交 `.claude/` 本机配置，不改 `package.json.version`，不移除旧 records 的 `value < 0` 丢包 fallback。
 
 ## 执行日志
+
+### 2026-07-14 v3.1.4 Issue #18 per-bucket Ping loss fix
+
+- Issue 判断：应修复。Komari 1.2.6 的 `public:queryMetrics` 已返回 `ping.loss` 分时序列，当前主题只查询 `ping.latency`，再把 `avgLoss` 覆盖到每个历史格，导致所有格子同值同色。
+- 修复边界：周期汇总继续采用 `public:getPingMetricStats` 的按样本加权平均；历史时间格改为消费 `ping.loss`，按时间桶与 point `count` 加权，ratio 转百分比；`null` 保持空桶；旧 records 负值丢包逻辑保持不变。
+- 已实现：Metric Store 查询同时请求 `ping.latency_ms` / `ping.loss`；按任务与时间桶聚合 loss point，使用 `count` 加权；丢包序列覆盖不完整时回退 legacy records；本地 Ping 缓存版本升到 8，避免旧错误结果继续命中。
+- 发布准备：唯一版本源更新为 `3.1.4`，README 当前版本、专项说明与更新日志已同步；`.claude/` 继续排除。当前 `gh` 登录 token 已失效，公开 Issue / Release 可通过 GitHub REST 读取，git 推送凭据单独验证。
+- 本地验证：`bun run lint`、`bun run build` 和 `git diff --check` 均通过；构建仅有既有 `@vueuse/core` PURE 注释与 `globe` 大 chunk 警告。
+- 本地资产：`komari-theme-Glassmorphism-build-4f37416.zip`，大小 5,105,926 bytes，SHA-256 `3b9510345ad79319d70311ed8a3c03a79cf4159cbf5b0ef48c3f04623798df74`；顶层为 `komari-theme.json`、`preview.png`、`dist/`，包内版本为 `3.1.4`。
+- 远端验证：待推送后检查 Actions、tag、Release 和正式发布资产。
 
 ### 2026-07-14 v3.1.3 reduced-motion route transition fix
 
@@ -29,7 +39,8 @@
 - 发布准备：唯一版本源更新为 `3.1.3`，README 当前版本、专项说明和更新日志已同步；`.claude/` 继续排除。
 - 本地验证：`bun run lint`、`bun run build` 和 `git diff --check` 均通过；构建仅有既有 `@vueuse/core` PURE 注释与 `globe` 大 chunk 警告。
 - 本地资产：`komari-theme-Glassmorphism-build-4716f15.zip`，大小 5,105,653 bytes，SHA-256 `e202ce28508a3dc0c9b1a4a1e8c5c7706dd1f281ef72d8f4d73d429b891bac11`；顶层为 `komari-theme.json`、`preview.png`、`dist/`，包内版本为 `3.1.3`。
-- 远端验证：待推送后检查 Actions、tag、Release 和正式发布资产。
+- 远端验证：提交 `4f37416` 已推送到 `main`；GitHub Actions `Release On Version Bump` run `#29311122789` 成功；tag `v3.1.3` 已生成；Release 为正式发布（非 draft / prerelease）。
+- 线上资产：`komari-theme-Glassmorphism-build-4f37416.zip`，大小 5,120,783 bytes，SHA-256 `f4d5f1be0c769ffc5372ab6a9b780042768f82529827b7222a843ef642605bee`；下载后复核顶层结构为 `komari-theme.json`、`preview.png`、`dist/`，包内版本为 `3.1.3`。
 
 ### 2026-07-14 post-release README restructure
 
@@ -162,6 +173,8 @@
 
 ## 验证记录
 
+- 2026-07-14 v3.1.4 Issue #18 local release validation：`bun run lint`、`bun run build`、`git diff --check` 通过；本地 zip `komari-theme-Glassmorphism-build-4f37416.zip` 大小 5,105,926 bytes，SHA-256 `3b9510345ad79319d70311ed8a3c03a79cf4159cbf5b0ef48c3f04623798df74`，顶层结构 `komari-theme.json`、`preview.png`、`dist/`，包内版本 `3.1.4`。构建仍只有既有 `@vueuse/core` PURE 注释与 `globe` 大 chunk 警告。
+- 2026-07-14 v3.1.3 release：发布提交 `4f37416` 已推送 `main`；GitHub Actions run `#29311122789` 成功。Release `v3.1.3` 为正式发布（非 draft / prerelease），target 为完整提交 `4f3741692bd81141ed542614d5b31a01ff0dc0fc`，zip 资产 `komari-theme-Glassmorphism-build-4f37416.zip` 上传状态为 `uploaded`。下载复核：大小 5,120,783 bytes，SHA-256 `f4d5f1be0c769ffc5372ab6a9b780042768f82529827b7222a843ef642605bee`，顶层结构 `komari-theme.json`、`preview.png`、`dist/`，包内版本 `3.1.3`。
 - 2026-07-14 v3.1.0 release：发布提交 `14dac71` 已推送 `main`；GitHub Actions run `#42` 成功。Release `v3.1.0` 为正式发布（非 draft / prerelease），target 为完整提交 `14dac711d3e1ad1e7963c6dc2609ab6d1921f82d`，zip 资产上传状态为 `uploaded`。
 - 2026-07-14 official detail metric dashboard / Ping custom range：`komari-theme.json` 解析通过，共 56 个表单行、48 个唯一 key、无重复；12 个图表族使用的 Tabler 图标均存在。最终 `bun run lint` 与 `bun run build` 通过，生成 `dist/` 和 `komari-theme-Glassmorphism-build-4e9ae53.zip`，zip 顶层保持 `komari-theme.json`、`preview.png`、`dist/`。本地 `http://127.0.0.1:5174/` 页面非空且桌面布局无重叠；本地无 Komari 后端，未完成真实节点数据下的移动端详情页、新旧 Ping 接口和 GPU 多设备实测。构建仍只有既有 `@vueuse/core` PURE 注释与 `globe` chunk 体积警告。
 - 2026-07-13 managed settings compact keys follow-up：`komari-theme.json` 经 PowerShell `ConvertFrom-Json` 解析通过，共 56 个表单行、48 个唯一 key、0 个 Slot 字段、5 个 `richtext` 多行 keys 字段。混合分隔样例 `cpu,memory\ndisk process；gpu` 按顺序解析为 5 个 key。`bun run lint` 通过；`bun run build` 内含 `vue-tsc --build` 并通过，生成 `dist/` 与 `komari-theme-Glassmorphism-build-4e9ae53.zip`。构建仍只有既有 `@vueuse/core` PURE 注释和 `globe` 大 chunk 警告。

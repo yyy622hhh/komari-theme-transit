@@ -38,7 +38,7 @@
 
 | 项目     | 说明                                                      |
 | :------- | :-------------------------------------------------------- |
-| 当前版本 | **v3.1.3**                                                |
+| 当前版本 | **v3.1.4**                                                |
 | 主题定位 | Komari Monitor 可导入 zip 主题，不是普通 Web App 部署包   |
 | 视觉风格 | 毛玻璃卡片、动态背景、浅色 / 深色 / 北京时间自动日夜模式  |
 | 数据能力 | Metric Store 优先，旧接口自动 fallback，兼容 Komari 1.2.x |
@@ -46,6 +46,14 @@
 | 发布产物 | `komari-theme-Glassmorphism-build-<short-sha>.zip`        |
 
 > 好看只是外壳。v3 真正的重点，是把 Metric、Ping、流量、费用、健康分析和运维工具整合成日常真的会打开来看的监控面板。
+
+---
+
+## 📶 v3.1.4 首页分时丢包修复
+
+`v3.1.4` 修复首页节点卡的丢包时间格被整段平均值覆盖、导致所有格子同值同色的问题。
+
+右侧汇总仍显示整个统计周期的平均丢包率；每个时间格改为读取 Metric Store 的 `ping.loss` 分时序列，并按各 Ping 任务的实际样本数加权。空桶继续显示为无数据，旧版 Komari 的 records 负值丢包逻辑仍作为 fallback 保留。
 
 ---
 
@@ -343,6 +351,16 @@ dist/
 ## 📝 更新日志
 
 <details open>
+<summary><strong>v3.1.4 · 首页分时丢包修复</strong></summary>
+
+- 首页 Metric Store 查询同时读取 `ping.latency_ms` 与 `ping.loss`
+- 每个丢包时间格按对应时间桶和 point `count` 加权计算，不再复用整段平均值
+- `null` 空桶保持无数据，周期平均丢包文字继续使用精确汇总统计
+- Metric 分时丢包数据不完整时自动回退旧 records 负值丢包逻辑
+
+</details>
+
+<details>
 <summary><strong>v3.1.3 · 减弱动画路由切换修复</strong></summary>
 
 - 修复开启“减弱过渡动画”后进入详情只剩背景的问题
