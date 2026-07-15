@@ -35,6 +35,12 @@ export interface NodeData {
   auto_renewal: boolean
   currency: string
   expired_at: string
+  traffic_rate?: number
+  time_rate?: number
+  startup_fee?: number
+  first_agent_reported_at?: string
+  first_agent_reported_at_estimated?: boolean
+  billing_traffic_bytes?: number
   group: string
   groups: string[]
   tags: string
@@ -189,6 +195,12 @@ const useNodesStore = defineStore('nodes', () => {
       auto_renewal: client.auto_renewal,
       currency: client.currency,
       expired_at: client.expired_at,
+      traffic_rate: client.traffic_rate,
+      time_rate: client.time_rate,
+      startup_fee: client.startup_fee,
+      first_agent_reported_at: client.first_agent_reported_at,
+      first_agent_reported_at_estimated: client.first_agent_reported_at_estimated,
+      billing_traffic_bytes: client.billing_traffic_bytes,
       group: client.group,
       groups: parseNodeGroups(client.group),
       tags: client.tags,

@@ -38,7 +38,7 @@
 
 | 项目     | 说明                                                      |
 | :------- | :-------------------------------------------------------- |
-| 当前版本 | **v3.1.5**                                                |
+| 当前版本 | **v3.1.6**                                                |
 | 主题定位 | Komari Monitor 可导入 zip 主题，不是普通 Web App 部署包   |
 | 视觉风格 | 毛玻璃卡片、动态背景、浅色 / 深色 / 北京时间自动日夜模式  |
 | 数据能力 | Metric Store 优先，旧接口自动 fallback，兼容 Komari 1.2.x |
@@ -46,6 +46,18 @@
 | 发布产物 | `komari-theme-Glassmorphism-build-<short-sha>.zip`        |
 
 > 好看只是外壳。v3 真正的重点，是把 Metric、Ping、流量、费用、健康分析和运维工具整合成日常真的会打开来看的监控面板。
+
+---
+
+## 🧩 v3.1.6 默认主题后台与费用明细
+
+- `/admin`、`/terminal`、`/manage/*` 复用完整官方 komari-web，并增加 Glassmorphism 亮暗色覆盖与可重复同步脚本
+- 首页节点延迟、丢包格可直接打开完整监测图；“剩余价值”可查看逐节点数据、切换显示币种并覆盖汇率
+- 提前适配 [Komari PR #604](https://github.com/komari-monitor/komari/pull/604) 与 [komari-web PR #82](https://github.com/komari-monitor/komari-web/pull/82) 的流量单价、小时单价、首次开机费和首次 Agent 上报锚点；空费率按 0，旧核心不会收到未知字段
+- 访客审计增加采集开关、UTF-8 安全截断，并继续支持当前筛选结果的完整 JSON / CSV 导出
+- 默认背景改为原创青蓝、淡紫、薄荷网格图，与 `docs/preview.png` 的主题配色一致
+
+> 实时费用字段需要升级到包含 Komari PR #604 的核心后才会出现；当前主题和嵌入管理端会通过返回字段自动检测能力。
 
 ---
 
@@ -367,6 +379,17 @@ dist/
 ## 📝 更新日志
 
 <details open>
+<summary><strong>v3.1.6 · 默认主题后台与费用明细</strong></summary>
+
+- 内置完整官方管理端与终端路由，增加 Glassmorphism 配色和可重复同步流程
+- 延迟 / 丢包支持弹窗监测；剩余价值支持逐节点明细、显示币种与汇率覆盖
+- 提前适配实时费用估算字段，并保持旧 Komari 核心账单表单兼容
+- 访客审计增加采集开关、UTF-8 安全截断与完整 JSON / CSV 导出
+- 使用与项目主预览同色系的原创默认背景
+
+</details>
+
+<details>
 <summary><strong>v3.1.5 · 色觉辅助与访客安全审计</strong></summary>
 
 - 新增标准 / 色觉友好主题选项、语义色、图表线型和 Ping 状态纹理

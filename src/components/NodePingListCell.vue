@@ -6,6 +6,10 @@ const props = defineProps<{
   online: boolean
 }>()
 
+const emit = defineEmits<{
+  click: []
+}>()
+
 const {
   latencyRenderBars,
   lossRenderBars,
@@ -13,7 +17,12 @@ const {
 </script>
 
 <template>
-  <div class="group flex flex-col gap-[1px] pr-4">
+  <button
+    type="button"
+    class="group flex w-full flex-col gap-[1px] pr-4 text-left"
+    aria-label="打开延迟和丢包监测"
+    @click.stop="emit('click')"
+  >
     <div class="group/panel relative items-center gap-1 opacity-80 hover:opacity-100">
       <div
         class="grid h-1 cursor-auto items-end gap-[1px] transition-all hover:h-2.5"
@@ -46,5 +55,5 @@ const {
         </span>
       </div>
     </div>
-  </div>
+  </button>
 </template>

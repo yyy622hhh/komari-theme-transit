@@ -99,6 +99,12 @@ export interface Client {
   auto_renewal: boolean
   currency: string
   expired_at: string
+  traffic_rate?: number
+  time_rate?: number
+  startup_fee?: number
+  first_agent_reported_at?: string
+  first_agent_reported_at_estimated?: boolean
+  billing_traffic_bytes?: number
   group: string
   tags: string
   hidden: boolean
@@ -940,6 +946,10 @@ export class KomariRpc {
 
   async getAuditLogs(limit?: string, page?: string, msgType?: string, signal?: AbortSignal): Promise<AuditLogsResponse> {
     return this.client.call<AuditLogsResponse>('admin:getLogs', { limit, page, msg_type: msgType }, signal)
+  }
+
+  async updateAdminSettings(settings: Record<string, unknown>, signal?: AbortSignal): Promise<void> {
+    await this.client.call('admin:editSettings', settings, signal)
   }
 
   // ==================== Public 方法（主题/公开页优先使用） ====================

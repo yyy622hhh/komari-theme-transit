@@ -43,7 +43,10 @@ const props = defineProps<{
   sortResetKey?: string
 }>()
 
-const emit = defineEmits<{ click: [node: NodeData] }>()
+const emit = defineEmits<{
+  click: [node: NodeData]
+  pingClick: [node: NodeData]
+}>()
 
 const rowStaggerMs = UI_CONFIG.motion.staggerMs
 const rowStaggerLimit = UI_CONFIG.motion.staggerLimit
@@ -479,7 +482,7 @@ function buildNodeMetadataItems(node: NodeData): NodeMetadataItem[] {
                   <span class="text-[11px] font-medium text-foreground/70 truncate">
                     {{ formatUptime(node.uptime ?? 0) }}
                   </span>
-                  <NodePingListCell :uuid="node.uuid" :online="node.online" />
+                  <NodePingListCell :uuid="node.uuid" :online="node.online" @click="emit('pingClick', node)" />
                 </div>
 
                 <!-- 操作系统 -->

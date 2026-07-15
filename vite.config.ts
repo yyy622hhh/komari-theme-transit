@@ -3,6 +3,7 @@ import { execSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { resolve } from 'node:path'
+import process from 'node:process'
 import { fileURLToPath, URL } from 'node:url'
 import tailwindcss from '@tailwindcss/vite'
 import vue from '@vitejs/plugin-vue'
@@ -20,6 +21,7 @@ interface ThemeManifest {
 }
 
 const themeJsonPath = resolve(__dirname, 'komari-theme.json')
+const devApiTarget = process.env.VITE_API_TARGET || 'http://127.0.0.1:25774'
 
 function readThemeManifest(): ThemeManifest {
   if (!existsSync(themeJsonPath))
@@ -125,6 +127,20 @@ export default defineConfig({
   },
   server: {
     host: '0.0.0.0',
+    proxy: {
+      '/api': {
+        target: devApiTarget,
+        changeOrigin: true,
+        headers: { Origin: devApiTarget },
+        rewriteWsOrigin: true,
+        ws: true,
+      },
+      '/themes': {
+        target: devApiTarget,
+        changeOrigin: true,
+        headers: { Origin: devApiTarget },
+      },
+    },
   },
   build: {
     target: ['es2018', 'safari15.4'],

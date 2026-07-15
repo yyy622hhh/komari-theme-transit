@@ -10,7 +10,7 @@ import { CardX } from '@/components/ui/card-x'
 import { Spinner } from '@/components/ui/spinner'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useVisitorAudit } from '@/composables/useVisitorAudit'
-import { loadAuditLogs } from '@/services/audit.service'
+import { loadAuditLogs, updateVisitorAuditEnabled } from '@/services/audit.service'
 import { buildSnapshotCsvAsync, downloadText } from '@/services/snapshot.service'
 import { useAppStore } from '@/stores/app'
 import { formatDateTime } from '@/utils/helper'
@@ -38,6 +38,7 @@ const limit = ref(50)
 const logView = ref<AuditView>('all')
 const loading = ref(false)
 const exporting = ref<'json' | 'csv' | null>(null)
+const updatingVisitorAudit = ref(false)
 const error = ref<string | null>(null)
 let requestId = 0
 
@@ -289,6 +290,35 @@ async function fetchLogs(): Promise<void> {
   }
 }
 
+async function setVisitorAuditEnabled(enabled: boolean): Promise<void> {
+  if (!appStore.visitorAuditSupported || updatingVisitorAudit.value)
+    return
+
+  const granted = await appStore.requireLoginPermission('auditLog', { force: true })
+  if (!granted) {
+    window.$message?.warning('登录状态已过期，请重新登录后修改访客审计设置。')
+    return
+  }
+
+  updatingVisitorAudit.value = true
+  try {
+    await updateVisitorAuditEnabled(enabled)
+    if (appStore.publicSettings) {
+      appStore.publicSettings = {
+        ...appStore.publicSettings,
+        visitor_audit_enabled: enabled,
+      }
+    }
+    window.$message?.success(enabled ? '访客审计采集已启用。' : '访客审计采集已暂停。')
+  }
+  catch (err) {
+    window.$message?.error(err instanceof Error ? err.message : '更新访客审计设置失败')
+  }
+  finally {
+    updatingVisitorAudit.value = false
+  }
+}
+
 function refreshLogs(): void {
   void recordVisitorEvent({
     event: 'audit_refresh',
@@ -377,9 +407,22 @@ onMounted(() => {
             </Button>
           </div>
         </div>
-        <div class="flex items-start gap-2 rounded-md bg-background/45 px-3 py-2 text-xs text-muted-foreground">
-          <Icon :icon="visitorAuditStatus.icon" width="15" height="15" class="mt-0.5 shrink-0" :class="visitorAuditStatus.tone" />
-          <span>{{ visitorAuditStatus.text }}</span>
+        <div class="flex flex-col gap-2 rounded-md bg-background/45 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+          <div class="flex items-start gap-2 text-xs text-muted-foreground">
+            <Icon :icon="visitorAuditStatus.icon" width="15" height="15" class="mt-0.5 shrink-0" :class="visitorAuditStatus.tone" />
+            <span>{{ visitorAuditStatus.text }}</span>
+          </div>
+          <Button
+            v-if="appStore.visitorAuditSupported"
+            size="sm"
+            :variant="appStore.visitorAuditEnabled ? 'outline' : 'default'"
+            class="h-7 shrink-0 self-end sm:self-auto"
+            :disabled="updatingVisitorAudit"
+            @click="setVisitorAuditEnabled(!appStore.visitorAuditEnabled)"
+          >
+            <Icon :icon="updatingVisitorAudit ? 'tabler:loader-2' : appStore.visitorAuditEnabled ? 'tabler:shield-pause' : 'tabler:shield-check'" width="14" height="14" :class="updatingVisitorAudit && 'animate-spin'" />
+            {{ updatingVisitorAudit ? '更新中' : appStore.visitorAuditEnabled ? '暂停采集' : '启用采集' }}
+          </Button>
         </div>
       </div>
     </CardX>

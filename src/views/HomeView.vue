@@ -48,6 +48,7 @@ const HealthSummaryPanel = defineAsyncComponent(() => import('@/components/Healt
 const NodeCard = defineAsyncComponent(() => import('@/components/NodeCard.vue'))
 const NodeGeneralCards = defineAsyncComponent(() => import('@/components/NodeGeneralCards.vue'))
 const NodeList = defineAsyncComponent(() => import('@/components/NodeList.vue'))
+const PingMonitorDialog = defineAsyncComponent(() => import('@/components/PingMonitorDialog.vue'))
 const NodeTopologyPanel = defineAsyncComponent(() => import('@/components/NodeTopologyPanel.vue'))
 const ProviderValuePanel = defineAsyncComponent(() => import('@/components/ProviderValuePanel.vue'))
 const SnapshotExportPanel = defineAsyncComponent(() => import('@/components/SnapshotExportPanel.vue'))
@@ -79,6 +80,7 @@ const activeHomeTool = ref<HomeToolKey>('nodes')
 const activeQuickControl = ref<HomeQuickControlKey>(appStore.homeQuickDefaultControl)
 const exchangeRates = ref(financeHelper.DEFAULT_EXCHANGE_RATES)
 const excludeFreeNodes = ref(true)
+const pingDialogNode = ref<NodeData | null>(null)
 
 const homeToolPermissionMap: Record<Exclude<HomeToolKey, 'nodes'>, PermissionKey> = {
   topology: 'nodeTopology',
@@ -302,6 +304,10 @@ const nodeListSortResetKey = computed(() => {
 
 function handleNodeClick(node: NodeData) {
   router.push({ name: 'instance-detail', params: { id: node.uuid } })
+}
+
+function openPingDialog(node: NodeData) {
+  pingDialogNode.value = node
 }
 
 function getNodeItemTransitionKey(node: NodeData): string {
@@ -550,7 +556,12 @@ const nodeCardGridClass = computed(() => {
                 class="min-w-0"
                 :style="getNodeItemTransitionStyle(index)"
               >
-                <NodeCard :node="node" :reduce-motion="reduceDenseNodeEffects" @click="handleNodeClick(node)" />
+                <NodeCard
+                  :node="node"
+                  :reduce-motion="reduceDenseNodeEffects"
+                  @click="handleNodeClick(node)"
+                  @ping-click="openPingDialog(node)"
+                />
               </div>
             </TransitionGroup>
             <NodeList
@@ -559,6 +570,7 @@ const nodeCardGridClass = computed(() => {
               :transition-key="appStore.nodeSelectedGroup"
               :sort-reset-key="nodeListSortResetKey"
               @click="handleNodeClick"
+              @ping-click="openPingDialog"
             />
             <div v-else class="text-muted-foreground text-center py-8">
               <Empty :description="emptyDescription" />
@@ -568,6 +580,14 @@ const nodeCardGridClass = computed(() => {
       </div>
     </div>
   </div>
+
+  <PingMonitorDialog
+    v-if="pingDialogNode"
+    :open="Boolean(pingDialogNode)"
+    :uuid="pingDialogNode.uuid"
+    :node-name="pingDialogNode.name"
+    @update:open="!$event && (pingDialogNode = null)"
+  />
 </template>
 
 <style scoped>

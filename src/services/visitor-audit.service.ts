@@ -8,6 +8,28 @@ const SESSION_STORAGE_KEY = 'komari-theme:visitor-audit-session'
 const VISITOR_AUDIT_TIMEOUT_MS = 4_000
 const DETAIL_JSON_LIMIT = 1_800
 const SENSITIVE_KEY_PATTERN = /authorization|password|passwd|secret|token|clipboard|command|query_value|cookie_value|cookie_header/i
+const COMPACT_DETAIL_KEYS = [
+  'fingerprint_id',
+  'webrtc',
+  'platform',
+  'browser_brands',
+  'mobile',
+  'languages',
+  'timezone',
+  'screen',
+  'viewport',
+  'pixel_ratio',
+  'hardware_concurrency',
+  'device_memory',
+  'touch_points',
+  'webdriver',
+  'cookie_enabled',
+  'do_not_track',
+  'connection',
+  'webgl',
+  'theme_version',
+  'color_vision_mode',
+] as const
 let requestSequence = 0
 let memorySessionId = ''
 
@@ -60,6 +82,45 @@ function sanitizeDetailValue(value: unknown, depth = 0): unknown {
   return result
 }
 
+function jsonByteLength(value: unknown): number {
+  return new TextEncoder().encode(JSON.stringify(value)).byteLength
+}
+
+function compactSecurityDetail(sanitized: Record<string, unknown>, originalSize: number): Record<string, unknown> {
+  const compact: Record<string, unknown> = {
+    session_id: getVisitorAuditSessionId(),
+    truncated: true,
+    original_size: originalSize,
+  }
+  for (const key of COMPACT_DETAIL_KEYS) {
+    if (sanitized[key] !== undefined)
+      compact[key] = sanitized[key]
+  }
+
+  for (const optionalKey of ['webgl', 'connection', 'browser_brands', 'languages', 'viewport', 'screen']) {
+    if (jsonByteLength(compact) <= DETAIL_JSON_LIMIT)
+      return compact
+    delete compact[optionalKey]
+  }
+
+  if (jsonByteLength(compact) <= DETAIL_JSON_LIMIT)
+    return compact
+
+  const webRtc = compact.webrtc
+  const webRtcFingerprint = webRtc && typeof webRtc === 'object' && !Array.isArray(webRtc)
+    ? (webRtc as Record<string, unknown>).fingerprint_id
+    : undefined
+  return {
+    session_id: getVisitorAuditSessionId(),
+    fingerprint_id: compact.fingerprint_id,
+    webrtc: webRtcFingerprint ? { fingerprint_id: webRtcFingerprint } : undefined,
+    theme_version: compact.theme_version,
+    color_vision_mode: compact.color_vision_mode,
+    truncated: true,
+    original_size: originalSize,
+  }
+}
+
 function compactDetail(detail: Record<string, unknown> | undefined): Record<string, unknown> {
   const sanitized = sanitizeDetailValue({
     ...detail,
@@ -68,16 +129,11 @@ function compactDetail(detail: Record<string, unknown> | undefined): Record<stri
   if (!sanitized)
     return { session_id: getVisitorAuditSessionId() }
 
-  const encoded = JSON.stringify(sanitized)
-  if (encoded.length <= DETAIL_JSON_LIMIT)
+  const encodedSize = jsonByteLength(sanitized)
+  if (encodedSize <= DETAIL_JSON_LIMIT)
     return sanitized
 
-  return {
-    session_id: getVisitorAuditSessionId(),
-    truncated: true,
-    original_size: encoded.length,
-    fingerprint_id: typeof sanitized.fingerprint_id === 'string' ? sanitized.fingerprint_id : undefined,
-  }
+  return compactSecurityDetail(sanitized, encodedSize)
 }
 
 function normalizeEvent(event: VisitorAuditEventParams): VisitorAuditEventParams | null {

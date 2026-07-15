@@ -5,6 +5,15 @@ export type CurrencyCode = 'CNY' | 'USD' | 'HKD' | 'EUR' | 'GBP' | 'JPY' | 'RUB'
 export type ExchangeRates = Record<CurrencyCode, number>
 export type ExchangeRateSource = 'cache' | 'network' | 'stale-cache' | 'default'
 
+export interface BillingEstimate {
+  runtimeHours: number
+  trafficTiB: number
+  timeCost: number
+  trafficCost: number
+  startupCost: number
+  totalCost: number
+}
+
 interface ExchangeRatesCache {
   base: 'CNY'
   date: string
@@ -13,7 +22,10 @@ interface ExchangeRatesCache {
 }
 
 const CACHE_KEY = 'komari_finance_exchange_rates_cny_v1'
-const REQUIRED_CURRENCIES: CurrencyCode[] = ['CNY', 'USD', 'HKD', 'EUR', 'GBP', 'JPY', 'RUB', 'CHF', 'INR', 'VND', 'THB', 'CAD']
+const OVERRIDES_KEY = 'komari_finance_exchange_rate_overrides_v1'
+const FINANCE_CURRENCY_KEY = 'fin_currency'
+const EXCLUDE_FREE_KEY = 'fin_exclude_free'
+export const SUPPORTED_CURRENCIES: CurrencyCode[] = ['CNY', 'USD', 'HKD', 'EUR', 'GBP', 'JPY', 'RUB', 'CHF', 'INR', 'VND', 'THB', 'CAD']
 const MS_PER_DAY = 24 * 60 * 60 * 1000
 const LONG_TERM_YEARS = 100
 let exchangeRatesInflight: Promise<{ rates: ExchangeRates, source: ExchangeRateSource }> | null = null
@@ -105,12 +117,59 @@ export function getTodayDateKey(date = new Date()): string {
 }
 
 export function shouldExcludeFreeNodes(): boolean {
-  const value = getLocalStorageItem('fin_exclude_free')
+  const value = getLocalStorageItem(EXCLUDE_FREE_KEY)
   return value === null ? true : value === 'true'
 }
 
 export function getStoredFinanceCurrency(): CurrencyCode {
-  return normalizeCurrency(getLocalStorageItem('fin_currency') || 'CNY')
+  return normalizeCurrency(getLocalStorageItem(FINANCE_CURRENCY_KEY) || 'CNY')
+}
+
+export function setStoredFinanceCurrency(currency: CurrencyCode): void {
+  setLocalStorageItem(FINANCE_CURRENCY_KEY, currency)
+}
+
+export function setExcludeFreeNodes(exclude: boolean): void {
+  setLocalStorageItem(EXCLUDE_FREE_KEY, String(exclude))
+}
+
+export function applyExchangeRateOverrides(rates: ExchangeRates): ExchangeRates {
+  const overrides = readExchangeRateOverrides()
+  return { ...rates, ...overrides, CNY: 1 }
+}
+
+export function setExchangeRateOverride(currency: CurrencyCode, value: number): void {
+  if (currency === 'CNY' || !Number.isFinite(value) || value <= 0)
+    return
+  const overrides = readExchangeRateOverrides()
+  overrides[currency] = value
+  setLocalStorageItem(OVERRIDES_KEY, JSON.stringify(overrides))
+}
+
+export function clearExchangeRateOverrides(): void {
+  removeLocalStorageItem(OVERRIDES_KEY)
+}
+
+export function calculateBillingEstimate(node: NodeData, now = new Date()): BillingEstimate {
+  const anchorAt = node.first_agent_reported_at ? new Date(node.first_agent_reported_at).getTime() : Number.NaN
+  const hasStarted = Number.isFinite(anchorAt)
+  const runtimeHours = hasStarted ? Math.max(0, now.getTime() - anchorAt) / (60 * 60 * 1000) : 0
+  const trafficBytes = Math.max(0, Number(node.billing_traffic_bytes) || 0)
+  const trafficTiB = trafficBytes / 1024 ** 4
+  const timeRate = Math.max(0, Number(node.time_rate) || 0)
+  const trafficRate = Math.max(0, Number(node.traffic_rate) || 0)
+  const startupCost = hasStarted ? Math.max(0, Number(node.startup_fee) || 0) : 0
+  const timeCost = runtimeHours * timeRate
+  const trafficCost = trafficTiB * trafficRate
+
+  return {
+    runtimeHours,
+    trafficTiB,
+    timeCost,
+    trafficCost,
+    startupCost,
+    totalCost: timeCost + trafficCost + startupCost,
+  }
 }
 
 export function calculateTotalRemainingValueCNY(
@@ -358,7 +417,7 @@ function sanitizeExchangeRates(rates: unknown): ExchangeRates | null {
   const record = rates as Record<string, unknown>
   const result = { CNY: 1 } as ExchangeRates
 
-  for (const currency of REQUIRED_CURRENCIES) {
+  for (const currency of SUPPORTED_CURRENCIES) {
     if (currency === 'CNY')
       continue
 
@@ -370,6 +429,27 @@ function sanitizeExchangeRates(rates: unknown): ExchangeRates | null {
   }
 
   return result
+}
+
+function readExchangeRateOverrides(): Partial<ExchangeRates> {
+  try {
+    const rawValue = getLocalStorageItem(OVERRIDES_KEY)
+    if (!rawValue)
+      return {}
+    const record = JSON.parse(rawValue) as Record<string, unknown>
+    const result: Partial<ExchangeRates> = {}
+    for (const currency of SUPPORTED_CURRENCIES) {
+      if (currency === 'CNY')
+        continue
+      const value = Number(record[currency])
+      if (Number.isFinite(value) && value > 0)
+        result[currency] = value
+    }
+    return result
+  }
+  catch {
+    return {}
+  }
 }
 
 function getLocalStorageItem(key: string): string | null {
@@ -387,5 +467,14 @@ function setLocalStorageItem(key: string, value: string): void {
   }
   catch {
     // 缓存失败不应阻断价值计算，下一次刷新会重新尝试获取汇率。
+  }
+}
+
+function removeLocalStorageItem(key: string): void {
+  try {
+    localStorage.removeItem(key)
+  }
+  catch {
+    // 本地覆盖清理失败时继续使用当前内存值。
   }
 }

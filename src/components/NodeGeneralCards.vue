@@ -5,7 +5,7 @@ import type { CurrencyCode, ExchangeRateSource } from '@/utils/financeHelper'
 import type { TopNodeMetric } from '@/utils/nodeMetricsHelper'
 import { Icon } from '@iconify/vue'
 import { useNow } from '@vueuse/core'
-import { computed, onMounted, ref } from 'vue'
+import { computed, defineAsyncComponent, onMounted, ref } from 'vue'
 import NodeEarthGlobe from '@/components/NodeEarthGlobe.vue'
 import { CardX } from '@/components/ui/card-x'
 import { DataTooltip } from '@/components/ui/data-tooltip'
@@ -35,6 +35,7 @@ interface GeneralMetricCard {
   value: string
   unit?: string
   tooltip?: string
+  action?: 'financeDetails'
 }
 
 interface OnlineStats {
@@ -64,12 +65,15 @@ const props = defineProps<{
 }>()
 const appStore = useAppStore()
 const nodesStore = useNodesStore()
+const FinanceDetailsDialog = defineAsyncComponent(() => import('@/components/FinanceDetailsDialog.vue'))
 // 未登录且开启「未登录隐藏价格」时，屏蔽金额类信息
 const showPrice = computed(() => appStore.privateFeaturesAllowed || !appStore.hidePriceWhenLoggedOut)
 const exchangeRates = ref(financeHelper.DEFAULT_EXCHANGE_RATES)
+const dailyExchangeRates = ref(financeHelper.DEFAULT_EXCHANGE_RATES)
 const exchangeRateSource = ref<ExchangeRateSource | 'loading'>('loading')
 const financeCurrency = ref<CurrencyCode>('CNY')
 const excludeFreeNodes = ref(true)
+const financeDetailsOpen = ref(false)
 const currentTime = useNow({ interval: 1000 })
 const summaryNodes = computed(() => props.nodes ?? nodesStore.visibleNodes)
 const summaryTransitionKey = computed(() => props.transitionKey ?? nodesStore.visibleNodes.length)
@@ -451,6 +455,7 @@ function getCardDefinition(key: GeneralCardKey): GeneralMetricCard {
         icon: 'tabler:cash',
         value: showPrice.value ? `${formattedRemainingValue.value.symbol}${formattedRemainingValue.value.value}` : '***',
         tooltip: totalValueTooltip.value,
+        action: showPrice.value ? 'financeDetails' : undefined,
       }
     case 'totalTraffic':
       return {
@@ -766,12 +771,45 @@ function getCardPositionClass(index: number): string {
   return cardPositionClasses[index] ?? 'col-span-4 row-span-1'
 }
 
+function activateCard(card: GeneralMetricCard) {
+  if (card.action === 'financeDetails')
+    financeDetailsOpen.value = true
+}
+
+function handleCardKeydown(event: KeyboardEvent, card: GeneralMetricCard) {
+  if (!card.action || (event.key !== 'Enter' && event.key !== ' '))
+    return
+  event.preventDefault()
+  activateCard(card)
+}
+
+function updateFinanceCurrency(currency: CurrencyCode) {
+  financeCurrency.value = currency
+  financeHelper.setStoredFinanceCurrency(currency)
+}
+
+function updateExcludeFreeNodes(exclude: boolean) {
+  excludeFreeNodes.value = exclude
+  financeHelper.setExcludeFreeNodes(exclude)
+}
+
+function updateExchangeRate(currency: CurrencyCode, value: number) {
+  financeHelper.setExchangeRateOverride(currency, value)
+  exchangeRates.value = { ...exchangeRates.value, [currency]: value, CNY: 1 }
+}
+
+function resetExchangeRates() {
+  financeHelper.clearExchangeRateOverrides()
+  exchangeRates.value = { ...dailyExchangeRates.value }
+}
+
 onMounted(async () => {
   financeCurrency.value = financeHelper.getStoredFinanceCurrency()
   excludeFreeNodes.value = financeHelper.shouldExcludeFreeNodes()
 
   const { rates, source } = await financeHelper.getDailyExchangeRates()
-  exchangeRates.value = rates
+  dailyExchangeRates.value = rates
+  exchangeRates.value = financeHelper.applyExchangeRateOverrides(rates)
   exchangeRateSource.value = source
 })
 </script>
@@ -789,8 +827,13 @@ onMounted(async () => {
         v-for="(card, index) in visibleCards"
         :key="card.key"
         hoverable
-        :class="[cardClass, getCardPositionClass(index)]"
+        :class="[cardClass, getCardPositionClass(index), card.action && 'cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring']"
         content-class="h-full !p-3"
+        :role="card.action ? 'button' : undefined"
+        :tabindex="card.action ? 0 : undefined"
+        :aria-label="card.action ? `查看${card.label}明细` : undefined"
+        @click="activateCard(card)"
+        @keydown="handleCardKeydown($event, card)"
       >
         <div class="flex h-full flex-col justify-between gap-1">
           <div class="flex items-start justify-between gap-2">
@@ -826,6 +869,21 @@ onMounted(async () => {
       </CardX>
     </div>
   </div>
+
+  <FinanceDetailsDialog
+    v-if="financeDetailsOpen"
+    v-model:open="financeDetailsOpen"
+    :nodes="summaryNodes"
+    :rates="exchangeRates"
+    :source="exchangeRateSource"
+    :currency="financeCurrency"
+    :exclude-free="excludeFreeNodes"
+    :now="currentTime"
+    @update:currency="updateFinanceCurrency"
+    @update:exclude-free="updateExcludeFreeNodes"
+    @update:rate="updateExchangeRate"
+    @reset-rates="resetExchangeRates"
+  />
 </template>
 
 <style scoped>

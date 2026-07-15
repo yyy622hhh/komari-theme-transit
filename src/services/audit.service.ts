@@ -29,3 +29,11 @@ export async function loadAuditLogs(params: { page?: number | string, limit?: nu
     async signal => getSharedRpc().getAuditLogs(String(limit), String(page), msgType, signal),
   )
 }
+
+export async function updateVisitorAuditEnabled(enabled: boolean): Promise<void> {
+  await requestManager.run(
+    'audit:visitor-setting',
+    async signal => getSharedRpc().updateAdminSettings({ visitor_audit_enabled: enabled }, signal),
+    { retryAttempts: 0 },
+  )
+}
