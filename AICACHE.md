@@ -398,3 +398,13 @@
 - Komari PR #604 head `f08f47d` is `CLEAN` / `MERGEABLE`; all frontend and cross-platform binary checks succeeded.
 - komari-web PR #82 head `0fee1f1` is `CLEAN` / `MERGEABLE`; that exact commit is embedded under `public/admin-app/`.
 - Local-only `.claude/`, `output/`, and `tmp/` must remain uncommitted.
+
+## 2026-07-15 v3.1.7 published
+
+- Release commit: `3710532164e6b58433373199321d2977574e9913`.
+- GitHub Actions run `29428658864`: success.
+- Release: `https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism/releases/tag/v3.1.7`.
+- Published asset: `komari-theme-Glassmorphism-build-3710532.zip`, SHA-256 `ac1a203a53a5d31fdc8a148964e1e64f1659dea7beb9745c906a8731686180a4`.
+- Downloaded asset verification passed: manifest `3.1.7`, `主题设置`, `preview.png` hash equals repository preview, and `dist/index.html` exists.
+- Old preview seen after upgrading is browser cache: komari-web uses `/themes/<short>/<preview>` without a version query. A hard refresh/cleared image cache displays the released image; a durable cache-busting change belongs in komari-web.
+- Maintainer feedback indicates the real-time billing PRs do not fit Komari's simple cycle billing model. Treat Komari #604 and komari-web #82 as experimental fork work pending explicit upstream acceptance: wall-clock hourly estimates include offline time, traffic estimates do not reset by billing cycle, and startup fee is a static one-time add-on rather than a cycle item.
