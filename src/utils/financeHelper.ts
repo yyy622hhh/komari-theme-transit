@@ -158,7 +158,9 @@ export function calculateBillingEstimate(node: NodeData, now = new Date()): Bill
   const trafficTiB = trafficBytes / 1024 ** 4
   const timeRate = Math.max(0, Number(node.time_rate) || 0)
   const trafficRate = Math.max(0, Number(node.traffic_rate) || 0)
-  const startupCost = hasStarted ? Math.max(0, Number(node.startup_fee) || 0) : 0
+  const startupCost = hasStarted && node.billing_startup_fee_applied === true
+    ? Math.max(0, Number(node.startup_fee) || 0)
+    : 0
   const timeCost = runtimeHours * timeRate
   const trafficCost = trafficTiB * trafficRate
 

@@ -579,15 +579,14 @@ const nodeCardGridClass = computed(() => {
         </Tabs>
       </div>
     </div>
+    <PingMonitorDialog
+      v-if="pingDialogNode"
+      :open="Boolean(pingDialogNode)"
+      :uuid="pingDialogNode.uuid"
+      :node-name="pingDialogNode.name"
+      @update:open="!$event && (pingDialogNode = null)"
+    />
   </div>
-
-  <PingMonitorDialog
-    v-if="pingDialogNode"
-    :open="Boolean(pingDialogNode)"
-    :uuid="pingDialogNode.uuid"
-    :node-name="pingDialogNode.name"
-    @update:open="!$event && (pingDialogNode = null)"
-  />
 </template>
 
 <style scoped>

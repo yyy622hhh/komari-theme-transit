@@ -2,13 +2,13 @@
   "name": "Komari Glassmorphism",
   "short": "Glassmorphism",
   "description": "A Glassmorphism theme for Komari",
-  "version": "3.1.6",
+  "version": "3.1.7",
   "author": "sanrokamlan",
   "url": "https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism",
   "preview": "preview.png",
   "configuration": {
     "type": "managed",
-    "name": "Glassmorphism 设置",
+    "name": "主题设置",
     "data": [
       { "name": "01 · 基础与外观", "type": "title" },
       { "key": "themeMode", "name": "默认主题模式", "type": "select", "default": "beijing", "options": "beijing,light,dark", "help": "beijing=北京时间自动； light=亮色； dark=暗色。" },
@@ -31,7 +31,7 @@
       { "key": "glassCustomColors", "name": "自定义毛玻璃颜色 JSON", "type": "richtext", "default": "{\"lightCard\":\"#f1f5f9bd\",\"lightControl\":\"#e2e8f0c2\",\"lightText\":\"#14151a\",\"lightMutedText\":\"#3f4552\",\"lightBorder\":\"#cbd5e199\",\"darkCard\":\"#0d111ad9\",\"darkControl\":\"#101624cc\",\"darkText\":\"#f7f8fb\",\"darkMutedText\":\"#d6dae4\",\"darkBorder\":\"#ffffff2e\"}", "help": "lightCard/darkCard=卡片； lightControl/darkControl=控制条； lightText/darkText=主文字； lightMutedText/darkMutedText=次文字； lightBorder/darkBorder=边框。支持 #RRGGBB 和 #RRGGBBAA。" },
 
       { "name": "03 · 首页总览卡片", "type": "title" },
-      { "key": "generalCardPreset", "name": "头部卡片方案", "type": "select", "default": "基础", "options": "官方,基础,运维,资源,财务,流量,GPU,资产,完整,自定义", "help": "自定义时读取下方 keys，顺序就是显示顺序。" },
+      { "key": "generalCardPreset", "name": "头部卡片方案", "type": "select", "default": "基础", "options": "官方,基础,运维,资源,财务,流量,GPU,资产,完整,自定义", "help": "完整=展示全部可用卡片；自定义时读取下方 keys，顺序就是显示顺序。" },
       { "key": "generalCardKeys", "name": "自定义头部卡片 keys", "type": "richtext", "default": "memory\ndisk\nremainingValue\ntotalTraffic\nuploadSpeed\ndownloadSpeed", "help": "逗号、空格或换行分隔。 currentTime=当前时间； memory=内存； disk=硬盘； remainingValue=剩余价值； totalTraffic=累计流量； uploadSpeed=实时上行； downloadSpeed=实时下行； onlineNodes=在线节点； offlineNodes=离线节点； avgCpu=平均CPU； avgGpu=平均GPU； avgLoad=平均负载； swap=交换内存； processes=进程总数； connections=连接总数； cpuCores=CPU核心； gpuNodes=GPU节点； gpuPeakNode=GPU峰值节点； trafficQuota=流量配额； trafficPeak=实时峰值； uploadPeakNode=上行最高节点； downloadPeakNode=下行最高节点； highLoadNodes=高负载节点； expiringNodes=即将到期； trafficWarnings=流量预警； connectionPeakNode=连接峰值节点； regionDistribution=地区分布； systemDistribution=系统分布； virtualizationDistribution=虚拟化分布； monthlyCost=月费用； yearlyCost=年费用。" },
 
       { "name": "04 · 高级工具与隐私", "type": "title" },

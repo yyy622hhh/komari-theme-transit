@@ -12,15 +12,25 @@
 
 ## 当前任务
 
-- 状态：done
-- 目标：发布 v3.1.6，完成默认主题后台适配、访客安全审计、首页延迟/丢包与价值明细交互、原创默认背景，并将实时费用估算分别提交 Komari 与 komari-web 上游。
-- 里程碑：M3 访客审计；M4 交互与背景；M5 默认主题整合和实时费用估算；M6 可重复同步、验证与发布。
-- 范围：完整官方 `/admin`、`/terminal`、`/manage/*` 静态子应用；访客 IP/UA/浏览器指纹/WebRTC 摘要与 CSV/JSON 导出；Ping 弹窗；汇率/价值明细；原创默认背景；Komari/komari-web 计费 PR。
-- 兼容约束：旧版 Komari 不返回 `traffic_rate` 时，嵌入管理端隐藏且不提交新增计费字段；空费率按 0；开机费只在 Agent 首次成功上报后计入一次。
-- 上游：Komari PR #604；komari-web PR #82。主题发布版本应为 3.1.6（当前远端已发布 3.1.5）。
-- 不做：不可篡改账单流水、付款状态和历史结算账本；不提交 `.claude/` 或 `output/` 生成过程目录。
+- 状态：in-progress
+- 目标：生成 Linux amd64 本地集成测试包，合并验证 Komari PR #604、已合并访客审计 PR #602、komari-web PR #82 与 Glassmorphism v3.1.6 内置默认主题。
+- 里程碑：M6 集成构建、测试交付与验证，不扩大现有上游 PR 范围。
+- 范围：CGO Linux amd64 核心二进制、可导入主题 zip、独立管理端构建、测试说明与 SHA-256；部署后在用户保持登录的浏览器中继续联调。
+- 安全约束：`visitor_audit_enabled` 保持上游默认关闭，由管理员在审计面板明确开启；测试包不预置数据库、账号、密钥或访客数据。
+- 来源：Komari PR #604 `f08f47d`（含访客审计 PR #602）；komari-web PR #82 `0fee1f1`；主题基线 `261fcc1`，目标发布 v3.1.7。
+- 不做：不把 Glassmorphism 默认主题替换混入计费 PR #604；不发布测试构建为正式 Release；不构建 Windows 包。
 
 ## 执行日志
+
+### 2026-07-15 Linux integration test bundle
+
+- 已确认 Komari PR #604 没有修改上游默认主题，但其提交历史已包含 PR #602 的访客审计 RPC、默认关闭开关、限流和日志过滤修复。
+- 已确认 Glassmorphism `dist/` 包含由 komari-web `b8fcc4580fe2cd5b715b76c97f4ff4b9ba066581` 构建的完整 `/admin-app/`，入口桥接覆盖 `/admin`、`/terminal`、`/manage/*`。
+- 用户指定只需 Linux 测试包；目标收窄为 `linux/amd64`。
+- PR #604 复核修复：账单累计写入失败现在只记录日志，不再阻断已保存的 Agent 上报和运行时在线状态；新增回归测试，提交 `b242ee8` 已推送 PR 分支。流量费率明确为每 TiB（`1024^4 bytes`）。
+- komari-web #82 本地补强：管理端账单弹窗新增流量、运行时间、首次开机费和总估算，30 秒刷新；费率前后端统一限制为 `0..1e12`；明确锚点可修改但首次上报后不可清空。`npm run lint` 为 0 error / 27 个既有 warning，`npm run build` 通过。
+- v3.1.6 空白页已稳定复现：`HomeView` 新增 `PingMonitorDialog` 时把弹窗放在主根节点外，视图变成 Fragment；Vue 报 `Component inside <Transition> renders non-element root node`，`out-in` 离场后主区域为空。修复为把弹窗移入 `.home-view` 单一根容器；浏览器首页 -> 详情 -> 返回首页恢复正常且无新 warning/error。
+- 永久约束已写入 `AIAGENTREADME.md` 和 `src/AGENTS.md`：路由视图必须单元素根，新增全局弹窗后必须验证动画开启/关闭两种路由往返。
 
 ### 2026-07-15 v3.1.6 release preparation
 
@@ -368,3 +378,23 @@
 
 1.
 ```
+
+## 2026-07-15 Preview redesign (M4)
+
+- Redesigning `docs/preview.png` because the current marketing-hero composition is too close to Komari Emerald (left title, large globe, three-word slogan).
+- New direction: a product-first monitoring dashboard scene with frosted node cards and compact telemetry, no globe, no Emerald logo, no marketing slogan.
+- Generated `output/imagegen/komari-glass-dashboard-preview-v2.png` with `gpt-image-2` (high quality) and selected its 1280x720 web derivative after visual inspection. The new composition is a full monitoring workspace with a top status strip, network overview, and six node cards.
+- Runtime screenshot/mock work was deferred. `docs/preview.png` was replaced with a pure conceptual settings cover: no version badge and no actual page preview; it emphasizes eight configurable areas over the generated cyan/mint/lilac glass background.
+- Shortened the managed configuration menu label from `Glassmorphism 设置` to `主题设置`.
+- Release audit found `applyClient()` did not refresh the new billing fields after initial load. v3.1.7 now updates rates, anchor state, cumulative traffic, and startup-fee-applied state during the existing client metadata polling cycle.
+- Fixed the misleading `完整` general-card preset: it was hard-coded to six cards even though the responsive renderer supports additional rows. It now expands to every unique `ALL_GENERAL_CARD_KEYS` entry; other presets remain curated six-card layouts.
+
+## 2026-07-15 v3.1.7 release candidate
+
+- `bun run lint`: passed.
+- `bun run build`: passed, including `vue-tsc`; only the existing Rollup annotation and large globe chunk warnings remain.
+- Local archive contains `komari-theme.json`, `preview.png`, and `dist/index.html`; embedded manifest version is `3.1.7` and configuration name is `主题设置`.
+- Home -> detail -> home was browser-verified earlier with no refresh and no Fragment/Transition warning after moving `PingMonitorDialog` inside the single `HomeView` root.
+- Komari PR #604 head `f08f47d` is `CLEAN` / `MERGEABLE`; all frontend and cross-platform binary checks succeeded.
+- komari-web PR #82 head `0fee1f1` is `CLEAN` / `MERGEABLE`; that exact commit is embedded under `public/admin-app/`.
+- Local-only `.claude/`, `output/`, and `tmp/` must remain uncommitted.

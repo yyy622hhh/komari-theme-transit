@@ -91,6 +91,8 @@ Cache/request keys must include every dimension that changes the result, especia
 ## Views and async components
 
 - Keep `defineOptions({ name: 'HomeView' })` in `HomeView.vue`, because `App.vue` KeepAlive includes `HomeView` by name.
+- Keep every route view as a single-element root. `App.vue` wraps routed components with `Transition` + `KeepAlive`; a Fragment root (including a dialog placed beside the main root) can stall `out-in` leave handling and leave only the background visible.
+- After changing a route view root, test home -> detail -> home in a browser with page animations both enabled and disabled, and check that Vue does not log `Component inside <Transition> renders non-element root node`.
 - Heavy node/chart UI should stay lazy-loaded with `defineAsyncComponent` from views.
 - Views coordinate store/composable state; they should not own reusable business logic.
 

@@ -40,6 +40,7 @@ export interface NodeData {
   startup_fee?: number
   first_agent_reported_at?: string
   first_agent_reported_at_estimated?: boolean
+  billing_startup_fee_applied?: boolean
   billing_traffic_bytes?: number
   group: string
   groups: string[]
@@ -200,6 +201,7 @@ const useNodesStore = defineStore('nodes', () => {
       startup_fee: client.startup_fee,
       first_agent_reported_at: client.first_agent_reported_at,
       first_agent_reported_at_estimated: client.first_agent_reported_at_estimated,
+      billing_startup_fee_applied: client.billing_startup_fee_applied,
       billing_traffic_bytes: client.billing_traffic_bytes,
       group: client.group,
       groups: parseNodeGroups(client.group),
@@ -347,6 +349,20 @@ const useNodesStore = defineStore('nodes', () => {
       node.currency = client.currency
     if (node.expired_at !== client.expired_at)
       node.expired_at = client.expired_at
+    if (node.traffic_rate !== client.traffic_rate)
+      node.traffic_rate = client.traffic_rate
+    if (node.time_rate !== client.time_rate)
+      node.time_rate = client.time_rate
+    if (node.startup_fee !== client.startup_fee)
+      node.startup_fee = client.startup_fee
+    if (node.first_agent_reported_at !== client.first_agent_reported_at)
+      node.first_agent_reported_at = client.first_agent_reported_at
+    if (node.first_agent_reported_at_estimated !== client.first_agent_reported_at_estimated)
+      node.first_agent_reported_at_estimated = client.first_agent_reported_at_estimated
+    if (node.billing_startup_fee_applied !== client.billing_startup_fee_applied)
+      node.billing_startup_fee_applied = client.billing_startup_fee_applied
+    if (node.billing_traffic_bytes !== client.billing_traffic_bytes)
+      node.billing_traffic_bytes = client.billing_traffic_bytes
     if (node.group !== client.group) {
       node.group = client.group
       const nextGroups = parseNodeGroups(client.group)

@@ -173,7 +173,6 @@ const ALL_GENERAL_CARD_KEYS = [
   'regionDistribution',
   'systemDistribution',
   'virtualizationDistribution',
-  'monthlyCost',
   'yearlyCost',
 ] as const satisfies readonly GeneralCardKey[]
 
@@ -349,14 +348,7 @@ const GENERAL_CARD_PRESETS: Record<GeneralCardPreset, GeneralCardKey[]> = {
     'cpuCores',
     'gpuNodes',
   ],
-  full: [
-    'onlineNodes',
-    'remainingValue',
-    'monthlyCost',
-    'totalTraffic',
-    'trafficPeak',
-    'highLoadNodes',
-  ],
+  full: [...ALL_GENERAL_CARD_KEYS],
   custom: DEFAULT_GENERAL_CARD_ORDER,
 }
 

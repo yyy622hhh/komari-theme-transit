@@ -59,6 +59,14 @@ const offlineTime = computed(() => formatDateTime(props.node.time))
 const cpuStatus = computed(() => getStatus(props.node.cpu ?? 0))
 const memPercentage = computed(() => getMemoryPercentage(props.node))
 const memStatus = computed(() => getStatus(memPercentage.value))
+const swapTooltip = computed(() => {
+  const used = Math.max(0, props.node.swap ?? 0)
+  const total = Math.max(0, props.node.swap_total ?? 0)
+  if (total <= 0)
+    return 'Swap 未配置'
+  const percentage = Math.min(100, used / total * 100)
+  return `Swap ${formatBytes(used)} / ${formatBytes(total)} (${percentage.toFixed(1)}%)`
+})
 const diskPercentage = computed(() => getDiskPercentage(props.node))
 const diskStatus = computed(() => getStatus(diskPercentage.value))
 
@@ -244,13 +252,13 @@ function hasRegion(region: string | null | undefined): boolean {
               <ProgressThin :percentage="props.node.cpu ?? 0" :status="cpuStatus" :height="4" />
             </div>
 
-            <div class="flex flex-col gap-1">
+            <DataTooltip placement="top" :content="swapTooltip" class="flex flex-col gap-1" content-class="whitespace-nowrap">
               <div class="flex justify-between text-xs">
                 <span class="text-muted-foreground">M</span>
                 <span class="tabular-nums font-medium">{{ memPercentage.toFixed(1) }}%</span>
               </div>
               <ProgressThin :percentage="memPercentage" :status="memStatus" :height="4" />
-            </div>
+            </DataTooltip>
 
             <div class="col-span-2 text-[11px] text-muted-foreground truncate">
               {{ formatBytes(props.node.ram ?? 0) }} / {{ formatBytes(props.node.mem_total ?? 0) }}
@@ -291,7 +299,7 @@ function hasRegion(region: string | null | undefined): boolean {
           </div>
 
           <!-- 内存 -->
-          <div class="flex flex-col gap-1">
+          <DataTooltip placement="top" :content="swapTooltip" class="flex flex-col gap-1" content-class="whitespace-nowrap">
             <div class="flex justify-between text-xs">
               <span class="text-muted-foreground">内存</span>
               <span class="tabular-nums font-medium">{{ memPercentage.toFixed(1) }}%</span>
@@ -300,7 +308,7 @@ function hasRegion(region: string | null | undefined): boolean {
             <div class="text-[11px] text-muted-foreground truncate">
               {{ formatBytes(props.node.ram ?? 0) }} / {{ formatBytes(props.node.mem_total ?? 0) }}
             </div>
-          </div>
+          </DataTooltip>
 
           <!-- 硬盘 -->
           <div class="flex flex-col gap-1">

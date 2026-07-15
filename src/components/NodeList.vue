@@ -542,36 +542,28 @@ function buildNodeMetadataItems(node: NodeData): NodeMetadataItem[] {
                 </div>
 
                 <!-- 流量 -->
-                <div v-else-if="col.key === 'traffic'" class="group min-w-0">
-                  <DataTooltip placement="top" class="flex items-center gap-2" content-class="mb-1.5">
-                    <div class="space-y-1 w-full">
-                      <div class="text-[11px] font-medium text-foreground/75 truncate">
-                        <span class="inline group-hover:hidden">
-                          {{ getTrafficUsedPercentage(node).toFixed(1) }}%
-                        </span>
-                        <span class="hidden group-hover:inline">
-                          {{ formatBytes(getTrafficUsed(node)) }} /
-                          <template v-if="hasTrafficLimit(node)">{{ formatBytes(node.traffic_limit) }}</template>
-                          <template v-else>∞</template>
-                        </span>
-                      </div>
-                      <TrafficProgress
-                        :upload="node.net_total_up ?? 0" :download="node.net_total_down ?? 0"
-                        :traffic-limit="node.traffic_limit" :traffic-limit-type="(node.traffic_limit_type || 'sum')"
-                        height="4px"
-                      />
+                <div
+                  v-else-if="col.key === 'traffic'"
+                  class="group min-w-0"
+                  :title="`↑ ${formatBytes(node.net_total_up ?? 0)}\n↓ ${formatBytes(node.net_total_down ?? 0)}`"
+                >
+                  <div class="space-y-1 w-full">
+                    <div class="text-[11px] font-medium text-foreground/75 truncate">
+                      <span class="inline group-hover:hidden">
+                        {{ getTrafficUsedPercentage(node).toFixed(1) }}%
+                      </span>
+                      <span class="hidden group-hover:inline">
+                        {{ formatBytes(getTrafficUsed(node)) }} /
+                        <template v-if="hasTrafficLimit(node)">{{ formatBytes(node.traffic_limit) }}</template>
+                        <template v-else>∞</template>
+                      </span>
                     </div>
-                    <template #content>
-                      <span class="flex flex-row gap-0.5 items-center whitespace-nowrap">
-                        <Icon icon="tabler:chevron-up" width="12" height="12" />
-                        {{ formatBytes(node.net_total_up ?? 0) }}
-                      </span>
-                      <span class="flex flex-row gap-0.5 items-center whitespace-nowrap">
-                        <Icon icon="tabler:chevron-down" width="12" height="12" />
-                        {{ formatBytes(node.net_total_down ?? 0) }}
-                      </span>
-                    </template>
-                  </DataTooltip>
+                    <TrafficProgress
+                      :upload="node.net_total_up ?? 0" :download="node.net_total_down ?? 0"
+                      :traffic-limit="node.traffic_limit" :traffic-limit-type="(node.traffic_limit_type || 'sum')"
+                      height="4px"
+                    />
+                  </div>
                 </div>
 
                 <!-- 速率 -->

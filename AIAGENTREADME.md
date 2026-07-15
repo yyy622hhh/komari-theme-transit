@@ -157,6 +157,8 @@ Vue Component
   - `/` -> `HomeView`
   - `/instance/:id` -> `InstanceDetail`
 - 不要加全局 router guard。公开首页/详情页必须保持公开，敏感数据路径自己做权限 gate。
+- `RouterView` 的路由组件被 `Transition` 和 `KeepAlive` 包裹，因此 `HomeView`、`InstanceDetail` 必须保持单一 HTML 元素根节点。全局弹窗、抽屉和 Teleport 入口也要放在该根容器内部；Fragment 根会让 Vue 无法执行离场动画，`out-in` 模式可能只剩背景且必须刷新才能恢复。
+- 改路由视图根结构后，必须在浏览器验证首页 -> 详情 -> 返回首页，确认无需刷新、控制台没有 `Component inside <Transition> renders non-element root node` 警告；同时覆盖开启和关闭“减弱过渡动画”的模式。
 
 ## 8. 状态管理
 
