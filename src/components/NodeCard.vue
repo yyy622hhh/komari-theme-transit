@@ -96,12 +96,12 @@ const trafficPercentageClass = computed(() => {
   if (!hasTrafficLimit(props.node))
     return 'text-muted-foreground'
   if (trafficUsedPercentage.value >= 95)
-    return 'text-red-500'
+    return 'text-destructive'
   if (trafficUsedPercentage.value >= 80)
-    return 'text-orange-500'
+    return 'text-warning'
   if (trafficUsedPercentage.value >= 60)
-    return 'text-yellow-500'
-  return 'text-green-600'
+    return 'text-warning'
+  return 'text-success'
 })
 
 // 是否显示金额：未登录且开启「未登录隐藏价格」时不显示价格 / 剩余价值，
@@ -167,7 +167,7 @@ function hasRegion(region: string | null | undefined): boolean {
     :size="nodeCardXSize"
     :content-class="nodeCardContentPaddingClass"
     class="node-card w-full cursor-pointer border-none shadow-[0_0_0_3px] shadow-transparent transition-all duration-200 rounded-xl"
-    :class="[!props.node.online && '!shadow-red-500/30']"
+    :class="[!props.node.online && '!shadow-destructive/30']"
     role="button"
     tabindex="0"
     :aria-label="`查看节点 ${props.node.name} 详情`"
@@ -180,12 +180,12 @@ function hasRegion(region: string | null | undefined): boolean {
         <div class="relative size-2.5 shrink-0">
           <span
             class="size-2.5 rounded-full block"
-            :class="props.node.online ? 'bg-green-500' : 'bg-red-500'"
+            :class="props.node.online ? 'bg-success' : 'bg-destructive'"
           />
           <span
             v-if="!props.reduceMotion"
             class="animate-ping absolute inset-0 rounded-full opacity-60"
-            :class="props.node.online ? 'bg-green-500' : 'bg-red-500'"
+            :class="props.node.online ? 'bg-success' : 'bg-destructive'"
           />
         </div>
         <span class="text-sm font-bold flex-1 min-w-0 truncate">{{ props.node.name }}</span>
@@ -262,7 +262,7 @@ function hasRegion(region: string | null | undefined): boolean {
               </span>
             </div>
             <ProgressThin :percentage="trafficUsedPercentage" :status="trafficStatus" :height="4" />
-            <div class="text-[11px] truncate" :class="trafficUsedPercentage >= 95 ? 'text-red-500' : 'text-muted-foreground'">
+            <div class="text-[11px] truncate" :class="trafficUsedPercentage >= 95 ? 'text-destructive' : 'text-muted-foreground'">
               {{ formatBytes(trafficUsed) }}
               <template v-if="hasTrafficLimit(props.node)">
                 / {{ formatBytes(props.node.traffic_limit) }}
@@ -320,7 +320,7 @@ function hasRegion(region: string | null | undefined): boolean {
               </span>
             </div>
             <ProgressThin :percentage="trafficUsedPercentage" :status="trafficStatus" :height="4" />
-            <div class="text-[11px] truncate" :class="trafficUsedPercentage >= 95 ? 'text-red-500' : 'text-muted-foreground'">
+            <div class="text-[11px] truncate" :class="trafficUsedPercentage >= 95 ? 'text-destructive' : 'text-muted-foreground'">
               {{ formatBytes(trafficUsed) }}
               <template v-if="hasTrafficLimit(props.node)">
                 / {{ formatBytes(props.node.traffic_limit) }}
@@ -336,7 +336,7 @@ function hasRegion(region: string | null | undefined): boolean {
         <div class="grid gap-1.5" :class="nodeCardMetricGridClass">
           <!-- 实时网速 -->
           <div class="flex flex-col gap-0.5 rounded-lg bg-slate-500/5 min-w-0 overflow-hidden" :class="nodeCardMetricBoxClass">
-            <div class="text-[11px] text-green-600 flex items-center gap-1">
+            <div class="text-[11px] text-success flex items-center gap-1">
               <Icon icon="tabler:chevron-up" width="11" height="11" />
               <span class="truncate min-w-0 overflow-hidden">{{ formatBytesPerSecond(props.node.net_out ?? 0) }}</span>
             </div>

@@ -45,6 +45,14 @@ watch(
   },
   { immediate: true, deep: true },
 )
+
+watch(
+  () => appStore.colorVisionFriendly,
+  (enabled) => {
+    document.documentElement.classList.toggle('color-vision-friendly', enabled)
+  },
+  { immediate: true },
+)
 </script>
 
 <template>

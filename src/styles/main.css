@@ -31,6 +31,12 @@
   --success-foreground: oklch(0.985 0 0);
   --info: oklch(0.6 0.118 230);
   --info-foreground: oklch(0.985 0 0);
+  --selection: oklch(0.55 0.15 155);
+  --signal-1: #059669;
+  --signal-2: #4ade80;
+  --signal-3: #a3e635;
+  --signal-4: #facc15;
+  --signal-5: #f43f5e;
   --border: oklch(0.92 0.004 286.32);
   --input: oklch(0.92 0.004 286.32);
   --ring: oklch(0.705 0.015 286.067);
@@ -66,6 +72,12 @@
   --success-foreground: oklch(0.141 0.005 285.823);
   --info: oklch(0.68 0.13 230);
   --info-foreground: oklch(0.141 0.005 285.823);
+  --selection: oklch(0.74 0.17 162);
+  --signal-1: #10b981;
+  --signal-2: #4ade80;
+  --signal-3: #a3e635;
+  --signal-4: #fde047;
+  --signal-5: #fb7185;
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.552 0.016 285.938);
@@ -99,6 +111,12 @@
   --color-success-foreground: var(--success-foreground);
   --color-info: var(--info);
   --color-info-foreground: var(--info-foreground);
+  --color-selection: var(--selection);
+  --color-signal-1: var(--signal-1);
+  --color-signal-2: var(--signal-2);
+  --color-signal-3: var(--signal-3);
+  --color-signal-4: var(--signal-4);
+  --color-signal-5: var(--signal-5);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
@@ -180,6 +198,62 @@ html.legacy-webkit.dark {
   --border: #3f4046;
   --input: #47484f;
   --ring: #777982;
+}
+
+html.color-vision-friendly {
+  --selection: #0072b2;
+  --success: #0072b2;
+  --success-foreground: #ffffff;
+  --warning: #8a5a00;
+  --warning-foreground: #ffffff;
+  --destructive: #b54708;
+  --destructive-foreground: #ffffff;
+  --info: #8e477e;
+  --info-foreground: #ffffff;
+  --chart-1: #0072b2;
+  --chart-2: #e69f00;
+  --chart-3: #009e73;
+  --chart-4: #cc79a7;
+  --chart-5: #d55e00;
+  --signal-1: #0072b2;
+  --signal-2: #56b4e9;
+  --signal-3: #009e73;
+  --signal-4: #e69f00;
+  --signal-5: #d55e00;
+}
+
+html.color-vision-friendly.dark {
+  --selection: #56b4e9;
+  --success: #56b4e9;
+  --success-foreground: #07111f;
+  --warning: #e69f00;
+  --warning-foreground: #14151a;
+  --destructive: #f28e5b;
+  --destructive-foreground: #14151a;
+  --info: #d090c5;
+  --info-foreground: #14151a;
+  --chart-1: #56b4e9;
+  --chart-2: #e69f00;
+  --chart-3: #44c7a0;
+  --chart-4: #d090c5;
+  --chart-5: #f28e5b;
+  --signal-1: #56b4e9;
+  --signal-2: #9bd7f0;
+  --signal-3: #44c7a0;
+  --signal-4: #e69f00;
+  --signal-5: #f28e5b;
+}
+
+html.color-vision-friendly .ping-signal-pattern-2 {
+  background-image: repeating-linear-gradient(135deg, transparent 0 2px, rgb(255 255 255 / 0.45) 2px 3px);
+}
+
+html.color-vision-friendly .ping-signal-pattern-3 {
+  background-image: repeating-linear-gradient(90deg, transparent 0 2px, rgb(0 0 0 / 0.28) 2px 3px);
+}
+
+html.color-vision-friendly .ping-signal-pattern-4 {
+  background-image: repeating-linear-gradient(45deg, transparent 0 1px, rgb(255 255 255 / 0.58) 1px 2px);
 }
 
 html.legacy-webkit,

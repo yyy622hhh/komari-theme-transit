@@ -551,15 +551,15 @@ const metricCards = computed<MetricCard[]>(() => appStore.detailMetricCardOrder.
       <div v-if="appStore.nodeDetailSectionTabsEnabled" class="px-4 overflow-x-auto">
         <Tabs v-model="activeDetailSection" class="w-full">
           <TabsList class="w-max h-8 bg-background/50 backdrop-blur-xl rounded-md">
-            <TabsTrigger value="overview" class="h-6.5 flex-none shrink-0 gap-1 text-xs border-none data-[state=active]:text-green-600 shadow-none rounded-sm">
+            <TabsTrigger value="overview" class="h-6.5 flex-none shrink-0 gap-1 text-xs border-none data-[state=active]:text-selection shadow-none rounded-sm">
               <Icon icon="tabler:layout-dashboard" :width="12" :height="12" />
               概览
             </TabsTrigger>
-            <TabsTrigger value="load" class="h-6.5 flex-none shrink-0 gap-1 text-xs border-none data-[state=active]:text-green-600 shadow-none rounded-sm">
+            <TabsTrigger value="load" class="h-6.5 flex-none shrink-0 gap-1 text-xs border-none data-[state=active]:text-selection shadow-none rounded-sm">
               <Icon icon="tabler:activity" :width="12" :height="12" />
               负载
             </TabsTrigger>
-            <TabsTrigger value="ping" class="h-6.5 flex-none shrink-0 gap-1 text-xs border-none data-[state=active]:text-green-600 shadow-none rounded-sm">
+            <TabsTrigger value="ping" class="h-6.5 flex-none shrink-0 gap-1 text-xs border-none data-[state=active]:text-selection shadow-none rounded-sm">
               <Icon icon="tabler:timeline" :width="12" :height="12" />
               延迟
             </TabsTrigger>

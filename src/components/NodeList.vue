@@ -414,10 +414,10 @@ function buildNodeMetadataItems(node: NodeData): NodeMetadataItem[] {
               <template v-for="col in columns" :key="col.key">
                 <!-- 在线状态指示器 -->
                 <div v-if="col.key === 'status'" class="flex justify-center">
-                  <div class="size-2 rounded-full relative" :class="[node.online ? 'bg-green-600' : 'bg-red-600']">
+                  <div class="size-2 rounded-full relative" :class="[node.online ? 'bg-success' : 'bg-destructive']">
                     <div
                       class="animate-ping absolute inset-0 rounded-full opacity-50"
-                      :class="[node.online ? 'bg-green-600' : 'bg-red-600']"
+                      :class="[node.online ? 'bg-success' : 'bg-destructive']"
                     />
                   </div>
                 </div>
@@ -574,7 +574,7 @@ function buildNodeMetadataItems(node: NodeData): NodeMetadataItem[] {
                 <!-- 速率 -->
                 <div v-else-if="col.key === 'rate'" class="min-w-0">
                   <div class="text-[11px] font-medium flex flex-col">
-                    <span class="text-green-600 dark:text-green-400 flex flex-row gap-1 items-center truncate">
+                    <span class="text-success flex flex-row gap-1 items-center truncate">
                       <Icon icon="tabler:chevron-up" width="12" height="12" class="shrink-0" />
                       {{ formatBytesPerSecond(node.net_out ?? 0) }}
                     </span>
@@ -594,7 +594,7 @@ function buildNodeMetadataItems(node: NodeData): NodeMetadataItem[] {
               <div class="grid gap-2 items-center justify-center" :style="gridStyle">
                 <div class="h-full space-y-1" :style="offlineOverlayContentStyle">
                   <div class="text-sm font-semibold truncate">
-                    <span class="text-red-500">离线</span> {{ node.name }}
+                    <span class="text-destructive">离线</span> {{ node.name }}
                   </div>
                   <div class="text-xs font-medium text-foreground/65">
                     {{ formatOfflineTime(node) }}

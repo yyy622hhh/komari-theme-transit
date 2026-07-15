@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { CardX } from '@/components/ui/card-x'
 import { Input } from '@/components/ui/input'
 import { useNodeProviderMetadata } from '@/composables/useNodeProviderMetadata'
+import { useVisitorAudit } from '@/composables/useVisitorAudit'
 import { buildSnapshotCsvAsync, buildSnapshotJsonAsync, downloadText } from '@/services/snapshot.service'
 import { useAppStore } from '@/stores/app'
 import * as financeHelper from '@/utils/financeHelper'
@@ -58,6 +59,7 @@ const props = defineProps<{
 }>()
 
 const appStore = useAppStore()
+const { record: recordVisitorEvent } = useVisitorAudit()
 const exchangeRates = ref(financeHelper.DEFAULT_EXCHANGE_RATES)
 const exportPasswordInput = ref('')
 const exporting = ref<null | 'json' | 'csv'>(null)
@@ -378,6 +380,13 @@ async function exportJson(): Promise<void> {
       content,
       'application/json;charset=utf-8',
     )
+    void recordVisitorEvent({
+      event: 'export_json',
+      path: '/',
+      route: 'home',
+      target: 'snapshot',
+      detail: { node_count: exportRows.length },
+    })
   }
   finally {
     exporting.value = null
@@ -400,6 +409,13 @@ async function exportCsv(): Promise<void> {
       'text/csv;charset=utf-8',
       { bom: true },
     )
+    void recordVisitorEvent({
+      event: 'export_csv',
+      path: '/',
+      route: 'home',
+      target: 'snapshot',
+      detail: { node_count: exportRows.length },
+    })
   }
   finally {
     exporting.value = null
@@ -526,7 +542,7 @@ async function exportCsv(): Promise<void> {
             <td class="px-2 py-3 font-medium">
               {{ row.name }}
             </td>
-            <td class="px-2 py-3" :class="row.online ? 'text-green-600' : 'text-red-500'">
+            <td class="px-2 py-3" :class="row.online ? 'text-success' : 'text-destructive'">
               {{ formatStatus(row.online) }}
             </td>
             <td class="px-2 py-3 text-xs text-muted-foreground">

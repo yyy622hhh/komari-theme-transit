@@ -6,10 +6,12 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import VisitorInfo from '@/components/VisitorInfo.vue'
+import { useVisitorAudit } from '@/composables/useVisitorAudit'
 import { useAppStore } from '@/stores/app'
 
 const router = useRouter()
 const appStore = useAppStore()
+const { record: recordVisitorEvent } = useVisitorAudit()
 
 const isScrolled = inject<ReturnType<typeof ref<boolean>>>('isScrolled', ref(false))
 
@@ -52,8 +54,19 @@ function handleButtonClick(action: string) {
   switch (action) {
     case 'toggleTheme':
       appStore.updateThemeMode()
+      void recordVisitorEvent({
+        event: 'theme_mode_change',
+        path: router.currentRoute.value.path,
+        route: String(router.currentRoute.value.name ?? ''),
+        target: appStore.themeMode,
+      })
       break
     case 'jumpToSetting':
+      void recordVisitorEvent({
+        event: 'admin_entry_click',
+        path: router.currentRoute.value.path,
+        route: String(router.currentRoute.value.name ?? ''),
+      })
       location.href = '/admin'
       break
   }

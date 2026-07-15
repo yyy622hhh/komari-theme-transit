@@ -90,6 +90,7 @@ type NodeCardSize = 'mini' | 'compact' | 'comfortable' | 'large'
 type RpcTransportMode = 'websocket' | 'http'
 type EarthRenderer = 'realistic' | 'cobe' | 'tiled'
 type GlassColorPreset = 'emerald' | 'soft' | 'contrast' | 'midnight' | 'custom'
+type ColorVisionMode = 'default' | 'accessible'
 export type ChartDashboardCardKey
   = | 'cpu'
     | 'memory'
@@ -551,6 +552,14 @@ const GLASS_COLOR_PRESET_ALIASES: Record<string, GlassColorPreset> = {
   自定义: 'custom',
 }
 
+const COLOR_VISION_MODE_ALIASES: Record<string, ColorVisionMode> = {
+  default: 'default',
+  标准: 'default',
+  accessible: 'accessible',
+  colorblind: 'accessible',
+  色觉友好: 'accessible',
+}
+
 const DEFAULT_GLASS_CUSTOM_COLORS: GlassCustomColors = {
   lightCard: '#f1f5f9bd',
   lightControl: '#e2e8f0c2',
@@ -853,6 +862,12 @@ function parseGlassColorPreset(value: unknown): GlassColorPreset {
   return GLASS_COLOR_PRESET_ALIASES[value.trim()] ?? 'emerald'
 }
 
+function parseColorVisionMode(value: unknown): ColorVisionMode {
+  if (typeof value !== 'string')
+    return 'default'
+  return COLOR_VISION_MODE_ALIASES[value.trim()] ?? 'default'
+}
+
 const useAppStore = defineStore('app', () => {
   const loading = ref<boolean>(true)
 
@@ -867,6 +882,8 @@ const useAppStore = defineStore('app', () => {
   const connectionError = ref<boolean>(false)
 
   const themeSettings = computed(() => normalizeThemeSettings(publicSettings.value?.theme_settings))
+  const visitorAuditSupported = computed(() => typeof publicSettings.value?.visitor_audit_enabled === 'boolean')
+  const visitorAuditEnabled = computed(() => publicSettings.value?.visitor_audit_enabled === true)
 
   // 首页滚动位置记忆
   const homeScrollPosition = ref<number>(0)
@@ -1027,6 +1044,10 @@ const useAppStore = defineStore('app', () => {
   const glassColorPreset = computed<GlassColorPreset>(() => parseGlassColorPreset(themeSettings.value.glassColorPreset))
 
   const glassCustomColors = computed<GlassCustomColors>(() => parseGlassCustomColors(themeSettings.value))
+
+  const colorVisionMode = computed<ColorVisionMode>(() => parseColorVisionMode(themeSettings.value.colorVisionMode))
+
+  const colorVisionFriendly = computed<boolean>(() => colorVisionMode.value === 'accessible')
 
   const homeQuickControlsEnabled = computed<boolean>(() => readBooleanSetting(themeSettings.value, 'homeQuickControlsEnabled', true))
 
@@ -1281,6 +1302,10 @@ const useAppStore = defineStore('app', () => {
     homeToolsEnabled,
     glassColorPreset,
     glassCustomColors,
+    colorVisionMode,
+    colorVisionFriendly,
+    visitorAuditSupported,
+    visitorAuditEnabled,
     homeQuickControlsEnabled,
     homeQuickControlOrder,
     homeQuickDefaultControl,

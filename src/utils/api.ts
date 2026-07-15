@@ -44,6 +44,7 @@ export interface PublicSettings {
   sitename: string
   theme: string
   theme_settings?: Record<string, unknown> | null
+  visitor_audit_enabled?: boolean
   /** 数据更新间隔（秒），主题配置项 */
   dataUpdateInterval?: number
 }

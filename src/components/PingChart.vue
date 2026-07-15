@@ -2,7 +2,7 @@
 import type { MetricSeries, PingMetricTaskStats, PingRecord, PingTaskInfo } from '@/utils/rpc'
 import { Icon } from '@iconify/vue'
 import dayjs from 'dayjs'
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, shallowRef, watch, watchEffect } from 'vue'
 import VChart from 'vue-echarts'
 import { Button } from '@/components/ui/button'
 import { Empty } from '@/components/ui/empty'
@@ -14,6 +14,7 @@ import { PING_RECORD_MAX_COUNT } from '@/constants/load'
 import { loadPingRecordsWithTasks } from '@/services/history.service'
 import { loadPingMetricStats, queryMetrics } from '@/services/metrics.service'
 import { useAppStore } from '@/stores/app'
+import { ACCESSIBLE_LINE_TYPES, getChartSeriesPalette } from '@/utils/chartPalette'
 import { isPingMetric, normalizeMetricSeriesList, PING_LATENCY_METRIC, pingTaskId, pingTaskName } from '@/utils/metricSeries'
 import { cutPeakValues, interpolateNullsLinear } from '@/utils/recordHelper'
 import '@/utils/echarts' // 共享 ECharts 配置
@@ -43,17 +44,11 @@ const chartThemeColors = computed(() => ({
   crosshairColor: isDark.value ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.1)',
 }))
 
-// 优化后的图表配色方案（多任务时使用）
-const chartColors = [
-  '#FF6B6B', // 珊瑚红
-  '#4ECDC4', // 青绿色
-  '#A78BFA', // 紫罗兰
-  '#60A5FA', // 天蓝色
-  '#FFB347', // 琥珀黄
-  '#F472B6', // 粉红色
-  '#34D399', // 翠绿色
-  '#FB923C', // 橙色
-]
+const chartColors = reactive(getChartSeriesPalette(appStore.colorVisionFriendly))
+
+watchEffect(() => {
+  chartColors.splice(0, chartColors.length, ...getChartSeriesPalette(appStore.colorVisionFriendly))
+})
 
 // 从 publicSettings 获取记录保留时间
 const maxPingRecordPreserveTime = computed(() => appStore.publicSettings?.ping_record_preserve_time || 168)
@@ -607,8 +602,11 @@ const pingChartOption = computed(() => {
   const hours = selectedHours.value
 
   // 构建 series，确保颜色与卡片一致
-  const series = taskList.map((task) => {
+  const series = taskList.map((task, index) => {
     const color = getTaskColor(task.id)
+    const lineType = appStore.colorVisionFriendly
+      ? (ACCESSIBLE_LINE_TYPES[index % ACCESSIBLE_LINE_TYPES.length] ?? 'solid')
+      : 'solid'
     return {
       name: task.name,
       type: 'line' as const,
@@ -616,7 +614,7 @@ const pingChartOption = computed(() => {
       smooth: cutPeak.value ? 0.6 : 0.1,
       showSymbol: false,
       connectNulls: false,
-      lineStyle: { width: 1.5, color, cap: 'round' as const },
+      lineStyle: { width: 1.5, color, cap: 'round' as const, type: lineType },
       itemStyle: { color }, // 确保 symbol 颜色一致
     }
   })

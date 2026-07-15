@@ -11,20 +11,21 @@ function normalizePositiveInteger(value: string | number | null | undefined, fal
   return Math.floor(numericValue)
 }
 
-export function getAuditLogsRequestKey(page = 1, limit = DEFAULT_AUDIT_LOG_LIMIT): string {
-  return `audit:logs:${page}:${limit}`
+export function getAuditLogsRequestKey(page = 1, limit = DEFAULT_AUDIT_LOG_LIMIT, msgType?: string): string {
+  return `audit:logs:${page}:${limit}:${msgType?.trim() || 'all'}`
 }
 
-export function abortAuditLogs(page = 1, limit = DEFAULT_AUDIT_LOG_LIMIT): void {
-  requestManager.abort(getAuditLogsRequestKey(page, limit))
+export function abortAuditLogs(page = 1, limit = DEFAULT_AUDIT_LOG_LIMIT, msgType?: string): void {
+  requestManager.abort(getAuditLogsRequestKey(page, limit, msgType))
 }
 
-export async function loadAuditLogs(params: { page?: number | string, limit?: number | string } = {}): Promise<AuditLogsResponse> {
+export async function loadAuditLogs(params: { page?: number | string, limit?: number | string, msgType?: string } = {}): Promise<AuditLogsResponse> {
   const page = normalizePositiveInteger(params.page, 1)
   const limit = normalizePositiveInteger(params.limit, DEFAULT_AUDIT_LOG_LIMIT)
+  const msgType = params.msgType?.trim() || undefined
 
   return requestManager.run(
-    getAuditLogsRequestKey(page, limit),
-    async signal => getSharedRpc().getAuditLogs(String(limit), String(page), signal),
+    getAuditLogsRequestKey(page, limit, msgType),
+    async signal => getSharedRpc().getAuditLogs(String(limit), String(page), msgType, signal),
   )
 }

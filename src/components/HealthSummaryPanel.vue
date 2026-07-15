@@ -346,7 +346,7 @@ const summaryLines = computed(() => {
         size="sm"
         variant="ghost"
         class="bg-background/50"
-        :class="selectedRange === option.key && 'bg-background text-green-600'"
+        :class="selectedRange === option.key && 'bg-background text-selection'"
         @click="selectedRange = option.key"
       >
         {{ option.label }}
@@ -373,12 +373,12 @@ const summaryLines = computed(() => {
               </div>
             </div>
           </template>
-          <div v-if="error" class="text-sm text-red-500">
+          <div v-if="error" class="text-sm text-destructive">
             {{ error }}
           </div>
           <ul v-else class="space-y-2 text-sm">
             <li v-for="line in summaryLines" :key="line" class="flex gap-2">
-              <Icon icon="tabler:point-filled" width="14" height="14" class="mt-0.5 text-green-600" />
+              <Icon icon="tabler:point-filled" width="14" height="14" class="mt-0.5 text-success" />
               <span>{{ line }}</span>
             </li>
           </ul>
@@ -386,7 +386,7 @@ const summaryLines = computed(() => {
 
         <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           <CardX title="离线 / 可用性" size="small" class="border-none bg-background/50">
-            <div class="text-2xl font-bold text-red-500">
+            <div class="text-2xl font-bold text-destructive">
               {{ offlineNodes.length }}
             </div>
             <div class="mt-2 flex flex-wrap gap-1">
@@ -400,7 +400,7 @@ const summaryLines = computed(() => {
             <div v-if="cpuRankNodes.length" class="space-y-1 text-sm">
               <div v-for="item in cpuRankNodes" :key="item.uuid" class="flex justify-between gap-2">
                 <span class="truncate">{{ item.name }}</span>
-                <span class="tabular-nums" :class="item.cpuPeak >= appStore.homeHighLoadThreshold ? 'text-orange-500' : 'text-muted-foreground'">{{ item.cpuPeak.toFixed(1) }}%</span>
+                <span class="tabular-nums" :class="item.cpuPeak >= appStore.homeHighLoadThreshold ? 'text-warning' : 'text-muted-foreground'">{{ item.cpuPeak.toFixed(1) }}%</span>
               </div>
             </div>
             <div v-else class="text-sm text-muted-foreground">
@@ -412,7 +412,7 @@ const summaryLines = computed(() => {
             <div v-if="memoryRankNodes.length" class="space-y-1 text-sm">
               <div v-for="item in memoryRankNodes" :key="item.uuid" class="flex justify-between gap-2">
                 <span class="truncate">{{ item.name }}</span>
-                <span class="tabular-nums" :class="item.memoryPeak >= appStore.homeHighLoadThreshold ? 'text-orange-500' : 'text-muted-foreground'">{{ item.memoryPeak.toFixed(1) }}%</span>
+                <span class="tabular-nums" :class="item.memoryPeak >= appStore.homeHighLoadThreshold ? 'text-warning' : 'text-muted-foreground'">{{ item.memoryPeak.toFixed(1) }}%</span>
               </div>
             </div>
             <div v-else class="text-sm text-muted-foreground">
@@ -424,7 +424,7 @@ const summaryLines = computed(() => {
             <div v-if="diskRankNodes.length" class="space-y-1 text-sm">
               <div v-for="item in diskRankNodes" :key="item.uuid" class="flex justify-between gap-2">
                 <span class="truncate">{{ item.name }}</span>
-                <span class="tabular-nums" :class="diskRankMode === 'growth' ? 'text-orange-500' : 'text-muted-foreground'">
+                <span class="tabular-nums" :class="diskRankMode === 'growth' ? 'text-warning' : 'text-muted-foreground'">
                   {{ diskRankMode === 'growth' ? `${formatBytes(item.diskDailyGrowthBytes)}/天` : `${item.diskUsagePercentage.toFixed(1)}%` }}
                 </span>
               </div>
@@ -438,7 +438,7 @@ const summaryLines = computed(() => {
             <div v-if="trafficWarnings.length" class="space-y-1 text-sm">
               <div v-for="item in trafficWarnings.slice(0, HEALTH_LIST_LIMIT)" :key="item.uuid" class="flex justify-between gap-2">
                 <span class="truncate">{{ item.name }}</span>
-                <span class="tabular-nums text-red-500">{{ item.trafficUsedPercentage.toFixed(1) }}%</span>
+                <span class="tabular-nums text-destructive">{{ item.trafficUsedPercentage.toFixed(1) }}%</span>
               </div>
             </div>
             <div v-else class="text-sm text-muted-foreground">

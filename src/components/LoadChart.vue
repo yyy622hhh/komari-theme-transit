@@ -6,7 +6,7 @@ import type { MetricQueryParams, MetricSeries, PingTaskInfo, StatusRecord } from
 import { Icon } from '@iconify/vue'
 import { useIntervalFn } from '@vueuse/core'
 import dayjs from 'dayjs'
-import { computed, onMounted, ref, shallowRef, watch } from 'vue'
+import { computed, onMounted, reactive, ref, shallowRef, watch, watchEffect } from 'vue'
 import VChart from 'vue-echarts'
 import MetricChartHeader from '@/components/MetricChartHeader.vue'
 import MetricSeriesChartCard from '@/components/MetricSeriesChartCard.vue'
@@ -21,6 +21,7 @@ import { LOAD_RECORD_MAX_COUNT } from '@/constants/load'
 import { loadMetricDefinitions, loadPublicPingTasks, queryMetrics } from '@/services/metrics.service'
 import { useAppStore } from '@/stores/app'
 import { useNodesStore } from '@/stores/nodes'
+import { getChartSeriesPalette, getLoadChartPalette } from '@/utils/chartPalette'
 import { formatBytes, formatBytesSplit } from '@/utils/helper'
 import { metricTags, normalizeMetricSeriesList } from '@/utils/metricSeries'
 import { fillMissingTimePoints } from '@/utils/recordHelper'
@@ -43,21 +44,11 @@ const detailLoadStatsHours = computed(() => appStore.publicSettings?.record_pres
 // 使用 store 中的 isDark computed
 const isDark = computed(() => appStore.isDark)
 
-// 优化后的图表配色方案（基于 Material Design 色彩）
-const chartColors = {
-  // 主色调 - 珊瑚红
-  primary: '#FF6B6B',
-  primaryArea: 'rgba(255, 107, 107, 0.15)',
-  // 次要色 - 琥珀黄
-  secondary: '#FFB347',
-  // 第三色 - 青绿色
-  tertiary: '#4ECDC4',
-  // 第四色 - 紫罗兰
-  quaternary: '#A78BFA',
-  // 第五色 - 天蓝色
-  quinary: '#60A5FA',
-  senary: '#34D399',
-}
+const chartColors = reactive(getLoadChartPalette(appStore.colorVisionFriendly))
+
+watchEffect(() => {
+  Object.assign(chartColors, getLoadChartPalette(appStore.colorVisionFriendly))
+})
 
 const LOAD_METRIC_KEYS = [
   'cpu.usage',
@@ -748,7 +739,11 @@ const latestStatus = computed(() => {
 
 const hasGpuData = computed(() => chartData.value.some(record => record.gpu != null || record.gpu_usage != null || record.gpu_memory != null || record.gpu_detailed))
 
-const metricSeriesColors = ['#38BDF8', '#A78BFA', '#34D399', '#FB7185', '#FBBF24', '#22D3EE', '#F97316', '#94A3B8']
+const metricSeriesColors = reactive(getChartSeriesPalette(appStore.colorVisionFriendly))
+
+watchEffect(() => {
+  metricSeriesColors.splice(0, metricSeriesColors.length, ...getChartSeriesPalette(appStore.colorVisionFriendly))
+})
 
 const pingTaskNameMap = computed(() => new Map(pingTasks.value.map(task => [String(task.id), task.name])))
 
@@ -833,6 +828,7 @@ function pingSeries(metricKey: 'ping.latency_ms' | 'ping.loss'): MetricChartSeri
         name: taskName,
         color: metricSeriesColors[index % metricSeriesColors.length]!,
         kind: metricKey === 'ping.loss' ? 'percent' : 'milliseconds',
+        dashed: appStore.colorVisionFriendly && index % 2 === 1,
         data: series.points.map(point => [
           point.time,
           point.value === null || !Number.isFinite(point.value)
@@ -980,8 +976,8 @@ const cpuChartOption = computed(() => ({
           x2: 0,
           y2: 1,
           colorStops: [
-            { offset: 0, color: 'rgba(255, 107, 107, 0.25)' },
-            { offset: 1, color: 'rgba(255, 107, 107, 0.02)' },
+            { offset: 0, color: chartColors.primaryAreaStrong },
+            { offset: 1, color: chartColors.primaryAreaFaint },
           ],
         },
       },
@@ -1079,8 +1075,8 @@ const memoryChartOption = computed(() => ({
           x2: 0,
           y2: 1,
           colorStops: [
-            { offset: 0, color: 'rgba(255, 107, 107, 0.25)' },
-            { offset: 1, color: 'rgba(255, 107, 107, 0.02)' },
+            { offset: 0, color: chartColors.primaryAreaStrong },
+            { offset: 1, color: chartColors.primaryAreaFaint },
           ],
         },
       },
@@ -1177,8 +1173,8 @@ const diskChartOption = computed(() => ({
           x2: 0,
           y2: 1,
           colorStops: [
-            { offset: 0, color: 'rgba(78, 205, 196, 0.25)' },
-            { offset: 1, color: 'rgba(78, 205, 196, 0.02)' },
+            { offset: 0, color: chartColors.tertiaryAreaStrong },
+            { offset: 1, color: chartColors.tertiaryAreaFaint },
           ],
         },
       },

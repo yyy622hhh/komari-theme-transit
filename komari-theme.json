@@ -2,7 +2,7 @@
   "name": "Komari Glassmorphism",
   "short": "Glassmorphism",
   "description": "A Glassmorphism theme for Komari",
-  "version": "3.1.4",
+  "version": "3.1.5",
   "author": "sanrokamlan",
   "url": "https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism",
   "preview": "preview.png",
@@ -27,6 +27,7 @@
       { "key": "hideGeneralCard", "name": "隐藏头部", "type": "switch", "default": false, "help": "隐藏地球和总览卡片" },
       { "key": "visitorInfoEnabled", "name": "显示访客信息", "type": "switch", "default": true, "help": "显示底部访客 IP 条和左下角访客详情卡片" },
       { "key": "glassColorPreset", "name": "毛玻璃配色方案", "type": "select", "default": "翡翠", "options": "翡翠,柔和,高对比,午夜,自定义", "help": "选择“自定义”后读取下方 JSON。" },
+      { "key": "colorVisionMode", "name": "色觉辅助配色", "type": "select", "default": "标准", "options": "标准,色觉友好", "help": "色觉友好使用蓝、蓝绿、橙、朱红、紫红，并为图表和状态增加线型、纹理、文字或图标区分。" },
       { "key": "glassCustomColors", "name": "自定义毛玻璃颜色 JSON", "type": "richtext", "default": "{\"lightCard\":\"#f1f5f9bd\",\"lightControl\":\"#e2e8f0c2\",\"lightText\":\"#14151a\",\"lightMutedText\":\"#3f4552\",\"lightBorder\":\"#cbd5e199\",\"darkCard\":\"#0d111ad9\",\"darkControl\":\"#101624cc\",\"darkText\":\"#f7f8fb\",\"darkMutedText\":\"#d6dae4\",\"darkBorder\":\"#ffffff2e\"}", "help": "lightCard/darkCard=卡片； lightControl/darkControl=控制条； lightText/darkText=主文字； lightMutedText/darkMutedText=次文字； lightBorder/darkBorder=边框。支持 #RRGGBB 和 #RRGGBBAA。" },
 
       { "name": "03 · 首页总览卡片", "type": "title" },

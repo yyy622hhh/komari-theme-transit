@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button'
 import { Empty } from '@/components/ui/empty'
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { useVisitorAudit } from '@/composables/useVisitorAudit'
 import { UI_CONFIG } from '@/constants/ui'
 import { useAppStore } from '@/stores/app'
 import { useNodesStore } from '@/stores/nodes'
@@ -59,6 +60,7 @@ const denseNodePingAnimationThreshold = UI_CONFIG.motion.denseNodePingAnimationT
 const appStore = useAppStore()
 const nodesStore = useNodesStore()
 const router = useRouter()
+const { record: recordVisitorEvent } = useVisitorAudit()
 
 onActivated(() => {
   nextTick(() => {
@@ -313,7 +315,28 @@ function getNodeItemTransitionStyle(index: number): Record<string, string> {
 }
 
 function setQuickControl(key: HomeQuickControlKey) {
+  if (activeQuickControl.value === key)
+    return
   activeQuickControl.value = key
+  void recordVisitorEvent({
+    event: 'filter_change',
+    path: '/',
+    route: 'home',
+    target: key,
+    detail: { result_count: nodeList.value.length },
+  })
+}
+
+function setNodeViewMode(mode: 'card' | 'list') {
+  if (appStore.nodeViewMode === mode)
+    return
+  appStore.nodeViewMode = mode
+  void recordVisitorEvent({
+    event: 'view_mode_change',
+    path: '/',
+    route: 'home',
+    target: mode,
+  })
 }
 
 async function toggleHomeTool(key: Exclude<HomeToolKey, 'nodes'>) {
@@ -332,12 +355,45 @@ async function toggleHomeTool(key: Exclude<HomeToolKey, 'nodes'>) {
   }
 
   activeHomeTool.value = key
+  void recordVisitorEvent({
+    event: 'home_tool_open',
+    path: '/',
+    route: 'home',
+    target: key,
+  })
 }
 
 watch(homeTools, (tools) => {
   if (activeHomeTool.value !== 'nodes' && !tools.some(tool => tool.key === activeHomeTool.value))
     activeHomeTool.value = 'nodes'
 }, { immediate: true })
+
+watch(() => appStore.nodeSelectedGroup, (next, previous) => {
+  if (next === previous)
+    return
+  void recordVisitorEvent({
+    event: 'group_change',
+    path: '/',
+    route: 'home',
+    target: next,
+    detail: { visible_nodes: groupNodeList.value.length },
+  })
+})
+
+watch(debouncedSearchText, (next, previous) => {
+  const keyword = next.trim()
+  if (keyword === previous.trim())
+    return
+  void recordVisitorEvent({
+    event: keyword ? 'search' : 'search_clear',
+    path: '/',
+    route: 'home',
+    detail: {
+      keyword_length: keyword.length,
+      result_count: nodeList.value.length,
+    },
+  })
+})
 
 const activeToolTitle = computed(() => {
   if (activeHomeTool.value === 'nodes')
@@ -385,7 +441,7 @@ const nodeCardGridClass = computed(() => {
                 <TabsList class="w-max h-8 bg-background/50 backdrop-blur-xl rounded-md pointer-events-auto">
                   <TabsTrigger
                     v-for="g in groups" :key="g.name" :value="g.name"
-                    class="h-6.5 flex-none shrink-0 text-xs border-none data-[state=active]:text-green-600 shadow-none rounded-sm"
+                    class="h-6.5 flex-none shrink-0 text-xs border-none data-[state=active]:text-selection shadow-none rounded-sm"
                   >
                     {{ g.tab }}
                   </TabsTrigger>
@@ -399,7 +455,7 @@ const nodeCardGridClass = computed(() => {
                     v-for="control in quickControls" :key="control.key"
                     type="button"
                     class="inline-flex h-6.5 flex-none shrink-0 items-center gap-1 rounded-sm px-2 text-xs text-muted-foreground transition-colors hover:text-foreground"
-                    :class="activeQuickControl === control.key ? 'bg-background text-green-600 shadow-sm' : ''"
+                    :class="activeQuickControl === control.key ? 'bg-background text-selection shadow-sm' : ''"
                     :aria-pressed="activeQuickControl === control.key"
                     :aria-label="`切换到${control.label}节点，${quickControlCounts[control.key] ?? 0} 台`"
                     @click="setQuickControl(control.key)"
@@ -419,7 +475,7 @@ const nodeCardGridClass = computed(() => {
                   v-for="tool in homeTools" :key="tool.key"
                   variant="ghost" size="icon"
                   class="size-7 rounded-sm text-muted-foreground shadow-none hover:bg-background/60"
-                  :class="[activeHomeTool === tool.key ? '!text-green-600 !bg-background' : '']"
+                  :class="[activeHomeTool === tool.key ? '!text-selection !bg-background' : '']"
                   :aria-label="`${tool.label}：${tool.description}`"
                   :aria-pressed="activeHomeTool === tool.key"
                   :title="tool.description"
@@ -432,16 +488,16 @@ const nodeCardGridClass = computed(() => {
               <Button
                 variant="outline" size="icon" aria-label="卡片视图"
                 class="w-8 h-8 border-none bg-background/50 backdrop-blur-xs shadow-none hover:bg-background/60 rounded-md"
-                :class="[appStore.nodeViewMode === 'card' ? '!text-green-600 !bg-background' : '']"
-                @click="appStore.nodeViewMode = 'card'"
+                :class="[appStore.nodeViewMode === 'card' ? '!text-selection !bg-background' : '']"
+                @click="setNodeViewMode('card')"
               >
                 <Icon icon="tabler:layout-grid" :width="14" :height="14" />
               </Button>
               <Button
                 variant="outline" size="icon" aria-label="列表视图"
                 class="w-8 h-8 border-none bg-background/50 backdrop-blur-xs shadow-none hover:bg-background/60 rounded-md"
-                :class="[appStore.nodeViewMode === 'list' ? '!text-green-600 !bg-background' : '']"
-                @click="appStore.nodeViewMode = 'list'"
+                :class="[appStore.nodeViewMode === 'list' ? '!text-selection !bg-background' : '']"
+                @click="setNodeViewMode('list')"
               >
                 <Icon icon="tabler:table" :width="14" :height="14" />
               </Button>

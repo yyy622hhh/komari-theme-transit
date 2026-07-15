@@ -4,6 +4,7 @@ import { nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { Alert, AlertAction, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Toaster } from '@/components/ui/sonner'
+import { useVisitorPageAudit } from '@/composables/useVisitorAudit'
 import { useAppStore } from '@/stores/app'
 import { destroyInitManager, initApp, retryInitApp } from '@/utils/init'
 import Background from './components/Background.vue'
@@ -13,6 +14,7 @@ import LoadingCover from './components/LoadingCover.vue'
 import Provider from './components/Provider.vue'
 
 const appStore = useAppStore()
+useVisitorPageAudit()
 
 const isReady = ref(false)
 const isRetryingConnection = ref(false)
@@ -76,7 +78,7 @@ onUnmounted(() => {
       <div v-if="!appStore.loading" class="app-shell">
         <main class="min-h-screen overflow-hidden">
           <div v-if="appStore.connectionError" class="relative z-10 mx-auto max-w-[1280px] px-4 pt-4">
-            <Alert variant="destructive" class="!pr-28 border-none bg-red-400/10 backdrop-blur-xs rounded-md">
+            <Alert variant="destructive" class="!pr-28 border-none bg-destructive/10 backdrop-blur-xs rounded-md">
               <Icon icon="tabler:plug-connected-x" />
               <AlertTitle>RPC 服务错误</AlertTitle>
               <AlertDescription>连接服务器失败，请检查网络后重试。</AlertDescription>
