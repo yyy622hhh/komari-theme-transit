@@ -27,8 +27,7 @@
 
 <div align="center">
 
-<img src="docs/preview-home.png" width="49%" alt="Komari Glassmorphism 首页预览" />
-<img src="docs/preview-detail.png" width="49%" alt="Komari Glassmorphism 节点详情预览" />
+<img src="docs/preview.png" width="80%" alt="Komari Glassmorphism 可配置能力概览" />
 
 </div>
 
@@ -38,7 +37,7 @@
 
 | 项目     | 说明                                                      |
 | :------- | :-------------------------------------------------------- |
-| 当前版本 | **v3.1.9**                                                |
+| 当前版本 | **v3.2.0**                                                |
 | 主题定位 | Komari Monitor 可导入 zip 主题，不是普通 Web App 部署包   |
 | 视觉风格 | 毛玻璃卡片、动态背景、浅色 / 深色 / 北京时间自动日夜模式  |
 | 数据能力 | Metric Store 优先，旧接口自动 fallback，兼容 Komari 1.2.x |
@@ -46,6 +45,15 @@
 | 发布产物 | `komari-theme-Glassmorphism-build-<short-sha>.zip`        |
 
 > 好看只是外壳。v3 真正的重点，是把 Metric、Ping、流量、费用、健康分析和运维工具整合成日常真的会打开来看的监控面板。
+
+---
+
+## 🌍 v3.2.0 地球与地图显示修复
+
+- 恢复 v3.1.8 的首页地球尺寸与头部高度，撤销 v3.1.9 引入的强制裁剪，真实地球不再消失或缩成小球
+- 默认仍使用真实贴图地球；Cobe 点阵地球和平铺地图继续作为可选样式
+- 修复平铺地图暗色样式错误作用于整个页面、导致页面透明度降到 20% 和整体发黑的问题
+- 桌面与移动端均验证真实地球、Cobe 和平铺地图；移动端平铺地图使用内部横向滚动，不撑宽页面
 
 ---
 
@@ -413,6 +421,15 @@ dist/
 ## 📝 更新日志
 
 <details open>
+<summary><strong>v3.2.0 · 地球与地图显示修复</strong></summary>
+
+- 恢复真实地球原尺寸与原头部布局，移除 v3.1.9 的强制高度和裁剪
+- 修复平铺地图暗色 scoped CSS 泄漏导致整页发黑
+- 验证真实地球、Cobe 和平铺地图的桌面/移动端尺寸、标记与溢出行为
+
+</details>
+
+<details>
 <summary><strong>v3.1.9 · 上游核心兼容与后台整合</strong></summary>
 
 - 与未合并的 #604/#82 解耦，按量费用改为主题本地估算器

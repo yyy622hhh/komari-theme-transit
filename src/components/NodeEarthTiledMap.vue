@@ -207,15 +207,15 @@ const clusterMarkers = computed<ClusterMarker[]>(() => regionClusters.value.map(
   mix-blend-mode: soft-light;
 }
 
-:global(.dark) .earth-image-base {
+:global(.dark .earth-image-base) {
   filter: saturate(1.1) contrast(1.04) brightness(0.92);
 }
 
-:global(.dark) .earth-image-bump {
+:global(.dark .earth-image-bump) {
   opacity: 0.28;
 }
 
-:global(.dark) .earth-image-water {
+:global(.dark .earth-image-water) {
   opacity: 0.2;
 }
 
@@ -405,33 +405,33 @@ const clusterMarkers = computed<ClusterMarker[]>(() => regionClusters.value.map(
   white-space: nowrap;
 }
 
-:global(.dark) .earth-map {
+:global(.dark .earth-map) {
   border-right-color: rgb(125 211 252 / 0.12);
 }
 
-:global(.dark) .legend-panel {
+:global(.dark .legend-panel) {
   background: rgb(15 23 42 / 0.18);
 }
 
-:global(.dark) .legend-title,
-:global(.dark) .legend-item {
+:global(.dark .legend-title),
+:global(.dark .legend-item) {
   border-color: rgb(125 211 252 / 0.18);
   background: rgb(15 23 42 / 0.58);
 }
 
-:global(.dark) .legend-title {
+:global(.dark .legend-title) {
   color: rgb(186 230 253 / 0.86);
 }
 
-:global(.dark) .legend-title span {
+:global(.dark .legend-title span) {
   color: rgb(110 231 183 / 0.92);
 }
 
-:global(.dark) .legend-name {
+:global(.dark .legend-name) {
   color: rgb(255 255 255 / 0.9);
 }
 
-:global(.dark) .legend-meta {
+:global(.dark .legend-meta) {
   color: rgb(186 230 253 / 0.66);
 }
 
