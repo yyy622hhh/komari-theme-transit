@@ -450,3 +450,11 @@
 - Browser verification on `https://mt.vpnmiao.com/`: 390x844 and 1280x720 had no document overflow; the visitor detail card stayed hidden; globe/list boundaries were visually clean; `/admin`, `/admin/settings/theme`, `/admin/theme_managed` and `/terminal` loaded; Theme Management had no 404; admin images had no broken resources; console had no new warnings/errors.
 - Integration validation: `go test ./database/clients ./web/api/client ./web/rpc/jsonrpc` and `go vet ./...` passed. Linux amd64 CGO/static build succeeded and was deployed for live testing. The test host was cleaned to the active binary/data only, with no backups retained per operator request.
 - Release guardrail: do not reintroduce #604/#82 into the theme release or new upstream PRs. Komari default-theme work must be a clean branch from upstream main; komari-web asset-path work must be a clean branch from upstream radix.
+
+## 2026-07-16 v3.1.9 published and upstreamed
+
+- Release commit `f17a5eb7c18138fba78d22504e1ed5b19b347284`; workflow `29492624741` succeeded; Release `v3.1.9` points to the same SHA.
+- Published asset `komari-theme-Glassmorphism-build-f17a5eb.zip`, SHA-256 `aab1572006c02447461410422962d5c65c569c6429a0191a74e6ee5544eaff9b`. Downloaded verification passed for version, `Glassmorphism` short name, `主题设置`, preview hash, `dist/index.html`, embedded admin index, admin source SHA and absence of #604 fields.
+- Komari fork branch `codex/glassmorphism-default-theme`, commit `7b64db3c403f05f6dfbcb603ae4763c8842442a8`, upstream PR `komari-monitor/komari#606`. It pins Glassmorphism `v3.1.9`, builds with Bun, normalizes the embedded manifest to `short: default`, and tests metadata preservation. PR CI run `29493915098` passed frontend plus all seven Linux/Windows binary jobs.
+- komari-web fork branch `codex/base-aware-static-assets`, commit `2ff6c2be70ac12a641ac7272cdfed1995439d58a`, upstream PR `komari-monitor/komari-web#83`. It resolves flag and OS images from Vite `BASE_URL`; lint has 0 errors/27 existing warnings, and both root and `/admin-app/` production builds pass.
+- The admin sync script accepts both legacy root-relative komari-web assets (rewritten after build) and #83-style native BASE_URL assets (already correct). Do not restore the old requirement that at least one root-relative path must be rewritten.
