@@ -794,6 +794,25 @@ function readStringSetting(settings: ThemeSettings, key: string, fallback = ''):
   return typeof value === 'string' ? value.trim() : fallback
 }
 
+function resolveBackgroundSource(value: unknown): string {
+  if (typeof value !== 'string')
+    return ''
+
+  const source = value.trim()
+  if (!source.toLowerCase().startsWith('local:'))
+    return source
+
+  const segments = source.slice('local:'.length)
+    .replaceAll('\\', '/')
+    .split('/')
+    .filter(Boolean)
+
+  if (segments.length === 0 || segments.some(segment => segment === '.' || segment === '..'))
+    return ''
+
+  return `/themes/user-assets/${segments.map(segment => encodeURIComponent(segment)).join('/')}`
+}
+
 function readColorSetting(settings: ThemeSettings, key: string, fallback: string): string {
   const trimmed = readStringSetting(settings, key, fallback)
   return HEX_COLOR_REGEX.test(trimmed) ? trimmed : fallback
@@ -872,6 +891,7 @@ const useAppStore = defineStore('app', () => {
   const authStatus = ref(getAuthSession().status)
   const privateFeaturesAllowed = computed(() => authStatus.value === 'authenticated')
   const connectionError = ref<boolean>(false)
+  const homeAdvancedToolsVisible = ref(false)
 
   const themeSettings = computed(() => normalizeThemeSettings(publicSettings.value?.theme_settings))
   const visitorAuditSupported = computed(() => typeof publicSettings.value?.visitor_audit_enabled === 'boolean')
@@ -1162,17 +1182,11 @@ const useAppStore = defineStore('app', () => {
   })
 
   const lightBackgroundUrl = computed<string>(() => {
-    const value = themeSettings.value.lightBackgroundUrl
-    if (typeof value === 'string')
-      return value.trim()
-    return ''
+    return resolveBackgroundSource(themeSettings.value.lightBackgroundUrl)
   })
 
   const darkBackgroundUrl = computed<string>(() => {
-    const value = themeSettings.value.darkBackgroundUrl
-    if (typeof value === 'string')
-      return value.trim()
-    return ''
+    return resolveBackgroundSource(themeSettings.value.darkBackgroundUrl)
   })
 
   const backgroundBlur = computed<number>(() => readNumberSetting(themeSettings.value, 'backgroundBlur', 0, 0, Number.MAX_SAFE_INTEGER))
@@ -1292,6 +1306,7 @@ const useAppStore = defineStore('app', () => {
     generalCardEnabledMap,
     generalCardOrder,
     homeToolsEnabled,
+    homeAdvancedToolsVisible,
     glassColorPreset,
     glassCustomColors,
     colorVisionMode,

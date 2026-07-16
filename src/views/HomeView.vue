@@ -128,7 +128,8 @@ const groups = computed(() => [
   ...nodesStore.groups.map(g => ({ tab: g, name: g })),
 ])
 
-const quickControls = computed(() => appStore.homeQuickControlOrder.map(key => quickControlDefinitions[key]))
+const quickControlKeys = computed<HomeQuickControlKey[]>(() => appStore.homeQuickControlOrder.filter(key => key !== 'monthlyCost'))
+const quickControls = computed(() => quickControlKeys.value.map(key => quickControlDefinitions[key]))
 const showQuickControls = computed(() => appStore.homeQuickControlsEnabled && quickControls.value.length > 0)
 
 watch(
@@ -139,8 +140,11 @@ watch(
       return
     }
 
-    if (!appStore.homeQuickControlOrder.includes(activeQuickControl.value))
-      activeQuickControl.value = appStore.homeQuickDefaultControl
+    if (!quickControlKeys.value.includes(activeQuickControl.value)) {
+      activeQuickControl.value = quickControlKeys.value.includes(appStore.homeQuickDefaultControl)
+        ? appStore.homeQuickDefaultControl
+        : 'default'
+    }
   },
   { immediate: true },
 )
@@ -280,7 +284,7 @@ const quickControlCounts = computed<Record<HomeQuickControlKey, number>>(() => {
     base = base.filter(n => isNodeMatchSearch(n, debouncedSearchText.value))
 
   const counts = {} as Record<HomeQuickControlKey, number>
-  for (const key of appStore.homeQuickControlOrder)
+  for (const key of quickControlKeys.value)
     counts[key] = getQuickControlCount(base, key)
   return counts
 })
@@ -373,6 +377,11 @@ watch(homeTools, (tools) => {
   if (activeHomeTool.value !== 'nodes' && !tools.some(tool => tool.key === activeHomeTool.value))
     activeHomeTool.value = 'nodes'
 }, { immediate: true })
+
+watch(() => appStore.homeAdvancedToolsVisible, (visible) => {
+  if (!visible)
+    activeHomeTool.value = 'nodes'
+})
 
 watch(() => appStore.nodeSelectedGroup, (next, previous) => {
   if (next === previous)
@@ -476,7 +485,7 @@ const nodeCardGridClass = computed(() => {
               </div>
             </div>
             <div class="search flex min-w-0 flex-wrap gap-2 items-center justify-end pointer-events-auto max-sm:justify-start xl:ml-auto">
-              <div v-if="homeTools.length" class="flex h-8 items-center gap-1 rounded-md bg-background/50 p-0.5 backdrop-blur-xs">
+              <div v-if="homeTools.length && appStore.homeAdvancedToolsVisible" class="flex h-8 items-center gap-1 rounded-md bg-background/50 p-0.5 backdrop-blur-xs">
                 <Button
                   v-for="tool in homeTools" :key="tool.key"
                   variant="ghost" size="icon"

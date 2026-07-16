@@ -5,12 +5,24 @@ export type CurrencyCode = 'CNY' | 'USD' | 'HKD' | 'EUR' | 'GBP' | 'JPY' | 'RUB'
 export type ExchangeRates = Record<CurrencyCode, number>
 export type ExchangeRateSource = 'cache' | 'network' | 'stale-cache' | 'default'
 
-export interface BillingEstimate {
-  runtimeHours: number
+export type MeteredTrafficMode = 'sum' | 'max' | 'up' | 'down'
+
+export interface MeteredEstimateSettings {
+  currency: CurrencyCode
+  trafficMode: MeteredTrafficMode
+  trafficRate: number
+  timeRate: number
+  manualHours: number
+  oneTimeFee: number
+}
+
+export interface MeteredEstimate {
+  trafficBytes: number
   trafficTiB: number
-  timeCost: number
+  runtimeHours: number
   trafficCost: number
-  startupCost: number
+  timeCost: number
+  oneTimeCost: number
   totalCost: number
 }
 
@@ -25,10 +37,12 @@ const CACHE_KEY = 'komari_finance_exchange_rates_cny_v1'
 const OVERRIDES_KEY = 'komari_finance_exchange_rate_overrides_v1'
 const FINANCE_CURRENCY_KEY = 'fin_currency'
 const EXCLUDE_FREE_KEY = 'fin_exclude_free'
+const METERED_SETTINGS_KEY_PREFIX = 'theme:usage-estimator:v1:'
+export const MAX_ESTIMATE_INPUT = 1e12
 export const SUPPORTED_CURRENCIES: CurrencyCode[] = ['CNY', 'USD', 'HKD', 'EUR', 'GBP', 'JPY', 'RUB', 'CHF', 'INR', 'VND', 'THB', 'CAD']
 const MS_PER_DAY = 24 * 60 * 60 * 1000
 const LONG_TERM_YEARS = 100
-let exchangeRatesInflight: Promise<{ rates: ExchangeRates, source: ExchangeRateSource }> | null = null
+let exchangeRatesInflight: Promise<{ rates: ExchangeRates, source: ExchangeRateSource, updatedAt: number | null }> | null = null
 
 export const DEFAULT_EXCHANGE_RATES: ExchangeRates = {
   CNY: 1,
@@ -133,6 +147,94 @@ export function setExcludeFreeNodes(exclude: boolean): void {
   setLocalStorageItem(EXCLUDE_FREE_KEY, String(exclude))
 }
 
+export function getStoredMeteredEstimateSettings(nodeUuid: string): MeteredEstimateSettings {
+  const defaults: MeteredEstimateSettings = {
+    currency: 'USD',
+    trafficMode: 'sum',
+    trafficRate: 0,
+    timeRate: 0,
+    manualHours: 0,
+    oneTimeFee: 0,
+  }
+
+  try {
+    const rawValue = getLocalStorageItem(`${METERED_SETTINGS_KEY_PREFIX}${nodeUuid}`)
+    if (!rawValue)
+      return defaults
+
+    const value = JSON.parse(rawValue) as Partial<Record<keyof MeteredEstimateSettings, unknown>>
+    const trafficMode = value.trafficMode === 'max' || value.trafficMode === 'up' || value.trafficMode === 'down'
+      ? value.trafficMode
+      : 'sum'
+
+    return {
+      currency: normalizeCurrency(typeof value.currency === 'string' ? value.currency : defaults.currency),
+      trafficMode,
+      trafficRate: normalizeOptionalCost(value.trafficRate),
+      timeRate: normalizeOptionalCost(value.timeRate),
+      manualHours: normalizeOptionalCost(value.manualHours),
+      oneTimeFee: normalizeOptionalCost(value.oneTimeFee),
+    }
+  }
+  catch {
+    return defaults
+  }
+}
+
+export function setStoredMeteredEstimateSettings(nodeUuid: string, settings: MeteredEstimateSettings): void {
+  if (!nodeUuid.trim())
+    return
+
+  setLocalStorageItem(`${METERED_SETTINGS_KEY_PREFIX}${nodeUuid}`, JSON.stringify({
+    currency: normalizeCurrency(settings.currency),
+    trafficMode: settings.trafficMode,
+    trafficRate: normalizeOptionalCost(settings.trafficRate),
+    timeRate: normalizeOptionalCost(settings.timeRate),
+    manualHours: normalizeOptionalCost(settings.manualHours),
+    oneTimeFee: normalizeOptionalCost(settings.oneTimeFee),
+  }))
+}
+
+export function clearStoredMeteredEstimateSettings(nodeUuid: string): void {
+  if (nodeUuid.trim())
+    removeLocalStorageItem(`${METERED_SETTINGS_KEY_PREFIX}${nodeUuid}`)
+}
+
+export function calculateMeteredEstimate(node: NodeData, settings: MeteredEstimateSettings): MeteredEstimate {
+  const normalizeTrafficCounter = (value: unknown) => {
+    const numericValue = Number(value)
+    if (!Number.isFinite(numericValue) || numericValue <= 0)
+      return 0
+    return Math.min(numericValue, Number.MAX_SAFE_INTEGER)
+  }
+  const up = normalizeTrafficCounter(node.net_total_up)
+  const down = normalizeTrafficCounter(node.net_total_down)
+  let trafficBytes = up + down
+
+  if (settings.trafficMode === 'max')
+    trafficBytes = Math.max(up, down)
+  else if (settings.trafficMode === 'up')
+    trafficBytes = up
+  else if (settings.trafficMode === 'down')
+    trafficBytes = down
+
+  const trafficTiB = trafficBytes / 1024 ** 4
+  const runtimeHours = normalizeOptionalCost(settings.manualHours)
+  const trafficCost = trafficTiB * normalizeOptionalCost(settings.trafficRate)
+  const timeCost = runtimeHours * normalizeOptionalCost(settings.timeRate)
+  const oneTimeCost = normalizeOptionalCost(settings.oneTimeFee)
+
+  return {
+    trafficBytes,
+    trafficTiB,
+    runtimeHours,
+    trafficCost,
+    timeCost,
+    oneTimeCost,
+    totalCost: trafficCost + timeCost + oneTimeCost,
+  }
+}
+
 export function applyExchangeRateOverrides(rates: ExchangeRates): ExchangeRates {
   const overrides = readExchangeRateOverrides()
   return { ...rates, ...overrides, CNY: 1 }
@@ -148,30 +250,6 @@ export function setExchangeRateOverride(currency: CurrencyCode, value: number): 
 
 export function clearExchangeRateOverrides(): void {
   removeLocalStorageItem(OVERRIDES_KEY)
-}
-
-export function calculateBillingEstimate(node: NodeData, now = new Date()): BillingEstimate {
-  const anchorAt = node.first_agent_reported_at ? new Date(node.first_agent_reported_at).getTime() : Number.NaN
-  const hasStarted = Number.isFinite(anchorAt)
-  const runtimeHours = hasStarted ? Math.max(0, now.getTime() - anchorAt) / (60 * 60 * 1000) : 0
-  const trafficBytes = Math.max(0, Number(node.billing_traffic_bytes) || 0)
-  const trafficTiB = trafficBytes / 1024 ** 4
-  const timeRate = Math.max(0, Number(node.time_rate) || 0)
-  const trafficRate = Math.max(0, Number(node.traffic_rate) || 0)
-  const startupCost = hasStarted && node.billing_startup_fee_applied === true
-    ? Math.max(0, Number(node.startup_fee) || 0)
-    : 0
-  const timeCost = runtimeHours * timeRate
-  const trafficCost = trafficTiB * trafficRate
-
-  return {
-    runtimeHours,
-    trafficTiB,
-    timeCost,
-    trafficCost,
-    startupCost,
-    totalCost: timeCost + trafficCost + startupCost,
-  }
 }
 
 export function calculateTotalRemainingValueCNY(
@@ -296,6 +374,7 @@ export function formatFinanceAmount(amount: number, currency: CurrencyCode): {
 export async function getDailyExchangeRates(): Promise<{
   rates: ExchangeRates
   source: ExchangeRateSource
+  updatedAt: number | null
 }> {
   const today = getTodayDateKey()
   const cached = readCachedExchangeRates()
@@ -304,6 +383,7 @@ export async function getDailyExchangeRates(): Promise<{
     return {
       rates: cached.rates,
       source: 'cache',
+      updatedAt: cached.fetchedAt,
     }
   }
 
@@ -311,10 +391,12 @@ export async function getDailyExchangeRates(): Promise<{
     exchangeRatesInflight = (async () => {
       const fetchedRates = await fetchExchangeRates()
       if (fetchedRates) {
-        writeCachedExchangeRates(fetchedRates, today)
+        const updatedAt = Date.now()
+        writeCachedExchangeRates(fetchedRates, today, updatedAt)
         return {
           rates: fetchedRates,
           source: 'network' as const,
+          updatedAt,
         }
       }
 
@@ -322,12 +404,14 @@ export async function getDailyExchangeRates(): Promise<{
         return {
           rates: cached.rates,
           source: 'stale-cache' as const,
+          updatedAt: cached.fetchedAt,
         }
       }
 
       return {
         rates: DEFAULT_EXCHANGE_RATES,
         source: 'default' as const,
+        updatedAt: null,
       }
     })().finally(() => {
       exchangeRatesInflight = null
@@ -381,7 +465,7 @@ async function fetchWithTimeout(url: string, timeoutMs = 5000): Promise<Response
   }
 }
 
-function readCachedExchangeRates(): { date: string, rates: ExchangeRates } | null {
+function readCachedExchangeRates(): { date: string, rates: ExchangeRates, fetchedAt: number } | null {
   try {
     const rawValue = getLocalStorageItem(CACHE_KEY)
     if (!rawValue)
@@ -395,6 +479,7 @@ function readCachedExchangeRates(): { date: string, rates: ExchangeRates } | nul
     return {
       date: cache.date,
       rates,
+      fetchedAt: Number.isFinite(cache.fetchedAt) ? cache.fetchedAt : 0,
     }
   }
   catch {
@@ -402,11 +487,11 @@ function readCachedExchangeRates(): { date: string, rates: ExchangeRates } | nul
   }
 }
 
-function writeCachedExchangeRates(rates: ExchangeRates, date: string): void {
+function writeCachedExchangeRates(rates: ExchangeRates, date: string, fetchedAt: number): void {
   const cache: ExchangeRatesCache = {
     base: 'CNY',
     date,
-    fetchedAt: Date.now(),
+    fetchedAt,
     rates,
   }
   setLocalStorageItem(CACHE_KEY, JSON.stringify(cache))
@@ -452,6 +537,11 @@ function readExchangeRateOverrides(): Partial<ExchangeRates> {
   catch {
     return {}
   }
+}
+
+function normalizeOptionalCost(value: unknown): number {
+  const amount = Number(value)
+  return Number.isFinite(amount) && amount >= 0 && amount <= MAX_ESTIMATE_INPUT ? amount : 0
 }
 
 function getLocalStorageItem(key: string): string | null {

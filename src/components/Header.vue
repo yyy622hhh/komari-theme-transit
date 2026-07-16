@@ -32,13 +32,22 @@ const actionButtons = computed(() => {
     dark: 'icon-park-outline:moon',
   } as const
 
-  const buttons: Array<{ title: string, icon: string, action: string }> = [
-    {
-      title: `${themeTitleMap[appStore.themeMode]}（点击切换）`,
-      icon: themeIconMap[appStore.themeMode],
-      action: 'toggleTheme',
-    },
-  ]
+  const buttons: Array<{ title: string, icon: string, action: string, pressed?: boolean }> = []
+
+  if (router.currentRoute.value.name === 'home' && appStore.privateFeaturesAllowed && appStore.homeToolsEnabled) {
+    buttons.push({
+      title: appStore.homeAdvancedToolsVisible ? '收起高级工具' : '显示高级工具',
+      icon: 'tabler:tools',
+      action: 'toggleHomeTools',
+      pressed: appStore.homeAdvancedToolsVisible,
+    })
+  }
+
+  buttons.push({
+    title: `${themeTitleMap[appStore.themeMode]}（点击切换）`,
+    icon: themeIconMap[appStore.themeMode],
+    action: 'toggleTheme',
+  })
 
   if (!appStore.loading && (appStore.privateFeaturesAllowed || !appStore.hideAdminEntryWhenLoggedOut)) {
     buttons.push({
@@ -60,6 +69,9 @@ function handleButtonClick(action: string) {
         route: String(router.currentRoute.value.name ?? ''),
         target: appStore.themeMode,
       })
+      break
+    case 'toggleHomeTools':
+      appStore.homeAdvancedToolsVisible = !appStore.homeAdvancedToolsVisible
       break
     case 'jumpToSetting':
       void recordVisitorEvent({
@@ -97,7 +109,14 @@ const sitename = computed(() => appStore.publicSettings?.sitename || 'Komari Mon
         <div class="flex items-center gap-2">
           <Tooltip v-for="button in actionButtons" :key="button.action">
             <TooltipTrigger as-child>
-              <Button variant="ghost" size="icon-sm" @click="handleButtonClick(button.action)">
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                :aria-label="button.title"
+                :aria-pressed="button.pressed"
+                :class="button.pressed && 'bg-background/70 text-selection'"
+                @click="handleButtonClick(button.action)"
+              >
                 <Icon :icon="button.icon" :width="18" :height="18" />
               </Button>
             </TooltipTrigger>

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Icon } from '@iconify/vue'
 import { computed, onMounted, ref } from 'vue'
+import { useAppStore } from '@/stores/app'
 
 interface VisitorData {
   ip: string
@@ -18,6 +19,7 @@ interface VisitorProvider {
 type JsonRecord = Record<string, unknown>
 
 const visitorFetchTimeout = 8000
+const appStore = useAppStore()
 
 const show = ref(false)
 const dismissed = ref(false)
@@ -261,8 +263,7 @@ function formatDate(): string {
   })
 }
 
-// 站点名（访客卡片头部显示用）
-const siteName = '访客'
+const siteName = computed(() => appStore.privateFeaturesAllowed ? '尊敬的管理员' : '访客')
 </script>
 
 <template>
@@ -291,7 +292,7 @@ const siteName = '访客'
   <Transition name="slide-left">
     <div
       v-if="show && !dismissed"
-      class="fixed bottom-16 inset-x-3 sm:left-3 sm:right-auto z-50 w-auto max-w-[calc(100vw-1.5rem)] sm:w-56 rounded-2xl overflow-hidden
+      class="fixed bottom-16 left-3 z-50 hidden w-56 max-w-[calc(100vw-1.5rem)] overflow-hidden rounded-2xl 2xl:block
              bg-white/70 dark:bg-neutral-900/70
              backdrop-blur-xl
              border border-white/40 dark:border-white/10
@@ -310,8 +311,10 @@ const siteName = '访客'
           </div>
         </div>
         <button
+          type="button"
           class="size-6 rounded-full flex items-center justify-center
                  hover:bg-black/8 dark:hover:bg-white/10 transition-colors"
+          aria-label="关闭访客信息"
           @click="dismiss"
         >
           <Icon icon="icon-park-outline:close" :width="13" :height="13" class="text-muted-foreground" />

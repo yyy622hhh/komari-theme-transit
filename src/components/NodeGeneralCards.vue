@@ -71,6 +71,7 @@ const showPrice = computed(() => appStore.privateFeaturesAllowed || !appStore.hi
 const exchangeRates = ref(financeHelper.DEFAULT_EXCHANGE_RATES)
 const dailyExchangeRates = ref(financeHelper.DEFAULT_EXCHANGE_RATES)
 const exchangeRateSource = ref<ExchangeRateSource | 'loading'>('loading')
+const exchangeRateUpdatedAt = ref<number | null>(null)
 const financeCurrency = ref<CurrencyCode>('CNY')
 const excludeFreeNodes = ref(true)
 const financeDetailsOpen = ref(false)
@@ -720,14 +721,14 @@ const wrapperClass = computed(() => {
     return 'p-3 sm:p-4 grid grid-cols-12 gap-2 sm:gap-3 h-auto min-h-[40rem] sm:min-h-[30rem] md:min-h-[36rem] lg:min-h-[40rem]'
 
   return hasExtraCards.value
-    ? 'p-4 grid grid-cols-12 gap-2 h-auto md:min-h-58'
-    : 'p-4 grid grid-cols-12 grid-rows-1 gap-2 h-auto md:h-58'
+    ? 'p-4 grid grid-cols-12 gap-2 h-auto md:min-h-72'
+    : 'p-4 grid grid-cols-12 grid-rows-1 gap-2 h-auto md:h-72'
 })
 const earthClass = computed(() => {
   if (isTiledEarth.value)
     return 'col-span-12 row-start-2 min-h-[18rem] h-[18rem] sm:h-[20rem] md:h-[24rem] lg:h-[28rem]'
 
-  return 'col-span-12 col-start-1 md:col-span-6 md:col-start-7 md:row-start-1'
+  return 'col-span-12 col-start-1 md:col-span-6 md:col-start-7 md:row-start-1 md:h-full md:min-h-72 md:!max-w-none md:!overflow-hidden'
 })
 const cardGridClass = computed(() => {
   if (!showEarth.value)
@@ -738,7 +739,7 @@ const cardGridClass = computed(() => {
 
   return hasExtraCards.value
     ? 'h-auto -mt-42 md:mt-0 col-span-12 row-start-3 z-9 md:h-auto md:col-span-6 md:row-start-1 grid grid-cols-12 auto-rows-[5rem] md:auto-rows-[7rem] gap-2'
-    : 'h-42 -mt-42 md:mt-0 col-span-12 row-start-3 z-9 md:h-auto md:col-span-6 md:row-start-1 grid grid-cols-12 grid-rows-2 gap-2'
+    : 'h-42 -mt-42 md:mt-0 col-span-12 row-start-3 z-9 md:h-58 md:self-center md:col-span-6 md:row-start-1 grid grid-cols-12 grid-rows-2 gap-2'
 })
 const cardClass = 'group relative z-10 h-full bg-background/50 border-none hover:bg-background backdrop-blur-sm md:backdrop-blur-none transition-all'
 const cardPositionClasses = [
@@ -807,10 +808,11 @@ onMounted(async () => {
   financeCurrency.value = financeHelper.getStoredFinanceCurrency()
   excludeFreeNodes.value = financeHelper.shouldExcludeFreeNodes()
 
-  const { rates, source } = await financeHelper.getDailyExchangeRates()
+  const { rates, source, updatedAt } = await financeHelper.getDailyExchangeRates()
   dailyExchangeRates.value = rates
   exchangeRates.value = financeHelper.applyExchangeRateOverrides(rates)
   exchangeRateSource.value = source
+  exchangeRateUpdatedAt.value = updatedAt
 })
 </script>
 
@@ -876,6 +878,7 @@ onMounted(async () => {
     :nodes="summaryNodes"
     :rates="exchangeRates"
     :source="exchangeRateSource"
+    :rates-updated-at="exchangeRateUpdatedAt"
     :currency="financeCurrency"
     :exclude-free="excludeFreeNodes"
     :now="currentTime"

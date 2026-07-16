@@ -85,7 +85,7 @@ export function useNodePingDisplay(
             ? getLatencyToneClass(value)
             : getLossToneClass(value),
         tooltip: value === null
-          ? `${formatDateTime(point.time, 'HH:mm:ss')} N/A`
+          ? `${formatDateTime(point.time, 'HH:mm:ss')}\n无采样数据`
           : metric === 'latency'
             ? `${formatDateTime(point.time, 'HH:mm:ss')}\n${Math.round(value)} ms`
             : `${formatDateTime(point.time, 'HH:mm:ss')}\n${value.toFixed(1)}%`,
@@ -101,8 +101,8 @@ export function useNodePingDisplay(
         : !pingStatsEnabled.value
             ? '未启用记录'
             : metric === 'latency'
-              ? 'N/A'
-              : 'N/A'
+              ? '无采样数据'
+              : '无采样数据'
 
     return Array.from({ length: EMPTY_PING_BAR_COUNT }, (_, index) => ({
       key: `${metric}-empty-${index}`,
