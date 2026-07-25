@@ -237,6 +237,7 @@ export interface PingRecord {
 /** Ping 任务摘要 */
 export interface PingTaskInfo {
   id: number
+  weight?: number
   name: string
   interval: number
   loss: number
@@ -297,6 +298,7 @@ export interface MetricPoint {
   time: string
   value: number | null
   count?: number
+  /** @deprecated Komari 1.2.x compatibility alias; prefer tags. */
   tag?: Record<string, unknown>
   tags?: Record<string, unknown>
   labels?: Record<string, unknown>
@@ -308,6 +310,7 @@ export interface MetricSeries {
   type?: string
   unit?: string
   retention_days?: number
+  /** @deprecated Komari 1.2.x compatibility alias; prefer tags. */
   tag?: Record<string, unknown>
   tags?: Record<string, unknown>
   downsampled: boolean

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Icon } from '@iconify/vue'
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useAppStore } from '@/stores/app'
 
 interface VisitorData {
@@ -19,12 +19,15 @@ interface VisitorProvider {
 type JsonRecord = Record<string, unknown>
 
 const visitorFetchTimeout = 8000
+const mobileScrollIdleDelay = 700
+const mobileViewportQuery = '(max-width: 767px)'
 const appStore = useAppStore()
 
 const show = ref(false)
 const dismissed = ref(false)
 const visitorLoading = ref(true)
 const visitorFailed = ref(false)
+const mobileScrolling = ref(false)
 const visitor = ref<VisitorData>({
   ip: '',
   city: '',
@@ -75,8 +78,26 @@ const firefoxPattern = /Firefox/i
 const safariPattern = /Safari/i
 const macOsPattern = /Mac OS X/i
 const linuxPattern = /Linux/i
+let mobileViewport: MediaQueryList | null = null
+let scrollIdleTimer: number | undefined
+
+function handleScroll(): void {
+  if (!mobileViewport?.matches)
+    return
+
+  mobileScrolling.value = true
+  if (scrollIdleTimer !== undefined)
+    window.clearTimeout(scrollIdleTimer)
+  scrollIdleTimer = window.setTimeout(() => {
+    mobileScrolling.value = false
+    scrollIdleTimer = undefined
+  }, mobileScrollIdleDelay)
+}
 
 onMounted(async () => {
+  mobileViewport = window.matchMedia(mobileViewportQuery)
+  window.addEventListener('scroll', handleScroll, { passive: true })
+
   window.setTimeout(() => {
     show.value = true
   }, 600)
@@ -93,6 +114,12 @@ onMounted(async () => {
   finally {
     visitorLoading.value = false
   }
+})
+
+onUnmounted(() => {
+  window.removeEventListener('scroll', handleScroll)
+  if (scrollIdleTimer !== undefined)
+    window.clearTimeout(scrollIdleTimer)
 })
 
 function dismiss() {
@@ -270,19 +297,19 @@ const siteName = computed(() => appStore.privateFeaturesAllowed ? '尊敬的管�
   <!-- 底部居中 IP 条（桌面+手机都显示） -->
   <Transition name="slide-up">
     <div
-      v-if="show && !dismissed"
-      class="fixed bottom-4 inset-x-3 md:left-1/2 md:right-auto md:-translate-x-1/2 z-50
-             flex max-w-[calc(100vw-1.5rem)] items-center gap-2 rounded-full px-3 py-1.5 md:px-4
+      v-if="show && !dismissed && !mobileScrolling"
+      class="fixed bottom-3 left-1/2 z-50 flex w-max max-w-[calc(100vw-1.5rem)] -translate-x-1/2
+             items-center gap-1.5 rounded-full px-3 py-1.5 md:bottom-4 md:gap-2 md:px-4
              bg-white/55 dark:bg-black/50
              backdrop-blur-md
              border border-white/40 dark:border-white/10
              shadow-lg text-[12px] md:text-[13px] select-none whitespace-nowrap"
     >
       <Icon icon="icon-park-outline:earth" :width="14" :height="14" class="text-blue-500 shrink-0" />
-      <span class="text-muted-foreground shrink-0">Your IP:</span>
-      <span class="font-semibold text-foreground shrink-0">{{ displayIp }}</span>
+      <span class="hidden text-muted-foreground sm:inline">Your IP:</span>
+      <span class="min-w-0 truncate font-semibold text-foreground">{{ displayIp }}</span>
       <span class="text-muted-foreground/40 shrink-0">|</span>
-      <span class="text-muted-foreground shrink-0">{{ displayCountry }}</span>
+      <span class="max-w-20 shrink-0 truncate text-muted-foreground sm:max-w-none">{{ displayCountry }}</span>
       <span class="hidden sm:inline text-muted-foreground/40 shrink-0">|</span>
       <span class="hidden sm:inline text-muted-foreground truncate max-w-[140px] md:max-w-[220px]">{{ displayOrg }}</span>
     </div>

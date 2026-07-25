@@ -25,6 +25,11 @@ const emit = defineEmits<{
   pingClick: []
 }>()
 const appStore = useAppStore()
+const isFavorite = computed(() => appStore.isFavoriteNode(props.node.uuid))
+
+function toggleFavorite(): void {
+  appStore.toggleFavoriteNode(props.node.uuid)
+}
 
 function handleKeyboardOpen(event: KeyboardEvent) {
   if (event.key !== 'Enter' && event.key !== ' ')
@@ -213,6 +218,17 @@ function hasRegion(region: string | null | undefined): boolean {
     <!-- 头部右侧：OS + 国旗 -->
     <template #header-extra>
       <div class="flex gap-1.5 items-center shrink-0">
+        <button
+          type="button"
+          class="inline-flex size-5 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-slate-500/10 hover:text-amber-500"
+          :class="isFavorite && 'text-amber-500'"
+          :aria-label="isFavorite ? `取消收藏 ${props.node.name}` : `收藏 ${props.node.name}`"
+          :title="isFavorite ? '取消收藏' : '收藏节点'"
+          @click.stop="toggleFavorite"
+          @keydown.stop
+        >
+          <Icon :icon="isFavorite ? 'tabler:star-filled' : 'tabler:star'" width="14" height="14" />
+        </button>
         <img :src="getOSImage(props.node.os)" :alt="getOSName(props.node.os)" class="size-4">
         <img
           v-if="hasRegion(props.node.region)"

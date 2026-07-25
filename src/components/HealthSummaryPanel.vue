@@ -39,6 +39,12 @@ interface NodeHealthSummary {
   pingHasData: boolean
 }
 
+interface NodeRiskSummary {
+  node: NodeHealthSummary
+  score: number
+  reasons: string[]
+}
+
 type PingRecordLike = PingRecord
 
 interface PingHealthStats {
@@ -317,6 +323,66 @@ const trafficWarnings = computed(() => summaries.value.filter(item => item.traff
 const pingWarnings = computed(() => summaries.value.filter(item => item.pingHasData && (item.avgLoss >= 5 || item.avgLatency >= 200 || item.avgVolatility >= 3)).sort((a, b) => b.avgLoss - a.avgLoss))
 const fastestTrafficBurn = computed(() => props.nodes.filter(hasTrafficLimit).map(node => ({ node, speed: getTrafficBurnSpeed(node) })).sort((a, b) => b.speed - a.speed).slice(0, HEALTH_LIST_LIMIT))
 
+function thresholdRisk(value: number, threshold: number, weight: number): number {
+  if (value < threshold)
+    return 0
+  const span = Math.max(1, 100 - threshold)
+  return Math.min(weight, weight * (value - threshold) / span + weight * 0.4)
+}
+
+const riskRankNodes = computed<NodeRiskSummary[]>(() => summaries.value.map((node) => {
+  if (!node.online)
+    return { node, score: 100, reasons: ['节点离线'] }
+
+  const reasons: string[] = []
+  let score = 0
+  const loadThreshold = appStore.homeHighLoadThreshold
+  const trafficThreshold = appStore.homeTrafficWarningThreshold
+
+  const cpuRisk = thresholdRisk(node.cpuPeak, loadThreshold, 25)
+  if (cpuRisk > 0) {
+    score += cpuRisk
+    reasons.push(`CPU ${node.cpuPeak.toFixed(0)}%`)
+  }
+  const memoryRisk = thresholdRisk(node.memoryPeak, loadThreshold, 20)
+  if (memoryRisk > 0) {
+    score += memoryRisk
+    reasons.push(`内存 ${node.memoryPeak.toFixed(0)}%`)
+  }
+  const diskRisk = thresholdRisk(node.diskUsagePercentage, loadThreshold, 15)
+  if (diskRisk > 0) {
+    score += diskRisk
+    reasons.push(`磁盘 ${node.diskUsagePercentage.toFixed(0)}%`)
+  }
+  const trafficRisk = thresholdRisk(node.trafficUsedPercentage, trafficThreshold, 15)
+  if (node.trafficLimitBytes > 0 && trafficRisk > 0) {
+    score += trafficRisk
+    reasons.push(`流量 ${node.trafficUsedPercentage.toFixed(0)}%`)
+  }
+  if (node.avgLoss >= 5) {
+    score += Math.min(15, node.avgLoss * 0.75)
+    reasons.push(`丢包 ${node.avgLoss.toFixed(1)}%`)
+  }
+  if (node.avgLatency >= 200) {
+    score += Math.min(10, node.avgLatency / 100)
+    reasons.push(`延迟 ${Math.round(node.avgLatency)}ms`)
+  }
+  if (node.diskPredictionDays !== null && node.diskPredictionDays <= appStore.diskPredictionThresholdDays) {
+    score += 10
+    reasons.push(`磁盘约 ${Math.max(0, Math.ceil(node.diskPredictionDays))} 天后满`)
+  }
+
+  return { node, score: Math.min(100, Math.round(score)), reasons }
+}).filter(item => item.score > 0).sort((a, b) => b.score - a.score).slice(0, HEALTH_LIST_LIMIT))
+
+function riskScoreClass(score: number): string {
+  if (score >= 70)
+    return 'text-destructive'
+  if (score >= 35)
+    return 'text-warning'
+  return 'text-muted-foreground'
+}
+
 const summaryLines = computed(() => {
   if (!generatedAt.value)
     return ['选择时间范围后点击生成摘要，不会在首页自动重算。']
@@ -385,6 +451,26 @@ const summaryLines = computed(() => {
         </CardX>
 
         <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          <CardX title="综合异常排行" size="small" class="border-none bg-background/50 md:col-span-2 xl:col-span-3">
+            <div v-if="riskRankNodes.length" class="grid gap-1.5 md:grid-cols-2 xl:grid-cols-3">
+              <div v-for="(item, index) in riskRankNodes" :key="item.node.uuid" class="flex min-w-0 items-center gap-2 rounded-md bg-slate-500/5 px-2.5 py-2">
+                <span class="w-5 shrink-0 text-center text-xs font-semibold tabular-nums text-muted-foreground">{{ index + 1 }}</span>
+                <div class="min-w-0 flex-1">
+                  <div class="truncate text-sm font-medium">
+                    {{ item.node.name }}
+                  </div>
+                  <div class="truncate text-[11px] text-muted-foreground" :title="item.reasons.join('、')">
+                    {{ item.reasons.join(' · ') }}
+                  </div>
+                </div>
+                <span class="shrink-0 text-xs font-semibold tabular-nums" :class="riskScoreClass(item.score)">{{ item.score }}</span>
+              </div>
+            </div>
+            <div v-else class="text-sm text-muted-foreground">
+              {{ generatedAt ? '当前阈值下未发现明显异常' : '生成后显示综合异常排行' }}
+            </div>
+          </CardX>
+
           <CardX title="离线 / 可用性" size="small" class="border-none bg-background/50">
             <div class="text-2xl font-bold text-destructive">
               {{ offlineNodes.length }}

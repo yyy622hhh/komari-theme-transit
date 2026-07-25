@@ -16,6 +16,7 @@ import { loadNodeLoadRecords } from '@/services/history.service'
 import { useAppStore } from '@/stores/app'
 import { useNodesStore } from '@/stores/nodes'
 import { formatCityNameZh } from '@/utils/cityNameHelper'
+import { getCpuBenchmarkRating, getPassMarkCpuLookupUrl } from '@/utils/cpuBenchmark'
 import * as financeHelper from '@/utils/financeHelper'
 import { formatBytesPerSecondWithConfig, formatBytesWithConfig, formatUptimeWithFormat } from '@/utils/helper'
 import { getOSImage, getOSName } from '@/utils/osImageHelper'
@@ -39,76 +40,9 @@ const peakNetOut = ref(0)
 const peakNetIn = ref(0)
 const activeDetailSection = ref<'overview' | 'load' | 'ping'>('overview')
 const data = computed(() => nodesStore.visibleNodesByUuid.get(String(route.params.id)))
-
-// CPU 评分
-interface CpuScore {
-  score: number
-  tier: 'S' | 'A' | 'B' | 'C' | 'D'
-  tierColor: string
-  label: string
-}
-
-// 基于 CPU 型号关键字静态估算 PassMark 分数区间
-function estimateCpuScore(cpuName: string): CpuScore {
-  if (!cpuName || cpuName === '-')
-    return { score: 0, tier: 'D', tierColor: 'text-gray-400', label: '未知' }
-
-  const name = cpuName.toLowerCase()
-
-  // AMD EPYC 系列
-  if (name.includes('epyc 9') || name.includes('epyc 75') || name.includes('epyc 74'))
-    return { score: 95, tier: 'S', tierColor: 'text-yellow-500', label: '旗舰服务器级' }
-  if (name.includes('epyc 7'))
-    return { score: 82, tier: 'A', tierColor: 'text-blue-500', label: '高端服务器级' }
-  if (name.includes('epyc'))
-    return { score: 72, tier: 'A', tierColor: 'text-blue-500', label: '服务器级' }
-
-  // Intel Xeon 系列
-  if (name.includes('xeon gold 6') || name.includes('xeon platinum'))
-    return { score: 80, tier: 'A', tierColor: 'text-blue-500', label: '高端服务器级' }
-  if (name.includes('xeon gold'))
-    return { score: 68, tier: 'B', tierColor: 'text-green-500', label: '服务器级' }
-  if (name.includes('xeon silver') || name.includes('xeon e5') || name.includes('xeon e-'))
-    return { score: 55, tier: 'B', tierColor: 'text-green-500', label: '中端服务器级' }
-  if (name.includes('xeon'))
-    return { score: 45, tier: 'C', tierColor: 'text-orange-500', label: '入门服务器级' }
-
-  // AMD Ryzen 系列
-  if (name.includes('ryzen 9 7') || name.includes('ryzen 9 9'))
-    return { score: 92, tier: 'S', tierColor: 'text-yellow-500', label: '旗舰消费级' }
-  if (name.includes('ryzen 9'))
-    return { score: 80, tier: 'A', tierColor: 'text-blue-500', label: '高端消费级' }
-  if (name.includes('ryzen 7'))
-    return { score: 70, tier: 'A', tierColor: 'text-blue-500', label: '中高端消费级' }
-  if (name.includes('ryzen 5'))
-    return { score: 58, tier: 'B', tierColor: 'text-green-500', label: '中端消费级' }
-  if (name.includes('ryzen 3'))
-    return { score: 42, tier: 'C', tierColor: 'text-orange-500', label: '入门消费级' }
-
-  // Intel Core 系列
-  if (name.includes('core i9') || name.includes('core ultra 9'))
-    return { score: 88, tier: 'S', tierColor: 'text-yellow-500', label: '旗舰消费级' }
-  if (name.includes('core i7') || name.includes('core ultra 7'))
-    return { score: 72, tier: 'A', tierColor: 'text-blue-500', label: '高端消费级' }
-  if (name.includes('core i5') || name.includes('core ultra 5'))
-    return { score: 60, tier: 'B', tierColor: 'text-green-500', label: '中端消费级' }
-  if (name.includes('core i3'))
-    return { score: 42, tier: 'C', tierColor: 'text-orange-500', label: '入门消费级' }
-
-  // ARM / Ampere
-  if (name.includes('ampere') || name.includes('altra'))
-    return { score: 78, tier: 'A', tierColor: 'text-blue-500', label: '云原生 ARM 级' }
-  if (name.includes('neoverse') || name.includes('graviton'))
-    return { score: 70, tier: 'A', tierColor: 'text-blue-500', label: '云原生 ARM 级' }
-  if (name.includes('arm') || name.includes('aarch64'))
-    return { score: 40, tier: 'C', tierColor: 'text-orange-500', label: 'ARM 级' }
-
-  // 虚拟化通用
-  if (name.includes('virtual') || name.includes('kvm64') || name.includes('qemu'))
-    return { score: 30, tier: 'D', tierColor: 'text-red-400', label: '虚拟化通用' }
-
-  return { score: 35, tier: 'C', tierColor: 'text-orange-500', label: '通用' }
-}
+const detailNodes = computed(() => nodesStore.visibleNodes)
+const detailNodeIndex = computed(() => detailNodes.value.findIndex(node => node.uuid === data.value?.uuid))
+const isFavoriteNode = computed(() => data.value ? appStore.isFavoriteNode(data.value.uuid) : false)
 
 let trafficPeakSeq = 0
 
@@ -170,7 +104,46 @@ watch(data, (node) => {
     void fetchTrafficPeak(node.uuid)
 }, { immediate: true })
 
-const cpuScore = computed(() => estimateCpuScore(data.value?.cpu_name ?? ''))
+const cpuBenchmarkUrl = computed(() => getPassMarkCpuLookupUrl(data.value?.cpu_name ?? ''))
+const cpuBenchmarkRating = computed(() => getCpuBenchmarkRating(data.value?.cpu_name ?? ''))
+const cpuBenchmarkTierPercent = computed(() => ({ 'S': 92, 'A': 76, 'B': 58, 'C': 38, 'D': 20, '?': 0 }[cpuBenchmarkRating.value.tier]))
+const cpuBenchmarkTierTextClass = computed(() => ({
+  'S': 'text-yellow-500',
+  'A': 'text-blue-500',
+  'B': 'text-green-500',
+  'C': 'text-orange-500',
+  'D': 'text-red-400',
+  '?': 'text-muted-foreground',
+}[cpuBenchmarkRating.value.tier]))
+const cpuBenchmarkTierBarClass = computed(() => ({
+  'S': 'bg-yellow-500',
+  'A': 'bg-blue-500',
+  'B': 'bg-green-500',
+  'C': 'bg-orange-500',
+  'D': 'bg-red-400',
+  '?': 'bg-slate-400',
+}[cpuBenchmarkRating.value.tier]))
+
+function navigateDetailNode(offset: number): void {
+  const nodes = detailNodes.value
+  const index = detailNodeIndex.value
+  if (nodes.length < 2 || index < 0)
+    return
+  const target = nodes[(index + offset + nodes.length) % nodes.length]
+  if (target)
+    void router.push({ name: 'instance-detail', params: { id: target.uuid } })
+}
+
+function selectDetailNode(event: Event): void {
+  const uuid = (event.target as HTMLSelectElement).value
+  if (uuid && uuid !== data.value?.uuid)
+    void router.push({ name: 'instance-detail', params: { id: uuid } })
+}
+
+function toggleCurrentFavorite(): void {
+  if (data.value)
+    appStore.toggleFavoriteNode(data.value.uuid)
+}
 
 // 机房/厂商展示：城市 · 厂商 · ASN（缺项自动省略）
 const providerMetadata = computed(() => data.value ? getNodeProviderMetadata(data.value) : null)
@@ -512,13 +485,13 @@ const metricCards = computed<MetricCard[]>(() => appStore.detailMetricCardOrder.
 
     <template v-else>
       <!-- 顶部导航 -->
-      <div class="px-4 flex gap-4 items-center">
+      <div class="px-4 flex flex-wrap gap-2 items-center sm:gap-4">
         <Button variant="ghost" size="icon-sm" class="bg-background/50 hover:bg-background" aria-label="返回首页" @click="router.push('/')">
           <Icon icon="tabler:arrow-left" :width="16" :height="16" />
         </Button>
-        <div class="text-lg font-bold flex gap-2 items-center">
+        <div class="min-w-0 text-lg font-bold flex gap-2 items-center">
           <img :src="`/images/flags/${getRegionCode(data.region)}.svg`" :alt="getRegionAltText(data.region)" class="size-6">
-          <span>{{ data.name }}</span>
+          <span class="truncate">{{ data.name }}</span>
         </div>
         <Badge :variant="data.online ? 'default' : 'destructive'" class="text-xs !rounded">
           {{ data.online ? '在线' : '离线' }}
@@ -532,13 +505,51 @@ const metricCards = computed<MetricCard[]>(() => appStore.detailMetricCardOrder.
             {{ tag }}
           </Badge>
         </div>
+        <div class="ml-auto flex h-8 shrink-0 items-center gap-1 rounded-md bg-background/50 p-0.5 backdrop-blur-xs">
+          <Button
+            variant="ghost" size="icon-sm"
+            class="size-7 rounded-sm shadow-none"
+            :class="isFavoriteNode && 'text-amber-500'"
+            :aria-label="isFavoriteNode ? '取消收藏当前节点' : '收藏当前节点'"
+            :title="isFavoriteNode ? '取消收藏' : '收藏节点'"
+            @click="toggleCurrentFavorite"
+          >
+            <Icon :icon="isFavoriteNode ? 'tabler:star-filled' : 'tabler:star'" :width="14" :height="14" />
+          </Button>
+          <Button
+            variant="ghost" size="icon-sm" class="size-7 rounded-sm shadow-none"
+            :disabled="detailNodes.length < 2"
+            aria-label="上一个节点" title="上一个节点"
+            @click="navigateDetailNode(-1)"
+          >
+            <Icon icon="tabler:chevron-left" :width="14" :height="14" />
+          </Button>
+          <select
+            :value="data.uuid"
+            class="h-7 max-w-34 rounded-sm border-0 bg-transparent px-1 text-xs text-foreground outline-none sm:max-w-48"
+            aria-label="切换节点"
+            @change="selectDetailNode"
+          >
+            <option v-for="node in detailNodes" :key="node.uuid" :value="node.uuid">
+              {{ node.name }}
+            </option>
+          </select>
+          <Button
+            variant="ghost" size="icon-sm" class="size-7 rounded-sm shadow-none"
+            :disabled="detailNodes.length < 2"
+            aria-label="下一个节点" title="下一个节点"
+            @click="navigateDetailNode(1)"
+          >
+            <Icon icon="tabler:chevron-right" :width="14" :height="14" />
+          </Button>
+        </div>
         <!-- 厂商标识 -->
         <DataTooltip
           v-if="vpsProvider"
           as="div"
           placement="bottom"
           :content="vpsProvider.tooltipLines.join('\n')"
-          class="ml-auto max-w-full"
+          class="max-w-full"
           content-class="w-72 whitespace-pre-wrap break-words px-2 py-1.5 text-left leading-relaxed"
         >
           <div class="flex max-w-full items-center gap-1.5 rounded-full bg-background/50 px-3 py-1 text-xs text-muted-foreground">
@@ -589,37 +600,47 @@ const metricCards = computed<MetricCard[]>(() => appStore.detailMetricCardOrder.
         </CardX>
       </div>
 
-      <!-- 硬件信息 + CPU 评分 -->
+      <!-- 硬件信息 -->
       <div v-if="!appStore.nodeDetailSectionTabsEnabled || activeDetailSection === 'overview'" class="px-4 gap-4 grid grid-cols-1 lg:grid-cols-2">
         <CardX
           title="硬件信息" size="small" content-class="flex-1"
           class="group h-full bg-background/50 border-none hover:bg-background transition-all rounded-md"
         >
           <div class="flex flex-col gap-3 h-full">
-            <!-- CPU 信息 + 评分（跨全宽） -->
+            <!-- CPU 信息（跨全宽） -->
             <div class="min-w-0 flex flex-col gap-2 rounded-sm bg-slate-500/5 p-2">
-              <div class="flex gap-1 items-center text-muted-foreground">
-                <Icon icon="icon-park-outline:cpu" :width="14" :height="14" />
-                <span class="text-xs sm:text-sm">CPU</span>
+              <div class="flex items-center justify-between gap-2 text-muted-foreground">
+                <div class="flex min-w-0 items-center gap-1">
+                  <Icon icon="icon-park-outline:cpu" :width="14" :height="14" />
+                  <span class="text-xs sm:text-sm">CPU</span>
+                </div>
+                <a
+                  :href="cpuBenchmarkUrl"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-sm bg-slate-500/8 px-2 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-slate-500/12 hover:text-foreground"
+                  title="在 PassMark 查看该 CPU 的公开 CPU Mark 跑分与排行"
+                >
+                  <Icon icon="tabler:chart-bar" :width="13" :height="13" />
+                  <span class="hidden sm:inline">CPU Mark 排行</span>
+                  <span class="sm:hidden">CPU Mark</span>
+                  <Icon icon="tabler:external-link" :width="11" :height="11" />
+                </a>
               </div>
-              <span class="text-xs sm:text-sm break-all">{{ data.cpu_name }} (x{{ data.cpu_cores }})</span>
-              <!-- 评分条 -->
-              <div class="flex items-center gap-2 mt-1">
-                <span class="text-xs font-bold" :class="cpuScore.tierColor">{{ cpuScore.tier }}</span>
-                <div class="flex-1 h-1.5 rounded-full bg-slate-500/10 overflow-hidden">
+              <span class="text-xs sm:text-sm break-all">{{ data.cpu_name }} ({{ data.cpu_cores }} vCPU)</span>
+              <div
+                class="mt-1 flex items-center gap-2"
+                :title="`参考公开天梯与型号代际的本地近似分级，不代表当前 ${data.cpu_cores} vCPU 的实测性能。${cpuBenchmarkRating.description}`"
+              >
+                <span class="shrink-0 text-xs font-bold" :class="cpuBenchmarkTierTextClass">{{ cpuBenchmarkRating.tier }}</span>
+                <div class="h-1.5 flex-1 overflow-hidden rounded-full bg-slate-500/10">
                   <div
                     class="h-full rounded-full transition-all duration-700"
-                    :class="{
-                      'bg-yellow-500': cpuScore.tier === 'S',
-                      'bg-blue-500': cpuScore.tier === 'A',
-                      'bg-green-500': cpuScore.tier === 'B',
-                      'bg-orange-500': cpuScore.tier === 'C',
-                      'bg-red-400': cpuScore.tier === 'D',
-                    }"
-                    :style="{ width: `${cpuScore.score}%` }"
+                    :class="cpuBenchmarkTierBarClass"
+                    :style="{ width: `${cpuBenchmarkTierPercent}%` }"
                   />
                 </div>
-                <span class="text-[11px] text-muted-foreground shrink-0">{{ cpuScore.label }}</span>
+                <span class="shrink-0 text-[11px] text-muted-foreground">{{ cpuBenchmarkRating.label }}</span>
               </div>
             </div>
 

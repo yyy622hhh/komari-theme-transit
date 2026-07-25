@@ -1,4 +1,4 @@
-import type { MetricPoint, MetricSeries, PingMetricTaskStats } from '@/utils/rpc'
+import type { MetricPoint, MetricSeries, PingMetricTaskStats, PingTaskInfo } from '@/utils/rpc'
 
 export const PING_LATENCY_METRIC = 'ping.latency_ms'
 export const PING_LOSS_METRIC = 'ping.loss'
@@ -29,9 +29,9 @@ function stringifyTagValue(value: unknown): string {
 
 export function metricTags(value: { tag?: Record<string, unknown>, tags?: Record<string, unknown>, labels?: Record<string, unknown> } | null | undefined): Record<string, unknown> {
   return {
-    ...(isPlainRecord(value?.tags) ? value.tags : {}),
-    ...(isPlainRecord(value?.tag) ? value.tag : {}),
     ...(isPlainRecord(value?.labels) ? value.labels : {}),
+    ...(isPlainRecord(value?.tag) ? value.tag : {}),
+    ...(isPlainRecord(value?.tags) ? value.tags : {}),
   }
 }
 
@@ -39,10 +39,9 @@ export function metricTagsKey(tags: Record<string, unknown> | null | undefined):
   if (!tags)
     return ''
 
-  return Object.keys(tags)
+  return JSON.stringify(Object.keys(tags)
     .sort()
-    .map(key => `${key}=${stringifyTagValue(tags[key])}`)
-    .join('|')
+    .map(key => [key, stringifyTagValue(tags[key])]))
 }
 
 export function metricSeriesKey(series: Pick<MetricSeries, 'metric_key' | 'entity_id' | 'tag' | 'tags'>): string {
@@ -80,6 +79,7 @@ export function normalizeMetricSeries(series: MetricSeries): NormalizedMetricSer
     return [{
       ...series,
       tags: baseTags,
+      tag: undefined,
       points: [],
     }]
   }
@@ -87,6 +87,7 @@ export function normalizeMetricSeries(series: MetricSeries): NormalizedMetricSer
   return Array.from(groups.values(), group => ({
     ...series,
     tags: group.tags,
+    tag: undefined,
     points: group.points.sort((left, right) => new Date(left.time).getTime() - new Date(right.time).getTime()),
   }))
 }
@@ -111,6 +112,36 @@ export function pingTaskName(value: { tag?: Record<string, unknown>, tags?: Reco
   const tags = metricTags(value as { tag?: Record<string, unknown>, tags?: Record<string, unknown>, labels?: Record<string, unknown> } | null | undefined)
   const directName = (value as { name?: string } | null | undefined)?.name
   return directName?.trim() || stringifyTagValue(tags.task_name || tags.name || tags.task) || pingTaskId(value)
+}
+
+/** Keep metric lines aligned with Komari's Ping task weight order. */
+export function comparePingTaskOrder(
+  leftTags: Record<string, unknown> | undefined,
+  rightTags: Record<string, unknown> | undefined,
+  tasks: ReadonlyMap<string, PingTaskInfo>,
+): number {
+  const leftId = pingTaskId({ tags: leftTags })
+  const rightId = pingTaskId({ tags: rightTags })
+  const leftTask = leftId ? tasks.get(leftId) : undefined
+  const rightTask = rightId ? tasks.get(rightId) : undefined
+
+  if (leftTask && rightTask) {
+    const weightDelta = (leftTask.weight ?? 0) - (rightTask.weight ?? 0)
+    if (weightDelta !== 0)
+      return weightDelta
+    return leftTask.id - rightTask.id
+  }
+  if (leftTask)
+    return -1
+  if (rightTask)
+    return 1
+  if (leftId === rightId)
+    return 0
+  if (!leftId)
+    return 1
+  if (!rightId)
+    return -1
+  return leftId.localeCompare(rightId, undefined, { numeric: true })
 }
 
 export function pingMetricStatKey(stat: Pick<PingMetricTaskStats, 'entity_id' | 'task_id'>): string {

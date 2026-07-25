@@ -42,7 +42,7 @@ export type GeneralCardKey
     | 'yearlyCost'
 
 export type HomeQuickControlKey
-  = | 'default'
+  = | 'favorite'
     | 'monthlyCost'
     | 'totalTraffic'
     | 'upload'
@@ -228,7 +228,7 @@ const LEGACY_GENERAL_CARD_SETTING_KEYS: Partial<Record<GeneralCardKey, string>> 
 }
 
 const DEFAULT_HOME_QUICK_CONTROL_ORDER: HomeQuickControlKey[] = [
-  'default',
+  'favorite',
   'monthlyCost',
   'totalTraffic',
   'peak',
@@ -353,9 +353,9 @@ const GENERAL_CARD_PRESETS: Record<GeneralCardPreset, GeneralCardKey[]> = {
 }
 
 const HOME_QUICK_CONTROL_PRESETS: Record<HomeQuickControlPreset, HomeQuickControlKey[]> = {
-  basic: ['default', 'monthlyCost', 'peak', 'offline'],
-  traffic: ['default', 'totalTraffic', 'peak'],
-  ops: ['default', 'monthlyCost', 'offline', 'highLoad', 'expiring'],
+  basic: ['favorite', 'monthlyCost', 'peak', 'offline'],
+  traffic: ['favorite', 'totalTraffic', 'peak'],
+  ops: ['favorite', 'monthlyCost', 'offline', 'highLoad', 'expiring'],
   full: DEFAULT_HOME_QUICK_CONTROL_ORDER,
   custom: DEFAULT_HOME_QUICK_CONTROL_ORDER,
 }
@@ -709,7 +709,7 @@ function parseHomeQuickControlPreset(value: unknown): HomeQuickControlPreset {
 }
 
 function normalizeHomeQuickControlOrder(keys: HomeQuickControlKey[]): HomeQuickControlKey[] {
-  return ['default', ...keys.filter(key => key !== 'default')]
+  return [...new Set(keys)]
 }
 
 function normalizeThemeSettings(raw: unknown): ThemeSettings {
@@ -887,11 +887,29 @@ const useAppStore = defineStore('app', () => {
   const lang = ref<Lang>('zh-CN')
   const publicSettings = ref<PublicSettings>()
   const nodeSelectedGroup = useStorageAsync<string>('nodeSelectedGroup', 'all', localStorage)
+  const favoriteNodeIds = useStorageAsync<string[]>('theme:favorite-nodes:v1', [], localStorage)
   const isLoggedIn = ref<boolean>(getAuthSession().authenticated)
   const authStatus = ref(getAuthSession().status)
   const privateFeaturesAllowed = computed(() => authStatus.value === 'authenticated')
   const connectionError = ref<boolean>(false)
   const homeAdvancedToolsVisible = ref(false)
+  const favoriteNodeIdSet = computed(() => new Set(
+    (Array.isArray(favoriteNodeIds.value) ? favoriteNodeIds.value : [])
+      .filter((id): id is string => typeof id === 'string' && Boolean(id.trim())),
+  ))
+
+  function isFavoriteNode(uuid: string): boolean {
+    return favoriteNodeIdSet.value.has(uuid)
+  }
+
+  function toggleFavoriteNode(uuid: string): void {
+    const normalized = uuid.trim()
+    if (!normalized)
+      return
+    favoriteNodeIds.value = favoriteNodeIdSet.value.has(normalized)
+      ? [...favoriteNodeIdSet.value].filter(id => id !== normalized)
+      : [...favoriteNodeIdSet.value, normalized]
+  }
 
   const themeSettings = computed(() => normalizeThemeSettings(publicSettings.value?.theme_settings))
   const visitorAuditSupported = computed(() => typeof publicSettings.value?.visitor_audit_enabled === 'boolean')
@@ -1079,13 +1097,6 @@ const useAppStore = defineStore('app', () => {
     }
 
     return normalizeHomeQuickControlOrder([...HOME_QUICK_CONTROL_PRESETS[preset]])
-  })
-
-  const homeQuickDefaultControl = computed<HomeQuickControlKey>(() => {
-    const value = themeSettings.value.homeQuickDefaultControl
-    if (typeof value === 'string' && isHomeQuickControlKey(value) && homeQuickControlOrder.value.includes(value))
-      return value
-    return 'default'
   })
 
   const nodeListMetadataEnabled = computed<boolean>(() => readBooleanSetting(themeSettings.value, 'nodeListMetadataEnabled', true))
@@ -1289,6 +1300,10 @@ const useAppStore = defineStore('app', () => {
     resolvedThemeMode,
     lang,
     nodeSelectedGroup,
+    favoriteNodeIds,
+    favoriteNodeIdSet,
+    isFavoriteNode,
+    toggleFavoriteNode,
     nodeViewMode,
     defaultViewMode,
     nodeCardSize,
@@ -1315,7 +1330,6 @@ const useAppStore = defineStore('app', () => {
     visitorAuditEnabled,
     homeQuickControlsEnabled,
     homeQuickControlOrder,
-    homeQuickDefaultControl,
     nodeListMetadataEnabled,
     nodeListMetadataFields,
     nodeListCustomTagsVisible,

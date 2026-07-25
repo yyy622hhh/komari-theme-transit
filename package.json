@@ -19,6 +19,8 @@
     "type-check": "vue-tsc --build",
     "publish": "bun scripts/publish.ts",
     "sync:admin": "bun scripts/sync-komari-admin.ts",
+    "test:visual": "bun run build-only && playwright test",
+    "test:visual:update": "bun run build-only && playwright test --update-snapshots",
     "lint": "eslint . --fix --cache",
     "lint:eslint": "eslint . --fix --cache"
   },
@@ -43,6 +45,7 @@
   "devDependencies": {
     "@antfu/eslint-config": "^7.4.3",
     "@iconify/json": "^2.2.442",
+    "@playwright/test": "^1.62.0",
     "@tailwindcss/vite": "^4.1.16",
     "@tsconfig/node24": "^24.0.4",
     "@types/node": "^24.10.13",

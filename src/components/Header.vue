@@ -34,9 +34,9 @@ const actionButtons = computed(() => {
 
   const buttons: Array<{ title: string, icon: string, action: string, pressed?: boolean }> = []
 
-  if (router.currentRoute.value.name === 'home' && appStore.privateFeaturesAllowed && appStore.homeToolsEnabled) {
+  if (router.currentRoute.value.name === 'home' && appStore.homeToolsEnabled) {
     buttons.push({
-      title: appStore.homeAdvancedToolsVisible ? '收起高级工具' : '显示高级工具',
+      title: appStore.homeAdvancedToolsVisible ? '收起首页工具' : '显示首页工具',
       icon: 'tabler:tools',
       action: 'toggleHomeTools',
       pressed: appStore.homeAdvancedToolsVisible,

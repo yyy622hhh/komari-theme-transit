@@ -23,7 +23,7 @@ import { useAppStore } from '@/stores/app'
 import { useNodesStore } from '@/stores/nodes'
 import { getChartSeriesPalette, getLoadChartPalette } from '@/utils/chartPalette'
 import { formatBytes, formatBytesSplit } from '@/utils/helper'
-import { metricTags, normalizeMetricSeriesList } from '@/utils/metricSeries'
+import { comparePingTaskOrder, metricTags, normalizeMetricSeriesList } from '@/utils/metricSeries'
 import { fillMissingTimePoints } from '@/utils/recordHelper'
 import { getSharedRpc } from '@/utils/rpc'
 import '@/utils/echarts' // 共享 ECharts 配置
@@ -246,19 +246,18 @@ const diskPredictionSummary = computed(() => {
   const prediction = diskPrediction.value
   if (prediction) {
     const days = Math.max(0, Math.ceil(prediction.daysUntilFull))
-    const growth = formatBytesSplit(prediction.dailyGrowthBytes, appStore.byteDecimals)
     return days <= 0
-      ? `按最近 ${prediction.sampleDays.toFixed(1)} 天趋势，磁盘预计已满`
-      : `按最近 ${prediction.sampleDays.toFixed(1)} 天趋势，预计 ${days} 天后满 · 日增 ${growth.value} ${growth.unit}`
+      ? '预计已满'
+      : `预计 ${days} 天后满`
   }
 
   const state = diskPredictionState.value
   if (state.reason === 'no_samples')
-    return '磁盘预测数据积累中：暂无可用历史样本'
+    return '暂无趋势'
   if (state.reason === 'insufficient_samples')
-    return '磁盘预测数据积累中：样本数量不足'
+    return '样本不足'
   if (state.reason === 'insufficient_duration')
-    return `磁盘预测数据积累中：历史跨度 ${state.sampleDays.toFixed(1)} 天，至少需要约 2 天`
+    return '趋势积累中'
   return ''
 })
 
@@ -745,7 +744,7 @@ watchEffect(() => {
   metricSeriesColors.splice(0, metricSeriesColors.length, ...getChartSeriesPalette(appStore.colorVisionFriendly))
 })
 
-const pingTaskNameMap = computed(() => new Map(pingTasks.value.map(task => [String(task.id), task.name])))
+const pingTaskMap = computed(() => new Map(pingTasks.value.map(task => [String(task.id), task])))
 
 function seriesHasData(series: MetricChartSeriesData): boolean {
   return series.data.some(([, value]) => value !== null && Number.isFinite(value))
@@ -820,10 +819,11 @@ const temperatureChartSeries = computed<MetricChartSeriesData[]>(() => {
 function pingSeries(metricKey: 'ping.latency_ms' | 'ping.loss'): MetricChartSeriesData[] {
   return rawMetricSeries.value
     .filter(series => series.metric_key === metricKey)
+    .sort((left, right) => comparePingTaskOrder(metricTags(left), metricTags(right), pingTaskMap.value))
     .map<MetricChartSeriesData>((series, index) => {
       const tags = metricTags(series)
       const taskId = String(tags.task_id ?? tags.task ?? '')
-      const taskName = pingTaskNameMap.value.get(taskId) || (taskId ? `任务 ${taskId}` : `Ping ${index + 1}`)
+      const taskName = pingTaskMap.value.get(taskId)?.name || (taskId ? `任务 ${taskId}` : `Ping ${index + 1}`)
       return {
         name: taskName,
         color: metricSeriesColors[index % metricSeriesColors.length]!,

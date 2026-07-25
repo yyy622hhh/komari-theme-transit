@@ -57,5 +57,5 @@ watch(
 
 <template>
   <slot />
-  <BackTop :visibility-height="1" @scrolled="isScrolled = $event" />
+  <BackTop :visibility-height="320" @scrolled="isScrolled = $event" />
 </template>

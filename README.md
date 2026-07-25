@@ -37,7 +37,7 @@
 
 | 项目     | 说明                                                      |
 | :------- | :-------------------------------------------------------- |
-| 当前版本 | **v3.2.0**                                                |
+| 当前版本 | **v3.3.0**                                                |
 | 主题定位 | Komari Monitor 可导入 zip 主题，不是普通 Web App 部署包   |
 | 视觉风格 | 毛玻璃卡片、动态背景、浅色 / 深色 / 北京时间自动日夜模式  |
 | 数据能力 | Metric Store 优先，旧接口自动 fallback，兼容 Komari 1.2.x |
@@ -45,6 +45,22 @@
 | 发布产物 | `komari-theme-Glassmorphism-build-<short-sha>.zip`        |
 
 > 好看只是外壳。v3 真正的重点，是把 Metric、Ping、流量、费用、健康分析和运维工具整合成日常真的会打开来看的监控面板。
+
+---
+
+## 🚀 v3.3.0 大规模节点巡检与视觉回归
+
+- 首页搜索扩展为节点名、地区、IPv4 / IPv6 与 CPU 型号模糊匹配，支持 `192.168.x.x` 等 IPv4 通配写法
+- 新增收藏节点、收藏快捷筛选，以及详情页上一台 / 下一台 / 下拉切换
+- 新增最多 4 台节点的实时横向对比，未选择时预览状态、CPU、内存、磁盘、网络、流量、运行时间和价格等对比字段
+- 健康摘要新增综合异常排行，合并 CPU、内存、磁盘、流量、Ping、离线状态和磁盘增长风险
+- 超过 30 台节点时首屏按视口延迟挂载卡片；空闲时错峰补齐，快速滚动时优先加载目标区域
+- Metric `tags` 优先并继续兼容旧版 `tag`，保留 Komari 1.2.5 的 records / Ping fallback
+- CPU 信息升级本地近似代际分级，并提供 CPU Mark 查询入口；未知或特殊型号可直接查看公开排行
+- 优化手机端访客 IP 条和返回顶部按钮，滚动时自动避让，长 IPv6 不再撑宽页面
+- 引入 7 场景 Playwright 视觉回归：桌面 / 手机、亮色 / 暗色、卡片 / 列表、色觉辅助、三种地球布局和节点详情
+
+> 视觉测试使用完全虚构的固定节点、IP、价格与 Metric 数据，不访问真实主控，也不会进入主题 Release 压缩包。
 
 ---
 
@@ -398,8 +414,17 @@ bun install
 bun run dev
 bun run lint
 bun run build
+bun run test:visual
 bun run preview
 ```
+
+更新确认过的视觉基准图：
+
+```bash
+bun run test:visual:update
+```
+
+视觉测试需要先执行 `bunx playwright install chromium`。截图差异会输出到 `test-results/` 和 `playwright-report/`；GitHub Actions 失败时会自动上传差异附件。
 
 构建成功后会生成：
 
@@ -421,6 +446,18 @@ dist/
 ## 📝 更新日志
 
 <details open>
+<summary><strong>v3.3.0 · 大规模节点巡检与视觉回归</strong></summary>
+
+- 新增收藏、节点实时对比、详情快速切换和综合异常排行
+- 搜索支持节点名、地区、IPv4 / IPv6、CPU 型号与 IPv4 通配
+- 大量节点卡片采用首屏减载、空闲补齐、滚动优先的混合挂载策略
+- Metric `tags` 优先，继续兼容 Komari 1.2.5 旧 records / Ping 接口
+- 更新 CPU 代际近似分级和 CPU Mark 查询入口
+- 增加 7 场景 Playwright 视觉回归与 GitHub Actions 差异附件
+
+</details>
+
+<details>
 <summary><strong>v3.2.0 · 地球与地图显示修复</strong></summary>
 
 - 恢复真实地球原尺寸与原头部布局，移除 v3.1.9 的强制高度和裁剪

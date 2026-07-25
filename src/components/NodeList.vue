@@ -53,6 +53,10 @@ const rowStaggerLimit = UI_CONFIG.motion.staggerLimit
 
 const appStore = useAppStore()
 
+function toggleFavorite(node: NodeData): void {
+  appStore.toggleFavoriteNode(node.uuid)
+}
+
 // 未登录且开启「未登录隐藏价格」时，隐藏价格信息
 const showPrice = computed(() => appStore.privateFeaturesAllowed || !appStore.hidePriceWhenLoggedOut)
 
@@ -433,6 +437,17 @@ function buildNodeMetadataItems(node: NodeData): NodeMetadataItem[] {
                       :alt="getRegionAltText(node.region)" class="size-5 rounded-sm shrink-0"
                     >
                     <span class="truncate">{{ node.name }}</span>
+                    <button
+                      type="button"
+                      class="inline-flex size-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-slate-500/10 hover:text-amber-500"
+                      :class="appStore.isFavoriteNode(node.uuid) && 'text-amber-500'"
+                      :aria-label="appStore.isFavoriteNode(node.uuid) ? `取消收藏 ${node.name}` : `收藏 ${node.name}`"
+                      :title="appStore.isFavoriteNode(node.uuid) ? '取消收藏' : '收藏节点'"
+                      @click.stop="toggleFavorite(node)"
+                      @keydown.stop
+                    >
+                      <Icon :icon="appStore.isFavoriteNode(node.uuid) ? 'tabler:star-filled' : 'tabler:star'" width="13" height="13" />
+                    </button>
                     <DataTooltip
                       v-if="getNodeMessage(node)"
                       :content="getNodeMessageTooltip(node)"

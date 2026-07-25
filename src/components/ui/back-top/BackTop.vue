@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { Icon } from '@iconify/vue'
 import { onMounted, onUnmounted, ref } from 'vue'
 
 interface Props {
@@ -6,7 +7,7 @@ interface Props {
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  visibilityHeight: 1,
+  visibilityHeight: 320,
 })
 
 const emit = defineEmits<{
@@ -16,9 +17,8 @@ const emit = defineEmits<{
 const show = ref(false)
 
 function handleScroll() {
-  const scrolled = window.scrollY > props.visibilityHeight
-  show.value = scrolled
-  emit('scrolled', scrolled)
+  show.value = window.scrollY > props.visibilityHeight
+  emit('scrolled', window.scrollY > 1)
 }
 
 function scrollToTop() {
@@ -46,23 +46,11 @@ onUnmounted(() => {
   >
     <button
       v-show="show"
-      class="fixed bottom-8 right-8 z-[9999] size-10 rounded-full bg-background border shadow-sm flex items-center justify-center text-foreground hover:bg-accent transition-colors"
+      class="fixed bottom-16 right-3 z-[60] flex size-9 items-center justify-center rounded-full border bg-background/80 text-foreground shadow-sm backdrop-blur-md transition-colors hover:bg-accent md:bottom-8 md:right-8 md:size-10"
       aria-label="返回顶部"
       @click="scrollToTop"
     >
-      <svg
-        xmlns="http://www.w3.org/2000/svg"
-        width="20"
-        height="20"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-      >
-        <path d="M12 19V5M5 12l7-7 7 7" />
-      </svg>
+      <Icon icon="tabler:arrow-up" :width="18" :height="18" />
     </button>
   </Transition>
 </template>

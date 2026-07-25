@@ -6,6 +6,7 @@ import { Icon } from '@iconify/vue'
 import { useDebounceFn } from '@vueuse/core'
 import { computed, defineAsyncComponent, nextTick, onActivated, onDeactivated, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import DeferredRender from '@/components/DeferredRender.vue'
 import MarkdownRenderer from '@/components/MarkdownRenderer.vue'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -23,7 +24,7 @@ import {
   isExpiringNode,
   isHighLoadNode,
 } from '@/utils/nodeMetricsHelper'
-import { isRegionMatch } from '@/utils/regionHelper'
+import { isNodeMatchSearch } from '@/utils/nodeSearch'
 import { hasFreeNodeTag } from '@/utils/tagHelper'
 
 interface QuickControlOption {
@@ -32,7 +33,8 @@ interface QuickControlOption {
   icon: string
 }
 
-type HomeToolKey = 'nodes' | 'topology' | 'providerValue' | 'healthSummary' | 'snapshotExport' | 'auditLog'
+type HomeToolKey = 'nodes' | 'nodeCompare' | 'topology' | 'providerValue' | 'healthSummary' | 'snapshotExport' | 'auditLog'
+type PrivateHomeToolKey = Exclude<HomeToolKey, 'nodes' | 'nodeCompare'>
 
 interface HomeToolOption {
   key: Exclude<HomeToolKey, 'nodes'>
@@ -48,6 +50,7 @@ const HealthSummaryPanel = defineAsyncComponent(() => import('@/components/Healt
 const NodeCard = defineAsyncComponent(() => import('@/components/NodeCard.vue'))
 const NodeGeneralCards = defineAsyncComponent(() => import('@/components/NodeGeneralCards.vue'))
 const NodeList = defineAsyncComponent(() => import('@/components/NodeList.vue'))
+const NodeComparePanel = defineAsyncComponent(() => import('@/components/NodeComparePanel.vue'))
 const PingMonitorDialog = defineAsyncComponent(() => import('@/components/PingMonitorDialog.vue'))
 const NodeTopologyPanel = defineAsyncComponent(() => import('@/components/NodeTopologyPanel.vue'))
 const ProviderValuePanel = defineAsyncComponent(() => import('@/components/ProviderValuePanel.vue'))
@@ -77,12 +80,12 @@ onDeactivated(() => {
 const searchText = ref('')
 const debouncedSearchText = ref('')
 const activeHomeTool = ref<HomeToolKey>('nodes')
-const activeQuickControl = ref<HomeQuickControlKey>(appStore.homeQuickDefaultControl)
+const activeQuickControl = ref<HomeQuickControlKey | null>(null)
 const exchangeRates = ref(financeHelper.DEFAULT_EXCHANGE_RATES)
 const excludeFreeNodes = ref(true)
 const pingDialogNode = ref<NodeData | null>(null)
 
-const homeToolPermissionMap: Record<Exclude<HomeToolKey, 'nodes'>, PermissionKey> = {
+const homeToolPermissionMap: Record<PrivateHomeToolKey, PermissionKey> = {
   topology: 'nodeTopology',
   providerValue: 'providerValue',
   healthSummary: 'healthSummary',
@@ -91,7 +94,7 @@ const homeToolPermissionMap: Record<Exclude<HomeToolKey, 'nodes'>, PermissionKey
 }
 
 const quickControlDefinitions: Record<HomeQuickControlKey, QuickControlOption> = {
-  default: { key: 'default', label: '默认', icon: 'tabler:sort-ascending' },
+  favorite: { key: 'favorite', label: '收藏', icon: 'tabler:star' },
   monthlyCost: { key: 'monthlyCost', label: '月成本', icon: 'tabler:calendar-dollar' },
   totalTraffic: { key: 'totalTraffic', label: '总流量', icon: 'tabler:database' },
   upload: { key: 'upload', label: '上行', icon: 'tabler:chevron-up' },
@@ -103,16 +106,16 @@ const quickControlDefinitions: Record<HomeQuickControlKey, QuickControlOption> =
 }
 
 const homeTools = computed<HomeToolOption[]>(() => {
-  if (!appStore.privateFeaturesAllowed || !appStore.homeToolsEnabled)
+  if (!appStore.homeToolsEnabled)
     return []
 
-  return [
-    { key: 'topology', label: '拓扑', icon: 'tabler:route', description: 'ASN / BGP / 上游根因' },
-    { key: 'providerValue', label: '性价比', icon: 'tabler:scale', description: '单机资源成本对比' },
-    { key: 'healthSummary', label: '健康', icon: 'tabler:heartbeat', description: '日周月历史健康概览' },
-    { key: 'snapshotExport', label: '导出', icon: 'tabler:download', description: 'CSV / JSON 数据快照' },
-    { key: 'auditLog', label: '日志', icon: 'tabler:list-details', description: '管理员操作审计日志' },
+  const tools: HomeToolOption[] = [
+    { key: 'nodeCompare', label: '对比', icon: 'tabler:columns-3', description: '最多四台节点实时横向对比' },
   ]
+  if (!appStore.privateFeaturesAllowed)
+    return tools
+
+  return [...tools, { key: 'topology', label: '拓扑', icon: 'tabler:route', description: 'ASN / BGP / 上游根因' }, { key: 'providerValue', label: '性价比', icon: 'tabler:scale', description: '单机资源成本对比' }, { key: 'healthSummary', label: '健康', icon: 'tabler:heartbeat', description: '日周月历史健康概览' }, { key: 'snapshotExport', label: '导出', icon: 'tabler:download', description: 'CSV / JSON 数据快照' }, { key: 'auditLog', label: '日志', icon: 'tabler:list-details', description: '管理员操作审计日志' }]
 })
 
 const updateDebouncedSearch = useDebounceFn((value: string) => {
@@ -133,18 +136,15 @@ const quickControls = computed(() => quickControlKeys.value.map(key => quickCont
 const showQuickControls = computed(() => appStore.homeQuickControlsEnabled && quickControls.value.length > 0)
 
 watch(
-  () => [appStore.homeQuickDefaultControl, appStore.homeQuickControlOrder.join('|'), appStore.homeQuickControlsEnabled] as const,
+  () => [appStore.homeQuickControlOrder.join('|'), appStore.homeQuickControlsEnabled] as const,
   () => {
     if (!appStore.homeQuickControlsEnabled) {
-      activeQuickControl.value = 'default'
+      activeQuickControl.value = null
       return
     }
 
-    if (!quickControlKeys.value.includes(activeQuickControl.value)) {
-      activeQuickControl.value = quickControlKeys.value.includes(appStore.homeQuickDefaultControl)
-        ? appStore.homeQuickDefaultControl
-        : 'default'
-    }
+    if (activeQuickControl.value && !quickControlKeys.value.includes(activeQuickControl.value))
+      activeQuickControl.value = null
   },
   { immediate: true },
 )
@@ -173,25 +173,6 @@ function getNodeMonthlyCostCNY(node: NodeData): number {
   return financeHelper.calculateMonthlyCostCNY(node, exchangeRates.value)
 }
 
-function isNodeMatchSearch(node: NodeData, search: string): boolean {
-  if (!search.trim())
-    return true
-  const lowerSearch = search.toLowerCase().trim()
-  if (node.name.toLowerCase().includes(lowerSearch))
-    return true
-  if (node.region && isRegionMatch(node.region, search))
-    return true
-  if (node.os && node.os.toLowerCase().includes(lowerSearch))
-    return true
-  if (node.groups.some(group => group.toLowerCase().includes(lowerSearch)))
-    return true
-  if (node.tags && node.tags.toLowerCase().includes(lowerSearch))
-    return true
-  if (node.remark && node.remark.toLowerCase().includes(lowerSearch))
-    return true
-  return false
-}
-
 function sortNodesByComputedValue(nodes: NodeData[], selector: (node: NodeData) => number): NodeData[] {
   return nodes
     .map(node => ({ node, value: selector(node) }))
@@ -210,10 +191,12 @@ function placeOfflineNodesLast(nodes: NodeData[]): NodeData[] {
   })
 }
 
-function getQuickControlNodes(nodes: NodeData[], control: HomeQuickControlKey): NodeData[] {
+function getQuickControlNodes(nodes: NodeData[], control: HomeQuickControlKey | null): NodeData[] {
   let result: NodeData[]
 
   switch (control) {
+    case 'favorite':
+      return nodes.filter(node => appStore.isFavoriteNode(node.uuid))
     case 'monthlyCost':
       result = sortNodesByComputedValue(nodes, getNodeMonthlyCostCNY)
       break
@@ -237,7 +220,6 @@ function getQuickControlNodes(nodes: NodeData[], control: HomeQuickControlKey): 
     case 'expiring':
       result = nodes.filter(node => isExpiringNode(node, appStore.homeExpiringDays))
       break
-    case 'default':
     default:
       result = nodes
       break
@@ -248,6 +230,8 @@ function getQuickControlNodes(nodes: NodeData[], control: HomeQuickControlKey): 
 
 function getQuickControlCount(nodes: NodeData[], control: HomeQuickControlKey): number {
   switch (control) {
+    case 'favorite':
+      return nodes.reduce((count, node) => count + (appStore.isFavoriteNode(node.uuid) ? 1 : 0), 0)
     case 'offline':
       return nodes.reduce((count, node) => count + (node.online ? 0 : 1), 0)
     case 'highLoad':
@@ -277,6 +261,8 @@ const nodeList = computed(() => {
 const isDenseNodeGrid = computed(() => appStore.nodeViewMode === 'card' && nodeList.value.length > denseNodeAppearThreshold)
 const enableNodeCardTransition = computed(() => !appStore.disablePageAnimation && !isDenseNodeGrid.value)
 const reduceDenseNodeEffects = computed(() => appStore.nodeViewMode === 'card' && nodeList.value.length > denseNodePingAnimationThreshold)
+const deferNodeCards = computed(() => appStore.nodeViewMode === 'card' && nodeList.value.length > UI_CONFIG.virtualList.nodeThreshold)
+const deferredNodeCardHeight = computed(() => ({ mini: 220, compact: 270, comfortable: 310, large: 350 }[appStore.nodeCardSize]))
 
 const quickControlCounts = computed<Record<HomeQuickControlKey, number>>(() => {
   let base = groupNodeList.value
@@ -292,7 +278,7 @@ const quickControlCounts = computed<Record<HomeQuickControlKey, number>>(() => {
 const emptyDescription = computed(() => {
   if (debouncedSearchText.value.trim())
     return '没有匹配的节点'
-  if (activeQuickControl.value !== 'default')
+  if (activeQuickControl.value)
     return '当前快捷筛选下暂无节点'
   return '暂无节点'
 })
@@ -303,7 +289,7 @@ function clearSearch() {
 }
 
 const nodeListSortResetKey = computed(() => {
-  return `${appStore.nodeSelectedGroup}|${debouncedSearchText.value.trim()}|${activeQuickControl.value}`
+  return `${appStore.nodeSelectedGroup}|${debouncedSearchText.value.trim()}|${activeQuickControl.value ?? 'all'}`
 })
 
 function handleNodeClick(node: NodeData) {
@@ -315,7 +301,7 @@ function openPingDialog(node: NodeData) {
 }
 
 function getNodeItemTransitionKey(node: NodeData): string {
-  return `${appStore.nodeSelectedGroup}-${activeQuickControl.value}-${node.uuid}`
+  return `${appStore.nodeSelectedGroup}-${activeQuickControl.value ?? 'all'}-${node.uuid}`
 }
 
 function getNodeItemTransitionStyle(index: number): Record<string, string> {
@@ -325,15 +311,13 @@ function getNodeItemTransitionStyle(index: number): Record<string, string> {
 }
 
 function setQuickControl(key: HomeQuickControlKey) {
-  if (activeQuickControl.value === key)
-    return
-  activeQuickControl.value = key
+  activeQuickControl.value = activeQuickControl.value === key ? null : key
   void recordVisitorEvent({
     event: 'filter_change',
     path: '/',
     route: 'home',
-    target: key,
-    detail: { result_count: nodeList.value.length },
+    target: activeQuickControl.value ?? 'all',
+    detail: { active: Boolean(activeQuickControl.value), result_count: nodeList.value.length },
   })
 }
 
@@ -357,11 +341,14 @@ async function toggleHomeTool(key: Exclude<HomeToolKey, 'nodes'>) {
     return
   }
 
-  const granted = await appStore.requireLoginPermission(homeToolPermissionMap[key], { force: true })
-  if (!granted) {
-    activeHomeTool.value = 'nodes'
-    window.$message?.warning('登录状态已过期，请重新登录后使用高级工具。')
-    return
+  const permission = key === 'nodeCompare' ? null : homeToolPermissionMap[key]
+  if (permission) {
+    const granted = await appStore.requireLoginPermission(permission, { force: true })
+    if (!granted) {
+      activeHomeTool.value = 'nodes'
+      window.$message?.warning('登录状态已过期，请重新登录后使用高级工具。')
+      return
+    }
   }
 
   activeHomeTool.value = key
@@ -519,7 +506,7 @@ const nodeCardGridClass = computed(() => {
               <div class="relative z-1 h-8" :class="searchText ? 'w-full sm:w-60' : 'w-8'">
                 <div class="absolute top-0 right-0 w-full">
                   <Input
-                    v-model="searchText" placeholder="搜索节点名称、地区、系统"
+                    v-model="searchText" placeholder="搜索名称、地区、IP、CPU"
                     aria-label="搜索节点"
                     class="transition-all border-none shadow-none h-8 bg-background/50 backdrop-blur-xs rounded-md hover:!bg-background/60 focus:!pl-7.5 focus:placeholder:!text-muted-foreground focus:!bg-background/80 focus:!ring-slate-500/10"
                     :class="searchText ? '!w-full sm:!w-60 !pl-7.5 pr-7 placeholder:!text-muted-foreground' : 'w-8 placeholder:text-transparent focus:!w-52 sm:focus:!w-60'"
@@ -547,6 +534,7 @@ const nodeCardGridClass = computed(() => {
               {{ activeToolTitle }} · 当前分组：{{ g.tab }}（{{ groupNodeList.length }} 台）
             </div>
             <NodeTopologyPanel v-if="activeHomeTool === 'topology'" :nodes="groupNodeList" />
+            <NodeComparePanel v-else-if="activeHomeTool === 'nodeCompare'" :nodes="groupNodeList" />
             <ProviderValuePanel v-else-if="activeHomeTool === 'providerValue'" :nodes="groupNodeList" />
             <HealthSummaryPanel v-else-if="activeHomeTool === 'healthSummary'" :nodes="groupNodeList" />
             <SnapshotExportPanel v-else-if="activeHomeTool === 'snapshotExport'" :nodes="groupNodeList" />
@@ -561,16 +549,22 @@ const nodeCardGridClass = computed(() => {
             >
               <div
                 v-for="(node, index) in nodeList"
-                :key="getNodeItemTransitionKey(node)"
+                :key="`${getNodeItemTransitionKey(node)}:${deferNodeCards ? 'deferred' : 'full'}`"
                 class="min-w-0"
                 :style="getNodeItemTransitionStyle(index)"
               >
-                <NodeCard
-                  :node="node"
-                  :reduce-motion="reduceDenseNodeEffects"
-                  @click="handleNodeClick(node)"
-                  @ping-click="openPingDialog(node)"
-                />
+                <DeferredRender
+                  :enabled="deferNodeCards"
+                  :idle-delay="800 + index * 70"
+                  :min-height="deferredNodeCardHeight"
+                >
+                  <NodeCard
+                    :node="node"
+                    :reduce-motion="reduceDenseNodeEffects"
+                    @click="handleNodeClick(node)"
+                    @ping-click="openPingDialog(node)"
+                  />
+                </DeferredRender>
               </div>
             </TransitionGroup>
             <NodeList
