@@ -348,7 +348,7 @@ export function calculateRemainingValueCNY(
     return priceCNY
 
   const remainingDays = Math.ceil(diffMs / MS_PER_DAY)
-  const fraction = Math.min(remainingDays / billingCycle, 1)
+  const fraction = remainingDays / billingCycle
   return priceCNY * fraction
 }
 

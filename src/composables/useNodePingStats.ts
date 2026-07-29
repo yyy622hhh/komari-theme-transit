@@ -4,7 +4,7 @@ import { useThrottleFn } from '@vueuse/core'
 import { computed, onScopeDispose, ref, shallowRef, toValue, watch } from 'vue'
 import { PING_RECORD_MAX_COUNT } from '@/constants/load'
 import { abortPingRecords, loadPingRecords } from '@/services/history.service'
-import { loadPingMetricStats, queryMetrics } from '@/services/metrics.service'
+import { abortPingMetricStats, abortQueryMetrics, loadPingMetricStats, queryMetrics } from '@/services/metrics.service'
 import { isPingMetric, normalizeMetricSeriesList, PING_LATENCY_METRIC, PING_LOSS_METRIC, pingTaskId } from '@/utils/metricSeries'
 
 export interface NodePingHistoryPoint {
@@ -359,6 +359,9 @@ async function loadSharedPingRecords(entry: SharedPingRecordsEntry, hours: numbe
   entry.promise = (async () => {
     try {
       const metricState = nodeUuid ? await loadPingMetricRecords(nodeUuid, hours, maxCount).catch(() => null) : null
+      if (entry.subscribers === 0)
+        return
+
       if (metricState) {
         entry.data.value = metricState
       }
@@ -401,6 +404,23 @@ function stopSharedPingRecordsRefresh(entry: SharedPingRecordsEntry): void {
   entry.refreshTimer = null
 }
 
+function abortSharedPingRecordsRequests(hours: number, maxCount?: number, uuid?: string): void {
+  abortPingRecords(hours, maxCount, uuid)
+  if (!uuid)
+    return
+
+  abortPingMetricStats({ entity_id: uuid, hours, max_points: maxCount })
+  abortQueryMetrics({
+    metric_keys: [PING_LATENCY_METRIC, PING_LOSS_METRIC],
+    entity_id: uuid,
+    hours,
+    downsample: true,
+    fill_empty: true,
+    max_points: maxCount,
+    aggregation: 'avg',
+  })
+}
+
 function retainSharedPingRecordsEntry(hours: number, maxCount?: number, uuid?: string): () => void {
   const entry = getSharedPingRecordsEntry(hours, maxCount, uuid)
   entry.subscribers += 1
@@ -415,7 +435,7 @@ function retainSharedPingRecordsEntry(hours: number, maxCount?: number, uuid?: s
     entry.subscribers = Math.max(0, entry.subscribers - 1)
     if (entry.subscribers === 0) {
       stopSharedPingRecordsRefresh(entry)
-      abortPingRecords(hours, maxCount, uuid)
+      abortSharedPingRecordsRequests(hours, maxCount, uuid)
     }
   }
 }

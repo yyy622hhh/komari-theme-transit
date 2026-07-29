@@ -71,3 +71,43 @@ test('detail dark mobile', async ({ page }) => {
   await expect(page.getByText('硬件信息')).toBeVisible()
   await expect(page).toHaveScreenshot('detail-dark-mobile.png', { fullPage: false })
 })
+
+test('detail ping requests stay scoped to the current node', async ({ page }) => {
+  const currentUuid = '00000000-0000-4000-8000-000000000001'
+  const metricCalls: Array<{ method: string, params: Record<string, unknown> }> = []
+  const isPingMetricCall = (call: { method: string, params: Record<string, unknown> }): boolean => {
+    const metricKeys = Array.isArray(call.params.metric_keys) ? call.params.metric_keys : []
+    return call.method === 'public:getPingMetricStats'
+      || metricKeys.includes('ping.latency_ms')
+      || metricKeys.includes('ping.loss')
+  }
+
+  page.on('request', (request) => {
+    if (!request.url().endsWith('/api/rpc2'))
+      return
+
+    const payload = request.postDataJSON() as { method?: string, params?: Record<string, unknown> } | null
+    if (payload?.method === 'public:queryMetrics' || payload?.method === 'public:getPingMetricStats') {
+      metricCalls.push({ method: payload.method, params: payload.params ?? {} })
+    }
+  })
+
+  await page.setViewportSize({ width: 1280, height: 720 })
+  await installKomariFixture(page)
+  await openStablePage(page)
+
+  await expect.poll(() => metricCalls.filter(isPingMetricCall).length).toBeGreaterThan(0)
+  const homeSummaryCalls = metricCalls.filter(call => call.method === 'public:queryMetrics' && isPingMetricCall(call))
+  expect(homeSummaryCalls.length).toBeGreaterThan(0)
+  expect(homeSummaryCalls.every(call => call.params.max_points === 150)).toBe(true)
+
+  metricCalls.length = 0
+  await page.getByRole('button', { name: '查看节点 主控-洛杉矶 详情' }).click()
+  await expect(page).toHaveURL(`/instance/${currentUuid}`)
+  await expect(page.getByText('硬件信息')).toBeVisible()
+  await page.waitForTimeout(2_000)
+
+  const detailPingCalls = metricCalls.filter(isPingMetricCall)
+  expect(detailPingCalls.length).toBeGreaterThan(0)
+  expect(new Set(detailPingCalls.map(call => call.params.entity_id))).toEqual(new Set([currentUuid]))
+})

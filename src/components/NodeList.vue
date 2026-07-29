@@ -41,6 +41,7 @@ const props = defineProps<{
   nodes: NodeData[]
   transitionKey?: string
   sortResetKey?: string
+  pingEnabled: boolean
 }>()
 
 const emit = defineEmits<{
@@ -489,7 +490,7 @@ function buildNodeMetadataItems(node: NodeData): NodeMetadataItem[] {
 
                 <!-- 延迟/丢包 -->
                 <!-- <div v-else-if="col.key === 'ping'">
-              <NodePingListCell :uuid="node.uuid" :online="node.online" />
+              <NodePingListCell :uuid="node.uuid" :online="node.online" :enabled="props.pingEnabled" />
             </div> -->
 
                 <!-- 运行时间 -->
@@ -497,7 +498,7 @@ function buildNodeMetadataItems(node: NodeData): NodeMetadataItem[] {
                   <span class="text-[11px] font-medium text-foreground/70 truncate">
                     {{ formatUptime(node.uptime ?? 0) }}
                   </span>
-                  <NodePingListCell :uuid="node.uuid" :online="node.online" @click="emit('pingClick', node)" />
+                  <NodePingListCell :uuid="node.uuid" :online="node.online" :enabled="props.pingEnabled" @click="emit('pingClick', node)" />
                 </div>
 
                 <!-- 操作系统 -->

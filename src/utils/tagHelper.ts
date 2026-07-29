@@ -369,11 +369,11 @@ export function formatPriceWithCycle(
 const TRAILING_ZERO_REGEX = /\.?0+$/
 
 /**
- * 计算剩余价值（按剩余天数占一个计费周期的比例折算）
+ * 计算剩余价值（按剩余天数占计费周期的比例折算）
  * - 价格 <= 0：返回 0
  * - 已过期：返回 0
  * - 一次性 / 未知周期（billingCycle <= 0）：返回全额价格
- * - 折算比例上限为 1，不超过一个计费周期的价格
+ * - 提前续费覆盖多个周期时，按全部剩余天数累计价值
  * @param price 价格
  * @param billingCycle 计费周期（天）
  * @param expiredAt 过期时间
@@ -397,7 +397,7 @@ export function getRemainingValue(
   if (billingCycle <= 0)
     return price
 
-  const fraction = Math.min(days / billingCycle, 1)
+  const fraction = days / billingCycle
   return price * fraction
 }
 

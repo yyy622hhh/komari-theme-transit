@@ -12,6 +12,13 @@
 
 ## 当前任务
 
+- 状态：in-progress，准备发布 v3.3.1
+- 目标：修复 GitHub Issue #33（详情页保留首页全部节点 Ping 查询）与 #35（提前续费后的剩余价值被封顶为一个计费周期）。
+- 里程碑：M2 性能修复 + 小范围业务计算纠错，不改变发布契约或长期机兼容语义。
+- 范围：首页 Ping 摘要订阅生命周期、摘要采样上限、在途 metric 请求释放、两处剩余价值计算及聚焦回归验证。
+- 发布：用户已明确要求发布新版，并在 Release 验证成功后关闭 Issue #33 / #35。
+- 不做：不修改全局实时状态轮询语义，不调整超过 100 年的长期机展示。
+
 - 状态：done，等待用户部署运行态测试
 - 目标：生成 Linux amd64 本地集成测试包，合并验证 Komari PR #604、已合并访客审计 PR #602、komari-web PR #82 与 Glassmorphism v3.1.8 内置默认主题。
 - 里程碑：M6 集成构建、测试交付与验证，不扩大现有上游 PR 范围。
@@ -21,6 +28,16 @@
 - 不做：不把 Glassmorphism 默认主题替换混入计费 PR #604；不发布测试构建为正式 Release；不构建 Windows 包。
 
 ## 执行日志
+
+### 2026-07-29 v3.3.1 Issue #33 / #35 hotfix
+
+- `#33` 根因确认：首页由 `KeepAlive` 保留后，节点卡片和列表的 `useNodePingStats` scope 不会销毁，因此每个 UUID 的 Metric Store 查询及 60 秒刷新订阅继续存在；卡片摘要还复用了完整图表的 6000 点上限。
+- `#33` 修复：首页激活状态显式传到卡片/列表 Ping composable，离开首页立即释放订阅并中止 metric / legacy 在途请求；无订阅时不再进入 fallback；摘要查询上限独立降为 150。
+- `#35` 修复：`financeHelper.calculateRemainingValueCNY` 和卡片 `tagHelper.getRemainingValue` 同步移除单周期封顶；超过 100 年的长期机兼容语义保持不变。
+- 回归：新增 Playwright RPC 断言，覆盖首页摘要 `max_points=150` 及进入详情后 Ping metric 只包含当前 UUID。系统 Chrome 中用例 4.0 秒通过；Windows Chrome 完成测试后未自行退出，托管 Chromium 结果留待 GitHub Actions 最终确认。
+- 数值：固定随机种子 `0x35c0ffee` 校验 10,000 组价格 / 周期 / 剩余天数，其中 9,727 组跨多个周期；两套计算入口全部通过，最大浮点误差 `7.450580596923828e-9`。
+- 本地验证：3.3.1 版本下 `bun run lint`、`bun run type-check`、`bun run build` 和 `git diff --check` 已通过；聚焦 Playwright RPC 用例通过。按用户要求停止额外的完整视觉矩阵。
+- 本地资产：`komari-theme-Glassmorphism-build-7d2c7e1.zip`，7,584,274 bytes，SHA-256 `F438AF4BDF12849983D206600A4C30025D64EF33ED47EBC330DA3E2458D039EB`；包内版本 3.3.1，顶层为 `komari-theme.json`、`preview.png`、`dist/`，包含 769 个 dist entries。
 
 ### 2026-07-16 exact Linux integration bundle
 

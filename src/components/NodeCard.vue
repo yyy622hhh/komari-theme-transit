@@ -17,8 +17,10 @@ import { formatCurrencyValue, formatPriceWithCycle, getDaysUntilExpired, getExpi
 const props = withDefaults(defineProps<{
   node: NodeData
   reduceMotion?: boolean
+  pingEnabled?: boolean
 }>(), {
   reduceMotion: false,
+  pingEnabled: true,
 })
 const emit = defineEmits<{
   click: []
@@ -79,7 +81,7 @@ const {
   lossDisplay,
   latencyPanelTooltip,
   lossPanelTooltip,
-} = useNodePingDisplay(() => props.node.uuid)
+} = useNodePingDisplay(() => props.node.uuid, { enabled: () => props.pingEnabled })
 
 const trafficUsedPercentage = computed(() => getTrafficUsedPercentage(props.node))
 const trafficUsed = computed(() => getTrafficUsed(props.node))

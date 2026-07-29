@@ -65,8 +65,10 @@ const appStore = useAppStore()
 const nodesStore = useNodesStore()
 const router = useRouter()
 const { record: recordVisitorEvent } = useVisitorAudit()
+const isViewActive = ref(true)
 
 onActivated(() => {
+  isViewActive.value = true
   nextTick(() => {
     if (appStore.homeScrollPosition > 0)
       window.scrollTo({ top: appStore.homeScrollPosition, behavior: 'instant' })
@@ -74,6 +76,7 @@ onActivated(() => {
 })
 
 onDeactivated(() => {
+  isViewActive.value = false
   appStore.homeScrollPosition = window.scrollY
 })
 
@@ -561,6 +564,7 @@ const nodeCardGridClass = computed(() => {
                   <NodeCard
                     :node="node"
                     :reduce-motion="reduceDenseNodeEffects"
+                    :ping-enabled="isViewActive"
                     @click="handleNodeClick(node)"
                     @ping-click="openPingDialog(node)"
                   />
@@ -572,6 +576,7 @@ const nodeCardGridClass = computed(() => {
               :nodes="nodeList"
               :transition-key="appStore.nodeSelectedGroup"
               :sort-reset-key="nodeListSortResetKey"
+              :ping-enabled="isViewActive"
               @click="handleNodeClick"
               @ping-click="openPingDialog"
             />

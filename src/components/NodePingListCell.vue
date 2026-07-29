@@ -4,6 +4,7 @@ import { useNodePingDisplay } from '@/composables/useNodePingDisplay'
 const props = defineProps<{
   uuid: string
   online: boolean
+  enabled: boolean
 }>()
 
 const emit = defineEmits<{
@@ -13,7 +14,7 @@ const emit = defineEmits<{
 const {
   latencyRenderBars,
   lossRenderBars,
-} = useNodePingDisplay(() => props.uuid)
+} = useNodePingDisplay(() => props.uuid, { enabled: () => props.enabled })
 </script>
 
 <template>
