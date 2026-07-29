@@ -20,6 +20,7 @@ export interface VisualFixtureOptions {
   earthRenderer?: 'cobe' | 'realistic' | 'tiled'
   colorVisionFriendly?: boolean
   viewMode?: 'card' | 'list'
+  nodeCardSize?: 'mini' | 'compact' | 'comfortable' | 'large'
   hideEarth?: boolean
 }
 
@@ -283,7 +284,7 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
     dataUpdateInterval: 60,
     rpcTransportMode: 'http',
     defaultViewMode: options.viewMode ?? 'card',
-    nodeCardSize: 'compact',
+    nodeCardSize: options.nodeCardSize ?? 'compact',
     earthRenderer: options.earthRenderer ?? 'realistic',
     hideEarth: options.hideEarth ?? false,
     stopEarth: true,

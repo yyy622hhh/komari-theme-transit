@@ -48,6 +48,13 @@ interface RemainingInfoTag {
   unit?: string
 }
 
+const NODE_METRIC_ICONS = {
+  cpu: 'tabler:cpu',
+  memory: 'icon-park-outline:memory',
+  disk: 'tabler:server-2',
+  traffic: 'tabler:arrows-transfer-up-down',
+} as const
+
 const isMiniNodeCard = computed(() => appStore.nodeCardSize === 'mini')
 const nodeCardXSize = computed(() => appStore.nodeCardSize === 'large' ? 'large' : 'medium')
 const nodeCardContentClass = computed(() => appStore.nodeCardSize === 'large' ? 'gap-4' : isMiniNodeCard.value ? 'gap-2' : 'gap-3')
@@ -261,7 +268,9 @@ function hasRegion(region: string | null | undefined): boolean {
           <div class="grid grid-cols-2 gap-x-3 gap-y-1">
             <div class="flex flex-col gap-1">
               <div class="flex justify-between text-xs">
-                <span class="text-muted-foreground">C</span>
+                <span class="inline-flex items-center text-sky-500" role="img" title="CPU" aria-label="CPU">
+                  <Icon :icon="NODE_METRIC_ICONS.cpu" data-node-metric-icon="cpu" width="12" height="12" aria-hidden="true" />
+                </span>
                 <span class="tabular-nums font-medium">{{ (props.node.cpu ?? 0).toFixed(1) }}%</span>
               </div>
               <ProgressThin :percentage="props.node.cpu ?? 0" :status="cpuStatus" :height="4" />
@@ -269,7 +278,9 @@ function hasRegion(region: string | null | undefined): boolean {
 
             <div class="flex flex-col gap-1" :title="swapTooltip">
               <div class="flex justify-between text-xs">
-                <span class="text-muted-foreground">M</span>
+                <span class="inline-flex items-center text-emerald-500" role="img" title="内存" aria-label="内存">
+                  <Icon :icon="NODE_METRIC_ICONS.memory" data-node-metric-icon="memory" width="12" height="12" aria-hidden="true" />
+                </span>
                 <span class="tabular-nums font-medium">{{ memPercentage.toFixed(1) }}%</span>
               </div>
               <ProgressThin :percentage="memPercentage" :status="memStatus" :height="4" />
@@ -282,7 +293,10 @@ function hasRegion(region: string | null | undefined): boolean {
 
           <div class="flex flex-col gap-1">
             <div class="flex justify-between text-xs">
-              <span class="text-muted-foreground">流量</span>
+              <span class="inline-flex min-w-0 items-center gap-1 text-muted-foreground">
+                <Icon :icon="NODE_METRIC_ICONS.traffic" data-node-metric-icon="traffic" width="12" height="12" class="shrink-0 text-violet-500" aria-hidden="true" />
+                <span class="truncate">流量</span>
+              </span>
               <span class="tabular-nums font-medium" :class="trafficPercentageClass">
                 {{ hasTrafficLimit(props.node) ? `${trafficUsedPercentage.toFixed(1)}%` : '∞' }}
               </span>
@@ -304,7 +318,10 @@ function hasRegion(region: string | null | undefined): boolean {
           <!-- CPU -->
           <div class="flex flex-col gap-1">
             <div class="flex justify-between text-xs">
-              <span class="text-muted-foreground">CPU</span>
+              <span class="inline-flex min-w-0 items-center gap-1 text-muted-foreground">
+                <Icon :icon="NODE_METRIC_ICONS.cpu" data-node-metric-icon="cpu" width="13" height="13" class="shrink-0 text-sky-500" aria-hidden="true" />
+                <span class="truncate">CPU</span>
+              </span>
               <span class="tabular-nums font-medium">{{ (props.node.cpu ?? 0).toFixed(1) }}%</span>
             </div>
             <ProgressThin :percentage="props.node.cpu ?? 0" :status="cpuStatus" :height="4" />
@@ -316,7 +333,10 @@ function hasRegion(region: string | null | undefined): boolean {
           <!-- 内存 -->
           <div class="flex flex-col gap-1" :title="swapTooltip">
             <div class="flex justify-between text-xs">
-              <span class="text-muted-foreground">内存</span>
+              <span class="inline-flex min-w-0 items-center gap-1 text-muted-foreground">
+                <Icon :icon="NODE_METRIC_ICONS.memory" data-node-metric-icon="memory" width="13" height="13" class="shrink-0 text-emerald-500" aria-hidden="true" />
+                <span class="truncate">内存</span>
+              </span>
               <span class="tabular-nums font-medium">{{ memPercentage.toFixed(1) }}%</span>
             </div>
             <ProgressThin :percentage="memPercentage" :status="memStatus" :height="4" />
@@ -328,7 +348,10 @@ function hasRegion(region: string | null | undefined): boolean {
           <!-- 硬盘 -->
           <div class="flex flex-col gap-1">
             <div class="flex justify-between text-xs">
-              <span class="text-muted-foreground">硬盘</span>
+              <span class="inline-flex min-w-0 items-center gap-1 text-muted-foreground">
+                <Icon :icon="NODE_METRIC_ICONS.disk" data-node-metric-icon="disk" width="13" height="13" class="shrink-0 text-orange-500" aria-hidden="true" />
+                <span class="truncate">硬盘</span>
+              </span>
               <span class="tabular-nums font-medium">{{ diskPercentage.toFixed(1) }}%</span>
             </div>
             <ProgressThin :percentage="diskPercentage" :status="diskStatus" :height="4" />
@@ -340,7 +363,10 @@ function hasRegion(region: string | null | undefined): boolean {
           <!-- 流量（分级颜色） -->
           <div class="flex flex-col gap-1">
             <div class="flex justify-between text-xs">
-              <span class="text-muted-foreground">流量</span>
+              <span class="inline-flex min-w-0 items-center gap-1 text-muted-foreground">
+                <Icon :icon="NODE_METRIC_ICONS.traffic" data-node-metric-icon="traffic" width="13" height="13" class="shrink-0 text-violet-500" aria-hidden="true" />
+                <span class="truncate">流量</span>
+              </span>
               <span class="tabular-nums font-medium" :class="trafficPercentageClass">
                 {{ hasTrafficLimit(props.node) ? `${trafficUsedPercentage.toFixed(1)}%` : '∞' }}
               </span>

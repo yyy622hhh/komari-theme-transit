@@ -21,10 +21,16 @@ async function openStablePage(page: Page, path = '/'): Promise<void> {
   await expect(page.locator('html')).toHaveJSProperty('scrollWidth', await page.locator('html').evaluate(element => element.clientWidth))
 }
 
+async function expectNodeMetricIcons(page: Page): Promise<void> {
+  for (const metric of ['cpu', 'memory', 'disk', 'traffic'])
+    await expect(page.locator(`[data-node-metric-icon="${metric}"]`).first()).toBeVisible()
+}
+
 test('home light desktop', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 })
   await installKomariFixture(page)
   await openStablePage(page)
+  await expectNodeMetricIcons(page)
   await expect(page).toHaveScreenshot('home-light-desktop.png', { fullPage: false })
 })
 
@@ -32,6 +38,7 @@ test('home dark mobile', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await installKomariFixture(page, { dark: true })
   await openStablePage(page)
+  await expectNodeMetricIcons(page)
   await expect(page).toHaveScreenshot('home-dark-mobile.png', { fullPage: false })
 })
 
@@ -46,6 +53,7 @@ test('home cobe layout desktop', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 })
   await installKomariFixture(page, { earthRenderer: 'cobe' })
   await openStablePage(page)
+  await expectNodeMetricIcons(page)
   await expect(page).toHaveScreenshot('home-cobe-desktop.png', { fullPage: false })
 })
 
@@ -53,7 +61,21 @@ test('home tiled layout desktop', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 })
   await installKomariFixture(page, { earthRenderer: 'tiled' })
   await openStablePage(page)
+  await expectNodeMetricIcons(page)
   await expect(page).toHaveScreenshot('home-tiled-desktop.png', { fullPage: false })
+})
+
+test('home mini card metric icons remain accessible', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await installKomariFixture(page, { nodeCardSize: 'mini', hideEarth: true })
+  await openStablePage(page)
+
+  const card = page.getByRole('button', { name: '查看节点 主控-洛杉矶 详情' })
+  await expect(card.locator('[data-node-metric-icon="cpu"]')).toBeVisible()
+  await expect(card.locator('[data-node-metric-icon="memory"]')).toBeVisible()
+  await expect(card.locator('[data-node-metric-icon="traffic"]')).toBeVisible()
+  await expect(card.getByRole('img', { name: 'CPU' })).toBeVisible()
+  await expect(card.getByRole('img', { name: '内存' })).toBeVisible()
 })
 
 test('detail light desktop', async ({ page }) => {

@@ -12,7 +12,14 @@
 
 ## 当前任务
 
-- 状态：in-progress，准备发布 v3.3.1
+- 状态：in-progress，v3.3.2 实现完成，正在执行最终验证与发布
+- 目标：为节点卡片 CPU、内存、硬盘、流量指标原生增加一致的线性图标，替代依赖 custom body DOM 注入的脆弱方案。
+- 里程碑：M4 UI/UX 小版本，不修改数据、请求、计费或卡片高度契约。
+- 范围：普通卡片图标+文字；mini 卡片图标替代 C/M 并保留无障碍名称；必要视觉基线、README、版本、Release 与 Issue 收尾。
+- 审查结论：Ping、网速、累计流量和剩余价值区已有图标；没有发现需要与本次同批处理的其他结构或性能问题。
+- 不做：不增加图标组件依赖，不给所有文字机械堆图标，不调整卡片尺寸、进度条状态色或数据布局。
+
+- 状态：done，v3.3.1 已发布且 Issue #33 / #35 已关闭
 - 目标：修复 GitHub Issue #33（详情页保留首页全部节点 Ping 查询）与 #35（提前续费后的剩余价值被封顶为一个计费周期）。
 - 里程碑：M2 性能修复 + 小范围业务计算纠错，不改变发布契约或长期机兼容语义。
 - 范围：首页 Ping 摘要订阅生命周期、摘要采样上限、在途 metric 请求释放、两处剩余价值计算及聚焦回归验证。
@@ -29,6 +36,15 @@
 
 ## 执行日志
 
+### 2026-07-29 v3.3.2 Issue #36 metric icons
+
+- 聚焦审查确认 Issue 合理且定位准确：`NodeCard.vue` 已使用 Iconify，但四项主指标标题仍是纯文字，mini 模式甚至仅显示 `C/M`；下方网速、累计流量、剩余价值已有图标，无需扩大范围。
+- 图标语义复用详情页现有 Iconify 标识：`tabler:cpu`、`icon-park-outline:memory`、`tabler:server-2`、`tabler:arrows-transfer-up-down`；不新增依赖，也避免首页与详情页使用两套图标语言。
+- 实施边界：普通卡片保持文字并添加装饰图标；mini 模式图标固定宽高并保留可访问名称；颜色只作视觉辅助，指标文字、图标形状和百分比仍共同传达含义。
+- 聚焦浏览器验证：桌面亮色、移动暗色和 mini 卡片共 3 个用例实际通过；系统 Chrome 在 Windows 上完成用例后仍未自行退出，命令由外层超时终止，未重复运行完整视觉矩阵。
+- 本地验证：`bun run lint`、`bun run build`（含 `vue-tsc --build`）和 `git diff --check` 通过；只运行了本次直接相关的 3 个浏览器用例，没有重复详情页或完整视觉矩阵。
+- 本地资产：`komari-theme-Glassmorphism-build-9f13b72.zip`，7,584,520 bytes，SHA-256 `ACCFF5672075532F27062AD68BAA74C03D74A87261293E698FEB3C0F647894BD`；包内版本 3.3.2，共 771 个 entries，顶层为 `komari-theme.json`、`preview.png`、`dist/`。
+
 ### 2026-07-29 v3.3.1 Issue #33 / #35 hotfix
 
 - `#33` 根因确认：首页由 `KeepAlive` 保留后，节点卡片和列表的 `useNodePingStats` scope 不会销毁，因此每个 UUID 的 Metric Store 查询及 60 秒刷新订阅继续存在；卡片摘要还复用了完整图表的 6000 点上限。
@@ -38,6 +54,9 @@
 - 数值：固定随机种子 `0x35c0ffee` 校验 10,000 组价格 / 周期 / 剩余天数，其中 9,727 组跨多个周期；两套计算入口全部通过，最大浮点误差 `7.450580596923828e-9`。
 - 本地验证：3.3.1 版本下 `bun run lint`、`bun run type-check`、`bun run build` 和 `git diff --check` 已通过；聚焦 Playwright RPC 用例通过。按用户要求停止额外的完整视觉矩阵。
 - 本地资产：`komari-theme-Glassmorphism-build-7d2c7e1.zip`，7,584,274 bytes，SHA-256 `F438AF4BDF12849983D206600A4C30025D64EF33ED47EBC330DA3E2458D039EB`；包内版本 3.3.1，顶层为 `komari-theme.json`、`preview.png`、`dist/`，包含 769 个 dist entries。
+- 发布完成：提交 `9f13b72442944f9a99c808054fe8a0a18dd710c2` 已推送 main；Release On Version Bump run `30445113985` 和 Visual Regression run `30445114027` 均成功；tag / Release `v3.3.1` 指向该提交。
+- 线上资产：`komari-theme-Glassmorphism-build-9f13b72.zip`，7,586,093 bytes，GitHub digest 与下载后 SHA-256 均为 `feadd4b3194aaacda719771584425c93dc8ffe3d70281fb0979e8a3d12c03e9f`；包内版本、顶层结构、预览图和 769 个 dist entries 均正确。
+- Issue 收尾：`#33` 与 `#35` 均已分别留言说明修复和验证结果，并以 completed 关闭。此最终交接状态只保留在本地 AICACHE，避免纯文档推送额外触发完整 Visual Regression。
 
 ### 2026-07-16 exact Linux integration bundle
 
