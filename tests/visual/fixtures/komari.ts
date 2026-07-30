@@ -21,6 +21,7 @@ export interface VisualFixtureOptions {
   colorVisionFriendly?: boolean
   viewMode?: 'card' | 'list'
   nodeCardSize?: 'mini' | 'compact' | 'comfortable' | 'large'
+  freePriceNode?: boolean
   hideEarth?: boolean
 }
 
@@ -28,7 +29,7 @@ function uuidFor(index: number): string {
   return `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`
 }
 
-function buildClients() {
+function buildClients(freePriceNode = false) {
   return Object.fromEntries(Array.from({ length: 12 }, (_, index) => {
     const fixture = REGION_FIXTURES[index % REGION_FIXTURES.length]
     const uuid = uuidFor(index)
@@ -52,7 +53,7 @@ function buildClients() {
       disk_total: (index % 3 + 1) * 40 * GIB,
       version: '1.2.6-visual',
       weight: index,
-      price: index === 5 ? 0 : 9.9 + index,
+      price: freePriceNode && index === 0 ? -1 : index === 5 ? 0 : 9.9 + index,
       billing_cycle: 365,
       auto_renewal: index % 2 === 0,
       currency: 'USD',
@@ -211,7 +212,7 @@ function jsonRpcResult(id: unknown, result: unknown) {
   return { jsonrpc: '2.0', id, result }
 }
 
-async function handleRpc(route: Route): Promise<void> {
+async function handleRpc(route: Route, clientFixtures = clients): Promise<void> {
   const payload = route.request().postDataJSON() as { id: unknown, method: string, params?: Record<string, unknown> }
   const uuid = typeof payload.params?.uuid === 'string' ? payload.params.uuid : uuidFor(0)
   const pingRecords = Array.from({ length: 48 }, (_, index) => ({ task_id: 1, client: uuid, time: new Date(Date.parse(FIXED_NOW) - (47 - index) * 75_000).toISOString(), value: index % 17 === 0 ? -1 : 76 + index }))
@@ -223,7 +224,7 @@ async function handleRpc(route: Route): Promise<void> {
       result = 'pong'
       break
     case 'common:getNodes':
-      result = clients
+      result = clientFixtures
       break
     case 'common:getNodesLatestStatus':
       result = statuses
@@ -258,7 +259,7 @@ async function handleRpc(route: Route): Promise<void> {
       result = { start: FIXED_NOW, end: FIXED_NOW, interval_seconds: 60, stats: [], count: 0 }
       break
     case 'public:getNodesInformation':
-      result = Object.values(clients)
+      result = Object.values(clientFixtures)
       break
     case 'public:getMe':
       result = { logged_in: false }
@@ -279,6 +280,7 @@ async function handleRpc(route: Route): Promise<void> {
 }
 
 export async function installKomariFixture(page: Page, options: VisualFixtureOptions = {}): Promise<void> {
+  const clientFixtures = options.freePriceNode ? buildClients(true) : clients
   const settings = {
     themeMode: options.dark ? 'dark' : 'light',
     dataUpdateInterval: 60,
@@ -346,7 +348,7 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
     contentType: 'application/json',
     body: JSON.stringify({ status: 'success', message: 'ok', data: { version: '1.2.6-visual', hash: 'visual' } }),
   }))
-  await page.route('**/rpc2', handleRpc)
+  await page.route('**/rpc2', route => handleRpc(route, clientFixtures))
   await page.route('https://ipwho.is/', route => route.fulfill({
     contentType: 'application/json',
     body: JSON.stringify({ success: true, ip: '2001:db8::25', city: 'Tokyo', region: 'Tokyo', country: 'Japan', connection: { org: 'Example Networks' } }),

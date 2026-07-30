@@ -14,7 +14,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import * as financeHelper from '@/utils/financeHelper'
-import { formatPriceWithCycle, getDaysUntilExpired, getExpireStatus, hasFreeNodeTag } from '@/utils/tagHelper'
+import { formatPriceWithCycle, getDaysUntilExpired, getExpireStatus, isFreeNode, isFreePrice } from '@/utils/tagHelper'
 
 type FinanceTab = 'fixed' | 'metered' | 'rates'
 interface UsageSnapshot {
@@ -45,7 +45,7 @@ const emit = defineEmits<{
 }>()
 
 const activeTab = ref<FinanceTab>('fixed')
-const visibleNodes = computed(() => props.nodes.filter(node => !props.excludeFree || !hasFreeNodeTag(node.tags)))
+const visibleNodes = computed(() => props.nodes.filter(node => !props.excludeFree || !isFreeNode(node)))
 const snapshotTakenAt = ref(Date.now())
 const usageSnapshots = ref<Map<string, UsageSnapshot>>(new Map())
 const selectedNodeUuid = ref(visibleNodes.value[0]?.uuid ?? '')
@@ -94,6 +94,10 @@ function formatDisplayAmount(amountCNY: number): string {
     return '汇率不可用'
   const formatted = financeHelper.formatFinanceAmount(amountCNY * displayRate.value, props.currency)
   return `${formatted.symbol}${formatted.value}`
+}
+
+function formatRemainingValue(node: NodeData, amountCNY: number): string {
+  return isFreePrice(node.price) ? '无' : formatDisplayAmount(amountCNY)
 }
 
 function formatOptionalDisplayAmount(amountCNY: number | null): string {
@@ -355,7 +359,7 @@ function formatTraffic(tib: number): string {
                     {{ row.expiryLabel }}
                   </td>
                   <td class="whitespace-nowrap px-3 py-2.5">
-                    {{ formatDisplayAmount(row.remainingCNY) }}
+                    {{ formatRemainingValue(row.node, row.remainingCNY) }}
                   </td>
                   <td class="whitespace-nowrap px-3 py-2.5 text-right font-semibold tabular-nums">
                     {{ formatDisplayAmount(row.monthlyCNY) }}

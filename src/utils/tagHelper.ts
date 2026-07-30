@@ -328,8 +328,16 @@ export function parseTags(tags: string | undefined): Array<{ text: string, color
   })
 }
 
+export function isFreePrice(price: number): boolean {
+  return price === -1
+}
+
 export function hasFreeNodeTag(tags: string | undefined): boolean {
   return parseTags(tags).some(tag => tag.text === '白嫖中')
+}
+
+export function isFreeNode(node: { price: number, tags?: string }): boolean {
+  return isFreePrice(node.price) || hasFreeNodeTag(node.tags)
 }
 
 /**
@@ -340,9 +348,7 @@ export function hasFreeNodeTag(tags: string | undefined): boolean {
  * @returns 价格显示文本
  */
 export function formatPrice(price: number, currency: string = '￥', lang: 'zh-CN' | 'en-US' = 'zh-CN'): string {
-  if (price === 0)
-    return lang === 'zh-CN' ? '免费' : 'Free'
-  if (price === -1)
+  if (price === 0 || isFreePrice(price))
     return lang === 'zh-CN' ? '免费' : 'Free'
   return `${currency}${price}`
 }
@@ -361,6 +367,9 @@ export function formatPriceWithCycle(
   currency: string = '￥',
   lang: 'zh-CN' | 'en-US' = 'zh-CN',
 ): string {
+  if (isFreePrice(price))
+    return formatPrice(price, currency, lang)
+
   const priceText = formatPrice(price, currency, lang)
   const cycleText = getBillingCycleText(billingCycle, lang)
   return `${priceText} / ${cycleText}`

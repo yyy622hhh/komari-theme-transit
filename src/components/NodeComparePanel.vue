@@ -9,7 +9,7 @@ import { useAppStore } from '@/stores/app'
 import { formatBytesPerSecondWithConfig, formatBytesWithConfig, formatUptimeWithFormat } from '@/utils/helper'
 import { getDiskPercentage, getMemoryPercentage, getTrafficUsed, getTrafficUsedPercentage, hasTrafficLimit } from '@/utils/nodeMetricsHelper'
 import { isNodeMatchSearch } from '@/utils/nodeSearch'
-import { formatPriceWithCycle } from '@/utils/tagHelper'
+import { formatPriceWithCycle, isFreePrice } from '@/utils/tagHelper'
 
 interface CompareMetric {
   key: string
@@ -80,7 +80,9 @@ const compareMetrics = computed<CompareMetric[]>(() => {
     metrics.push({
       key: 'price',
       label: '价格',
-      value: node => node.price > 0 ? formatPriceWithCycle(node.price, node.billing_cycle, node.currency, appStore.lang) : '-',
+      value: node => node.price > 0 || isFreePrice(node.price)
+        ? formatPriceWithCycle(node.price, node.billing_cycle, node.currency, appStore.lang)
+        : '-',
     })
   }
   return metrics

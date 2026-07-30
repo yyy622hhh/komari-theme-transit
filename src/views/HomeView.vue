@@ -25,7 +25,7 @@ import {
   isHighLoadNode,
 } from '@/utils/nodeMetricsHelper'
 import { isNodeMatchSearch } from '@/utils/nodeSearch'
-import { hasFreeNodeTag } from '@/utils/tagHelper'
+import { isFreeNode } from '@/utils/tagHelper'
 
 interface QuickControlOption {
   key: HomeQuickControlKey
@@ -170,7 +170,7 @@ watch(
 )
 
 function getNodeMonthlyCostCNY(node: NodeData): number {
-  if (excludeFreeNodes.value && hasFreeNodeTag(node.tags))
+  if (excludeFreeNodes.value && isFreeNode(node))
     return 0
 
   return financeHelper.calculateMonthlyCostCNY(node, exchangeRates.value)

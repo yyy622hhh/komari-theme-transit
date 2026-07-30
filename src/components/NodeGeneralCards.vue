@@ -26,7 +26,7 @@ import {
   isTrafficWarningNode,
 } from '@/utils/nodeMetricsHelper'
 import { getRegionDisplayName } from '@/utils/regionHelper'
-import { hasFreeNodeTag } from '@/utils/tagHelper'
+import { isFreeNode } from '@/utils/tagHelper'
 
 interface GeneralMetricCard {
   key: GeneralCardKey
@@ -183,7 +183,7 @@ function formatExpiryNode(node: NodeData): string {
 }
 
 function getNodePeriodCostCNY(node: NodeData, periodDays: number): number {
-  if (excludeFreeNodes.value && hasFreeNodeTag(node.tags))
+  if (excludeFreeNodes.value && isFreeNode(node))
     return 0
 
   return financeHelper.calculatePeriodCostCNY(node, exchangeRates.value, periodDays)

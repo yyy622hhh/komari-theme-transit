@@ -12,7 +12,13 @@
 
 ## 当前任务
 
-- 状态：in-progress，v3.3.2 实现完成，正在执行最终验证与发布
+- 状态：in-progress，v3.3.3 实现完成，正在执行最终验证与发布
+- 目标：统一 Komari `price = -1` 免费节点语义，移除“免费 / 周期”文案，并让单节点剩余价值显示“无 / N/A”。
+- 里程碑：M4 UI/UX + 小范围业务展示修复；金额计算继续返回数值，不把 `NaN` 作为业务状态。
+- 范围：公共价格 formatter、NodeCard、NodeList、NodeCompare、InstanceDetail、FinanceDetails 及首页财务排除免费节点逻辑；聚焦回归、v3.3.3 Release 和 Issue 收尾。
+- 兼容边界：`price = 0` 现有行为不随本次变更扩大；总剩余价值和总成本中免费节点继续贡献数字 0。
+
+- 状态：done，v3.3.2 已发布且 Issue #36 已关闭
 - 目标：为节点卡片 CPU、内存、硬盘、流量指标原生增加一致的线性图标，替代依赖 custom body DOM 注入的脆弱方案。
 - 里程碑：M4 UI/UX 小版本，不修改数据、请求、计费或卡片高度契约。
 - 范围：普通卡片图标+文字；mini 卡片图标替代 C/M 并保留无障碍名称；必要视觉基线、README、版本、Release 与 Issue 收尾。
@@ -36,6 +42,15 @@
 
 ## 执行日志
 
+### 2026-07-30 v3.3.3 Issue #37 free-node semantics
+
+- 上游 `komari-web` 约定确认：`price = 0` 不展示价格标签，`price = -1` 才显示免费；Issue 两个现象真实存在。
+- 影响范围复核：`tagHelper.getRemainingValue` 仅被 NodeCard 调用；FinanceDetails 与 InstanceDetail 使用 `financeHelper.calculateRemainingValueCNY`，不能靠修改一个数值 helper 自动修复。
+- 实施方案：引入统一免费节点判断；金额计算保持数字 0，NodeCard / FinanceDetails / InstanceDetail 在展示层输出“无 / N/A”；同步修正列表、对比面板和排除免费节点逻辑。
+- 聚焦浏览器验证：首页卡片、排除免费开关、财务表和详情页流程 2.2 秒实际通过；Windows 系统 Chrome 完成用例后未自行退出，命令由外层超时终止。
+- 本地验证：`bun run lint`、`bun run build`（含 `vue-tsc --build`）和 `git diff --check` 通过；未重复运行无关浏览器或完整视觉矩阵。
+- 本地资产：`komari-theme-Glassmorphism-build-2cd56ce.zip`，7,584,641 bytes，SHA-256 `F669E4172869CC7A9B5C40CDFC98D360ACB46C57015EA763CDDB976BF489131E`；包内版本 3.3.3，共 771 个 entries，顶层为 `komari-theme.json`、`preview.png`、`dist/`。
+
 ### 2026-07-29 v3.3.2 Issue #36 metric icons
 
 - 聚焦审查确认 Issue 合理且定位准确：`NodeCard.vue` 已使用 Iconify，但四项主指标标题仍是纯文字，mini 模式甚至仅显示 `C/M`；下方网速、累计流量、剩余价值已有图标，无需扩大范围。
@@ -44,6 +59,9 @@
 - 聚焦浏览器验证：桌面亮色、移动暗色和 mini 卡片共 3 个用例实际通过；系统 Chrome 在 Windows 上完成用例后仍未自行退出，命令由外层超时终止，未重复运行完整视觉矩阵。
 - 本地验证：`bun run lint`、`bun run build`（含 `vue-tsc --build`）和 `git diff --check` 通过；只运行了本次直接相关的 3 个浏览器用例，没有重复详情页或完整视觉矩阵。
 - 本地资产：`komari-theme-Glassmorphism-build-9f13b72.zip`，7,584,520 bytes，SHA-256 `ACCFF5672075532F27062AD68BAA74C03D74A87261293E698FEB3C0F647894BD`；包内版本 3.3.2，共 771 个 entries，顶层为 `komari-theme.json`、`preview.png`、`dist/`。
+- 发布完成：提交 `2cd56ceaad5eb0e292e2c70f7dc3be9cf4155158` 已推送 main；Release On Version Bump run `30452135059` 和 Visual Regression run `30452134859` 均成功；tag / Release `v3.3.2` 指向该提交。
+- 线上资产：`komari-theme-Glassmorphism-build-2cd56ce.zip`，7,592,580 bytes，GitHub digest 与下载后 SHA-256 均为 `f2ef3697197abbf0b10ee09bd7be184051d66ac71770273ab687c65ebf0514cd`；包内版本 3.3.2、771 个 entries 和顶层契约均正确。
+- Issue 收尾：`#36` 已留言说明实现和验证结果，并以 completed 关闭。此最终交接状态只保留在本地 AICACHE，避免纯文档推送额外触发完整 Visual Regression。
 
 ### 2026-07-29 v3.3.1 Issue #33 / #35 hotfix
 

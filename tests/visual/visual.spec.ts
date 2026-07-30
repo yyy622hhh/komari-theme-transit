@@ -78,6 +78,35 @@ test('home mini card metric icons remain accessible', async ({ page }) => {
   await expect(card.getByRole('img', { name: '内存' })).toBeVisible()
 })
 
+test('free node pricing stays semantic across home, finance, and detail', async ({ page }) => {
+  const freeNodeName = '主控-洛杉矶'
+  const freeNodeUuid = '00000000-0000-4000-8000-000000000001'
+  await page.setViewportSize({ width: 1280, height: 720 })
+  await installKomariFixture(page, { freePriceNode: true, hideEarth: true })
+  await openStablePage(page)
+
+  const nodeCard = page.getByRole('button', { name: `查看节点 ${freeNodeName} 详情` })
+  await expect(nodeCard.getByText('免费', { exact: true })).toBeVisible()
+  await expect(nodeCard.getByText('无', { exact: true })).toBeVisible()
+  await expect(nodeCard.getByText('免费 / 年', { exact: true })).toHaveCount(0)
+
+  await page.getByRole('button', { name: '查看剩余价值明细' }).click()
+  const financeDialog = page.getByRole('dialog', { name: '价值与费用明细' })
+  await expect(financeDialog.getByText(freeNodeName, { exact: true })).toHaveCount(0)
+  await financeDialog.getByLabel('排除免费节点').uncheck()
+  const freeNodeRow = financeDialog.getByRole('cell', { name: freeNodeName, exact: true }).locator('..')
+  await expect(freeNodeRow).toBeVisible()
+  await expect(freeNodeRow.getByText('免费', { exact: true })).toBeVisible()
+  await expect(freeNodeRow.getByText('无', { exact: true })).toBeVisible()
+
+  await page.goto(`/instance/${freeNodeUuid}`)
+  await expect(page.getByText('硬件信息', { exact: true })).toBeVisible()
+  await expect(page.getByText('节点价格', { exact: true })).toBeVisible()
+  await expect(page.getByText('剩余价值', { exact: true })).toBeVisible()
+  await expect(page.getByText('无', { exact: true })).toBeVisible()
+  await expect(page.getByText('免费 / 月', { exact: true })).toHaveCount(0)
+})
+
 test('detail light desktop', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 })
   await installKomariFixture(page)

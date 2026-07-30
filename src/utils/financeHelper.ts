@@ -1,5 +1,5 @@
 import type { NodeData } from '@/stores/nodes'
-import { hasFreeNodeTag } from '@/utils/tagHelper'
+import { isFreeNode } from '@/utils/tagHelper'
 
 export type CurrencyCode = 'CNY' | 'USD' | 'HKD' | 'EUR' | 'GBP' | 'JPY' | 'RUB' | 'CHF' | 'INR' | 'VND' | 'THB' | 'CAD'
 export type ExchangeRates = Record<CurrencyCode, number>
@@ -259,7 +259,7 @@ export function calculateTotalRemainingValueCNY(
   now = new Date(),
 ): number {
   return nodes.reduce((sum, node) => {
-    if (excludeFreeTags && hasFreeNodeTag(node.tags))
+    if (excludeFreeTags && isFreeNode(node))
       return sum
 
     return sum + calculateRemainingValueCNY(node, exchangeRates, now)
@@ -272,7 +272,7 @@ export function calculateTotalValueCNY(
   excludeFreeTags = true,
 ): number {
   return nodes.reduce((sum, node) => {
-    if (excludeFreeTags && hasFreeNodeTag(node.tags))
+    if (excludeFreeTags && isFreeNode(node))
       return sum
 
     return sum + getPriceCNY(node, exchangeRates)
@@ -300,7 +300,7 @@ export function calculateTotalMonthlyCostCNY(
   excludeFreeTags = true,
 ): number {
   return nodes.reduce((sum, node) => {
-    if (excludeFreeTags && hasFreeNodeTag(node.tags))
+    if (excludeFreeTags && isFreeNode(node))
       return sum
 
     return sum + calculateMonthlyCostCNY(node, exchangeRates)

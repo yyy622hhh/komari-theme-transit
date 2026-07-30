@@ -22,7 +22,7 @@ import { formatBytesPerSecondWithConfig, formatBytesWithConfig, formatUptimeWith
 import { getOSImage, getOSName } from '@/utils/osImageHelper'
 import { getRegionCode, getRegionDisplayName } from '@/utils/regionHelper'
 
-import { formatPrice, formatPriceWithCycle, getExpireStatus, getExpireText, parseTags } from '@/utils/tagHelper'
+import { formatPrice, formatPriceWithCycle, getExpireStatus, getExpireText, isFreePrice, parseTags } from '@/utils/tagHelper'
 
 const LoadChart = defineAsyncComponent(() => import('@/components/LoadChart.vue'))
 const PingChart = defineAsyncComponent(() => import('@/components/PingChart.vue'))
@@ -246,6 +246,8 @@ const nodePriceText = computed(() => {
 const monthlyAverageCostText = computed(() => {
   if (!data.value)
     return '-'
+  if (isFreePrice(data.value.price))
+    return formatPrice(data.value.price, data.value.currency, appStore.lang)
   const monthlyAverageCost = calculateMonthlyAverageCost(data.value.price, data.value.billing_cycle)
   if (monthlyAverageCost === null)
     return appStore.lang === 'zh-CN' ? '不适用' : 'N/A'
@@ -261,6 +263,8 @@ const remainingTimeText = computed(() => {
 const remainingValueText = computed(() => {
   if (!data.value)
     return '-'
+  if (isFreePrice(data.value.price))
+    return appStore.lang === 'zh-CN' ? '无' : 'N/A'
   const remainingValueCNY = financeHelper.calculateRemainingValueCNY(data.value, exchangeRates.value)
   const targetRate = exchangeRates.value[financeCurrency.value] || 1
   const formattedValue = financeHelper.formatFinanceAmount(remainingValueCNY * targetRate, financeCurrency.value)

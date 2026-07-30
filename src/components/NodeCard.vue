@@ -12,7 +12,7 @@ import { formatBytesPerSecondWithConfig, formatBytesWithConfig, formatDateTime, 
 import { getDiskPercentage, getMemoryPercentage, getTrafficUsed, getTrafficUsedPercentage, hasTrafficLimit } from '@/utils/nodeMetricsHelper'
 import { getOSImage, getOSName } from '@/utils/osImageHelper'
 import { getRegionCode, getRegionDisplayName } from '@/utils/regionHelper'
-import { formatCurrencyValue, formatPriceWithCycle, getDaysUntilExpired, getExpireStatus, getRemainingValue, parseTags } from '@/utils/tagHelper'
+import { formatCurrencyValue, formatPriceWithCycle, getDaysUntilExpired, getExpireStatus, getRemainingValue, isFreePrice, parseTags } from '@/utils/tagHelper'
 
 const props = withDefaults(defineProps<{
   node: NodeData
@@ -166,8 +166,10 @@ const remainingInfoTags = computed<RemainingInfoTag[]>(() => {
   }
 
   if (showPrice.value) {
-    const remainingValue = getRemainingValue(node.price, node.billing_cycle, node.expired_at)
-    items.push({ icon: 'tabler:coins', text: formatCurrencyValue(remainingValue, node.currency) })
+    const text = isFreePrice(node.price)
+      ? lang === 'zh-CN' ? '无' : 'N/A'
+      : formatCurrencyValue(getRemainingValue(node.price, node.billing_cycle, node.expired_at), node.currency)
+    items.push({ icon: 'tabler:coins', text })
   }
   return items
 })
