@@ -26,11 +26,21 @@ async function expectNodeMetricIcons(page: Page): Promise<void> {
     await expect(page.locator(`[data-node-metric-icon="${metric}"]`).first()).toBeVisible()
 }
 
+async function expectNodePingBars(page: Page): Promise<void> {
+  const card = page.getByRole('button', { name: '查看节点 主控-洛杉矶 详情' })
+  for (const metric of ['latency', 'loss']) {
+    const bars = card.locator(`[data-node-ping-bars="${metric}"]`)
+    await expect(bars).toBeVisible()
+    await expect.poll(() => bars.evaluate(element => element.getBoundingClientRect().width)).toBeGreaterThan(0)
+  }
+}
+
 test('home light desktop', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 })
   await installKomariFixture(page)
   await openStablePage(page)
   await expectNodeMetricIcons(page)
+  await expectNodePingBars(page)
   await expect(page).toHaveScreenshot('home-light-desktop.png', { fullPage: false })
 })
 
