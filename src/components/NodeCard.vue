@@ -46,6 +46,7 @@ interface RemainingInfoTag {
   prefix?: string
   value?: string
   unit?: string
+  className?: string
 }
 
 const NODE_METRIC_ICONS = {
@@ -151,18 +152,24 @@ const remainingInfoTags = computed<RemainingInfoTag[]>(() => {
   const days = getDaysUntilExpired(node.expired_at)
   const status = getExpireStatus(node.expired_at)
   const items: RemainingInfoTag[] = []
+  const expiryClass = status === 'expired' || status === 'critical'
+    ? 'text-destructive'
+    : status === 'warning' ? 'text-warning' : 'text-muted-foreground'
 
-  if (status === 'expired') {
-    items.push({ icon: 'tabler:calendar-stats', text: lang === 'zh-CN' ? '已过期' : 'Expired' })
+  if (status === 'unknown') {
+    items.push({ icon: 'tabler:calendar-stats', text: '-', className: expiryClass })
+  }
+  else if (status === 'expired') {
+    items.push({ icon: 'tabler:calendar-stats', text: lang === 'zh-CN' ? '已过期' : 'Expired', className: expiryClass })
   }
   else if (status === 'long_term') {
-    items.push({ icon: 'tabler:calendar-stats', text: lang === 'zh-CN' ? '长期' : 'Long-term' })
+    items.push({ icon: 'tabler:calendar-stats', text: lang === 'zh-CN' ? '长期' : 'Long-term', className: expiryClass })
   }
   else if (lang === 'zh-CN') {
-    items.push({ icon: 'tabler:calendar-stats', prefix: '剩余', value: String(days), unit: '天' })
+    items.push({ icon: 'tabler:calendar-stats', prefix: '剩余', value: String(days), unit: '天', className: expiryClass })
   }
   else {
-    items.push({ icon: 'tabler:calendar-stats', prefix: 'left', value: String(days), unit: 'days' })
+    items.push({ icon: 'tabler:calendar-stats', prefix: 'left', value: String(days), unit: 'days', className: expiryClass })
   }
 
   if (showPrice.value) {
@@ -417,7 +424,8 @@ function hasRegion(region: string | null | undefined): boolean {
             <template v-if="remainingInfoTags.length">
               <div
                 v-for="(item, i) in remainingInfoTags" :key="i"
-                class="text-[11px] text-muted-foreground flex items-center gap-0.5"
+                class="text-[11px] flex items-center gap-0.5"
+                :class="item.className ?? 'text-muted-foreground'"
               >
                 <Icon :icon="item.icon" width="11" height="11" class="shrink-0" />
                 <span v-if="item.text" class="truncate min-w-0 overflow-hidden">{{ item.text }}</span>

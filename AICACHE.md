@@ -12,7 +12,18 @@
 
 ## 当前任务
 
-- 状态：in-progress，v3.3.3 实现完成，正在执行最终验证与发布
+- 状态：in-progress，v3.3.4 已实现并完成本地验证，正在发布
+- 目标：节点卡片剩余 5 天内标红、6–10 天标黄；审计并修复详情页 4 小时 / 1 天历史视图 CPU 空白或异常显示。
+- 里程碑：M4 UI/UX + 兼容性修复，不修改计费计算、实时指标或后端接口契约。
+- 范围：共享到期阈值、NodeCard 到期提示、LoadChart 指标历史回退、确定性 Playwright 回归检查。
+- 已确认缺陷：指标历史当前只检查“任意序列有点”，CPU 序列缺失或全空时仍会压过 `common:getRecords` 兼容数据，导致 CPU 图表无有效数值。
+- 实现：共享阈值改为 5 天红色、10 天黄色；NodeCard 对到期状态着色并把无效日期显示为 `-`；短时历史缺少有效 CPU 点时回退 `common:getRecords`，同时保留新指标接口返回的 Ping 等独立序列；兼容记录的运行时数值先过滤非有限值再进入图表。
+- 回归：新增固定时钟下的 5/10 天边界颜色检查，以及新指标接口缺少 `cpu.usage` 时 4 小时 / 1 天 CPU 兼容回退检查。
+- 验证：`bun run lint`、`bun run build`、后续 `bun run build-only` 和 `git diff --check` 通过；构建产物 `komari-theme-Glassmorphism-build-b56ef97.zip` 保持 `komari-theme.json`、`preview.png`、`dist/` 顶层契约。
+- 浏览器：系统 Chrome 两条聚焦用例均执行完且无失败产物，Windows Chrome 在测试结束后的关闭阶段未自行退出，由 120 秒外层超时终止；应用内浏览器确认 Vite 入口可装载，本机未运行 `127.0.0.1:25774` Komari 后端，因此普通开发页的 API/RPC 代理按预期返回 500，实际数据视图由确定性 mock 用例覆盖。
+- 发布目标：`komari-theme.json` 与 README 已同步至 v3.3.4；发布提交仅包含本次修复、测试、版本和文档，不包含工作区原有预览图删除及本地目录。
+
+- 状态：done，v3.3.3 已发布且 Issue #37 已关闭
 - 目标：统一 Komari `price = -1` 免费节点语义，移除“免费 / 周期”文案，并让单节点剩余价值显示“无 / N/A”。
 - 里程碑：M4 UI/UX + 小范围业务展示修复；金额计算继续返回数值，不把 `NaN` 作为业务状态。
 - 范围：公共价格 formatter、NodeCard、NodeList、NodeCompare、InstanceDetail、FinanceDetails 及首页财务排除免费节点逻辑；聚焦回归、v3.3.3 Release 和 Issue 收尾。
@@ -50,6 +61,9 @@
 - 聚焦浏览器验证：首页卡片、排除免费开关、财务表和详情页流程 2.2 秒实际通过；Windows 系统 Chrome 完成用例后未自行退出，命令由外层超时终止。
 - 本地验证：`bun run lint`、`bun run build`（含 `vue-tsc --build`）和 `git diff --check` 通过；未重复运行无关浏览器或完整视觉矩阵。
 - 本地资产：`komari-theme-Glassmorphism-build-2cd56ce.zip`，7,584,641 bytes，SHA-256 `F669E4172869CC7A9B5C40CDFC98D360ACB46C57015EA763CDDB976BF489131E`；包内版本 3.3.3，共 771 个 entries，顶层为 `komari-theme.json`、`preview.png`、`dist/`。
+- 发布完成：提交 `63a1d0166e7bf9ab4bb29b003f3549fcdeb5a27f` 已推送 main；Release On Version Bump run `30530144758` 和 Visual Regression run `30530144811` 均成功；tag / Release `v3.3.3` 指向该提交。
+- 线上资产：`komari-theme-Glassmorphism-build-63a1d01.zip`，7,592,709 bytes，GitHub digest 与下载后 SHA-256 均为 `01a1d0111b0405f0ffaa280070d77e0dfe46bdd728edf0dbe7396a93be3ff249`；包内版本 3.3.3、771 个 entries 和顶层契约均正确。
+- Issue 收尾：`#37` 已留言说明实现与验证结果，并以 completed 关闭。此最终交接状态只保留在本地 AICACHE，避免纯文档推送额外触发完整 Visual Regression。
 
 ### 2026-07-29 v3.3.2 Issue #36 metric icons
 

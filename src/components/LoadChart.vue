@@ -294,33 +294,33 @@ function statusToRecordFormat(records: StatusRecord[]): RecordFormat[] {
     return {
       client: r.client,
       time: r.time,
-      cpu: r.cpu ?? null,
-      gpu: r.gpu_average_usage ?? r.gpu ?? null,
-      gpu_usage: r.gpu_average_usage ?? r.gpu ?? null,
+      cpu: metricValue(r.cpu),
+      gpu: metricValue(r.gpu_average_usage ?? r.gpu),
+      gpu_usage: metricValue(r.gpu_average_usage ?? r.gpu),
       gpu_memory: null,
       gpu_detailed: gpuDetailed,
-      ram: r.ram ?? null,
-      ram_total: r.ram_total ?? null,
-      swap: r.swap ?? null,
-      swap_total: r.swap_total ?? null,
-      load: r.load ?? null,
-      temp: r.temp ?? null,
-      disk: r.disk ?? null,
-      disk_total: r.disk_total ?? null,
-      net_in: r.net_in ?? null,
-      net_out: r.net_out ?? null,
-      net_total_up: r.net_total_up ?? null,
-      net_total_down: r.net_total_down ?? null,
-      traffic_up: r.traffic_up ?? null,
-      traffic_down: r.traffic_down ?? null,
-      process: r.process ?? null,
-      connections: r.connections ?? null,
-      connections_udp: r.connections_udp ?? null,
+      ram: metricValue(r.ram),
+      ram_total: metricValue(r.ram_total),
+      swap: metricValue(r.swap),
+      swap_total: metricValue(r.swap_total),
+      load: metricValue(r.load),
+      temp: metricValue(r.temp),
+      disk: metricValue(r.disk),
+      disk_total: metricValue(r.disk_total),
+      net_in: metricValue(r.net_in),
+      net_out: metricValue(r.net_out),
+      net_total_up: metricValue(r.net_total_up),
+      net_total_down: metricValue(r.net_total_down),
+      traffic_up: metricValue(r.traffic_up),
+      traffic_down: metricValue(r.traffic_down),
+      process: metricValue(r.process),
+      connections: metricValue(r.connections),
+      connections_udp: metricValue(r.connections_udp),
     }
   })
 }
 
-function metricValue(value: number | null | undefined): number | null {
+function metricValue(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
@@ -665,14 +665,15 @@ async function fetchHistoryData() {
 
   try {
     const metricHistory = await loadMetricHistoryRecords(metricParams).catch(() => null)
-    if (metricHistory) {
+    const hasCpuHistory = metricHistory?.records.some(record => record.cpu !== null && Number.isFinite(record.cpu)) ?? false
+    if (metricHistory && hasCpuHistory) {
       metricData.value = metricHistory.records
       rawMetricSeries.value = metricHistory.series
       remoteData.value = []
     }
     else {
       metricData.value = null
-      rawMetricSeries.value = []
+      rawMetricSeries.value = metricHistory?.series ?? []
       remoteData.value = await loadNodeLoadRecords(props.uuid, hours, LOAD_RECORD_MAX_COUNT)
     }
   }
@@ -1575,7 +1576,7 @@ onMounted(() => {
     <!-- 时间选择器 -->
     <div class="flex flex-col items-center gap-2">
       <Tabs v-model="selectedView" class="w-full items-center">
-        <TabsList class="h-8 bg-background/50 backdrop-blur-xl pointer-events-auto rounded-md">
+        <TabsList class="h-8 bg-background/50 backdrop-blur-xl pointer-events-auto rounded-md" data-load-chart-range>
           <TabsTrigger
             v-for="view in availableViews" :key="view.label" :value="view.label"
             class="h-6.5 text-xs border-none data-[state=active]:text-green-600 shadow-none rounded-sm"
@@ -1628,11 +1629,11 @@ onMounted(() => {
       <!-- 图表网格 -->
       <div v-else class="gap-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3">
         <!-- CPU 卡片 -->
-        <CardX v-if="isChartCardEnabled('cpu')" size="small" class="bg-background/50 border-none hover:bg-background transition-all rounded-md" :style="getChartCardStyle('cpu')">
+        <CardX v-if="isChartCardEnabled('cpu')" size="small" class="bg-background/50 border-none hover:bg-background transition-all rounded-md" data-load-chart-card="cpu" :style="getChartCardStyle('cpu')">
           <template #header>
             <MetricChartHeader title="CPU 与负载" icon="tabler:cpu" tone="rose">
               <div v-if="latestStatus?.cpu != null" class="text-xs flex gap-0.5 items-baseline">
-                <span>{{ latestStatus.cpu.toFixed(1) }}</span>
+                <span data-latest-cpu>{{ latestStatus.cpu.toFixed(1) }}</span>
                 <span>%</span>
               </div>
               <span v-else>-</span>
