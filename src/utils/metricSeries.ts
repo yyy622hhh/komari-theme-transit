@@ -114,26 +114,19 @@ export function pingTaskName(value: { tag?: Record<string, unknown>, tags?: Reco
   return directName?.trim() || stringifyTagValue(tags.task_name || tags.name || tags.task) || pingTaskId(value)
 }
 
-/** Keep metric lines aligned with Komari's Ping task weight order. */
-export function comparePingTaskOrder(
-  leftTags: Record<string, unknown> | undefined,
-  rightTags: Record<string, unknown> | undefined,
-  tasks: ReadonlyMap<string, PingTaskInfo>,
-): number {
-  const leftId = pingTaskId({ tags: leftTags })
-  const rightId = pingTaskId({ tags: rightTags })
-  const leftTask = leftId ? tasks.get(leftId) : undefined
-  const rightTask = rightId ? tasks.get(rightId) : undefined
+export function createPingTaskOrderMap(tasks: readonly Pick<PingTaskInfo, 'id'>[]): Map<string, number> {
+  return new Map(tasks.map((task, index) => [String(task.id), index]))
+}
 
-  if (leftTask && rightTask) {
-    const weightDelta = (leftTask.weight ?? 0) - (rightTask.weight ?? 0)
-    if (weightDelta !== 0)
-      return weightDelta
-    return leftTask.id - rightTask.id
-  }
-  if (leftTask)
+function comparePingTaskIds(leftId: string, rightId: string, taskOrder: ReadonlyMap<string, number>): number {
+  const leftIndex = taskOrder.get(leftId)
+  const rightIndex = taskOrder.get(rightId)
+
+  if (leftIndex !== undefined && rightIndex !== undefined)
+    return leftIndex - rightIndex
+  if (leftIndex !== undefined)
     return -1
-  if (rightTask)
+  if (rightIndex !== undefined)
     return 1
   if (leftId === rightId)
     return 0
@@ -142,6 +135,25 @@ export function comparePingTaskOrder(
   if (!rightId)
     return -1
   return leftId.localeCompare(rightId, undefined, { numeric: true })
+}
+
+/** Keep metric lines aligned with the ordered task list returned by Komari. */
+export function comparePingTaskOrder(
+  leftTags: Record<string, unknown> | undefined,
+  rightTags: Record<string, unknown> | undefined,
+  taskOrder: ReadonlyMap<string, number>,
+): number {
+  const leftId = pingTaskId({ tags: leftTags })
+  const rightId = pingTaskId({ tags: rightTags })
+  return comparePingTaskIds(leftId, rightId, taskOrder)
+}
+
+export function orderPingTasksByBackend<T extends Pick<PingTaskInfo, 'id'>>(
+  tasks: readonly T[],
+  backendTasks: readonly Pick<PingTaskInfo, 'id'>[],
+): T[] {
+  const taskOrder = createPingTaskOrderMap(backendTasks)
+  return [...tasks].sort((left, right) => comparePingTaskIds(String(left.id), String(right.id), taskOrder))
 }
 
 export function pingMetricStatKey(stat: Pick<PingMetricTaskStats, 'entity_id' | 'task_id'>): string {

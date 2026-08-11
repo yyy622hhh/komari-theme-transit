@@ -23,7 +23,7 @@ import { useAppStore } from '@/stores/app'
 import { useNodesStore } from '@/stores/nodes'
 import { getChartSeriesPalette, getLoadChartPalette } from '@/utils/chartPalette'
 import { formatBytes, formatBytesSplit } from '@/utils/helper'
-import { comparePingTaskOrder, metricTags, normalizeMetricSeriesList } from '@/utils/metricSeries'
+import { comparePingTaskOrder, createPingTaskOrderMap, metricTags, normalizeMetricSeriesList } from '@/utils/metricSeries'
 import { fillMissingTimePoints } from '@/utils/recordHelper'
 import { getSharedRpc } from '@/utils/rpc'
 import '@/utils/echarts' // 共享 ECharts 配置
@@ -746,6 +746,7 @@ watchEffect(() => {
 })
 
 const pingTaskMap = computed(() => new Map(pingTasks.value.map(task => [String(task.id), task])))
+const pingTaskOrder = computed(() => createPingTaskOrderMap(pingTasks.value))
 
 function seriesHasData(series: MetricChartSeriesData): boolean {
   return series.data.some(([, value]) => value !== null && Number.isFinite(value))
@@ -820,7 +821,7 @@ const temperatureChartSeries = computed<MetricChartSeriesData[]>(() => {
 function pingSeries(metricKey: 'ping.latency_ms' | 'ping.loss'): MetricChartSeriesData[] {
   return rawMetricSeries.value
     .filter(series => series.metric_key === metricKey)
-    .sort((left, right) => comparePingTaskOrder(metricTags(left), metricTags(right), pingTaskMap.value))
+    .sort((left, right) => comparePingTaskOrder(metricTags(left), metricTags(right), pingTaskOrder.value))
     .map<MetricChartSeriesData>((series, index) => {
       const tags = metricTags(series)
       const taskId = String(tags.task_id ?? tags.task ?? '')

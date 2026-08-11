@@ -201,3 +201,16 @@ test('detail ping requests stay scoped to the current node', async ({ page }) =>
   expect(detailPingCalls.length).toBeGreaterThan(0)
   expect(new Set(detailPingCalls.map(call => call.params.entity_id))).toEqual(new Set([currentUuid]))
 })
+
+test('detail ping tasks follow the backend task order', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 })
+  await installKomariFixture(page, { pingTaskOrdering: true })
+  await openStablePage(page, '/instance/00000000-0000-4000-8000-000000000001')
+
+  const taskCards = page.locator('[data-ping-task-id]')
+  await expect(taskCards).toHaveCount(3)
+  await expect(taskCards.first()).toHaveAttribute('data-ping-task-id', '30')
+  await expect(taskCards.nth(1)).toHaveAttribute('data-ping-task-id', '10')
+  await expect(taskCards.nth(2)).toHaveAttribute('data-ping-task-id', '20')
+  await expect(taskCards).toContainText(['浙江移动', '浙江联通', '浙江电信'])
+})

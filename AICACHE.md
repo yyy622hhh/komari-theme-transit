@@ -12,7 +12,17 @@
 
 ## 当前任务
 
-- 状态：in-progress，v3.3.4 已实现并完成本地验证，正在发布
+- 状态：in-progress，本地修复与验证完成，正在发布 v3.3.5
+- 目标：修复详情页延迟任务卡片、图例和主页 Ping 指标线与 Komari 后台任务排序不一致的问题。
+- 里程碑：M4 UI/UX 兼容性修复，不修改后端任务权重或接口契约。
+- 已确认缺陷：后端 `GetAllPingTasks()` 明确按 `weight ASC, id ASC` 返回；主页重新计算该规则，详情页新版指标路径却按 `getPingMetricStats` 的无保证数组顺序重建任务，可能与后台错位。
+- 实现：共享排序工具改为使用 `public:getPublicPingTasks` 返回数组索引；LoadChart 的 Ping 指标线和 PingChart 新指标路径重建的任务卡片、图例、颜色均使用该顺序；指标接口独有的未知任务按数值 ID 稳定追加。
+- 回归：夹具构造后台 `30,10,20`、指标统计 `20,30,10`、ID 自然顺序 `10,20,30` 三套冲突次序；直接排序断言通过，Playwright 能收集到详情页卡片顺序用例。
+- 验证：`bun run type-check`、涉及文件 ESLint、`bun run lint`、`bun run build`、`git diff --check` 均通过；生成 `komari-theme-Glassmorphism-build-e212925.zip`，顶层仍为 `komari-theme.json`、`preview.png`、`dist/`。
+- 浏览器限制：托管 Chromium 可执行文件未安装；系统 Chrome 能启动唯一用例但在 Windows 驱动生命周期中停住直至 120 秒外层超时，没有返回断言结果。内置浏览器可加载本地预览，但不能复用 RPC mock，且本机没有 Komari 后端，因此未把该页面作为数据回归证据。
+- 发布目标：`komari-theme.json` 与 README 同步至 v3.3.5；提交只包含 Ping 排序实现、回归夹具、版本和发布文档，排除工作区原有预览图删除与本地目录。
+
+- 状态：done，v3.3.4 已发布
 - 目标：节点卡片剩余 5 天内标红、6–10 天标黄；审计并修复详情页 4 小时 / 1 天历史视图 CPU 空白或异常显示。
 - 里程碑：M4 UI/UX + 兼容性修复，不修改计费计算、实时指标或后端接口契约。
 - 范围：共享到期阈值、NodeCard 到期提示、LoadChart 指标历史回退、确定性 Playwright 回归检查。
@@ -22,6 +32,8 @@
 - 验证：`bun run lint`、`bun run build`、后续 `bun run build-only` 和 `git diff --check` 通过；构建产物 `komari-theme-Glassmorphism-build-b56ef97.zip` 保持 `komari-theme.json`、`preview.png`、`dist/` 顶层契约。
 - 浏览器：系统 Chrome 两条聚焦用例均执行完且无失败产物，Windows Chrome 在测试结束后的关闭阶段未自行退出，由 120 秒外层超时终止；应用内浏览器确认 Vite 入口可装载，本机未运行 `127.0.0.1:25774` Komari 后端，因此普通开发页的 API/RPC 代理按预期返回 500，实际数据视图由确定性 mock 用例覆盖。
 - 发布目标：`komari-theme.json` 与 README 已同步至 v3.3.4；发布提交仅包含本次修复、测试、版本和文档，不包含工作区原有预览图删除及本地目录。
+- 发布完成：提交 `e2129252b358fcbc42d1fe445b736df2b8003f8c` 已推送 `main`；Release On Version Bump run `31414499653` 与 Visual Regression run `31414499655` 均成功，tag / Release `v3.3.4` 指向该提交。
+- 线上资产：`komari-theme-Glassmorphism-build-e212925.zip`，7,593,495 bytes；GitHub digest 与下载后 SHA-256 均为 `6DE5F47E8EB4178572C3B78117481403EB68A8858C7A1DBDDC0D2F004CC37693`，包内版本 3.3.4、771 个 entries，顶层契约完整。此最终交接状态只保留在本地，避免纯文档推送再次触发工作流。
 
 - 状态：done，v3.3.3 已发布且 Issue #37 已关闭
 - 目标：统一 Komari `price = -1` 免费节点语义，移除“免费 / 周期”文案，并让单节点剩余价值显示“无 / N/A”。
@@ -52,6 +64,12 @@
 - 不做：不把 Glassmorphism 默认主题替换混入计费 PR #604；不发布测试构建为正式 Release；不构建 Windows 包。
 
 ## 执行日志
+
+### 2026-08-11 Ping task order parity
+
+- 官方源码与测试确认 `GetAllPingTasks()` 按 `weight ASC, id ASC` 查询，公开任务接口与旧 Ping 记录接口都保留此顺序；新版 `getPingMetricStats` 结果没有等价排序保证。
+- 修复不再在前端复制后端权重规则，而是以公开任务接口的数组位置作为顺序来源，使主页与详情页在后端未来调整排序实现时仍保持一致。
+- 聚焦 Bun 断言结果为 `30,10,20`，Playwright `--list` 确认新增用例被收集；本机浏览器执行限制已记录在当前任务，CI 可使用仓库的托管 Chromium 完成最终浏览器回归。
 
 ### 2026-07-30 v3.3.3 Issue #37 free-node semantics
 

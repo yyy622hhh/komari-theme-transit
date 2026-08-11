@@ -25,6 +25,7 @@ export interface VisualFixtureOptions {
   hideEarth?: boolean
   expiryThresholds?: boolean
   missingCpuMetricHistory?: boolean
+  pingTaskOrdering?: boolean
 }
 
 function uuidFor(index: number): string {
@@ -197,22 +198,35 @@ function metricValue(key: string, index: number): number {
   return values[key] ?? 0
 }
 
-function buildMetricResponse(payload: Record<string, unknown>, missingCpuMetricHistory = false) {
+function buildMetricResponse(
+  payload: Record<string, unknown>,
+  options: VisualFixtureOptions,
+  pingTasks: Array<{ id: number, name: string }>,
+) {
   const requested = Array.isArray(payload.metric_keys) ? payload.metric_keys.map(String) : METRIC_KEYS
   const uuid = typeof payload.entity_id === 'string' ? payload.entity_id : uuidFor(0)
   const points = Array.from({ length: 48 }, (_, index) => ({
     time: new Date(Date.parse(FIXED_NOW) - (47 - index) * 75_000).toISOString(),
     index,
   }))
+  const metricPingTasks = options.pingTaskOrdering
+    ? [pingTasks[2]!, pingTasks[0]!, pingTasks[1]!]
+    : pingTasks
   const series = requested
-    .filter(key => !missingCpuMetricHistory || key !== 'cpu.usage')
-    .map(key => ({
-      metric_key: key,
-      entity_id: uuid,
-      type: 'gauge',
-      tags: key.startsWith('ping.') ? { task_id: '1', task_name: 'Tokyo' } : {},
-      points: points.map(point => ({ time: point.time, value: metricValue(key, point.index) })),
-    }))
+    .filter(key => !options.missingCpuMetricHistory || key !== 'cpu.usage')
+    .flatMap((key) => {
+      const taskList = key.startsWith('ping.') ? metricPingTasks : [null]
+      return taskList.map(task => ({
+        metric_key: key,
+        entity_id: uuid,
+        type: 'gauge',
+        tags: task ? { task_id: String(task.id), task_name: task.name } : {},
+        points: points.map(point => ({
+          time: point.time,
+          value: metricValue(key, point.index) + (task?.id ?? 0),
+        })),
+      }))
+    })
   return { start: points[0].time, end: points.at(-1)?.time, series, count: series.length }
 }
 
@@ -223,8 +237,22 @@ function jsonRpcResult(id: unknown, result: unknown) {
 async function handleRpc(route: Route, clientFixtures = clients, options: VisualFixtureOptions = {}): Promise<void> {
   const payload = route.request().postDataJSON() as { id: unknown, method: string, params?: Record<string, unknown> }
   const uuid = typeof payload.params?.uuid === 'string' ? payload.params.uuid : uuidFor(0)
-  const pingRecords = Array.from({ length: 48 }, (_, index) => ({ task_id: 1, client: uuid, time: new Date(Date.parse(FIXED_NOW) - (47 - index) * 75_000).toISOString(), value: index % 17 === 0 ? -1 : 76 + index }))
-  const pingTasks = [{ id: 1, name: 'Tokyo', interval: 60, loss: 3.2, weight: 1 }]
+  const pingTasks = options.pingTaskOrdering
+    ? [
+        { id: 30, name: '浙江移动', interval: 60, loss: 0, weight: 0 },
+        { id: 10, name: '浙江联通', interval: 60, loss: 0, weight: 1 },
+        { id: 20, name: '浙江电信', interval: 60, loss: 0, weight: 2 },
+      ]
+    : [{ id: 1, name: 'Tokyo', interval: 60, loss: 3.2, weight: 1 }]
+  const metricPingTasks = options.pingTaskOrdering
+    ? [pingTasks[2]!, pingTasks[0]!, pingTasks[1]!]
+    : pingTasks
+  const pingRecords = pingTasks.flatMap(task => Array.from({ length: 48 }, (_, index) => ({
+    task_id: task.id,
+    client: uuid,
+    time: new Date(Date.parse(FIXED_NOW) - (47 - index) * 75_000).toISOString(),
+    value: index % 17 === 0 ? -1 : 76 + index + task.id,
+  })))
   let result: unknown
 
   switch (payload.method) {
@@ -261,10 +289,32 @@ async function handleRpc(route: Route, clientFixtures = clients, options: Visual
       result = METRIC_KEYS.map(name => ({ name, description: name, type: 'gauge', retention_days: 30 }))
       break
     case 'public:queryMetrics':
-      result = buildMetricResponse(payload.params ?? {}, options.missingCpuMetricHistory)
+      result = buildMetricResponse(payload.params ?? {}, options, pingTasks)
       break
     case 'public:getPingMetricStats':
-      result = { start: FIXED_NOW, end: FIXED_NOW, interval_seconds: 60, stats: [], count: 0 }
+      result = options.pingTaskOrdering
+        ? {
+            start: FIXED_NOW,
+            end: FIXED_NOW,
+            interval_seconds: 60,
+            stats: metricPingTasks.map(task => ({
+              entity_id: uuid,
+              task_id: String(task.id),
+              name: task.name,
+              interval: task.interval,
+              tags: { task_id: String(task.id), task_name: task.name },
+              total: 48,
+              valid: 48,
+              loss: 0,
+              loss_approximate: false,
+              min: 40 + task.id,
+              max: 120 + task.id,
+              avg: 80 + task.id,
+              latest: 90 + task.id,
+            })),
+            count: metricPingTasks.length,
+          }
+        : { start: FIXED_NOW, end: FIXED_NOW, interval_seconds: 60, stats: [], count: 0 }
       break
     case 'public:getNodesInformation':
       result = Object.values(clientFixtures)
