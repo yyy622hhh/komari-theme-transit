@@ -52,6 +52,26 @@ test('home dark mobile', async ({ page }) => {
   await expect(page).toHaveScreenshot('home-dark-mobile.png', { fullPage: false })
 })
 
+test('PandaOps desktop topology and cards remain contained', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, { pandaOps: true, dark: true })
+  await openStablePage(page)
+
+  await expect(page.getByRole('heading', { name: '线路状态' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '查看线路历史' })).toHaveCount(2)
+  await expect(page.getByRole('button', { name: '查看节点 主控-洛杉矶 详情' })).toBeVisible()
+  await expect(page.locator('html')).toHaveJSProperty('scrollWidth', await page.locator('html').evaluate(element => element.clientWidth))
+})
+
+test('PandaOps mobile keeps document width contained', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await installKomariFixture(page, { pandaOps: true, dark: true })
+  await openStablePage(page)
+
+  await expect(page.getByRole('heading', { name: '线路状态' })).toBeVisible()
+  await expect(page.locator('html')).toHaveJSProperty('scrollWidth', await page.locator('html').evaluate(element => element.clientWidth))
+})
+
 test('home accessible list desktop', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 })
   await installKomariFixture(page, { colorVisionFriendly: true, viewMode: 'list', hideEarth: true })

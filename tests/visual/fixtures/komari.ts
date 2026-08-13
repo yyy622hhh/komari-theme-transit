@@ -26,6 +26,7 @@ export interface VisualFixtureOptions {
   expiryThresholds?: boolean
   missingCpuMetricHistory?: boolean
   pingTaskOrdering?: boolean
+  pandaOps?: boolean
 }
 
 function uuidFor(index: number): string {
@@ -358,6 +359,15 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
     homeQuickControlsEnabled: true,
     homeQuickControlPreset: '完整',
     homeToolsEnabled: true,
+    opsDashboardEnabled: options.pandaOps ?? false,
+    topologyEnabled: options.pandaOps ?? false,
+    carrierPingRegion: 'all',
+    topologyRoute: options.pandaOps
+      ? '北京电信|CN|入口;主控-洛杉矶|US|线路机;香港边缘节点-超长名称布局测试|HK|落地机||北京电信|CN|入口;东京-高负载|JP|线路机;新加坡-A100|SG|落地机'
+      : '',
+    topologyMetrics: options.pandaOps
+      ? 'live@主控-洛杉矶@Tokyo@51@0;84,0||live@东京-高负载@Tokyo@72@0;live@东京-高负载@Tokyo@88@0'
+      : '',
   }
 
   await page.addInitScript(({ fixedNow }) => {
@@ -394,7 +404,7 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
         record_preserve_time: 720,
         ping_record_preserve_time: 720,
         sitename: 'Komari Visual Lab',
-        theme: 'Glassmorphism',
+        theme: options.pandaOps ? 'PandaOps' : 'Glassmorphism',
         theme_settings: settings,
         visitor_audit_enabled: false,
       },
