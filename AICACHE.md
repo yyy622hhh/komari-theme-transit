@@ -680,3 +680,11 @@
 - Each segment now scales recent samples against its own median baseline. This preserves within-segment jitter while avoiding a misleading visual cliff between a long-haul hop and a low-latency local hop.
 - Exact latency, packet loss, timestamp and segment identity remain available in the sample tooltip. Unavailable samples retain a visible 48% marker rather than collapsing into a dot that resembles very low latency.
 - Browser coverage constrains rendered stability heights to the deliberate 48-96% scale and verifies segment grouping.
+
+## 2026-08-13 PandaOps inline edge samples
+
+- Status: done (M4/M6), release version `3.3.5-panda.11`.
+- Removed the separate trailing stability column from every topology row. Route health remains represented by the semantic row dot and the aggregate header summary.
+- Each route segment now owns its six recent samples directly inside the two connector rails surrounding that segment's latency/loss value. Older samples sit on the left rail and newer samples on the right rail.
+- Hover/focus tooltips retain exact segment, latency, packet loss and timestamp data. Clicking either segment metric opens the existing full route history dialog, preserving detailed inspection without a trailing chevron block.
+- Segment health is now emitted by `TopologyEdgeMetric`, eliminating the duplicate ping-stat observer previously required by `TopologyStability`.

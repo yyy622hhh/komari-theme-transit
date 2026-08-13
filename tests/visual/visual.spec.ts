@@ -58,11 +58,9 @@ test('PandaOps desktop topology and cards remain contained', async ({ page }) =>
   await openStablePage(page)
 
   await expect(page.getByRole('heading', { name: '线路状态' })).toBeVisible()
-  await expect(page.getByRole('button', { name: '查看线路历史' })).toHaveCount(2)
-  for (const status of await page.locator('[data-topology-status]').all()) {
-    await expect(status).toHaveCSS('white-space', 'nowrap')
-    await expect.poll(() => status.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
-  }
+  const historyButtons = page.getByRole('button', { name: '查看线路历史' })
+  await expect(historyButtons).toHaveCount(4)
+  await expect(page.locator('[data-topology-status]')).toHaveCount(0)
   for (const line of await page.locator('[data-topology-edge-line]').all()) {
     await expect.poll(() => line.evaluate(element => element.getBoundingClientRect().width)).toBeGreaterThan(7)
     await expect.poll(() => line.evaluate(element => element.getBoundingClientRect().width)).toBeLessThanOrEqual(64)
@@ -70,14 +68,14 @@ test('PandaOps desktop topology and cards remain contained', async ({ page }) =>
   const samples = page.locator('[data-topology-sample]')
   await expect.poll(() => samples.count()).toBeGreaterThan(0)
   const sampleHeights = await samples.evaluateAll(elements => elements.map(element => Number(element.getAttribute('data-topology-sample-height'))))
-  expect(sampleHeights.every(height => height >= 48 && height <= 96)).toBe(true)
-  const segmentGroups = page.locator('[data-topology-segment-group]')
+  expect(sampleHeights.every(height => height >= 6 && height <= 11)).toBe(true)
+  const segmentGroups = page.locator('[data-topology-edge-samples]')
   await expect(segmentGroups).toHaveCount(3)
   const averageRenderedHeight = async (groupIndex: number) => {
     const heights = await segmentGroups.nth(groupIndex).locator('[data-topology-sample]').evaluateAll(elements => elements.map(element => Number(element.getAttribute('data-topology-sample-height'))))
     return heights.reduce((sum, height) => sum + height, 0) / heights.length
   }
-  expect(Math.abs(await averageRenderedHeight(1) - await averageRenderedHeight(2))).toBeLessThan(12)
+  expect(Math.abs(await averageRenderedHeight(1) - await averageRenderedHeight(2))).toBeLessThan(3)
   await expect(segmentGroups.nth(1).locator('[data-topology-sample]').first()).toHaveAttribute('aria-label', /\d{2,3} ms/)
   await expect(segmentGroups.nth(2).locator('[data-topology-sample]').first()).toHaveAttribute('aria-label', /[012] ms/)
   const firstSample = samples.first()
@@ -90,6 +88,9 @@ test('PandaOps desktop topology and cards remain contained', async ({ page }) =>
   await expect(firstSample).toHaveAttribute('aria-label', /ms，丢包/)
   await page.getByRole('heading', { name: '线路状态' }).hover()
   await expect(sampleDetail).toBeHidden()
+  await historyButtons.first().click()
+  await expect(page.getByRole('dialog')).toContainText('查看每一段链路的实时延迟、丢包与历史波动。')
+  await page.getByRole('dialog').getByRole('button', { name: '关闭' }).click()
   const nodeCard = page.getByRole('button', { name: '查看节点 主控-洛杉矶 详情' })
   await expect(nodeCard).toBeVisible()
   const nodeCardSurface = nodeCard.locator('xpath=..')
@@ -130,7 +131,8 @@ test('PandaOps topology reports an unresolved configured node as an error', asyn
   await openStablePage(page)
 
   await expect(page.getByText(/1 异常/)).toBeVisible()
-  await expect(page.getByText('异常', { exact: true })).toBeVisible()
+  await expect(page.locator('[data-topology-route-status][data-status="error"]')).toHaveCount(1)
+  await expect(page.getByText('异常', { exact: true })).toHaveCount(0)
 })
 
 test('PandaOps topology manager saves through managed theme API', async ({ page }) => {

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { TopologyRouteDetail } from '@/components/TopologyRouteDetailDialog.vue'
-import type { TopologyRouteHealth } from '@/components/TopologyStability.vue'
 import type { NodeData } from '@/stores/nodes'
+import type { TopologyRouteHealth } from '@/utils/topologyHealth'
 import { Icon } from '@iconify/vue'
 import { useStorageAsync } from '@vueuse/core'
 import { computed, ref } from 'vue'
@@ -10,7 +10,6 @@ import TopologyEdgeMetric from '@/components/TopologyEdgeMetric.vue'
 import TopologyManagerDialog from '@/components/TopologyManagerDialog.vue'
 import TopologyProbeSelect from '@/components/TopologyProbeSelect.vue'
 import TopologyRouteDetailDialog from '@/components/TopologyRouteDetailDialog.vue'
-import TopologyStability from '@/components/TopologyStability.vue'
 import { useAppStore } from '@/stores/app'
 import { getNodeRole } from '@/utils/nodeRoleHelper'
 import { getRegionCode } from '@/utils/regionHelper'
@@ -46,7 +45,7 @@ const probeSelections = useStorageAsync<Record<string, string>>('pandaTopologyPr
 const managerOpen = ref(false)
 const detailOpen = ref(false)
 const selectedRoute = ref<TopologyRouteDetail | null>(null)
-const routeHealth = ref<Record<string, TopologyRouteHealth>>({})
+const routeSegmentHealth = ref<Record<string, Record<number, TopologyRouteHealth>>>({})
 
 const routeGroups = computed(() => splitTopologyGroups(appStore.topologyRoute))
 const metricGroups = computed(() => splitTopologyGroups(appStore.topologyMetrics))
@@ -88,23 +87,29 @@ const routes = computed<RouteRow[]>(() => routeGroups.value.map((group, routeInd
   }
 }).filter(route => route.nodes.length >= 2))
 
-function fallbackRouteHealth(route: RouteRow): TopologyRouteHealth {
+function getRouteHealth(route: RouteRow): TopologyRouteHealth {
   const configuredNodes = route.nodes.slice(1)
   if (configuredNodes.some(item => item.node?.online === false))
     return 'offline'
   if (configuredNodes.some(item => !item.node))
     return 'error'
-  return 'pending'
+  const expectedSegments = Math.max(1, route.nodes.length - 1)
+  const states = Array.from({ length: expectedSegments }, (_, index) => routeSegmentHealth.value[route.key]?.[index] ?? 'pending')
+  for (const status of ['offline', 'error', 'warning', 'pending'] as const) {
+    if (states.includes(status))
+      return status
+  }
+  return 'healthy'
 }
 
-function getRouteHealth(route: RouteRow): TopologyRouteHealth {
-  return routeHealth.value[route.key] ?? fallbackRouteHealth(route)
-}
-
-function updateRouteHealth(routeKey: string, status: TopologyRouteHealth): void {
-  if (routeHealth.value[routeKey] === status)
+function updateRouteSegmentHealth(routeKey: string, segmentIndex: number, status: TopologyRouteHealth): void {
+  const current = routeSegmentHealth.value[routeKey] ?? {}
+  if (current[segmentIndex] === status)
     return
-  routeHealth.value = { ...routeHealth.value, [routeKey]: status }
+  routeSegmentHealth.value = {
+    ...routeSegmentHealth.value,
+    [routeKey]: { ...current, [segmentIndex]: status },
+  }
 }
 
 const healthCounts = computed(() => routes.value.reduce((counts, route) => {
@@ -192,17 +197,30 @@ function openRouteDetail(route: RouteRow): void {
           <article
             v-for="route in routes"
             :key="route.key"
-            class="group grid min-h-12 grid-cols-[138px_minmax(120px,1fr)_170px_minmax(120px,1fr)_184px_112px] items-center gap-2 border-b border-white/[0.045] px-2 transition-colors last:border-b-0 hover:bg-white/[0.018]"
+            class="group grid min-h-12 grid-cols-[138px_minmax(118px,1fr)_170px_minmax(118px,1fr)_184px] items-center gap-2 border-b border-white/[0.045] px-2 transition-colors last:border-b-0 hover:bg-white/[0.018]"
           >
             <div class="flex min-w-0 items-center gap-2">
-              <span class="size-2 shrink-0 rounded-full" :class="routeDotClass(route)" />
+              <span
+                data-topology-route-status
+                :data-status="getRouteHealth(route)"
+                class="size-2 shrink-0 rounded-full"
+                :class="routeDotClass(route)"
+              />
               <TopologyProbeSelect
                 :model-value="route.probeKey"
                 @update:model-value="updateProbe(route, $event)"
               />
             </div>
 
-            <TopologyEdgeMetric :metric="route.metrics[0] || '-,-'" :nodes="nodes" />
+            <TopologyEdgeMetric
+              :metric="route.metrics[0] || '-,-'"
+              :nodes="nodes"
+              :source-label="route.nodes[0]?.name || '入口'"
+              :target-label="route.nodes[1]?.name || '线路机'"
+              :segment-index="0"
+              @open-detail="openRouteDetail(route)"
+              @status-change="updateRouteSegmentHealth(route.key, 0, $event)"
+            />
 
             <button
               type="button"
@@ -221,7 +239,15 @@ function openRouteDetail(route: RouteRow): void {
               <span class="shrink-0 text-[10px] text-slate-500">· {{ route.nodes[1]?.role }}</span>
             </button>
 
-            <TopologyEdgeMetric :metric="route.metrics[1] || '-,-'" :nodes="nodes" />
+            <TopologyEdgeMetric
+              :metric="route.metrics[1] || '-,-'"
+              :nodes="nodes"
+              :source-label="route.nodes[1]?.name || '线路机'"
+              :target-label="route.nodes[2]?.name || '落地机'"
+              :segment-index="1"
+              @open-detail="openRouteDetail(route)"
+              @status-change="updateRouteSegmentHealth(route.key, 1, $event)"
+            />
 
             <button
               type="button"
@@ -239,26 +265,6 @@ function openRouteDetail(route: RouteRow): void {
               <span class="truncate text-[13px] font-semibold">{{ route.nodes[2]?.name }}</span>
               <span class="shrink-0 text-[10px] text-slate-500">· {{ route.nodes[2]?.role }}</span>
             </button>
-
-            <div
-              class="flex h-8 items-center justify-end gap-1.5 rounded-md px-1 text-left text-slate-500 transition-colors hover:bg-white/[0.035] hover:text-slate-200"
-            >
-              <TopologyStability
-                class="min-w-0 flex-1"
-                :metrics="route.metrics"
-                :node-names="route.nodes.map(node => node.name)"
-                :nodes="nodes"
-                @status-change="updateRouteHealth(route.key, $event)"
-              />
-              <button
-                type="button"
-                class="flex size-6 shrink-0 items-center justify-center rounded text-slate-500 transition-colors hover:bg-white/[0.05] hover:text-slate-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-400/60"
-                aria-label="查看线路历史"
-                @click="openRouteDetail(route)"
-              >
-                <Icon icon="tabler:chevron-right" :width="13" class="opacity-60 transition-opacity group-hover:opacity-100" />
-              </button>
-            </div>
           </article>
         </div>
       </div>
