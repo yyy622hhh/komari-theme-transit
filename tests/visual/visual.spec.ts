@@ -190,6 +190,44 @@ test('audit tool shows real core logs without unsupported visitor controls', asy
   await expect(page.getByText(/等待核心发布访客审计能力/)).toHaveCount(0)
 })
 
+test('provider value sorting changes the ranked node order', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, { pandaOps: true, authenticated: true })
+  await openStablePage(page)
+  await page.getByRole('button', { name: '显示首页工具' }).click()
+  await page.getByRole('button', { name: /性价比：/ }).click()
+
+  const table = page.getByRole('table')
+  const firstNodeCell = table.locator('tbody tr').first().locator('td').first()
+  await page.getByRole('columnheader', { name: /^月成本/ }).click()
+  await expect(firstNodeCell).toContainText('主控-洛杉矶')
+  await page.getByRole('columnheader', { name: /^月成本/ }).click()
+  await expect(firstNodeCell).toContainText('新加坡-A100-12')
+})
+
+test('supported visitor audit toggle writes the core setting', async ({ page }) => {
+  const settingUpdates: Array<Record<string, unknown>> = []
+  page.on('request', (request) => {
+    if (!request.url().endsWith('/api/rpc2'))
+      return
+    const payload = request.postDataJSON() as { method?: string, params?: Record<string, unknown> } | null
+    if (payload?.method === 'admin:editSettings')
+      settingUpdates.push(payload.params ?? {})
+  })
+
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, { pandaOps: true, authenticated: true, visitorAuditSupported: true })
+  await openStablePage(page)
+  await page.getByRole('button', { name: '显示首页工具' }).click()
+  await page.getByRole('button', { name: /日志：/ }).click()
+
+  await expect(page.getByRole('tab', { name: '访客安全' })).toBeEnabled()
+  await page.getByRole('button', { name: '启用采集' }).click()
+  await expect.poll(() => settingUpdates.length).toBe(1)
+  expect(settingUpdates[0]).toMatchObject({ visitor_audit_enabled: true })
+  await expect(page.getByRole('button', { name: '暂停采集' })).toBeVisible()
+})
+
 test('home accessible list desktop', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 })
   await installKomariFixture(page, { colorVisionFriendly: true, viewMode: 'list', hideEarth: true })
