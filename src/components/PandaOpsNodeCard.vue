@@ -3,6 +3,7 @@ import type { NodeData } from '@/stores/nodes'
 import { computed } from 'vue'
 import CarrierPingSamples from '@/components/CarrierPingSamples.vue'
 import { ProgressThin } from '@/components/ui/progress-thin'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { useNodeCarrierPingDisplay } from '@/composables/useNodeCarrierPingDisplay'
 import { useAppStore } from '@/stores/app'
 import { formatBytesPerSecondWithConfig, formatBytesWithConfig, formatDateTime, getStatus, getUptimeDays } from '@/utils/helper'
@@ -66,13 +67,16 @@ function lossTone(loss: string): string {
 }
 
 const alertTone = computed(() => primaryAlert.value?.severity === 'critical'
-  ? 'text-rose-700 border-rose-500/20 bg-rose-500/[0.055] dark:text-rose-400 dark:border-rose-400/15 dark:bg-rose-400/[0.035]'
-  : 'text-amber-700 border-amber-500/20 bg-amber-500/[0.06] dark:text-amber-300 dark:border-amber-400/15 dark:bg-amber-400/[0.035]')
+  ? 'text-rose-600 dark:text-rose-400'
+  : 'text-amber-700 dark:text-amber-300')
+const alertEdgeTone = computed(() => primaryAlert.value?.severity === 'critical'
+  ? 'bg-rose-500/85 dark:bg-rose-400/75'
+  : 'bg-amber-500/90 dark:bg-amber-300/80')
 </script>
 
 <template>
   <article
-    class="panda-node-card group relative min-w-0 cursor-pointer overflow-hidden rounded-2xl p-3.5 transition duration-200 hover:-translate-y-px hover:border-emerald-400/25"
+    class="panda-node-card group relative h-full min-w-0 cursor-pointer overflow-hidden rounded-2xl p-3.5 transition duration-200 hover:-translate-y-px hover:border-emerald-400/25"
     :class="!node.online ? 'opacity-75' : ''"
   >
     <button
@@ -82,8 +86,15 @@ const alertTone = computed(() => primaryAlert.value?.severity === 'critical'
       @click="emit('click')"
     />
 
-    <header class="panda-node-card__header pointer-events-none relative z-1 flex items-start justify-between gap-3">
-      <div class="min-w-0">
+    <span
+      v-if="primaryAlert && node.online"
+      data-node-alert-edge
+      class="pointer-events-none absolute inset-y-3 left-0 z-1 w-0.5 rounded-r-full"
+      :class="alertEdgeTone"
+    />
+
+    <header class="panda-node-card__header pointer-events-none relative z-1 min-h-[2.65rem]">
+      <div class="flex min-w-0 items-center justify-between gap-3">
         <div class="flex min-w-0 items-center gap-2">
           <span class="size-2.5 shrink-0 rounded-full" :class="node.online ? 'bg-emerald-400' : 'bg-rose-400'" />
           <h3 class="truncate text-[15px] font-semibold tracking-[-0.01em] text-slate-900 dark:text-slate-100">
@@ -91,33 +102,43 @@ const alertTone = computed(() => primaryAlert.value?.severity === 'critical'
           </h3>
           <span v-if="role" class="shrink-0 text-[10px] text-slate-500">· {{ role }}</span>
         </div>
-        <div class="mt-1.5 flex items-center gap-2 text-[10px] text-slate-500">
+        <div class="flex shrink-0 items-center gap-2">
+          <img :src="getOSImage(node.os)" :alt="getOSName(node.os)" class="size-3.5 opacity-75">
+          <img
+            v-if="node.region"
+            :src="`/images/flags/${getRegionCode(node.region)}.svg`"
+            :alt="getRegionDisplayName(node.region)"
+            class="h-4 w-6 rounded-[2px] object-cover"
+          >
+        </div>
+      </div>
+      <div class="mt-1.5 flex min-w-0 items-center justify-between gap-3 text-[10px] text-slate-500">
+        <div class="flex min-w-0 shrink-0 items-center gap-2">
           <span>{{ node.online ? `在线 ${getUptimeDays(node.uptime)} 天` : '离线' }}</span>
           <span v-if="price">{{ price }}</span>
         </div>
-      </div>
-      <div class="flex shrink-0 items-center gap-2">
-        <img :src="getOSImage(node.os)" :alt="getOSName(node.os)" class="size-3.5 opacity-75">
-        <img
-          v-if="node.region"
-          :src="`/images/flags/${getRegionCode(node.region)}.svg`"
-          :alt="getRegionDisplayName(node.region)"
-          class="h-4 w-6 rounded-[2px] object-cover"
-        >
+        <TooltipProvider v-if="primaryAlert && node.online" :delay-duration="160">
+          <Tooltip>
+            <TooltipTrigger as-child>
+              <span
+                data-node-alert-reason
+                class="pointer-events-auto flex min-w-0 max-w-[58%] items-center gap-1.5 font-medium tabular-nums"
+                :class="alertTone"
+                @click="emit('click')"
+              >
+                <span class="size-1.5 shrink-0 rounded-full bg-current" />
+                <span class="truncate">{{ primaryAlert.detail }}</span>
+              </span>
+            </TooltipTrigger>
+            <TooltipContent data-node-alert-tooltip side="top" :side-offset="7" class="max-w-[260px] text-[10px] tabular-nums">
+              {{ primaryAlert.detail }}
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
       </div>
     </header>
 
-    <div
-      v-if="primaryAlert && node.online"
-      data-node-alert-reason
-      class="pointer-events-none relative z-1 mt-2 flex min-w-0 items-center gap-1.5 rounded-md border px-2 py-1 text-[9px] font-medium tabular-nums"
-      :class="alertTone"
-    >
-      <span class="size-1.5 shrink-0 rounded-full bg-current" />
-      <span class="truncate">{{ primaryAlert.detail }}</span>
-    </div>
-
-    <div class="panda-divider pointer-events-none relative z-1 grid grid-cols-3 gap-3 border-y py-2.5" :class="primaryAlert && node.online ? 'mt-2' : 'mt-3'">
+    <div data-node-resource-grid class="panda-divider pointer-events-none relative z-1 mt-3 grid grid-cols-3 gap-3 border-y py-2.5">
       <div>
         <div class="flex items-center justify-between gap-2 text-[10px]">
           <span class="text-slate-500">CPU</span>

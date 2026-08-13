@@ -410,7 +410,7 @@ const activeToolTitle = computed(() => {
 
 const nodeCardGridClass = computed(() => {
   if (appStore.opsDashboardEnabled)
-    return ['grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3']
+    return ['grid grid-cols-1 gap-3 md:auto-rows-fr md:grid-cols-2 xl:grid-cols-3']
 
   const sizeClass: Record<typeof appStore.nodeCardSize, string> = {
     mini: 'gap-3 sm:grid-cols-[repeat(auto-fill,minmax(270px,1fr))]',
@@ -561,12 +561,14 @@ const nodeCardGridClass = computed(() => {
                 v-for="(node, index) in nodeList"
                 :key="`${getNodeItemTransitionKey(node)}:${deferNodeCards ? 'deferred' : 'full'}`"
                 class="min-w-0"
+                :class="appStore.opsDashboardEnabled && 'h-full'"
                 :style="getNodeItemTransitionStyle(index)"
               >
                 <DeferredRender
                   :enabled="deferNodeCards"
                   :idle-delay="800 + index * 70"
                   :min-height="deferredNodeCardHeight"
+                  :class="appStore.opsDashboardEnabled && 'h-full'"
                 >
                   <PandaOpsNodeCard
                     v-if="appStore.opsDashboardEnabled"

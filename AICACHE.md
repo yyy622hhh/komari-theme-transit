@@ -12,6 +12,13 @@
 
 ## 当前任务
 
+- 状态：done，`3.3.5-panda.17` 已部署到 `monitor.example.com`
+- 目标：消除有告警和无告警节点卡片之间的高度差，保持高密度节点网格整齐。
+- 设计：删除会新增一整行高度的告警框，将主告警放入固定两行表头的第二行右侧；正常节点不显示占位状态，告警节点使用单行语义文字、悬停浮窗和 2px 边缘状态线。
+- 实现：贯通网格项、延迟渲染容器和节点卡片的等高布局，桌面节点网格使用等高自动行轨道；浏览器回归比较告警卡与健康卡的高度和资源区相对起点。
+- 验证：`bun run type-check`、`bun run lint`、`git diff --check` 通过；完整 Playwright 视觉与交互回归 26/26 通过，告警卡和无内联告警卡高度差、资源区相对起点差均小于 1px，告警浮窗与边缘状态线通过浏览器断言。
+- 发布：活动主题为 `3.3.5-panda.17`，Komari 服务 active，本机与公网首页 200；公网已加载 `index-ggZVzILZ.js`、`index-DSGx9Xsr.css`、`HomeView-CUwRHEzN.js`、`PandaOpsNodeCard--lsHjZ19.js` 和 `PandaOpsNodeCard-Q4dovIOq.css`，并确认线上卡片资源包含内联告警、浮窗和资源区回归标记。旧版完整备份位于 `/var/lib/komari/backups/PandaOps-panda16-before-equal-node-cards-20260814`。构建包 `komari-theme-PandaOps-build-6f9f762.zip`，SHA-256 `4147907388e0adce7cd3204262c304ca285b36b28caea1175334b13a6bb3594f`，服务器端校验一致。
+
 - 状态：done，`3.3.5-panda.16` 已部署到 `monitor.example.com`
 - 目标：修复 PandaOps 暗色模式顶部资产汇总的低对比度文字，尤其是“剩余价值”、标签和容量分母。
 - 根因：`PandaOpsDashboard.vue` 依赖 scoped CSS 内的 `:global(.dark)` 覆盖暗色文字，构建后的选择器未稳定命中，导致暗色背景继续使用浅色模式的深色文字值。

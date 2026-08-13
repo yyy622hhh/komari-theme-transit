@@ -195,6 +195,32 @@ test('PandaOps desktop topology and cards remain contained', async ({ page }) =>
   await page.getByRole('heading', { name: '线路状态' }).click()
   await expect(carrierTooltip).toBeHidden()
   await expect(page.locator('[data-node-alert-reason]').first()).toBeVisible()
+  const alertCard = page.getByRole('button', { name: '查看节点 东京-高负载 详情' }).locator('xpath=..')
+  const plainCard = page.getByRole('button', { name: '查看节点 伦敦-离线归档 详情' }).locator('xpath=..')
+  const alertReason = alertCard.locator('[data-node-alert-reason]')
+  await expect(alertReason).toBeVisible()
+  await expect(alertReason).toHaveCSS('border-top-width', '0px')
+  await expect(alertCard.locator('[data-node-alert-edge]')).toBeVisible()
+  await expect(plainCard.locator('[data-node-alert-reason]')).toHaveCount(0)
+  await alertReason.hover()
+  await expect(page.locator('[data-node-alert-tooltip]')).toContainText('CPU 96.4%')
+  await page.getByRole('heading', { name: '线路状态' }).hover()
+  await expect(page.locator('[data-node-alert-tooltip]')).toBeHidden()
+  await expect.poll(async () => {
+    const [alertBox, plainBox] = await Promise.all([alertCard.boundingBox(), plainCard.boundingBox()])
+    return alertBox && plainBox ? Math.abs(alertBox.height - plainBox.height) : Number.POSITIVE_INFINITY
+  }).toBeLessThan(1)
+  await expect.poll(async () => {
+    const [alertBox, alertResourceBox, plainBox, plainResourceBox] = await Promise.all([
+      alertCard.boundingBox(),
+      alertCard.locator('[data-node-resource-grid]').boundingBox(),
+      plainCard.boundingBox(),
+      plainCard.locator('[data-node-resource-grid]').boundingBox(),
+    ])
+    if (!alertBox || !alertResourceBox || !plainBox || !plainResourceBox)
+      return Number.POSITIVE_INFINITY
+    return Math.abs((alertResourceBox.y - alertBox.y) - (plainResourceBox.y - plainBox.y))
+  }).toBeLessThan(1)
   const expiryDate = page.getByRole('button', { name: '查看节点 台北-流量预警 详情' }).locator('xpath=..').locator('[data-node-expiry-date]')
   await expect(expiryDate).toHaveText('2026-08-02')
   await expect.poll(() => expiryDate.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
