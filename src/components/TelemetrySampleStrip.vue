@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import type { TelemetrySample } from '@/types/telemetry'
 import { onClickOutside } from '@vueuse/core'
-import { computed, onBeforeUnmount, onMounted, ref, useId } from 'vue'
+import { computed, onBeforeUnmount, ref, useId, watch } from 'vue'
+import { subscribeTelemetryViewportRefresh } from '@/composables/useTelemetryViewportRefresh'
 
 const props = withDefaults(defineProps<{
   samples: TelemetrySample[]
@@ -17,6 +18,7 @@ const activeIndex = ref<number | null>(null)
 const pinned = ref(false)
 const tooltipId = useId()
 const tooltipPosition = ref({ left: 0, top: 0, below: false })
+let stopViewportRefresh: (() => void) | null = null
 
 const activeSample = computed(() => activeIndex.value === null ? null : props.samples[activeIndex.value] ?? null)
 
@@ -150,14 +152,19 @@ function refreshTooltipPosition(): void {
     showSample(activeIndex.value)
 }
 
-onMounted(() => {
-  window.addEventListener('resize', refreshTooltipPosition, { passive: true })
-  window.addEventListener('scroll', refreshTooltipPosition, { passive: true, capture: true })
+watch(activeIndex, (index) => {
+  if (index !== null && !stopViewportRefresh) {
+    stopViewportRefresh = subscribeTelemetryViewportRefresh(refreshTooltipPosition)
+  }
+  else if (index === null && stopViewportRefresh) {
+    stopViewportRefresh()
+    stopViewportRefresh = null
+  }
 })
 
 onBeforeUnmount(() => {
-  window.removeEventListener('resize', refreshTooltipPosition)
-  window.removeEventListener('scroll', refreshTooltipPosition, { capture: true })
+  stopViewportRefresh?.()
+  stopViewportRefresh = null
 })
 
 onClickOutside(root, closeTooltip)

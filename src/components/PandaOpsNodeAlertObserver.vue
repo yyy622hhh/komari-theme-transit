@@ -1,21 +1,28 @@
 <script setup lang="ts">
 import type { NodeData } from '@/stores/nodes'
 import type { PandaOpsAlert } from '@/utils/pandaOpsAlert'
-import { onBeforeUnmount, watch } from 'vue'
+import { computed, onBeforeUnmount, watch } from 'vue'
 import { useNodeCarrierPingDisplay } from '@/composables/useNodeCarrierPingDisplay'
-import { getCarrierNodeAlert } from '@/utils/pandaOpsAlert'
+import { reportPandaOpsNodeAlert, resetPandaOpsNodeAlert } from '@/composables/usePandaOpsAlertState'
+import { getPrimaryNodeAlert } from '@/utils/pandaOpsAlert'
 
 const props = defineProps<{ node: NodeData }>()
-const emit = defineEmits<{ change: [alert: PandaOpsAlert | null] }>()
 const { carrierDisplays, carrierScopeLabel } = useNodeCarrierPingDisplay(() => props.node.uuid)
+const candidate = computed<PandaOpsAlert | null>(() => getPrimaryNodeAlert(props.node, carrierDisplays.value, carrierScopeLabel.value))
+const sampleToken = computed(() => {
+  const carrierToken = carrierDisplays.value
+    .map(carrier => carrier.latencyBars.at(-1)?.key ?? `${carrier.key}:empty`)
+    .join('|')
+  return `${props.node.time}|${candidate.value?.key ?? 'healthy'}|${candidate.value?.detail ?? ''}|${carrierToken}`
+})
 
 watch(
-  () => getCarrierNodeAlert(props.node, carrierDisplays.value, carrierScopeLabel.value),
-  alert => emit('change', alert),
+  [candidate, sampleToken],
+  ([alert, token]) => reportPandaOpsNodeAlert(props.node.uuid, alert, token),
   { immediate: true },
 )
 
-onBeforeUnmount(() => emit('change', null))
+onBeforeUnmount(() => resetPandaOpsNodeAlert(props.node.uuid))
 </script>
 
 <template>

@@ -1,5 +1,6 @@
 import type { CarrierPingDisplay } from '@/composables/useNodeCarrierPingDisplay'
 import type { NodeData } from '@/stores/nodes'
+import { PANDA_OPS_ALERT_THRESHOLDS } from '@/constants/pandaOps'
 import { getDiskPercentage, getMemoryPercentage, getTrafficUsedPercentage, hasTrafficLimit } from '@/utils/nodeMetricsHelper'
 
 export type PandaOpsAlertSeverity = 'warning' | 'critical'
@@ -51,11 +52,11 @@ export function getRealtimeNodeAlerts(node: NodeData): PandaOpsAlert[] {
   }
 
   const alerts = [
-    metricAlert(node, 'cpu', 'CPU', node.cpu, 85, 95, 'tabler:cpu'),
-    metricAlert(node, 'memory', '内存', getMemoryPercentage(node), 85, 95, 'tabler:device-sd-card'),
-    metricAlert(node, 'disk', '磁盘', getDiskPercentage(node), 80, 92, 'tabler:server-2'),
+    metricAlert(node, 'cpu', 'CPU', node.cpu, PANDA_OPS_ALERT_THRESHOLDS.cpu.warning, PANDA_OPS_ALERT_THRESHOLDS.cpu.critical, 'tabler:cpu'),
+    metricAlert(node, 'memory', '内存', getMemoryPercentage(node), PANDA_OPS_ALERT_THRESHOLDS.memory.warning, PANDA_OPS_ALERT_THRESHOLDS.memory.critical, 'tabler:device-sd-card'),
+    metricAlert(node, 'disk', '磁盘', getDiskPercentage(node), PANDA_OPS_ALERT_THRESHOLDS.disk.warning, PANDA_OPS_ALERT_THRESHOLDS.disk.critical, 'tabler:server-2'),
     hasTrafficLimit(node)
-      ? metricAlert(node, 'traffic', '流量额度', getTrafficUsedPercentage(node), 85, 95, 'tabler:arrows-transfer-up-down')
+      ? metricAlert(node, 'traffic', '流量额度', getTrafficUsedPercentage(node), PANDA_OPS_ALERT_THRESHOLDS.traffic.warning, PANDA_OPS_ALERT_THRESHOLDS.traffic.critical, 'tabler:arrows-transfer-up-down')
       : null,
   ].filter((alert): alert is PandaOpsAlert => Boolean(alert))
 
@@ -80,30 +81,32 @@ export function getCarrierNodeAlert(
 
   const prefix = scopePrefix(scopeLabel)
   const issues = carriers.flatMap((carrier) => {
+    if (carrier.stale)
+      return []
     const loss = Number.parseFloat(carrier.lossDisplay)
     const latency = Number.parseFloat(carrier.latencyDisplay)
     const result: PandaOpsAlert[] = []
 
-    if (Number.isFinite(loss) && loss > 3) {
+    if (Number.isFinite(loss) && loss > PANDA_OPS_ALERT_THRESHOLDS.carrierLoss.warning) {
       result.push({
         key: `${node.uuid}:carrier:${carrier.key}:loss`,
         nodeUuid: node.uuid,
         nodeName: node.name,
         detail: `${prefix}${carrier.label}丢包 ${loss.toFixed(1)}%`,
-        severity: loss >= 10 ? 'critical' : 'warning',
+        severity: loss >= PANDA_OPS_ALERT_THRESHOLDS.carrierLoss.critical ? 'critical' : 'warning',
         icon: 'tabler:wave-sine',
-        score: (loss >= 10 ? 240 : 140) + loss,
+        score: (loss >= PANDA_OPS_ALERT_THRESHOLDS.carrierLoss.critical ? 240 : 140) + loss,
       })
     }
-    else if (Number.isFinite(latency) && latency > 200) {
+    else if (Number.isFinite(latency) && latency > PANDA_OPS_ALERT_THRESHOLDS.carrierLatency.warning) {
       result.push({
         key: `${node.uuid}:carrier:${carrier.key}:latency`,
         nodeUuid: node.uuid,
         nodeName: node.name,
         detail: `${prefix}${carrier.label}延迟 ${Math.round(latency)} ms`,
-        severity: latency >= 260 ? 'critical' : 'warning',
+        severity: latency >= PANDA_OPS_ALERT_THRESHOLDS.carrierLatency.critical ? 'critical' : 'warning',
         icon: 'tabler:clock-exclamation',
-        score: (latency >= 260 ? 220 : 120) + latency / 10,
+        score: (latency >= PANDA_OPS_ALERT_THRESHOLDS.carrierLatency.critical ? 220 : 120) + latency / 10,
       })
     }
 

@@ -58,7 +58,7 @@ onMounted(async () => {
 <template>
   <section id="asset-summary" class="relative z-1 scroll-mt-20 px-4 pb-3 pt-3">
     <div class="mx-auto max-w-[1560px] space-y-3">
-      <div class="panda-panel telemetry-scroll overflow-x-auto rounded-2xl">
+      <div class="panda-panel telemetry-scroll rounded-2xl">
         <div class="panda-telemetry-grid grid min-w-[840px] grid-cols-[0.82fr_1.28fr_1.28fr_1fr_1.18fr_1.5fr] divide-x">
           <div class="telemetry-item">
             <span>在线</span>
@@ -99,6 +99,7 @@ onMounted(async () => {
 
 <style scoped>
 .telemetry-scroll {
+  overflow-x: auto;
   scrollbar-width: none;
 }
 
@@ -123,9 +124,42 @@ onMounted(async () => {
 }
 
 @media (max-width: 640px) {
+  .telemetry-scroll {
+    overflow: hidden;
+  }
+
+  .panda-telemetry-grid {
+    min-width: 0;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .panda-telemetry-grid > * {
+    border-inline-start-width: 0 !important;
+  }
+
+  .panda-telemetry-grid > :not(:nth-child(3n + 1)) {
+    border-inline-start: 1px solid var(--panda-divider) !important;
+  }
+
+  .panda-telemetry-grid > :nth-child(n + 4) {
+    border-top: 1px solid var(--panda-divider);
+  }
+
   .telemetry-item {
-    min-height: 3rem;
-    padding: 0.62rem 0.8rem;
+    min-width: 0;
+    min-height: 2.85rem;
+    flex-direction: column;
+    gap: 0.16rem;
+    padding: 0.42rem 0.35rem;
+    font-size: 0.61rem;
+  }
+
+  .telemetry-item strong {
+    max-width: 100%;
+    gap: 0.3rem;
+    overflow: hidden;
+    font-size: 0.68rem;
+    text-overflow: ellipsis;
   }
 }
 

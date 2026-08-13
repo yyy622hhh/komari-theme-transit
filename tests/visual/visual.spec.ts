@@ -119,6 +119,8 @@ test('PandaOps desktop topology and cards remain contained', async ({ page }) =>
   await expect(page.getByRole('heading', { name: '线路状态' })).toBeVisible()
   await expect(page.locator('[data-panda-alert-strip]')).toBeVisible()
   const alertStrip = page.locator('[data-panda-alert-strip]')
+  await expect(alertStrip.getByRole('heading', { name: '12 个异常需要关注' })).toBeVisible()
+  await expect(alertStrip.getByRole('button', { name: '另有 8 个' })).toBeVisible()
   const topologySection = page.getByRole('heading', { name: '线路状态' }).locator('xpath=ancestor::section[1]')
   await expect.poll(async () => {
     const [alertBox, topologyBox] = await Promise.all([alertStrip.boundingBox(), topologySection.boundingBox()])
@@ -235,6 +237,17 @@ test('PandaOps mobile keeps document width contained', async ({ page }) => {
   await openStablePage(page)
 
   await expect(page.getByRole('heading', { name: '线路状态' })).toBeVisible()
+  const mobileTelemetry = page.locator('#asset-summary .panda-telemetry-grid')
+  await expect.poll(() => mobileTelemetry.evaluate((element) => {
+    const style = getComputedStyle(element)
+    return style.gridTemplateColumns.split(' ').filter(Boolean).length
+  })).toBe(3)
+  await expect.poll(() => mobileTelemetry.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
+  const mobileAlertStrip = page.locator('[data-panda-alert-strip]')
+  await expect(mobileAlertStrip.getByRole('heading', { name: '12 个异常需要关注' })).toBeVisible()
+  await expect(mobileAlertStrip.getByRole('button', { name: '另有 10 个' })).toBeVisible()
+  await mobileAlertStrip.getByRole('button', { name: '另有 10 个' }).click()
+  await expect(mobileAlertStrip.getByRole('button', { name: '收起' })).toBeVisible()
   await expect(page.locator('[data-topology-mobile-route]')).toHaveCount(2)
   await expect(page.locator('.topology-scroll')).toHaveCount(0)
   await expect(page.locator('[data-topology-mobile-node]')).toHaveCount(4)
@@ -438,6 +451,17 @@ test('home mini card metric icons remain accessible', async ({ page }) => {
   await expect(card.locator('[data-node-metric-icon="traffic"]')).toBeVisible()
   await expect(card.getByRole('img', { name: 'CPU' })).toBeVisible()
   await expect(card.getByRole('img', { name: '内存' })).toBeVisible()
+})
+
+test('PandaOps node card size changes the real desktop grid density', async ({ page }) => {
+  await page.setViewportSize({ width: 1700, height: 1000 })
+  await installKomariFixture(page, { pandaOps: true, dark: true, nodeCardSize: 'mini' })
+  await openStablePage(page)
+
+  const grid = page.locator('[data-node-card-grid]')
+  await expect(grid).toHaveAttribute('data-node-card-size', 'mini')
+  await expect.poll(() => grid.evaluate(element => getComputedStyle(element).gridTemplateColumns.split(' ').length)).toBe(4)
+  await expect(page.getByRole('button', { name: '查看节点 主控-洛杉矶 详情' }).locator('xpath=..')).toHaveAttribute('data-panda-node-card-size', 'mini')
 })
 
 test('node card expiry uses red through 5 days and yellow through 10 days', async ({ page }) => {

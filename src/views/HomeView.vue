@@ -409,8 +409,15 @@ const activeToolTitle = computed(() => {
 })
 
 const nodeCardGridClass = computed(() => {
-  if (appStore.opsDashboardEnabled)
-    return ['grid grid-cols-1 gap-3 md:auto-rows-fr md:grid-cols-2 xl:grid-cols-3']
+  if (appStore.opsDashboardEnabled) {
+    const pandaOpsSizeClass: Record<typeof appStore.nodeCardSize, string> = {
+      mini: 'gap-3 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4',
+      compact: 'gap-3 md:grid-cols-2 xl:grid-cols-3',
+      comfortable: 'gap-4 lg:grid-cols-2 2xl:grid-cols-3',
+      large: 'gap-5 xl:grid-cols-2',
+    }
+    return ['grid grid-cols-1 md:auto-rows-fr', pandaOpsSizeClass[appStore.nodeCardSize]]
+  }
 
   const sizeClass: Record<typeof appStore.nodeCardSize, string> = {
     mini: 'gap-3 sm:grid-cols-[repeat(auto-fill,minmax(270px,1fr))]',
@@ -551,6 +558,8 @@ const nodeCardGridClass = computed(() => {
             <AuditLogPanel v-else-if="activeHomeTool === 'auditLog'" />
             <TransitionGroup
               v-else-if="nodeList.length !== 0 && appStore.nodeViewMode === 'card'"
+              data-node-card-grid
+              :data-node-card-size="appStore.nodeCardSize"
               :appear="enableNodeCardTransition"
               :css="enableNodeCardTransition"
               name="node-card-switch"

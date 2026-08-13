@@ -5,12 +5,12 @@ import CarrierPingSamples from '@/components/CarrierPingSamples.vue'
 import { ProgressThin } from '@/components/ui/progress-thin'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { useNodeCarrierPingDisplay } from '@/composables/useNodeCarrierPingDisplay'
+import { usePandaOpsNodeAlert } from '@/composables/usePandaOpsAlertState'
 import { useAppStore } from '@/stores/app'
 import { formatBytesPerSecondWithConfig, formatBytesWithConfig, formatDateTime, getStatus, getUptimeDays } from '@/utils/helper'
 import { getDiskPercentage, getMemoryPercentage, getTrafficUsed, getTrafficUsedPercentage, hasTrafficLimit } from '@/utils/nodeMetricsHelper'
 import { getConfiguredNodeRole, getNodeRole } from '@/utils/nodeRoleHelper'
 import { getOSImage, getOSName } from '@/utils/osImageHelper'
-import { getPrimaryNodeAlert } from '@/utils/pandaOpsAlert'
 import { getRegionCode, getRegionDisplayName } from '@/utils/regionHelper'
 import { formatPriceWithCycle, getDaysUntilExpired, getExpireStatus, parseTags } from '@/utils/tagHelper'
 
@@ -48,8 +48,8 @@ const expiryDate = computed(() => expiryStatus.value === 'unknown' || expiryStat
   ? ''
   : formatDateTime(props.node.expired_at, 'YYYY-MM-DD'))
 
-const { carrierDisplays, carrierScopeLabel } = useNodeCarrierPingDisplay(() => props.node.uuid)
-const primaryAlert = computed(() => getPrimaryNodeAlert(props.node, carrierDisplays.value, carrierScopeLabel.value))
+const { carrierDisplays, carrierScopeLabel, stale: carrierStatsStale } = useNodeCarrierPingDisplay(() => props.node.uuid)
+const primaryAlert = usePandaOpsNodeAlert(() => props.node.uuid)
 const formatBytes = (value: number) => formatBytesWithConfig(value, appStore.byteDecimals)
 const formatSpeed = (value: number) => formatBytesPerSecondWithConfig(value, appStore.byteDecimals)
 
@@ -76,6 +76,7 @@ const alertEdgeTone = computed(() => primaryAlert.value?.severity === 'critical'
 
 <template>
   <article
+    :data-panda-node-card-size="appStore.nodeCardSize"
     class="panda-node-card group relative h-full min-w-0 cursor-pointer overflow-hidden rounded-2xl p-3.5 transition duration-200 hover:-translate-y-px hover:border-emerald-400/25"
     :class="!node.online ? 'opacity-75' : ''"
   >
@@ -195,7 +196,7 @@ const alertEdgeTone = computed(() => primaryAlert.value?.severity === 'critical'
 
       <div class="node-card-cell min-w-0 px-2.5 py-1.5">
         <div class="mb-1 flex items-center justify-between text-[9px] text-slate-500">
-          <span>三网质量</span><span>{{ carrierScopeLabel }}</span>
+          <span>三网质量</span><span :class="carrierStatsStale && 'text-amber-700 dark:text-amber-300'">{{ carrierStatsStale ? `${carrierScopeLabel} 数据过期` : carrierScopeLabel }}</span>
         </div>
         <div class="space-y-1">
           <div v-for="carrier in carrierDisplays" :key="carrier.key" class="grid grid-cols-[26px_1fr_38px_34px] items-center gap-1 text-[8px] leading-none">
@@ -242,5 +243,25 @@ const alertEdgeTone = computed(() => primaryAlert.value?.severity === 'critical'
   border: 1px solid var(--panda-divider);
   border-radius: 0.65rem;
   background: var(--panda-cell-bg);
+}
+
+.panda-node-card[data-panda-node-card-size='mini'] {
+  padding: 0.75rem;
+}
+
+.panda-node-card[data-panda-node-card-size='mini'] [data-node-resource-grid] {
+  gap: 0.55rem;
+}
+
+.panda-node-card[data-panda-node-card-size='mini'] footer {
+  display: none;
+}
+
+.panda-node-card[data-panda-node-card-size='comfortable'] {
+  padding: 1rem;
+}
+
+.panda-node-card[data-panda-node-card-size='large'] {
+  padding: 1.1rem;
 }
 </style>

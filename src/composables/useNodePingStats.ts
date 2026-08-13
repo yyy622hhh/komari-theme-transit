@@ -3,6 +3,8 @@ import type { PingMetricTaskStats } from '@/utils/rpc'
 import { useThrottleFn } from '@vueuse/core'
 import { computed, onScopeDispose, ref, shallowRef, toValue, watch } from 'vue'
 import { PING_RECORD_MAX_COUNT } from '@/constants/load'
+import { PANDA_OPS_PING_STALE_AFTER_MS } from '@/constants/pandaOps'
+import { TIME_MS } from '@/constants/time'
 import { abortPingRecords, loadPingRecords } from '@/services/history.service'
 import { abortPingMetricStats, abortQueryMetrics, loadPingMetricStats, loadPublicPingTasks, queryMetrics } from '@/services/metrics.service'
 import { isPingMetric, normalizeMetricSeriesList, PING_LATENCY_METRIC, PING_LOSS_METRIC, pingTaskId } from '@/utils/metricSeries'
@@ -66,6 +68,13 @@ const FULL_LOSS_EPSILON = 1e-6
 const PING_RECORD_REFRESH_INTERVAL_MS = 60_000
 const TASK_FILTER_SEPARATOR_PATTERN = /[\s\-_—–·]+/g
 const sharedPingRecordsCache = new Map<string, SharedPingRecordsEntry>()
+const pingFreshnessTick = ref(Date.now())
+
+if (typeof window !== 'undefined') {
+  window.setInterval(() => {
+    pingFreshnessTick.value = Date.now()
+  }, TIME_MS.minute)
+}
 
 interface TaskRecordSummary {
   total: number
@@ -173,9 +182,15 @@ function readStatsCache(uuid: string, hours: number, maxCount?: number, taskName
     if (!raw)
       return null
 
-    const parsed = JSON.parse(raw) as { version?: number, stats?: unknown }
+    const parsed = JSON.parse(raw) as { version?: number, updatedAt?: unknown, stats?: unknown }
     if (parsed.version !== CACHE_VERSION || !isValidStatsState(parsed.stats))
       return null
+
+    const updatedAt = typeof parsed.updatedAt === 'string' ? Date.parse(parsed.updatedAt) : Number.NaN
+    if (!Number.isFinite(updatedAt) || Date.now() - updatedAt > PANDA_OPS_PING_STALE_AFTER_MS) {
+      window.localStorage.removeItem(getCacheKey(uuid, hours, maxCount, taskNameFilter))
+      return null
+    }
 
     return parsed.stats
   }
@@ -701,6 +716,9 @@ export function useNodePingStats(
 
   // stats 由共享 getRecords 结果派生；共享记录每分钟刷新一次后会自动重算。
   const stats = computed<NodePingStatsState>(() => {
+    // 即使网络刷新失败，也要按分钟重新校验 localStorage，避免已经过期的
+    // 历史数据在页面常驻期间无限展示。
+    void pingFreshnessTick.value
     const { uuid: nodeUuid, hours, maxCount, taskNameFilter, enabled } = resolved.value
     if (!enabled || !nodeUuid.trim())
       return createEmptyStats()
@@ -739,6 +757,21 @@ export function useNodePingStats(
     const normalizedFilter = normalizeTaskFilter(taskNameFilter)
     return [...new Set([...state.taskNamesById.values()]
       .filter(name => !normalizedFilter || normalizeTaskFilter(name).includes(normalizedFilter)))]
+  })
+
+  const lastFetchedAt = computed(() => {
+    void pingFreshnessTick.value
+    const { uuid: nodeUuid, hours, maxCount, enabled } = resolved.value
+    if (!enabled || !nodeUuid.trim())
+      return 0
+    return getSharedPingRecordsEntry(hours, maxCount, nodeUuid).lastFetchedAt
+  })
+
+  const stale = computed(() => {
+    if (!stats.value.hasData)
+      return false
+    const fetchedAt = lastFetchedAt.value
+    return fetchedAt > 0 && pingFreshnessTick.value - fetchedAt > PANDA_OPS_PING_STALE_AFTER_MS
   })
 
   // 副作用：按需触发首次共享加载并维护 loading/error，不再命令式写入 stats。
@@ -815,6 +848,8 @@ export function useNodePingStats(
     avgLoss: computed(() => stats.value.avgLoss),
     avgVolatility: computed(() => stats.value.avgVolatility),
     hasData: computed(() => stats.value.hasData),
+    lastFetchedAt,
+    stale,
     taskNames,
   }
 }
@@ -856,8 +891,10 @@ export function useNodeCarrierPingStats(uuid: MaybeRefOrGetter<string>, options?
       taskNames: carrier.ping.taskNames.value,
       stats: carrier.ping.stats.value,
       hasLatency: carrier.ping.hasData.value && carrier.ping.avgLatency.value > 0,
+      stale: carrier.ping.stale.value,
     }))),
     loading: computed(() => carrierPings.some(carrier => carrier.ping.loading.value)),
     error: computed(() => carrierPings.map(carrier => carrier.ping.error.value).find(Boolean) ?? null),
+    stale: computed(() => carrierPings.some(carrier => carrier.ping.stale.value)),
   }
 }

@@ -20,6 +20,7 @@ export interface CarrierPingDisplay {
   lossBars: CarrierPingBar[]
   latencyTooltip: string
   lossTooltip: string
+  stale: boolean
 }
 
 const EMPTY_PING_BAR_COUNT = 20
@@ -152,23 +153,36 @@ export function useNodeCarrierPingDisplay(uuid: MaybeRefOrGetter<string>) {
             ? (appStore.lang === 'zh-CN' ? '未启用 Ping 记录' : 'Ping records disabled')
             : taskHint
 
-    const latencyBars = carrier.stats.history.length
+    const baseLatencyBars = carrier.stats.history.length
       ? buildHistoryBars(label, carrier.key, carrier.stats.history, 'latency')
       : buildEmptyBars(label, carrier.key, 'latency', emptyReason)
-    const lossBars = carrier.stats.history.length
+    const baseLossBars = carrier.stats.history.length
       ? buildHistoryBars(label, carrier.key, carrier.stats.history, 'loss')
       : buildEmptyBars(label, carrier.key, 'loss', emptyReason)
+    const markStale = (bar: CarrierPingBar): CarrierPingBar => ({
+      ...bar,
+      tone: 'muted',
+      toneClass: 'bg-muted-foreground/20',
+      title: `${label} 数据已过期`,
+      ariaLabel: `${bar.ariaLabel}，数据已过期`,
+    })
+    const latencyBars = carrier.stale ? baseLatencyBars.map(markStale) : baseLatencyBars
+    const lossBars = carrier.stale ? baseLossBars.map(markStale) : baseLossBars
 
-    const latencyDisplay = carrier.hasLatency
-      ? `${Math.round(carrier.stats.avgLatency)} ms`
-      : carrierStats.loading.value
-        ? (appStore.lang === 'zh-CN' ? '加载中' : 'Loading')
-        : '-'
-    const lossDisplay = carrier.stats.hasData
-      ? `${carrier.stats.avgLoss.toFixed(1)}%`
-      : carrierStats.loading.value
-        ? (appStore.lang === 'zh-CN' ? '加载中' : 'Loading')
-        : '-'
+    const latencyDisplay = carrier.stale
+      ? (appStore.lang === 'zh-CN' ? '过期' : 'Stale')
+      : carrier.hasLatency
+        ? `${Math.round(carrier.stats.avgLatency)} ms`
+        : carrierStats.loading.value
+          ? (appStore.lang === 'zh-CN' ? '加载中' : 'Loading')
+          : '-'
+    const lossDisplay = carrier.stale
+      ? '-'
+      : carrier.stats.hasData
+        ? `${carrier.stats.avgLoss.toFixed(1)}%`
+        : carrierStats.loading.value
+          ? (appStore.lang === 'zh-CN' ? '加载中' : 'Loading')
+          : '-'
     const volatilityDisplay = carrier.hasLatency
       ? `±${carrier.stats.avgVolatility.toFixed(1)} ms`
       : '-'
@@ -195,6 +209,7 @@ export function useNodeCarrierPingDisplay(uuid: MaybeRefOrGetter<string>) {
       lossBars,
       latencyTooltip,
       lossTooltip,
+      stale: carrier.stale,
     }
   }))
 
@@ -203,5 +218,6 @@ export function useNodeCarrierPingDisplay(uuid: MaybeRefOrGetter<string>) {
     carrierScopeLabel,
     loading: carrierStats.loading,
     error: carrierStats.error,
+    stale: carrierStats.stale,
   }
 }
