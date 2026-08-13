@@ -75,6 +75,15 @@ test('PandaOps mobile keeps document width contained', async ({ page }) => {
   await expect(page.locator('html')).toHaveJSProperty('scrollWidth', await page.locator('html').evaluate(element => element.clientWidth))
 })
 
+test('PandaOps topology reports an unresolved configured node as an error', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, { pandaOps: true, dark: true, pandaOpsMissingNode: true })
+  await openStablePage(page)
+
+  await expect(page.getByText(/1 异常/)).toBeVisible()
+  await expect(page.getByText('异常', { exact: true })).toBeVisible()
+})
+
 test('PandaOps topology manager saves through managed theme API', async ({ page }) => {
   const saves: unknown[] = []
   await page.setViewportSize({ width: 1440, height: 900 })
@@ -93,6 +102,23 @@ test('PandaOps topology manager saves through managed theme API', async ({ page 
   await expect(dialog).toBeHidden()
   await expect.poll(() => saves.length).toBe(1)
   expect(saves[0]).toMatchObject({ topologyEnabled: true })
+})
+
+test('PandaOps topology manager lists configured Ping tasks without recent samples', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, {
+    pandaOps: true,
+    dark: true,
+    authenticated: true,
+    pandaOpsNoRecentTask: true,
+  })
+  await openStablePage(page)
+
+  await page.getByRole('button', { name: '管理', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: '拓扑管理' })
+  const taskSelect = dialog.getByLabel('第 2 条线路第 1 段 Ping 任务')
+  await expect(taskSelect).toBeVisible()
+  await expect(taskSelect.locator('option')).toContainText(['Configured-No-Recent-Sample'])
 })
 
 test('home accessible list desktop', async ({ page }) => {

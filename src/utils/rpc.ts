@@ -241,6 +241,7 @@ export interface PingTaskInfo {
   name: string
   interval: number
   loss: number
+  all_clients?: boolean
   default_on?: boolean
   clients?: string[]
   p99?: number

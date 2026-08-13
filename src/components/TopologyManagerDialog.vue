@@ -13,6 +13,7 @@ const emit = defineEmits<{ 'update:open': [open: boolean] }>()
 const manager = reactive(useTopologyManager(() => props.nodes))
 const taskOptions = ref<Record<string, string[]>>({})
 const taskLoading = ref<Record<string, boolean>>({})
+const taskErrors = ref<Record<string, string>>({})
 
 const isOpen = computed({
   get: () => props.open,
@@ -20,17 +21,27 @@ const isOpen = computed({
 })
 
 watch(() => props.open, (value) => {
-  if (value)
+  if (value) {
     manager.reset()
+    const sourceNames = manager.routes.flatMap(route => route.metrics.map(metric => metric.nodeName)).filter(Boolean)
+    void Promise.all(Array.from(new Set(sourceNames), loadTasks))
+  }
 }, { immediate: true })
 
 async function loadTasks(nodeName: string): Promise<void> {
   const node = props.nodes.find(item => item.name === nodeName)
-  if (!node || taskOptions.value[node.uuid] || taskLoading.value[node.uuid])
+  if (!node || taskLoading.value[node.uuid])
     return
   taskLoading.value = { ...taskLoading.value, [node.uuid]: true }
+  taskErrors.value = { ...taskErrors.value, [node.uuid]: '' }
   try {
     taskOptions.value = { ...taskOptions.value, [node.uuid]: await loadPingTaskNamesForNode(node.uuid) }
+  }
+  catch (error) {
+    taskErrors.value = {
+      ...taskErrors.value,
+      [node.uuid]: error instanceof Error ? error.message : '无法读取 Ping 任务。',
+    }
   }
   finally {
     taskLoading.value = { ...taskLoading.value, [node.uuid]: false }
@@ -40,6 +51,15 @@ async function loadTasks(nodeName: string): Promise<void> {
 function nodeTasks(nodeName: string): string[] {
   const node = props.nodes.find(item => item.name === nodeName)
   return node ? taskOptions.value[node.uuid] ?? [] : []
+}
+
+function nodeTaskState(nodeName: string): { uuid: string, loading: boolean, error: string } {
+  const uuid = props.nodes.find(item => item.name === nodeName)?.uuid ?? ''
+  return {
+    uuid,
+    loading: Boolean(uuid && taskLoading.value[uuid]),
+    error: uuid ? taskErrors.value[uuid] ?? '' : '',
+  }
 }
 
 async function save(): Promise<void> {
@@ -159,8 +179,8 @@ function updateFallback(metric: { fallbackLatency: number | null, fallbackLoss: 
             <template v-if="metric.live">
               <select
                 v-model="metric.nodeName"
+                :aria-label="`第 ${routeIndex + 1} 条线路第 ${metricIndex + 1} 段探测来源`"
                 class="h-8 w-full rounded-md border border-input bg-background px-2 text-xs"
-                @focus="loadTasks(metric.nodeName)"
                 @change="loadTasks(metric.nodeName)"
               >
                 <option value="">
@@ -170,18 +190,43 @@ function updateFallback(metric: { fallbackLatency: number | null, fallbackLoss: 
                   {{ option.name }}
                 </option>
               </select>
-              <input
+              <select
+                v-if="nodeTasks(metric.nodeName).length"
                 v-model="metric.taskFilter"
-                :list="`tasks-${route.id}-${metricIndex}`"
+                :aria-label="`第 ${routeIndex + 1} 条线路第 ${metricIndex + 1} 段 Ping 任务`"
+                class="h-8 w-full rounded-md border border-input bg-background px-2 text-xs"
+              >
+                <option value="">
+                  选择 Ping 任务
+                </option>
+                <option v-if="metric.taskFilter && !nodeTasks(metric.nodeName).includes(metric.taskFilter)" :value="metric.taskFilter">
+                  {{ metric.taskFilter }}（已配置）
+                </option>
+                <option v-for="task in nodeTasks(metric.nodeName)" :key="task" :value="task">
+                  {{ task }}
+                </option>
+              </select>
+              <input
+                v-else
+                v-model="metric.taskFilter"
+                :aria-label="`第 ${routeIndex + 1} 条线路第 ${metricIndex + 1} 段 Ping 任务`"
                 class="h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none focus:border-ring"
                 placeholder="Ping 任务名称"
                 @focus="loadTasks(metric.nodeName)"
               >
-              <datalist :id="`tasks-${route.id}-${metricIndex}`">
-                <option v-for="task in nodeTasks(metric.nodeName)" :key="task" :value="task" />
-              </datalist>
               <p class="text-[10px] text-muted-foreground">
-                {{ taskLoading[props.nodes.find(node => node.name === metric.nodeName)?.uuid || ''] ? '正在读取任务…' : '只统计来源节点上匹配该名称的任务' }}
+                <template v-if="nodeTaskState(metric.nodeName).loading">
+                  正在读取任务…
+                </template>
+                <template v-else-if="nodeTaskState(metric.nodeName).error">
+                  {{ nodeTaskState(metric.nodeName).error }}
+                </template>
+                <template v-else-if="nodeTasks(metric.nodeName).length">
+                  已列出该来源节点可用的 Ping 任务
+                </template>
+                <template v-else>
+                  未找到可用任务，可手动输入精确名称
+                </template>
               </p>
             </template>
             <div class="grid grid-cols-2 gap-2">

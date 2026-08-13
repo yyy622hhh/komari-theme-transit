@@ -28,6 +28,8 @@ export interface VisualFixtureOptions {
   pingTaskOrdering?: boolean
   pandaOps?: boolean
   authenticated?: boolean
+  pandaOpsMissingNode?: boolean
+  pandaOpsNoRecentTask?: boolean
 }
 
 function uuidFor(index: number): string {
@@ -246,6 +248,16 @@ async function handleRpc(route: Route, clientFixtures = clients, options: Visual
         { id: 20, name: '浙江电信', interval: 60, loss: 0, weight: 2 },
       ]
     : [{ id: 1, name: 'Tokyo', interval: 60, loss: 3.2, weight: 1 }]
+  if (options.pandaOpsNoRecentTask) {
+    pingTasks.push({
+      id: 99,
+      name: 'Configured-No-Recent-Sample',
+      interval: 30,
+      loss: 0,
+      weight: 99,
+      all_clients: true,
+    })
+  }
   const metricPingTasks = options.pingTaskOrdering
     ? [pingTasks[2]!, pingTasks[0]!, pingTasks[1]!]
     : pingTasks
@@ -364,7 +376,7 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
     topologyEnabled: options.pandaOps ?? false,
     carrierPingRegion: 'all',
     topologyRoute: options.pandaOps
-      ? '北京电信|CN|入口;主控-洛杉矶|US|线路机;香港边缘节点-超长名称布局测试|HK|落地机||北京电信|CN|入口;东京-高负载|JP|线路机;新加坡-A100|SG|落地机'
+      ? `北京电信|CN|入口;主控-洛杉矶|US|线路机;${options.pandaOpsMissingNode ? '未纳管-西雅图' : '香港边缘节点-超长名称布局测试'}|${options.pandaOpsMissingNode ? 'US' : 'HK'}|落地机||北京电信|CN|入口;东京-高负载|JP|线路机;新加坡-A100|SG|落地机`
       : '',
     topologyMetrics: options.pandaOps
       ? 'live@主控-洛杉矶@Tokyo@51@0;84,0||live@东京-高负载@Tokyo@72@0;live@东京-高负载@Tokyo@88@0'

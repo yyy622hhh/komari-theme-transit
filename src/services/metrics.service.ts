@@ -154,13 +154,23 @@ export async function loadPingTaskNamesForNode(nodeUuid: string): Promise<string
   if (!nodeUuid.trim())
     return []
 
-  const [tasks, stats] = await Promise.all([
-    loadPublicPingTasks().catch(() => []),
-    loadPingMetricStats({ entity_id: nodeUuid, hours: 1, max_points: 1 }).catch(() => null),
+  const [tasksResult, statsResult] = await Promise.allSettled([
+    loadPublicPingTasks(),
+    loadPingMetricStats({ entity_id: nodeUuid, hours: 1, max_points: 1 }),
   ])
+  if (tasksResult.status === 'rejected' && statsResult.status === 'rejected')
+    throw new Error('无法读取 Ping 任务，请稍后重试。')
+
+  const tasks = tasksResult.status === 'fulfilled' ? tasksResult.value : []
+  const stats = statsResult.status === 'fulfilled' ? statsResult.value : null
   const taskById = new Map(tasks.map(task => [String(task.id), task.name]))
-  return [...new Set((stats?.stats ?? [])
+  const configuredTaskNames = tasks
+    .filter(task => task.all_clients || task.default_on || !task.clients?.length || task.clients.includes(nodeUuid))
+    .map(task => task.name.trim())
+    .filter(Boolean)
+  const observedTaskNames = (stats?.stats ?? [])
     .filter(stat => stat.entity_id === nodeUuid)
     .map(stat => stat.name?.trim() || taskById.get(String(stat.task_id))?.trim() || '')
-    .filter(Boolean))]
+    .filter(Boolean)
+  return [...new Set([...configuredTaskNames, ...observedTaskNames])]
 }

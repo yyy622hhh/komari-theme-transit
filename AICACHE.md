@@ -618,3 +618,12 @@
 
 - Scoped the upstream global semantic `header` glass rule out of PandaOps node-card headers. Card titles now sit directly on the card surface without a second dark slab, divider or blur layer.
 - Added a browser regression assertion for the transparent PandaOps card header and bumped the managed theme version to `3.3.5-panda.2`.
+
+## 2026-08-13 PandaOps functional completion audit
+
+- Status: done (M5/M6), release version `3.3.5-panda.3`.
+- Live audit confirmed that Komari correctly merges the active PandaOps managed configuration into `/api/public`; the separate global `theme_settings` row is a base setting, not a failed topology save.
+- Topology health now evaluates both route segments and distinguishes healthy, warning, pending, error and offline states. Unresolved configured nodes are no longer counted as healthy, and each edge identifies live, loading, failed, missing-data and static-baseline sources.
+- The manager now loads all Ping tasks applicable to a selected node, including configured tasks without a recent sample, uses a real task select when choices exist, preserves an unmatched configured value, and exposes loading/read errors instead of silently falling back to a manual field.
+- Live validation confirmed the two dedicated tasks continue writing `ping.latency_ms` and `ping.loss`: Transit-JP-Relay to Transit-US-Edge reported roughly 82-85 ms / 0 loss; Transit-US-Relay to Transit-US-Edge-2 reported 0 ms / 0 loss in the latest minute rollups.
+- Validation passed: `bun run type-check`, `bun run lint`, `git diff --check`, production build, five focused PandaOps browser checks and the complete 18-test visual/functional suite. The only build warning remains the existing optional globe chunk size.
