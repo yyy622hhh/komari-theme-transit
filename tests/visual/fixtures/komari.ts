@@ -27,6 +27,7 @@ export interface VisualFixtureOptions {
   missingCpuMetricHistory?: boolean
   pingTaskOrdering?: boolean
   pandaOps?: boolean
+  authenticated?: boolean
 }
 
 function uuidFor(index: number): string {
@@ -412,7 +413,11 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
   }))
   await page.route('**/api/me', route => route.fulfill({
     contentType: 'application/json',
-    body: JSON.stringify({ logged_in: false, username: 'visual-guest' }),
+    body: JSON.stringify({ logged_in: options.authenticated ?? false, username: options.authenticated ? 'visual-admin' : 'visual-guest' }),
+  }))
+  await page.route('**/api/admin/theme/config?short=*', route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({ status: 'success', message: 'ok' }),
   }))
   await page.route('**/api/version', route => route.fulfill({
     contentType: 'application/json',

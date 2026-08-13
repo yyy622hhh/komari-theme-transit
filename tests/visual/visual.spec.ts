@@ -72,6 +72,26 @@ test('PandaOps mobile keeps document width contained', async ({ page }) => {
   await expect(page.locator('html')).toHaveJSProperty('scrollWidth', await page.locator('html').evaluate(element => element.clientWidth))
 })
 
+test('PandaOps topology manager saves through managed theme API', async ({ page }) => {
+  const saves: unknown[] = []
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, { pandaOps: true, dark: true, authenticated: true })
+  page.on('request', (request) => {
+    if (request.method() === 'PUT' && request.url().includes('/api/admin/theme/config?short=PandaOps'))
+      saves.push(request.postDataJSON())
+  })
+  await openStablePage(page)
+
+  await page.getByRole('button', { name: '管理', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: '拓扑管理' })
+  await expect(dialog).toBeVisible()
+  await dialog.getByRole('button', { name: '添加线路' }).click()
+  await dialog.getByRole('button', { name: '保存并应用' }).click()
+  await expect(dialog).toBeHidden()
+  await expect.poll(() => saves.length).toBe(1)
+  expect(saves[0]).toMatchObject({ topologyEnabled: true })
+})
+
 test('home accessible list desktop', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 })
   await installKomariFixture(page, { colorVisionFriendly: true, viewMode: 'list', hideEarth: true })
