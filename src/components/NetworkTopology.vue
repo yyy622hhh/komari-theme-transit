@@ -240,20 +240,25 @@ function openRouteDetail(route: RouteRow): void {
               <span class="shrink-0 text-[10px] text-slate-500">· {{ route.nodes[2]?.role }}</span>
             </button>
 
-            <button
-              type="button"
+            <div
               class="flex h-8 items-center justify-end gap-1.5 rounded-md px-1 text-left text-slate-500 transition-colors hover:bg-white/[0.035] hover:text-slate-200"
-              aria-label="查看线路历史"
-              @click="openRouteDetail(route)"
             >
               <TopologyStability
+                class="min-w-0 flex-1"
                 :metrics="route.metrics"
                 :node-names="route.nodes.map(node => node.name)"
                 :nodes="nodes"
                 @status-change="updateRouteHealth(route.key, $event)"
               />
-              <Icon icon="tabler:chevron-right" :width="13" class="opacity-0 transition-opacity group-hover:opacity-100" />
-            </button>
+              <button
+                type="button"
+                class="flex size-6 shrink-0 items-center justify-center rounded text-slate-500 transition-colors hover:bg-white/[0.05] hover:text-slate-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-400/60"
+                aria-label="查看线路历史"
+                @click="openRouteDetail(route)"
+              >
+                <Icon icon="tabler:chevron-right" :width="13" class="opacity-60 transition-opacity group-hover:opacity-100" />
+              </button>
+            </div>
           </article>
         </div>
       </div>

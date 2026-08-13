@@ -650,3 +650,10 @@
 - Status: done (M4/M6), release version `3.3.5-panda.6`.
 - Capped each line beside a topology latency/loss label at 64px while keeping it flex-shrinkable at narrow widths. The complete edge metric is centered within its grid column, so different metric lengths remain aligned without long decorative rules dominating the row.
 - Browser guards require every rendered topology line to stay between 8px and 64px at the PandaOps desktop breakpoint.
+
+## 2026-08-13 PandaOps topology sample drill-down
+
+- Status: done (M4/M6), release version `3.3.5-panda.7`.
+- Every visible topology stability bar is now an accessible historical sample trigger. Click, keyboard activation, or tap reveals its route segment, exact latency, packet loss and sample time without expanding the compact route row.
+- The separate chevron remains the entry point for the full 1h/24h/7d route history, avoiding nested interactive controls and preserving both quick inspection and detailed analysis.
+- Browser coverage clicks a real fixture sample and verifies the millisecond, loss and segment fields in the rendered portal tooltip.
