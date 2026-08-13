@@ -603,3 +603,13 @@
 - Implemented 7 deterministic Playwright baselines: light desktop home, dark mobile home, accessible desktop list, Cobe and tiled earth layouts, light desktop detail and dark mobile detail. All use mocked Komari API/RPC/visitor data, fixed time, disabled animations and hidden dynamic 3D canvas pixels while retaining globe layout boundaries.
 - First baseline generation and repeated comparison both passed 7/7 with system Chrome. Windows system-channel Chrome did not exit cleanly after reporting results, so release validation does not treat that local channel teardown as a product failure; CI installs and runs Playwright's managed Chromium.
 - Added the independent `Visual Regression` workflow for pull requests and `main`, with actual/diff/HTML report artifacts retained for 14 days on failure. Release target is v3.3.0.
+
+## 2026-08-13 PandaOps 3.3.5 integration
+
+- PandaOps now tracks upstream Glassmorphism v3.3.5 and keeps upstream's v3 request/cache/RPC architecture, admin bundle and managed configuration surface.
+- The PandaOps home replaces the large globe summary with a compact six-metric asset strip, multi-route topology and dense three-network node cards. `opsDashboardEnabled=false` returns to the upstream home without removing any upstream tools or detail-page features.
+- Topology routes and both segment metrics are now editable through an authenticated visual manager. Saves update the active Komari managed theme settings; the legacy serialized `topologyRoute` / `topologyMetrics` fields remain the persistence format for backwards compatibility.
+- A topology segment can use a static measured baseline or a named Komari Ping task. Ping history filtering is task-name-aware for both metric-series and legacy record fallbacks, so the transit-to-landing segment can show real latency and loss once a matching task exists.
+- Clicking a route stability cell opens 1h, 24h and 7d segment history. Missing live tasks degrade to the configured fallback and are labelled as waiting for task data instead of reporting a false live value.
+- The entrance selector retains Beijing/Shanghai/Guangzhou Telecom, Unicom and Mobile presets per route. Node cards use the same task-aware statistics for the configured three-network region.
+- Validation baseline: `bun run type-check`, `bun run lint`, `bun run build-only` and `git diff --check` pass on the v3.3.5 base. The existing large globe chunk warning remains an upstream optional-renderer warning and does not affect PandaOps home loading.

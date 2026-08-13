@@ -1,0 +1,49 @@
+<script setup lang="ts">
+import { Icon } from '@iconify/vue'
+import { computed } from 'vue'
+import { getTopologyProbe, TOPOLOGY_PROBE_OPTIONS } from '@/utils/topologyHelper'
+
+const props = defineProps<{ modelValue: string }>()
+const emit = defineEmits<{ 'update:modelValue': [value: string] }>()
+
+const selected = computed(() => getTopologyProbe(props.modelValue))
+const cities = ['北京', '上海', '广州']
+
+function updateValue(event: Event) {
+  const target = event.target
+  if (target instanceof HTMLSelectElement)
+    emit('update:modelValue', target.value)
+}
+</script>
+
+<template>
+  <label class="group relative flex min-w-0 flex-1 items-center gap-2">
+    <span class="sr-only">切换入口探测点</span>
+    <img
+      src="/images/flags/CN.svg"
+      alt="CN"
+      class="h-3.5 w-5 shrink-0 rounded-[2px] object-cover"
+    >
+    <select
+      :value="selected.key"
+      class="h-7 min-w-0 flex-1 cursor-pointer appearance-none rounded-md border border-transparent bg-transparent py-0 pl-1 pr-6 text-xs font-semibold text-slate-200 outline-none transition hover:border-white/[0.07] hover:bg-white/[0.025] focus:border-emerald-400/25 focus:ring-2 focus:ring-emerald-400/10 sm:text-[13px]"
+      :aria-label="`当前入口 ${selected.label}，点击切换`"
+      @change="updateValue"
+    >
+      <optgroup v-for="city in cities" :key="city" :label="city">
+        <option
+          v-for="option in TOPOLOGY_PROBE_OPTIONS.filter(item => item.city === city)"
+          :key="option.key"
+          :value="option.key"
+        >
+          {{ option.label }}
+        </option>
+      </optgroup>
+    </select>
+    <Icon
+      icon="tabler:chevron-down"
+      :width="13"
+      class="pointer-events-none absolute right-1.5 text-slate-500 transition group-focus-within:text-emerald-400"
+    />
+  </label>
+</template>

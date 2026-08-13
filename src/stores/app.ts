@@ -1017,6 +1017,19 @@ const useAppStore = defineStore('app', () => {
 
   const visitorInfoEnabled = computed<boolean>(() => readBooleanSetting(themeSettings.value, 'visitorInfoEnabled', true))
 
+  const opsDashboardEnabled = computed<boolean>(() => readBooleanSetting(themeSettings.value, 'opsDashboardEnabled', true))
+
+  const topologyEnabled = computed<boolean>(() => readBooleanSetting(themeSettings.value, 'topologyEnabled', true))
+
+  const topologyRoute = computed<string>(() => readStringSetting(themeSettings.value, 'topologyRoute'))
+
+  const topologyMetrics = computed<string>(() => readStringSetting(themeSettings.value, 'topologyMetrics'))
+
+  const carrierPingRegion = computed<string>(() => {
+    const value = readStringSetting(themeSettings.value, 'carrierPingRegion')
+    return ['all', 'beijing', 'shanghai', 'guangdong'].includes(value) ? value : 'beijing'
+  })
+
   const generalCardEnabledMap = computed<Record<GeneralCardKey, boolean>>(() => {
     const settings = themeSettings.value
     const enabledMap = { ...DEFAULT_GENERAL_CARD_ENABLED }
@@ -1318,6 +1331,11 @@ const useAppStore = defineStore('app', () => {
     hideEarth,
     hideGeneralCard,
     visitorInfoEnabled,
+    opsDashboardEnabled,
+    topologyEnabled,
+    topologyRoute,
+    topologyMetrics,
+    carrierPingRegion,
     generalCardEnabledMap,
     generalCardOrder,
     homeToolsEnabled,

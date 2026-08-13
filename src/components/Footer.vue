@@ -52,7 +52,7 @@ const formattedServerVersion = computed(() => serverVersion.value?.version ?? ''
             href="https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism" target="_blank" rel="noopener noreferrer"
             class="transition-opacity hover:opacity-80"
           >
-            <span class="font-medium text-foreground">Komari Glassmorphism</span>
+            <span class="font-medium text-foreground">PandaOps</span>
           </a>
         </DataTooltip>
       </div>

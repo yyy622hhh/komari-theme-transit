@@ -8,6 +8,47 @@
   scrollbar-width: thin;
 }
 
+/* PandaOps compact monitoring surface. */
+.panda-panel {
+  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  background: color-mix(in srgb, var(--card) 88%, transparent);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.025),
+    0 18px 50px -42px rgb(0 0 0 / 0.72);
+  backdrop-filter: blur(18px) saturate(118%);
+  -webkit-backdrop-filter: blur(18px) saturate(118%);
+}
+
+.panda-control {
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent) !important;
+  background: color-mix(in srgb, var(--card) 82%, transparent) !important;
+  color: var(--muted-foreground);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+.panda-control:hover {
+  color: var(--foreground);
+}
+
+.panda-node-card {
+  border: 1px solid color-mix(in srgb, var(--border) 76%, transparent);
+  background: color-mix(in srgb, var(--card) 86%, transparent);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.02);
+  backdrop-filter: blur(16px) saturate(112%);
+  -webkit-backdrop-filter: blur(16px) saturate(112%);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .panda-panel,
+  .panda-control,
+  .panda-node-card {
+    background: var(--card) !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+}
+
 :root {
   --background: oklch(0.935 0.015 252);
   --foreground: oklch(0.11 0.01 285.823);

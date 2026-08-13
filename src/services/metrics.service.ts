@@ -149,3 +149,18 @@ export async function loadPublicPingTasks(): Promise<PingTaskInfo[]> {
     { shouldRetry: shouldRetryMetricRequest },
   )
 }
+
+export async function loadPingTaskNamesForNode(nodeUuid: string): Promise<string[]> {
+  if (!nodeUuid.trim())
+    return []
+
+  const [tasks, stats] = await Promise.all([
+    loadPublicPingTasks().catch(() => []),
+    loadPingMetricStats({ entity_id: nodeUuid, hours: 1, max_points: 1 }).catch(() => null),
+  ])
+  const taskById = new Map(tasks.map(task => [String(task.id), task.name]))
+  return [...new Set((stats?.stats ?? [])
+    .filter(stat => stat.entity_id === nodeUuid)
+    .map(stat => stat.name?.trim() || taskById.get(String(stat.task_id))?.trim() || '')
+    .filter(Boolean))]
+}

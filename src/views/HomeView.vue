@@ -51,6 +51,8 @@ const NodeCard = defineAsyncComponent(() => import('@/components/NodeCard.vue'))
 const NodeGeneralCards = defineAsyncComponent(() => import('@/components/NodeGeneralCards.vue'))
 const NodeList = defineAsyncComponent(() => import('@/components/NodeList.vue'))
 const NodeComparePanel = defineAsyncComponent(() => import('@/components/NodeComparePanel.vue'))
+const PandaOpsDashboard = defineAsyncComponent(() => import('@/components/PandaOpsDashboard.vue'))
+const PandaOpsNodeCard = defineAsyncComponent(() => import('@/components/PandaOpsNodeCard.vue'))
 const PingMonitorDialog = defineAsyncComponent(() => import('@/components/PingMonitorDialog.vue'))
 const NodeTopologyPanel = defineAsyncComponent(() => import('@/components/NodeTopologyPanel.vue'))
 const ProviderValuePanel = defineAsyncComponent(() => import('@/components/ProviderValuePanel.vue'))
@@ -407,6 +409,9 @@ const activeToolTitle = computed(() => {
 })
 
 const nodeCardGridClass = computed(() => {
+  if (appStore.opsDashboardEnabled)
+    return ['grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3']
+
   const sizeClass: Record<typeof appStore.nodeCardSize, string> = {
     mini: 'gap-3 sm:grid-cols-[repeat(auto-fill,minmax(270px,1fr))]',
     compact: 'gap-3 sm:grid-cols-[repeat(auto-fill,minmax(300px,1fr))]',
@@ -431,13 +436,15 @@ const nodeCardGridClass = computed(() => {
     </div>
 
     <NodeGeneralCards
-      v-if="!appStore.hideGeneralCard"
+      v-if="!appStore.opsDashboardEnabled && !appStore.hideGeneralCard"
       :nodes="groupNodeList"
       :globe-nodes="groupNodeList"
       :transition-key="appStore.nodeSelectedGroup"
     />
 
-    <div class="node-info p-4 pt-0 flex flex-col gap-4 relative z-1 pointer-events-none" :class="!!appStore.hideGeneralCard && 'pt-4'">
+    <PandaOpsDashboard v-if="appStore.opsDashboardEnabled" :nodes="nodesStore.visibleNodes" />
+
+    <div class="node-info p-3 pt-0 sm:p-4 sm:pt-0 flex flex-col gap-4 relative z-1 pointer-events-none" :class="!appStore.opsDashboardEnabled && !!appStore.hideGeneralCard && 'pt-4'">
       <div class="nodes min-w-0">
         <Tabs v-model="appStore.nodeSelectedGroup" class="w-full flex-col gap-4">
           <div class="flex flex-col gap-2 xl:flex-row xl:items-center">
@@ -561,7 +568,13 @@ const nodeCardGridClass = computed(() => {
                   :idle-delay="800 + index * 70"
                   :min-height="deferredNodeCardHeight"
                 >
+                  <PandaOpsNodeCard
+                    v-if="appStore.opsDashboardEnabled"
+                    :node="node"
+                    @click="handleNodeClick(node)"
+                  />
                   <NodeCard
+                    v-else
                     :node="node"
                     :reduce-motion="reduceDenseNodeEffects"
                     :ping-enabled="isViewActive"

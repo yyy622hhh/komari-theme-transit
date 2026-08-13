@@ -4,7 +4,7 @@ import { useThrottleFn } from '@vueuse/core'
 import { computed, onScopeDispose, ref, shallowRef, toValue, watch } from 'vue'
 import { PING_RECORD_MAX_COUNT } from '@/constants/load'
 import { abortPingRecords, loadPingRecords } from '@/services/history.service'
-import { abortPingMetricStats, abortQueryMetrics, loadPingMetricStats, queryMetrics } from '@/services/metrics.service'
+import { abortPingMetricStats, abortQueryMetrics, loadPingMetricStats, loadPublicPingTasks, queryMetrics } from '@/services/metrics.service'
 import { isPingMetric, normalizeMetricSeriesList, PING_LATENCY_METRIC, PING_LOSS_METRIC, pingTaskId } from '@/utils/metricSeries'
 
 export interface NodePingHistoryPoint {
@@ -32,6 +32,7 @@ interface MetricLossPoint {
   time: string
   value: number
   count: number
+  taskId: number
 }
 
 function normalizeMaxCount(maxCount: number | null | undefined): number | undefined {
@@ -45,6 +46,7 @@ interface SharedPingRecordsState {
   source: 'metric' | 'legacy'
   metricStats?: PingMetricTaskStats[]
   metricLossPoints?: MetricLossPoint[]
+  taskNamesById: Map<number, string>
 }
 
 interface SharedPingRecordsEntry {
@@ -58,10 +60,11 @@ interface SharedPingRecordsEntry {
 }
 
 const HISTORY_BUCKET_COUNT = 20
-const CACHE_VERSION = 8
+const CACHE_VERSION = 9
 const CACHE_KEY_PREFIX = 'komari-theme-emerald:node-ping-stats'
 const FULL_LOSS_EPSILON = 1e-6
 const PING_RECORD_REFRESH_INTERVAL_MS = 60_000
+const TASK_FILTER_SEPARATOR_PATTERN = /[\s\-_—–·]+/g
 const sharedPingRecordsCache = new Map<string, SharedPingRecordsEntry>()
 
 interface TaskRecordSummary {
@@ -123,8 +126,12 @@ function getIncludedTaskIds(records: PingRecord[]): Set<number> {
   )
 }
 
-function getCacheKey(uuid: string, hours: number, maxCount?: number): string {
-  return `${CACHE_KEY_PREFIX}:${uuid}:${hours}:${maxCount ?? 'all'}`
+function normalizeTaskFilter(value: string): string {
+  return value.toLowerCase().replace(TASK_FILTER_SEPARATOR_PATTERN, '')
+}
+
+function getCacheKey(uuid: string, hours: number, maxCount?: number, taskNameFilter = ''): string {
+  return `${CACHE_KEY_PREFIX}:${uuid}:${hours}:${maxCount ?? 'all'}:${normalizeTaskFilter(taskNameFilter) || 'all'}`
 }
 
 function getSharedPingRecordsKey(hours: number, maxCount?: number, uuid?: string): string {
@@ -157,12 +164,12 @@ function isValidStatsState(value: unknown): value is NodePingStatsState {
     && state.history.every(isValidHistoryPoint)
 }
 
-function readStatsCache(uuid: string, hours: number, maxCount?: number): NodePingStatsState | null {
+function readStatsCache(uuid: string, hours: number, maxCount?: number, taskNameFilter = ''): NodePingStatsState | null {
   if (typeof window === 'undefined')
     return null
 
   try {
-    const raw = window.localStorage.getItem(getCacheKey(uuid, hours, maxCount))
+    const raw = window.localStorage.getItem(getCacheKey(uuid, hours, maxCount, taskNameFilter))
     if (!raw)
       return null
 
@@ -177,13 +184,13 @@ function readStatsCache(uuid: string, hours: number, maxCount?: number): NodePin
   }
 }
 
-function writeStatsCache(uuid: string, hours: number, maxCount: number | undefined, value: NodePingStatsState): void {
+function writeStatsCache(uuid: string, hours: number, maxCount: number | undefined, value: NodePingStatsState, taskNameFilter = ''): void {
   if (typeof window === 'undefined')
     return
 
   try {
     window.localStorage.setItem(
-      getCacheKey(uuid, hours, maxCount),
+      getCacheKey(uuid, hours, maxCount, taskNameFilter),
       JSON.stringify({
         version: CACHE_VERSION,
         updatedAt: new Date().toISOString(),
@@ -307,6 +314,7 @@ async function loadPingMetricRecords(nodeUuid: string, hours: number, maxCount?:
             time: point.time,
             value: point.value,
             count: isFiniteNumber(point.count) && point.count > 0 ? point.count : 1,
+            taskId,
           })
           metricLossTaskIds.add(taskId)
         }
@@ -346,6 +354,7 @@ async function loadPingMetricRecords(nodeUuid: string, hours: number, maxCount?:
     source: 'metric',
     metricStats: stats,
     metricLossPoints,
+    taskNamesById: new Map(),
   }
 }
 
@@ -358,18 +367,27 @@ async function loadSharedPingRecords(entry: SharedPingRecordsEntry, hours: numbe
 
   entry.promise = (async () => {
     try {
-      const metricState = nodeUuid ? await loadPingMetricRecords(nodeUuid, hours, maxCount).catch(() => null) : null
+      const [metricState, pingTasks] = await Promise.all([
+        nodeUuid ? loadPingMetricRecords(nodeUuid, hours, maxCount).catch(() => null) : Promise.resolve(null),
+        loadPublicPingTasks().catch(() => []),
+      ])
+      const taskNamesById = new Map(pingTasks.map(task => [normalizeTaskId(String(task.id)), task.name]))
+      for (const stat of metricState?.metricStats ?? []) {
+        if (stat.name?.trim())
+          taskNamesById.set(normalizeTaskId(stat.task_id), stat.name.trim())
+      }
       if (entry.subscribers === 0)
         return
 
       if (metricState) {
-        entry.data.value = metricState
+        entry.data.value = { ...metricState, taskNamesById }
       }
       else {
         const records = await loadPingRecords(hours, maxCount, nodeUuid)
         entry.data.value = {
           recordsByClient: buildRecordsByClient(records),
           source: 'legacy',
+          taskNamesById,
         }
       }
       entry.lastFetchedAt = Date.now()
@@ -638,6 +656,7 @@ export function useNodePingStats(
     hours?: MaybeRefOrGetter<number>
     enabled?: MaybeRefOrGetter<boolean>
     maxCount?: MaybeRefOrGetter<number | undefined>
+    taskNameFilter?: MaybeRefOrGetter<string>
   },
 ) {
   const loading = ref(false)
@@ -646,11 +665,13 @@ export function useNodePingStats(
   const resolved = computed(() => {
     const hours = Math.max(1, Math.floor(toValue(options?.hours) ?? 24))
     const maxCount = normalizeMaxCount(toValue(options?.maxCount) ?? PING_RECORD_MAX_COUNT)
+    const taskNameFilter = toValue(options?.taskNameFilter)?.trim() ?? ''
     return {
       uuid: toValue(uuid),
       hours,
       maxCount,
       cacheKey: getSharedPingRecordsKey(hours, maxCount, toValue(uuid)),
+      taskNameFilter,
       enabled: toValue(options?.enabled) ?? true,
     }
   })
@@ -680,7 +701,7 @@ export function useNodePingStats(
 
   // stats 由共享 getRecords 结果派生；共享记录每分钟刷新一次后会自动重算。
   const stats = computed<NodePingStatsState>(() => {
-    const { uuid: nodeUuid, hours, maxCount, enabled } = resolved.value
+    const { uuid: nodeUuid, hours, maxCount, taskNameFilter, enabled } = resolved.value
     if (!enabled || !nodeUuid.trim())
       return createEmptyStats()
 
@@ -689,12 +710,35 @@ export function useNodePingStats(
     const entry = getSharedPingRecordsEntry(hours, maxCount, nodeUuid)
     const state = entry.data.value
     if (!state)
-      return readStatsCache(nodeUuid, hours, maxCount) ?? createEmptyStats()
+      return readStatsCache(nodeUuid, hours, maxCount, taskNameFilter) ?? createEmptyStats()
 
-    const records = state.recordsByClient.get(nodeUuid) ?? []
-    return records.length || state.metricStats?.length
-      ? buildStats(records, state.metricStats, state.metricLossPoints)
+    const normalizedFilter = normalizeTaskFilter(taskNameFilter)
+    const matchingTaskIds = normalizedFilter
+      ? new Set([...state.taskNamesById.entries()]
+          .filter(([, name]) => normalizeTaskFilter(name).includes(normalizedFilter))
+          .map(([taskId]) => taskId))
+      : null
+    const records = (state.recordsByClient.get(nodeUuid) ?? [])
+      .filter(record => !matchingTaskIds || matchingTaskIds.has(record.task_id))
+    const metricStats = state.metricStats?.filter(stat => !matchingTaskIds || matchingTaskIds.has(normalizeTaskId(stat.task_id)))
+    const metricLossPoints = state.metricLossPoints?.filter(point => !matchingTaskIds || matchingTaskIds.has(point.taskId))
+    return records.length || metricStats?.length
+      ? buildStats(records, metricStats, metricLossPoints)
       : createEmptyStats()
+  })
+
+  const taskNames = computed<string[]>(() => {
+    const { uuid: nodeUuid, hours, maxCount, taskNameFilter, enabled } = resolved.value
+    if (!enabled || !nodeUuid.trim())
+      return []
+
+    const state = getSharedPingRecordsEntry(hours, maxCount, nodeUuid).data.value
+    if (!state)
+      return []
+
+    const normalizedFilter = normalizeTaskFilter(taskNameFilter)
+    return [...new Set([...state.taskNamesById.values()]
+      .filter(name => !normalizedFilter || normalizeTaskFilter(name).includes(normalizedFilter)))]
   })
 
   // 副作用：按需触发首次共享加载并维护 loading/error，不再命令式写入 stats。
@@ -746,8 +790,8 @@ export function useNodePingStats(
 
   // 共享记录会定时刷新，节流回写 localStorage，避免多节点同时重算时密集写盘。
   const persistStats = useThrottleFn(
-    (nodeUuid: string, hours: number, maxCount: number | undefined, value: NodePingStatsState) => {
-      writeStatsCache(nodeUuid, hours, maxCount, value)
+    (nodeUuid: string, hours: number, maxCount: number | undefined, taskNameFilter: string, value: NodePingStatsState) => {
+      writeStatsCache(nodeUuid, hours, maxCount, value, taskNameFilter)
     },
     30_000,
     true,
@@ -757,9 +801,9 @@ export function useNodePingStats(
   watch(stats, (value) => {
     if (!value.hasData)
       return
-    const { uuid: nodeUuid, hours, maxCount, enabled } = resolved.value
+    const { uuid: nodeUuid, hours, maxCount, taskNameFilter, enabled } = resolved.value
     if (enabled && nodeUuid.trim())
-      persistStats(nodeUuid, hours, maxCount, value)
+      persistStats(nodeUuid, hours, maxCount, taskNameFilter, value)
   })
 
   return {
@@ -771,5 +815,49 @@ export function useNodePingStats(
     avgLoss: computed(() => stats.value.avgLoss),
     avgVolatility: computed(() => stats.value.avgVolatility),
     hasData: computed(() => stats.value.hasData),
+    taskNames,
+  }
+}
+
+export type ChinaCarrierKey = 'unicom' | 'telecom' | 'mobile'
+
+interface NodeCarrierPingOptions {
+  hours?: MaybeRefOrGetter<number>
+  enabled?: MaybeRefOrGetter<boolean>
+  maxCount?: MaybeRefOrGetter<number | undefined>
+  taskNameFilter?: MaybeRefOrGetter<string>
+}
+
+const CHINA_CARRIERS = [
+  { key: 'unicom', labelZh: '联通', labelEn: 'Unicom' },
+  { key: 'telecom', labelZh: '电信', labelEn: 'Telecom' },
+  { key: 'mobile', labelZh: '移动', labelEn: 'Mobile' },
+] as const
+
+export function useNodeCarrierPingStats(uuid: MaybeRefOrGetter<string>, options?: NodeCarrierPingOptions) {
+  const carrierPings = CHINA_CARRIERS.map((carrier) => {
+    const taskNameFilter = computed(() => `${toValue(options?.taskNameFilter)?.trim() ?? ''}${carrier.labelZh}`)
+    return {
+      ...carrier,
+      ping: useNodePingStats(uuid, {
+        hours: options?.hours,
+        enabled: options?.enabled,
+        maxCount: options?.maxCount,
+        taskNameFilter,
+      }),
+    }
+  })
+
+  return {
+    carriers: computed(() => carrierPings.map(carrier => ({
+      key: carrier.key,
+      labelZh: carrier.labelZh,
+      labelEn: carrier.labelEn,
+      taskNames: carrier.ping.taskNames.value,
+      stats: carrier.ping.stats.value,
+      hasLatency: carrier.ping.hasData.value && carrier.ping.avgLatency.value > 0,
+    }))),
+    loading: computed(() => carrierPings.some(carrier => carrier.ping.loading.value)),
+    error: computed(() => carrierPings.map(carrier => carrier.ping.error.value).find(Boolean) ?? null),
   }
 }
