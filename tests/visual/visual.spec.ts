@@ -121,6 +121,75 @@ test('PandaOps topology manager lists configured Ping tasks without recent sampl
   await expect(taskSelect.locator('option')).toContainText(['Configured-No-Recent-Sample'])
 })
 
+test('home quick controls, node comparison and network data change visible results', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, { pandaOps: true, dark: true, authenticated: true })
+  await openStablePage(page)
+
+  await page.getByRole('button', { name: /切换到离线节点/ }).click()
+  await expect(page.getByRole('button', { name: '查看节点 伦敦-离线归档 详情' })).toBeVisible()
+  await expect(page.getByRole('button', { name: '查看节点 主控-洛杉矶 详情' })).toHaveCount(0)
+  await page.getByRole('button', { name: /切换到离线节点/ }).click()
+  await expect(page.getByRole('button', { name: '查看节点 主控-洛杉矶 详情' })).toBeVisible()
+
+  await page.getByRole('button', { name: '显示首页工具' }).click()
+  await page.getByRole('button', { name: /对比：/ }).click()
+  await page.getByRole('button', { name: '主控-洛杉矶', exact: true }).click()
+  await page.getByRole('button', { name: '东京-高负载', exact: true }).click()
+  await expect(page.getByText('已选 2 / 4')).toBeVisible()
+  await expect(page.getByText('实时快照')).toBeVisible()
+  await expect(page.getByText('96.4%')).toBeVisible()
+
+  await page.getByRole('button', { name: /网络：/ }).click()
+  await expect(page.getByText('IP 网络归属')).toBeVisible()
+  await expect(page.getByText(/不包含 BGP 路由或 traceroute 推断/)).toBeVisible()
+  await expect(page.getByText('ASN / BGP 拓扑')).toHaveCount(0)
+})
+
+test('health range reloads the selected period and snapshot export downloads real data', async ({ page }) => {
+  const healthHours: number[] = []
+  page.on('request', (request) => {
+    if (!request.url().endsWith('/api/rpc2'))
+      return
+    const payload = request.postDataJSON() as { method?: string, params?: Record<string, unknown> } | null
+    if (payload?.method === 'common:getRecords' && typeof payload.params?.hours === 'number')
+      healthHours.push(payload.params.hours)
+  })
+
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, { pandaOps: true, authenticated: true })
+  await openStablePage(page)
+  await page.getByRole('button', { name: '显示首页工具' }).click()
+  await page.getByRole('button', { name: /健康：/ }).click()
+  await page.getByRole('button', { name: '生成摘要' }).click()
+  await expect(page.getByText(/当前范围：周/)).toBeVisible()
+  await expect.poll(() => healthHours.filter(hours => hours === 168).length).toBeGreaterThan(0)
+
+  await page.getByRole('button', { name: '日', exact: true }).click()
+  await expect(page.getByText(/当前范围：日/)).toBeVisible()
+  await expect.poll(() => healthHours.filter(hours => hours === 24).length).toBeGreaterThan(0)
+
+  await page.getByRole('button', { name: /导出：/ }).click()
+  const downloadPromise = page.waitForEvent('download')
+  await page.getByRole('button', { name: '导出 JSON' }).click()
+  const download = await downloadPromise
+  expect(download.suggestedFilename()).toMatch(/^komari-snapshot-\d+\.json$/)
+  await expect(page.getByText(/已导出 12 台节点的 JSON 快照/)).toBeVisible()
+})
+
+test('audit tool shows real core logs without unsupported visitor controls', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, { pandaOps: true, authenticated: true })
+  await openStablePage(page)
+  await page.getByRole('button', { name: '显示首页工具' }).click()
+  await page.getByRole('button', { name: /日志：/ }).click()
+
+  await expect(page.getByText('更新主题配置')).toBeVisible()
+  await expect(page.getByText('管理员登录')).toBeVisible()
+  await expect(page.getByRole('tab', { name: '访客安全' })).toHaveCount(0)
+  await expect(page.getByText(/等待核心发布访客审计能力/)).toHaveCount(0)
+})
+
 test('home accessible list desktop', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 })
   await installKomariFixture(page, { colorVisionFriendly: true, viewMode: 'list', hideEarth: true })

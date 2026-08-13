@@ -627,3 +627,13 @@
 - The manager now loads all Ping tasks applicable to a selected node, including configured tasks without a recent sample, uses a real task select when choices exist, preserves an unmatched configured value, and exposes loading/read errors instead of silently falling back to a manual field.
 - Live validation confirmed the two dedicated tasks continue writing `ping.latency_ms` and `ping.loss`: Transit-JP-Relay to Transit-US-Edge reported roughly 82-85 ms / 0 loss; Transit-US-Relay to Transit-US-Edge-2 reported 0 ms / 0 loss in the latest minute rollups.
 - Validation passed: `bun run type-check`, `bun run lint`, `git diff --check`, production build, five focused PandaOps browser checks and the complete 18-test visual/functional suite. The only build warning remains the existing optional globe chunk size.
+
+## 2026-08-13 PandaOps anti-placeholder closure audit
+
+- Status: done (M4/M5/M6), release version `3.3.5-panda.4`.
+- Audited every visible homepage selector and advanced-tool entry by data source, state change, persistence/export result and error behavior. The browser suite now asserts real result changes for quick filters, node comparison, IP network grouping, health range reloads, snapshot downloads and admin audit records; opening a panel alone is no longer accepted as functional coverage.
+- Removed unsupported visitor-audit controls when the running Komari core omits `visitor_audit_enabled`. The audit tool remains available for the core's real `admin:getLogs` data without showing a disabled future-feature tab or upgrade placeholder.
+- Replaced the misleading `ASN / BGP / 上游根因` surface. The tool now truthfully reports IP-derived ASN/org/provider groupings and offline correlation only; it explicitly states that it does not contain BGP routes or traceroute inference. The tag-only synthetic upstream view was removed.
+- Fixed stale health-period semantics: once a report exists, changing day/week/month immediately regenerates the selected range, and the summary labels the range actually used for its data.
+- Snapshot JSON/CSV export now provides visible success and failure feedback. Removed the client-side `exportSecondaryPassword` gate because the value and comparison both lived in the downloaded page configuration and did not provide a real security boundary; verified login remains mandatory.
+- Validation passed: `bun run type-check`, `bun run lint`, `git diff --check`, production build, three focused function-closure browser checks and the complete 21-test browser suite. The only build warning remains the existing optional globe chunk size.

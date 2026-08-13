@@ -54,7 +54,6 @@ Public node monitoring, including Ping latency/loss history, must remain availab
 
 Export rules:
 
-- `exportSecondaryPassword` is optional and adds a client-side friction layer after verified login.
 - It is not a replacement for backend authorization.
 - CSV export must go through `services/snapshot.service.ts` and `utils/csv.ts`.
 - CSV cells starting with `=`, `+`, `-`, or `@` must be neutralized.

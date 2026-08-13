@@ -4,7 +4,6 @@ import { Icon } from '@iconify/vue'
 import { computed, onMounted, ref } from 'vue'
 import { Button } from '@/components/ui/button'
 import { CardX } from '@/components/ui/card-x'
-import { Input } from '@/components/ui/input'
 import { useNodeProviderMetadata } from '@/composables/useNodeProviderMetadata'
 import { useVisitorAudit } from '@/composables/useVisitorAudit'
 import { buildSnapshotCsvAsync, buildSnapshotJsonAsync, downloadText } from '@/services/snapshot.service'
@@ -61,7 +60,6 @@ const props = defineProps<{
 const appStore = useAppStore()
 const { record: recordVisitorEvent } = useVisitorAudit()
 const exchangeRates = ref(financeHelper.DEFAULT_EXCHANGE_RATES)
-const exportPasswordInput = ref('')
 const exporting = ref<null | 'json' | 'csv'>(null)
 
 const { getNodeProviderMetadata } = useNodeProviderMetadata({
@@ -335,14 +333,6 @@ async function verifySnapshotExportPermission(): Promise<boolean> {
     return false
   }
 
-  if (!appStore.exportSecondaryPassword)
-    return true
-
-  if (exportPasswordInput.value !== appStore.exportSecondaryPassword) {
-    window.$message?.warning('导出二级密码错误。')
-    return false
-  }
-
   return true
 }
 
@@ -387,6 +377,10 @@ async function exportJson(): Promise<void> {
       target: 'snapshot',
       detail: { node_count: exportRows.length },
     })
+    window.$message?.success(`已导出 ${exportRows.length} 台节点的 JSON 快照。`)
+  }
+  catch (error) {
+    window.$message?.error(error instanceof Error ? error.message : '导出 JSON 失败')
   }
   finally {
     exporting.value = null
@@ -416,6 +410,10 @@ async function exportCsv(): Promise<void> {
       target: 'snapshot',
       detail: { node_count: exportRows.length },
     })
+    window.$message?.success(`已导出 ${exportRows.length} 台节点的 CSV 快照。`)
+  }
+  catch (error) {
+    window.$message?.error(error instanceof Error ? error.message : '导出 CSV 失败')
   }
   finally {
     exporting.value = null
@@ -486,14 +484,6 @@ async function exportCsv(): Promise<void> {
       <div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div class="space-y-2 text-sm text-muted-foreground">
           <div>JSON 按节点分组并保留人类可读单位；CSV 使用中文表头、性价比指标和 UTF-8 BOM，直接用 Excel 打开不应乱码。</div>
-          <Input
-            v-if="appStore.exportSecondaryPassword"
-            v-model="exportPasswordInput"
-            type="password"
-            autocomplete="off"
-            placeholder="导出二级密码"
-            class="max-w-xs border-none bg-background/60"
-          />
         </div>
         <div class="flex gap-2">
           <Button variant="outline" class="bg-background/60" :disabled="Boolean(exporting)" @click="exportJson">

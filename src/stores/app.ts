@@ -1187,8 +1187,6 @@ const useAppStore = defineStore('app', () => {
 
   const providerAliases = computed<string>(() => readStringSetting(themeSettings.value, 'providerAliases'))
 
-  const exportSecondaryPassword = computed<string>(() => readStringSetting(themeSettings.value, 'exportSecondaryPassword'))
-
   const disablePageAnimation = computed<boolean>(() => readBooleanSetting(themeSettings.value, 'disablePageAnimation', false))
 
   // 计算属性：自定义背景配置
@@ -1364,7 +1362,6 @@ const useAppStore = defineStore('app', () => {
     hideAdminEntryWhenLoggedOut,
     hidePriceWhenLoggedOut,
     providerAliases,
-    exportSecondaryPassword,
     disablePageAnimation,
     backgroundEnabled,
     backgroundType,

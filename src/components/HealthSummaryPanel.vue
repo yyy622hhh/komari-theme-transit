@@ -60,6 +60,7 @@ const props = defineProps<{
 
 const appStore = useAppStore()
 const selectedRange = ref<HealthRangeOption['key']>('week')
+const generatedRange = ref<HealthRangeOption['key'] | null>(null)
 const generatedAt = ref<string>('')
 const loading = ref(false)
 const historyLoading = ref(false)
@@ -275,6 +276,7 @@ async function generateSummary(): Promise<void> {
   historyLoading.value = false
   error.value = null
   historyNote.value = ''
+  generatedRange.value = selectedRange.value
   generatedAt.value = new Date().toLocaleString('zh-CN')
 
   const realtimeRecordsByClient = buildCurrentLoadRecordsByClient()
@@ -309,6 +311,14 @@ async function generateSummary(): Promise<void> {
       historyLoading.value = false
     }
   }
+}
+
+function selectRange(range: HealthRangeOption['key']): void {
+  if (selectedRange.value === range)
+    return
+  selectedRange.value = range
+  if (generatedRange.value)
+    void generateSummary()
 }
 
 const offlineNodes = computed(() => props.nodes.filter(node => !node.online))
@@ -388,7 +398,7 @@ const summaryLines = computed(() => {
     return ['选择时间范围后点击生成摘要，不会在首页自动重算。']
 
   const lines: string[] = []
-  lines.push(`当前范围：${rangeOptions.value.find(option => option.key === selectedRange.value)?.label ?? '-'}，节点 ${props.nodes.length} 台，离线 ${offlineNodes.value.length} 台。`)
+  lines.push(`当前范围：${rangeOptions.value.find(option => option.key === generatedRange.value)?.label ?? '-'}，节点 ${props.nodes.length} 台，离线 ${offlineNodes.value.length} 台。`)
   if (offlineNodes.value.length)
     lines.push(`离线节点：${offlineNodes.value.slice(0, 6).map(node => node.name).join('、')}${offlineNodes.value.length > 6 ? '…' : ''}`)
   if (diskFullSoon.value.length)
@@ -413,7 +423,7 @@ const summaryLines = computed(() => {
         variant="ghost"
         class="bg-background/50"
         :class="selectedRange === option.key && 'bg-background text-selection'"
-        @click="selectedRange = option.key"
+        @click="selectRange(option.key)"
       >
         {{ option.label }}
       </Button>

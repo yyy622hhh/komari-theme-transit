@@ -9,20 +9,12 @@ import { CardX } from '@/components/ui/card-x'
 import { useNodeProviderMetadata } from '@/composables/useNodeProviderMetadata'
 import { useAppStore } from '@/stores/app'
 import { getRegionDisplayName } from '@/utils/regionHelper'
-import { parseTags } from '@/utils/tagHelper'
 
 interface TopologyNodeView {
   node: NodeData
   asn: string
   org: string
   provider: string
-  upstream?: NodeData
-}
-
-interface EdgeView {
-  from: NodeData
-  to: NodeData
-  source: 'tag' | 'asn'
 }
 
 interface AsnGroup {
@@ -42,19 +34,15 @@ interface RootCauseGroup {
   icon: string
   severity: 'critical' | 'warning' | 'info'
   affectedNodes: NodeData[]
-  upstream?: NodeData
 }
 
 const props = defineProps<{
   nodes: NodeData[]
 }>()
-const NORMALIZE_SPACE_REGEX = /\s+/g
 const ASN_CODE_REGEX = /AS\d+/i
-const UPSTREAM_PREFIXES = new Set(['upstream', 'parent', '上游', '父节点'])
-const UPSTREAM_SEPARATORS = [':', '=', '：'] as const
 
 const appStore = useAppStore()
-const activeMode = ref<'asn' | 'tags' | 'rootcause'>('asn')
+const activeMode = ref<'asn' | 'offline'>('asn')
 
 const { metadataByUuid } = useNodeProviderMetadata({
   nodes: () => props.nodes,
@@ -63,10 +51,6 @@ const { metadataByUuid } = useNodeProviderMetadata({
   allowGeoLookup: () => appStore.privateFeaturesAllowed,
   geoPermission: 'nodeTopology',
 })
-
-function normalizeRef(value: string): string {
-  return value.trim().toLowerCase().replace(NORMALIZE_SPACE_REGEX, ' ')
-}
 
 function stripAsn(value: string | undefined): string {
   const match = value?.match(ASN_CODE_REGEX)
@@ -89,109 +73,12 @@ function getNodeProvider(node: NodeData): string {
   return metadataOf(node)?.provider?.displayName || '未知厂商'
 }
 
-function parseUpstreamRef(text: string): string {
-  const trimmed = text.trim()
-  const lower = trimmed.toLowerCase()
-
-  for (const separator of UPSTREAM_SEPARATORS) {
-    const separatorIndex = lower.indexOf(separator)
-    if (separatorIndex <= 0)
-      continue
-
-    const key = lower.slice(0, separatorIndex).trim()
-    if (!UPSTREAM_PREFIXES.has(key))
-      continue
-
-    return trimmed.slice(separatorIndex + separator.length).trim()
-  }
-
-  return ''
-}
-
-function getUpstreamRefs(node: NodeData): string[] {
-  return parseTags(node.tags)
-    .map(tag => parseUpstreamRef(tag.text))
-    .filter(Boolean)
-}
-
-const nodeLookup = computed(() => {
-  const map = new Map<string, NodeData>()
-  for (const node of props.nodes) {
-    map.set(normalizeRef(node.uuid), node)
-    map.set(normalizeRef(node.name), node)
-    if (node.remark)
-      map.set(normalizeRef(node.remark), node)
-    if (node.public_remark)
-      map.set(normalizeRef(node.public_remark), node)
-  }
-  return map
-})
-
-function resolveUpstream(refText: string): NodeData | undefined {
-  return nodeLookup.value.get(normalizeRef(refText))
-}
-
-const topologyNodes = computed<TopologyNodeView[]>(() => props.nodes.map((node) => {
-  const upstream = getUpstreamRefs(node)
-    .map(resolveUpstream)
-    .find((candidate): candidate is NodeData => Boolean(candidate && candidate.uuid !== node.uuid))
-
-  return {
-    node,
-    asn: getNodeAsn(node),
-    org: getNodeOrg(node),
-    provider: getNodeProvider(node),
-    upstream,
-  }
-}))
-
-const topologyNodeByUuid = computed(() => new Map(topologyNodes.value.map(item => [item.node.uuid, item])))
-const nearestOfflineUpstreamByUuid = computed(() => {
-  const resolved = new Map<string, NodeData | undefined>()
-  const visiting = new Set<string>()
-
-  function resolveNearestOfflineUpstream(uuid: string): NodeData | undefined {
-    if (resolved.has(uuid))
-      return resolved.get(uuid)
-    if (visiting.has(uuid)) {
-      resolved.set(uuid, undefined)
-      return undefined
-    }
-
-    visiting.add(uuid)
-    const upstream = topologyNodeByUuid.value.get(uuid)?.upstream
-    const result = upstream
-      ? upstream.online
-        ? resolveNearestOfflineUpstream(upstream.uuid)
-        : upstream
-      : undefined
-    visiting.delete(uuid)
-    resolved.set(uuid, result)
-    return result
-  }
-
-  for (const item of topologyNodes.value)
-    resolveNearestOfflineUpstream(item.node.uuid)
-
-  return resolved
-})
-
-const tagEdges = computed<EdgeView[]>(() => topologyNodes.value
-  .filter(item => item.upstream)
-  .map(item => ({ from: item.upstream!, to: item.node, source: 'tag' as const })))
-
-const rootTagNodes = computed(() => topologyNodes.value.filter(item => !item.upstream))
-const downstreamByUuid = computed(() => {
-  const map = new Map<string, TopologyNodeView[]>()
-  for (const item of topologyNodes.value) {
-    if (!item.upstream)
-      continue
-    const downstream = map.get(item.upstream.uuid) ?? []
-    downstream.push(item)
-    map.set(item.upstream.uuid, downstream)
-  }
-  return map
-})
+const topologyNodes = computed<TopologyNodeView[]>(() => props.nodes.map(node => ({
+  node,
+  asn: getNodeAsn(node),
+  org: getNodeOrg(node),
+  provider: getNodeProvider(node),
+})))
 
 const asnGroups = computed<AsnGroup[]>(() => {
   const map = new Map<string, AsnGroup>()
@@ -219,40 +106,11 @@ const asnGroups = computed<AsnGroup[]>(() => {
 
 const totalOnline = computed(() => props.nodes.filter(node => node.online).length)
 const totalOffline = computed(() => props.nodes.length - totalOnline.value)
-const asnEdges = computed(() => asnGroups.value.reduce((count, group) => count + group.nodes.length, 0))
-
-function getOfflineUpstream(node: NodeData): NodeData | undefined {
-  return nearestOfflineUpstreamByUuid.value.get(node.uuid)
-}
+const identifiedNetworkCount = computed(() => topologyNodes.value.filter(item => item.asn || item.org !== '未知网络').length)
 
 const rootCauseGroups = computed<RootCauseGroup[]>(() => {
   const groups: RootCauseGroup[] = []
   const groupedNodeUuids = new Set<string>()
-  const byUpstream = new Map<string, { upstream: NodeData, nodes: NodeData[] }>()
-
-  for (const node of props.nodes.filter(item => !item.online)) {
-    const upstream = getOfflineUpstream(node)
-    if (!upstream)
-      continue
-
-    const group = byUpstream.get(upstream.uuid) ?? { upstream, nodes: [] }
-    group.nodes.push(node)
-    byUpstream.set(upstream.uuid, group)
-    groupedNodeUuids.add(node.uuid)
-  }
-
-  for (const group of byUpstream.values()) {
-    groups.push({
-      key: `upstream:${group.upstream.uuid}`,
-      title: `${group.upstream.name} 上游异常`,
-      description: `${group.nodes.length} 台下游节点可能受该上游影响，优先检查反代/入口节点。`,
-      icon: 'tabler:git-branch-deleted',
-      severity: 'critical',
-      affectedNodes: group.nodes,
-      upstream: group.upstream,
-    })
-  }
-
   for (const asnGroup of asnGroups.value) {
     const offlineNodes = asnGroup.nodes
       .map(item => item.node)
@@ -266,7 +124,7 @@ const rootCauseGroups = computed<RootCauseGroup[]>(() => {
     groups.push({
       key: `asn:${asnGroup.key}`,
       title: `${asnGroup.asn} 批量异常`,
-      description: `${offlineNodes.length} 台同 ASN / 同网络节点离线，可能是机房或线路层面问题。`,
+      description: `${offlineNodes.length} 台同网络归属节点离线。这是相关性聚类，不等同于已确认的故障根因。`,
       icon: 'tabler:network-off',
       severity: 'warning',
       affectedNodes: offlineNodes,
@@ -278,7 +136,7 @@ const rootCauseGroups = computed<RootCauseGroup[]>(() => {
     groups.push({
       key: 'standalone',
       title: '独立离线节点',
-      description: '未发现共同上游或 ASN 聚集特征，更像单机异常。',
+      description: '未发现同网络多节点离线特征，建议按单机事件检查。',
       icon: 'tabler:server-off',
       severity: 'info',
       affectedNodes: standalone,
@@ -332,10 +190,10 @@ function getNodeMetaLine(item: TopologyNodeView): string {
       </CardX>
       <CardX size="small" class="border-none bg-background/50">
         <div class="text-xs text-muted-foreground">
-          拓扑边
+          已识别网络
         </div>
         <div class="mt-1 text-2xl font-bold">
-          {{ tagEdges.length || asnEdges }}
+          {{ identifiedNetworkCount }} / {{ props.nodes.length }}
         </div>
       </CardX>
     </div>
@@ -343,15 +201,11 @@ function getNodeMetaLine(item: TopologyNodeView): string {
     <div class="flex flex-wrap gap-2">
       <Button size="sm" variant="ghost" class="bg-background/50" :class="activeMode === 'asn' && 'text-green-600 bg-background'" @click="activeMode = 'asn'">
         <Icon icon="tabler:world-share" width="14" height="14" />
-        ASN / BGP 视图
+        网络归属
       </Button>
-      <Button size="sm" variant="ghost" class="bg-background/50" :class="activeMode === 'tags' && 'text-green-600 bg-background'" @click="activeMode = 'tags'">
-        <Icon icon="tabler:git-branch" width="14" height="14" />
-        标签上游视图
-      </Button>
-      <Button size="sm" variant="ghost" class="bg-background/50" :class="activeMode === 'rootcause' && 'text-green-600 bg-background'" @click="activeMode = 'rootcause'">
+      <Button size="sm" variant="ghost" class="bg-background/50" :class="activeMode === 'offline' && 'text-green-600 bg-background'" @click="activeMode = 'offline'">
         <Icon icon="tabler:alert-triangle" width="14" height="14" />
-        根因分组
+        离线关联
       </Button>
     </div>
 
@@ -359,10 +213,10 @@ function getNodeMetaLine(item: TopologyNodeView): string {
       <template #header>
         <div>
           <div class="font-semibold">
-            ASN / BGP 拓扑
+            IP 网络归属
           </div>
           <div class="text-xs text-muted-foreground">
-            按 IP ASN / Org 聚合，模拟 bgp.tools 这类站点的 ASN → 节点关系。
+            按节点 IPv4 / IPv6 查询到的 ASN、组织与厂商聚合；不包含 BGP 路由或 traceroute 推断。
           </div>
         </div>
       </template>
@@ -371,10 +225,10 @@ function getNodeMetaLine(item: TopologyNodeView): string {
           <div class="rounded-xl border border-border/60 bg-slate-500/5 p-4 text-center">
             <Icon icon="tabler:cloud-network" width="34" height="34" class="mx-auto text-info" />
             <div class="mt-2 text-sm font-semibold">
-              Internet / BGP
+              公网地址
             </div>
             <div class="text-xs text-muted-foreground">
-              公网路由入口
+              IP 归属查询
             </div>
           </div>
           <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
@@ -414,52 +268,6 @@ function getNodeMetaLine(item: TopologyNodeView): string {
       </div>
     </CardX>
 
-    <CardX v-else-if="activeMode === 'tags'" class="border-none bg-background/50">
-      <template #header>
-        <div>
-          <div class="font-semibold">
-            标签上游拓扑
-          </div>
-          <div class="text-xs text-muted-foreground">
-            在节点标签里写 <span class="font-mono">upstream:节点名</span> / <span class="font-mono">上游:节点名</span> 后自动连线。
-          </div>
-        </div>
-      </template>
-      <div v-if="tagEdges.length === 0" class="rounded-lg bg-slate-500/5 p-4 text-sm text-muted-foreground">
-        还没有解析到 upstream 标签；未配置时会把所有节点视为根节点。
-      </div>
-      <div class="grid gap-4 lg:grid-cols-2">
-        <div v-for="item in rootTagNodes" :key="item.node.uuid" class="rounded-xl border border-border/60 bg-background/55 p-3">
-          <div class="flex items-center gap-2">
-            <span class="size-2 rounded-full" :class="item.node.online ? 'bg-green-600' : 'bg-red-500'" />
-            <div class="min-w-0 flex-1">
-              <div class="truncate text-sm font-semibold">
-                {{ item.node.name }}
-              </div>
-              <div class="truncate text-xs text-muted-foreground">
-                {{ getNodeMetaLine(item) }}
-              </div>
-            </div>
-            <Badge variant="outline" class="rounded-md text-[11px]">
-              根节点
-            </Badge>
-          </div>
-          <div v-if="downstreamByUuid.get(item.node.uuid)?.length" class="mt-3 border-l border-border/70 pl-3">
-            <div v-for="child in downstreamByUuid.get(item.node.uuid)" :key="child.node.uuid" class="mb-2 last:mb-0 rounded-lg bg-slate-500/5 p-2">
-              <div class="flex items-center gap-2 text-sm">
-                <Icon icon="tabler:corner-down-right" width="14" height="14" class="text-muted-foreground" />
-                <span class="size-1.5 rounded-full" :class="child.node.online ? 'bg-green-600' : 'bg-red-500'" />
-                <span class="truncate font-medium">{{ child.node.name }}</span>
-              </div>
-              <div class="ml-8 truncate text-xs text-muted-foreground">
-                {{ getNodeMetaLine(child) }}
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </CardX>
-
     <div v-else class="space-y-3">
       <CardX v-for="group in rootCauseGroups" :key="group.key" class="border bg-background/50" :class="severityClass(group.severity)">
         <div class="flex flex-col gap-3 md:flex-row md:items-start">
@@ -471,9 +279,6 @@ function getNodeMetaLine(item: TopologyNodeView): string {
             <div class="mt-1 text-sm text-muted-foreground">
               {{ group.description }}
             </div>
-            <div v-if="group.upstream" class="mt-2 text-xs text-muted-foreground">
-              上游：{{ group.upstream.name }}
-            </div>
             <div class="mt-3 flex flex-wrap gap-1.5">
               <Badge v-for="node in group.affectedNodes" :key="node.uuid" variant="outline" class="rounded-md bg-background/60 text-[11px]">
                 {{ node.name }}
@@ -484,7 +289,7 @@ function getNodeMetaLine(item: TopologyNodeView): string {
       </CardX>
       <CardX v-if="rootCauseGroups.length === 0" class="border-none bg-background/50">
         <div class="py-8 text-center text-sm text-muted-foreground">
-          当前没有离线节点，暂未形成根因分组。
+          当前没有离线节点，无需进行离线关联分析。
         </div>
       </CardX>
     </div>

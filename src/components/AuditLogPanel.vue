@@ -46,8 +46,6 @@ const totalPages = computed(() => Math.max(1, Math.ceil(total.value / limit.valu
 const pageStart = computed(() => total.value === 0 ? 0 : (page.value - 1) * limit.value + 1)
 const pageEnd = computed(() => Math.min(total.value, page.value * limit.value))
 const visitorAuditStatus = computed(() => {
-  if (!appStore.visitorAuditSupported)
-    return { icon: 'tabler:clock-pause', tone: 'text-warning', text: '当前核心尚未发布访客审计接口；升级到包含 PR #602 的版本后自动启用此视图。' }
   if (!appStore.visitorAuditEnabled)
     return { icon: 'tabler:shield-off', tone: 'text-warning', text: '核心已支持访客审计，但 visitor_audit_enabled 当前关闭。已有记录仍可查看。' }
   return { icon: 'tabler:shield-check', tone: 'text-success', text: '访客审计已启用；IP 与 User-Agent 由服务端可信记录，前端只提交受限操作摘要。' }
@@ -368,13 +366,13 @@ onMounted(() => {
             安全审计日志
           </div>
           <div class="text-xs text-muted-foreground">
-            管理员操作与访客访问记录，默认每页 {{ limit }} 条。
+            {{ appStore.visitorAuditSupported ? '管理员操作与访客访问记录' : '来自 Komari 核心的管理员操作记录' }}，默认每页 {{ limit }} 条。
           </div>
         </div>
       </template>
       <div class="flex flex-col gap-3">
         <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <Tabs v-model="logView">
+          <Tabs v-if="appStore.visitorAuditSupported" v-model="logView">
             <TabsList class="h-8 rounded-md bg-background/60">
               <TabsTrigger value="all" class="h-6.5 rounded-sm px-3 text-xs">
                 全部日志
@@ -407,7 +405,7 @@ onMounted(() => {
             </Button>
           </div>
         </div>
-        <div class="flex flex-col gap-2 rounded-md bg-background/45 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
+        <div v-if="appStore.visitorAuditSupported" class="flex flex-col gap-2 rounded-md bg-background/45 px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
           <div class="flex items-start gap-2 text-xs text-muted-foreground">
             <Icon :icon="visitorAuditStatus.icon" width="15" height="15" class="mt-0.5 shrink-0" :class="visitorAuditStatus.tone" />
             <span>{{ visitorAuditStatus.text }}</span>
@@ -528,7 +526,7 @@ onMounted(() => {
           </tbody>
         </table>
         <div v-else class="py-10 text-center text-sm text-muted-foreground">
-          {{ logView === 'visitor' && !appStore.visitorAuditSupported ? '等待核心发布访客审计能力。' : '暂无审计日志。' }}
+          暂无审计日志。
         </div>
       </Spinner>
     </CardX>

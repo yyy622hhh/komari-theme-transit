@@ -30,6 +30,7 @@ export interface VisualFixtureOptions {
   authenticated?: boolean
   pandaOpsMissingNode?: boolean
   pandaOpsNoRecentTask?: boolean
+  visitorAuditSupported?: boolean
 }
 
 function uuidFor(index: number): string {
@@ -333,6 +334,15 @@ async function handleRpc(route: Route, clientFixtures = clients, options: Visual
     case 'public:getNodesInformation':
       result = Object.values(clientFixtures)
       break
+    case 'admin:getLogs':
+      result = {
+        total: 2,
+        logs: [
+          { id: 2, ip: '198.51.100.22', uuid: uuidFor(0), message: '更新主题配置', msg_type: 'update', time: FIXED_NOW },
+          { id: 1, ip: '198.51.100.10', uuid: uuidFor(0), message: '管理员登录', msg_type: 'login', time: '2026-07-25T11:50:00.000Z' },
+        ],
+      }
+      break
     case 'public:getMe':
       result = { logged_in: false }
       break
@@ -419,7 +429,7 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
         sitename: 'Komari Visual Lab',
         theme: options.pandaOps ? 'PandaOps' : 'Glassmorphism',
         theme_settings: settings,
-        visitor_audit_enabled: false,
+        ...(options.visitorAuditSupported ? { visitor_audit_enabled: false } : {}),
       },
     }),
   }))
