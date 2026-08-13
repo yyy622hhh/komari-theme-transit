@@ -228,7 +228,11 @@ function buildMetricResponse(
         tags: task ? { task_id: String(task.id), task_name: task.name } : {},
         points: points.map(point => ({
           time: point.time,
-          value: metricValue(key, point.index) + (task?.id ?? 0),
+          value: task?.name === 'PandaOps-Local-Hop' && key === 'ping.latency_ms'
+            ? 1.1 + Math.sin(point.index / 4) * 0.15
+            : task?.name === 'PandaOps-Local-Hop' && key === 'ping.loss'
+              ? 0
+              : metricValue(key, point.index) + (task?.id ?? 0),
         })),
       }))
     })
@@ -254,6 +258,7 @@ async function handleRpc(route: Route, clientFixtures = clients, options: Visual
           { id: 11, name: '北京联通', interval: 60, loss: 0, weight: 2 },
           { id: 12, name: '北京电信', interval: 60, loss: 0, weight: 3 },
           { id: 13, name: '北京移动', interval: 60, loss: 0, weight: 4 },
+          { id: 18, name: 'PandaOps-Local-Hop', interval: 30, loss: 0, weight: 5 },
         ]
       : [{ id: 1, name: 'Tokyo', interval: 60, loss: 3.2, weight: 1 }]
   if (options.pandaOpsNoRecentTask) {
@@ -273,7 +278,11 @@ async function handleRpc(route: Route, clientFixtures = clients, options: Visual
     task_id: task.id,
     client: uuid,
     time: new Date(Date.parse(FIXED_NOW) - (47 - index) * 75_000).toISOString(),
-    value: index % 17 === 0 ? -1 : 76 + index + task.id,
+    value: index % 17 === 0
+      ? -1
+      : task.name === 'PandaOps-Local-Hop'
+        ? 1.1 + Math.sin(index / 4) * 0.15
+        : 76 + index + task.id,
   })))
   let result: unknown
 
@@ -396,7 +405,7 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
       ? `北京电信|CN|入口;主控-洛杉矶|US|线路机;${options.pandaOpsMissingNode ? '未纳管-西雅图' : '香港边缘节点-超长名称布局测试'}|${options.pandaOpsMissingNode ? 'US' : 'HK'}|落地机||北京电信|CN|入口;东京-高负载|JP|线路机;新加坡-A100|SG|落地机`
       : '',
     topologyMetrics: options.pandaOps
-      ? 'live@主控-洛杉矶@Tokyo@51@0;84,0||live@东京-高负载@Tokyo@72@0;live@东京-高负载@Tokyo@88@0'
+      ? 'live@主控-洛杉矶@Tokyo@51@0;84,0||live@东京-高负载@Tokyo@72@0;live@东京-高负载@PandaOps-Local-Hop@1.1@0'
       : '',
   }
 

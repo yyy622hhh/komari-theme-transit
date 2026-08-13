@@ -69,22 +69,41 @@ const health = computed<TopologyRouteHealth>(() => {
 
 watch(health, value => emit('statusChange', value), { immediate: true })
 
-const bars = computed(() => {
-  const points = pings.flatMap((ping, segmentIndex) => ping.history.value.slice(-6).map(point => ({
-    point,
-    segmentIndex,
-  }))).slice(-12)
-  if (!points.length)
-    return []
+function median(values: number[]): number {
+  if (!values.length)
+    return 0
 
-  const latencies = points.map(({ point }) => point.latency ?? 0)
-  const maximum = Math.max(...latencies, 1)
-  return points.map(({ point, segmentIndex }, index) => {
-    const sourceName = props.nodeNames[segmentIndex] || `节点 ${segmentIndex + 1}`
-    const targetName = props.nodeNames[segmentIndex + 1] || `节点 ${segmentIndex + 2}`
-    return {
+  const sorted = [...values].sort((left, right) => left - right)
+  const middle = Math.floor(sorted.length / 2)
+  if (sorted.length % 2)
+    return sorted[middle] ?? 0
+  return ((sorted[middle - 1] ?? 0) + (sorted[middle] ?? 0)) / 2
+}
+
+function stabilityHeight(latency: number | null, baseline: number): number {
+  if (latency === null)
+    return 48
+  if (baseline <= 0)
+    return 76
+
+  const relativeToBaseline = latency / baseline
+  return Math.round(Math.min(96, Math.max(58, 76 + (relativeToBaseline - 1) * 70)))
+}
+
+const barGroups = computed(() => pings.map((ping, segmentIndex) => {
+  const points = ping.history.value.slice(-6)
+  const validLatencies = points
+    .map(point => point.latency)
+    .filter((latency): latency is number => latency !== null && Number.isFinite(latency))
+  const baseline = median(validLatencies)
+  const sourceName = props.nodeNames[segmentIndex] || `节点 ${segmentIndex + 1}`
+  const targetName = props.nodeNames[segmentIndex + 1] || `节点 ${segmentIndex + 2}`
+
+  return {
+    segmentIndex,
+    bars: points.map((point, index) => ({
       key: `${segmentIndex}-${point.time}-${index}`,
-      height: point.latency === null ? 16 : Math.max(18, point.latency / maximum * 100),
+      height: stabilityHeight(point.latency, baseline),
       alert: point.loss !== null && point.loss > 3,
       unavailable: point.latency === null,
       latency: point.latency,
@@ -92,9 +111,9 @@ const bars = computed(() => {
       time: point.time,
       segmentIndex,
       segmentLabel: `${sourceName} → ${targetName}`,
-    }
-  })
-})
+    })),
+  }
+}).filter(group => group.bars.length))
 
 function formatLatency(value: number | null): string {
   return value === null ? '无响应' : `${Math.round(value)} ms`
@@ -153,65 +172,74 @@ const statusMeta = computed(() => {
 
 <template>
   <div class="flex min-w-0 items-center justify-end gap-2">
-    <TooltipProvider v-if="bars.length" :delay-duration="0" :skip-delay-duration="0">
-      <div class="hidden h-5 min-w-0 flex-1 items-end gap-[2px] sm:flex">
-        <TooltipRoot
-          v-for="bar in bars"
-          :key="bar.key"
-          :open="isTouchTooltipMode ? activeSampleKey === bar.key : undefined"
-          @update:open="(open) => setSampleTooltipOpen(bar.key, open)"
+    <TooltipProvider v-if="barGroups.length" :delay-duration="0" :skip-delay-duration="0">
+      <div class="hidden h-4 min-w-0 flex-1 items-end gap-1 sm:flex" aria-label="分段线路稳定度">
+        <div
+          v-for="group in barGroups"
+          :key="group.segmentIndex"
+          data-topology-segment-group
+          :data-topology-segment="group.segmentIndex + 1"
+          class="flex h-full min-w-0 flex-1 items-end gap-[2px] border-l border-white/[0.08] pl-1 first:border-l-0 first:pl-0"
         >
-          <TooltipTrigger as-child>
-            <button
-              type="button"
-              data-topology-sample
-              class="group/sample flex h-full min-w-[3px] flex-1 cursor-default items-end justify-center rounded-[2px] focus-visible:outline-none"
-              :aria-label="`${bar.segmentLabel}，${formatLatency(bar.latency)}，丢包 ${formatLoss(bar.loss)}，${formatDateTime(bar.time)}`"
-              @click.stop="toggleSampleTooltip(bar.key)"
-            >
-              <span
-                class="block w-full max-w-1 rounded-[1px] bg-emerald-400/70 transition-[filter,opacity] group-hover/sample:brightness-125 group-focus-visible/sample:ring-1 group-focus-visible/sample:ring-white/80"
-                :class="bar.unavailable ? '!bg-rose-400/80' : bar.alert ? '!bg-amber-400/80' : ''"
-                :style="{ height: `${bar.height}%` }"
-              />
-            </button>
-          </TooltipTrigger>
-          <TooltipPortal>
-            <TooltipContent
-              data-topology-sample-detail
-              side="top"
-              :side-offset="7"
-              class="z-50 w-52 rounded-lg border border-white/10 bg-[#101820]/95 px-3 py-2.5 text-slate-100 shadow-xl backdrop-blur-xl data-[state=delayed-open]:animate-in data-[state=delayed-open]:fade-in-0 data-[state=delayed-open]:zoom-in-95 data-[state=instant-open]:animate-in data-[state=instant-open]:fade-in-0 data-[state=instant-open]:zoom-in-95"
-            >
-              <div class="min-w-0">
-                <div class="mb-2 flex min-w-0 items-center justify-between gap-3 border-b border-white/8 pb-2">
-                  <span class="min-w-0 truncate text-[11px] font-semibold">第 {{ bar.segmentIndex + 1 }} 段</span>
-                  <span class="shrink-0 text-[12px] font-semibold tabular-nums" :class="bar.unavailable ? 'text-rose-300' : bar.alert ? 'text-amber-300' : 'text-emerald-300'">
-                    {{ formatLatency(bar.latency) }}
-                  </span>
+          <TooltipRoot
+            v-for="bar in group.bars"
+            :key="bar.key"
+            :open="isTouchTooltipMode ? activeSampleKey === bar.key : undefined"
+            @update:open="(open) => setSampleTooltipOpen(bar.key, open)"
+          >
+            <TooltipTrigger as-child>
+              <button
+                type="button"
+                data-topology-sample
+                :data-topology-sample-height="bar.height"
+                class="group/sample flex h-full min-w-[3px] flex-1 cursor-default items-end justify-center rounded-[2px] focus-visible:outline-none"
+                :aria-label="`${bar.segmentLabel}，${formatLatency(bar.latency)}，丢包 ${formatLoss(bar.loss)}，${formatDateTime(bar.time)}`"
+                @click.stop="toggleSampleTooltip(bar.key)"
+              >
+                <span
+                  class="block w-full max-w-[3px] rounded-full bg-emerald-400/70 transition-[filter,opacity] group-hover/sample:brightness-125 group-focus-visible/sample:ring-1 group-focus-visible/sample:ring-white/80"
+                  :class="bar.unavailable ? '!bg-rose-400/80 opacity-70' : bar.alert ? '!bg-amber-400/80' : ''"
+                  :style="{ height: `${bar.height}%` }"
+                />
+              </button>
+            </TooltipTrigger>
+            <TooltipPortal>
+              <TooltipContent
+                data-topology-sample-detail
+                side="top"
+                :side-offset="7"
+                class="z-50 w-52 rounded-lg border border-white/10 bg-[#101820]/95 px-3 py-2.5 text-slate-100 shadow-xl backdrop-blur-xl data-[state=delayed-open]:animate-in data-[state=delayed-open]:fade-in-0 data-[state=delayed-open]:zoom-in-95 data-[state=instant-open]:animate-in data-[state=instant-open]:fade-in-0 data-[state=instant-open]:zoom-in-95"
+              >
+                <div class="min-w-0">
+                  <div class="mb-2 flex min-w-0 items-center justify-between gap-3 border-b border-white/8 pb-2">
+                    <span class="min-w-0 truncate text-[11px] font-semibold">第 {{ bar.segmentIndex + 1 }} 段</span>
+                    <span class="shrink-0 text-[12px] font-semibold tabular-nums" :class="bar.unavailable ? 'text-rose-300' : bar.alert ? 'text-amber-300' : 'text-emerald-300'">
+                      {{ formatLatency(bar.latency) }}
+                    </span>
+                  </div>
+                  <p class="mb-2 truncate text-[10px] text-slate-400" :title="bar.segmentLabel">
+                    {{ bar.segmentLabel }}
+                  </p>
+                  <dl class="grid grid-cols-[36px_1fr] gap-x-3 gap-y-1 text-[10px]">
+                    <dt class="text-slate-500">
+                      丢包
+                    </dt>
+                    <dd class="text-right font-medium tabular-nums" :class="bar.alert ? 'text-amber-300' : 'text-slate-200'">
+                      {{ formatLoss(bar.loss) }}
+                    </dd>
+                    <dt class="text-slate-500">
+                      时间
+                    </dt>
+                    <dd class="text-right font-medium tabular-nums text-slate-300">
+                      {{ formatDateTime(bar.time, 'MM-DD HH:mm:ss') }}
+                    </dd>
+                  </dl>
                 </div>
-                <p class="mb-2 truncate text-[10px] text-slate-400" :title="bar.segmentLabel">
-                  {{ bar.segmentLabel }}
-                </p>
-                <dl class="grid grid-cols-[36px_1fr] gap-x-3 gap-y-1 text-[10px]">
-                  <dt class="text-slate-500">
-                    丢包
-                  </dt>
-                  <dd class="text-right font-medium tabular-nums" :class="bar.alert ? 'text-amber-300' : 'text-slate-200'">
-                    {{ formatLoss(bar.loss) }}
-                  </dd>
-                  <dt class="text-slate-500">
-                    时间
-                  </dt>
-                  <dd class="text-right font-medium tabular-nums text-slate-300">
-                    {{ formatDateTime(bar.time, 'MM-DD HH:mm:ss') }}
-                  </dd>
-                </dl>
-              </div>
-              <TooltipArrow class="size-2.5 rotate-45 rounded-[2px] bg-[#101820]/95 fill-[#101820]" />
-            </TooltipContent>
-          </TooltipPortal>
-        </TooltipRoot>
+                <TooltipArrow class="size-2.5 rotate-45 rounded-[2px] bg-[#101820]/95 fill-[#101820]" />
+              </TooltipContent>
+            </TooltipPortal>
+          </TooltipRoot>
+        </div>
       </div>
     </TooltipProvider>
     <span data-topology-status class="shrink-0 whitespace-nowrap text-[10px]" :class="statusMeta.tone">

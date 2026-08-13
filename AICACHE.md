@@ -672,3 +672,11 @@
 - The visual bars keep their compact 4px height while using a 12px pointer target. Each carrier series is one keyboard stop with left/right, Home/End, Enter/Space and Escape support, avoiding hundreds of tab stops across the dashboard.
 - Node cards now use a sibling full-card detail button instead of making the entire article an interactive role, so carrier sample controls are no longer nested inside another button-like surface.
 - Browser coverage verifies hover, click pinning, outside dismissal and that carrier interaction leaves the home URL unchanged.
+
+## 2026-08-13 PandaOps segmented stability sparkline
+
+- Status: done (M4/M6), release version `3.3.5-panda.10`.
+- Topology stability samples are grouped by route segment instead of being presented as one continuous absolute-latency series.
+- Each segment now scales recent samples against its own median baseline. This preserves within-segment jitter while avoiding a misleading visual cliff between a long-haul hop and a low-latency local hop.
+- Exact latency, packet loss, timestamp and segment identity remain available in the sample tooltip. Unavailable samples retain a visible 48% marker rather than collapsing into a dot that resembles very low latency.
+- Browser coverage constrains rendered stability heights to the deliberate 48-96% scale and verifies segment grouping.

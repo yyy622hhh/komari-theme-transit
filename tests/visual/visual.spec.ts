@@ -69,6 +69,17 @@ test('PandaOps desktop topology and cards remain contained', async ({ page }) =>
   }
   const samples = page.locator('[data-topology-sample]')
   await expect.poll(() => samples.count()).toBeGreaterThan(0)
+  const sampleHeights = await samples.evaluateAll(elements => elements.map(element => Number(element.getAttribute('data-topology-sample-height'))))
+  expect(sampleHeights.every(height => height >= 48 && height <= 96)).toBe(true)
+  const segmentGroups = page.locator('[data-topology-segment-group]')
+  await expect(segmentGroups).toHaveCount(3)
+  const averageRenderedHeight = async (groupIndex: number) => {
+    const heights = await segmentGroups.nth(groupIndex).locator('[data-topology-sample]').evaluateAll(elements => elements.map(element => Number(element.getAttribute('data-topology-sample-height'))))
+    return heights.reduce((sum, height) => sum + height, 0) / heights.length
+  }
+  expect(Math.abs(await averageRenderedHeight(1) - await averageRenderedHeight(2))).toBeLessThan(12)
+  await expect(segmentGroups.nth(1).locator('[data-topology-sample]').first()).toHaveAttribute('aria-label', /\d{2,3} ms/)
+  await expect(segmentGroups.nth(2).locator('[data-topology-sample]').first()).toHaveAttribute('aria-label', /[012] ms/)
   const firstSample = samples.first()
   await firstSample.hover()
   const sampleDetail = page.locator('[data-topology-sample-detail]')
