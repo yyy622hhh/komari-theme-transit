@@ -91,8 +91,8 @@ const statusMeta = computed(() => {
 </script>
 
 <template>
-  <div class="flex min-w-0 items-center justify-end gap-2.5">
-    <div v-if="bars.length" class="hidden h-4 w-20 items-end gap-[2px] sm:flex" aria-hidden="true">
+  <div class="flex min-w-0 items-center justify-end gap-2">
+    <div v-if="bars.length" class="hidden h-4 min-w-0 flex-1 items-end gap-[2px] sm:flex" aria-hidden="true">
       <span
         v-for="bar in bars"
         :key="bar.key"
@@ -101,7 +101,7 @@ const statusMeta = computed(() => {
         :style="{ height: `${bar.height}%` }"
       />
     </div>
-    <span class="text-[10px]" :class="statusMeta.tone">
+    <span data-topology-status class="shrink-0 whitespace-nowrap text-[10px]" :class="statusMeta.tone">
       {{ statusMeta.label }}
     </span>
   </div>

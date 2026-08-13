@@ -192,7 +192,7 @@ function openRouteDetail(route: RouteRow): void {
           <article
             v-for="route in routes"
             :key="route.key"
-            class="group grid min-h-12 grid-cols-[138px_minmax(120px,1fr)_170px_minmax(120px,1fr)_184px_72px] items-center gap-2 border-b border-white/[0.045] px-2 transition-colors last:border-b-0 hover:bg-white/[0.018]"
+            class="group grid min-h-12 grid-cols-[138px_minmax(120px,1fr)_170px_minmax(120px,1fr)_184px_112px] items-center gap-2 border-b border-white/[0.045] px-2 transition-colors last:border-b-0 hover:bg-white/[0.018]"
           >
             <div class="flex min-w-0 items-center gap-2">
               <span class="size-2 shrink-0 rounded-full" :class="routeDotClass(route)" />

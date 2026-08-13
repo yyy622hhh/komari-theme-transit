@@ -59,10 +59,17 @@ test('PandaOps desktop topology and cards remain contained', async ({ page }) =>
 
   await expect(page.getByRole('heading', { name: '线路状态' })).toBeVisible()
   await expect(page.getByRole('button', { name: '查看线路历史' })).toHaveCount(2)
+  for (const status of await page.locator('[data-topology-status]').all()) {
+    await expect(status).toHaveCSS('white-space', 'nowrap')
+    await expect.poll(() => status.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
+  }
   const nodeCard = page.getByRole('button', { name: '查看节点 主控-洛杉矶 详情' })
   await expect(nodeCard).toBeVisible()
   await expect(nodeCard.locator('.panda-node-card__header')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
   await expect(nodeCard.locator('.panda-node-card__header')).toHaveCSS('border-bottom-width', '0px')
+  const expiryDate = page.getByRole('button', { name: '查看节点 台北-流量预警 详情' }).locator('[data-node-expiry-date]')
+  await expect(expiryDate).toHaveText('2026-08-02')
+  await expect.poll(() => expiryDate.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
   await expect(page.locator('html')).toHaveJSProperty('scrollWidth', await page.locator('html').evaluate(element => element.clientWidth))
 })
 

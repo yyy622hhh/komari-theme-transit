@@ -637,3 +637,10 @@
 - Fixed stale health-period semantics: once a report exists, changing day/week/month immediately regenerates the selected range, and the summary labels the range actually used for its data.
 - Snapshot JSON/CSV export now provides visible success and failure feedback. Removed the client-side `exportSecondaryPassword` gate because the value and comparison both lived in the downloaded page configuration and did not provide a real security boundary; verified login remains mandatory.
 - Validation passed: `bun run type-check`, `bun run lint`, `git diff --check`, production build, focused function-closure browser checks and the complete 23-test browser suite. The only build warning remains the existing optional globe chunk size.
+
+## 2026-08-13 PandaOps truncation hotfix
+
+- Status: done (M4/M6), release version `3.3.5-panda.5`.
+- Expanded the topology health column from 72px to 112px and made the spark bars flex within the remaining width. Health labels are now shrink-proof and `white-space: nowrap`, so `稳定` no longer stacks vertically or clips at the panel edge.
+- Made the node expiry description the flexible/truncatable side and the exact `YYYY-MM-DD` date the shrink-proof side. The date uses tabular 8px numerals to remain fully visible inside the compact billing cell.
+- Browser guards assert that all topology health labels and the full expiry date have no internal overflow at the PandaOps desktop breakpoint.

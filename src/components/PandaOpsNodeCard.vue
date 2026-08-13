@@ -154,9 +154,9 @@ function lossTone(loss: string): string {
             / {{ formatBytes(node.traffic_limit) }}
           </template>
         </div>
-        <div class="mt-1 flex items-center justify-between gap-2 text-slate-500">
-          <span>{{ expiryText }}</span>
-          <span v-if="expiryDate" class="truncate">{{ expiryDate }}</span>
+        <div class="mt-1 flex min-w-0 items-center justify-between gap-1 text-slate-500">
+          <span class="min-w-0 truncate">{{ expiryText }}</span>
+          <span v-if="expiryDate" data-node-expiry-date class="shrink-0 whitespace-nowrap text-[8px] tabular-nums">{{ expiryDate }}</span>
         </div>
       </div>
 
