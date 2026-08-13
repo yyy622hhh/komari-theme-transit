@@ -62,20 +62,22 @@ test('PandaOps desktop topology and cards remain contained', async ({ page }) =>
   await expect(historyButtons).toHaveCount(4)
   await expect(page.locator('[data-topology-status]')).toHaveCount(0)
   for (const line of await page.locator('[data-topology-edge-line]').all()) {
-    await expect.poll(() => line.evaluate(element => element.getBoundingClientRect().width)).toBeGreaterThan(7)
-    await expect.poll(() => line.evaluate(element => element.getBoundingClientRect().width)).toBeLessThanOrEqual(64)
+    await expect.poll(() => line.evaluate(element => element.getBoundingClientRect().width)).toBeGreaterThan(150)
+    await expect.poll(() => line.evaluate(element => element.getBoundingClientRect().width)).toBeLessThan(600)
   }
   const samples = page.locator('[data-topology-sample]')
-  await expect.poll(() => samples.count()).toBeGreaterThan(0)
+  await expect(samples).toHaveCount(30)
   const sampleHeights = await samples.evaluateAll(elements => elements.map(element => Number(element.getAttribute('data-topology-sample-height'))))
-  expect(sampleHeights.every(height => height >= 6 && height <= 11)).toBe(true)
+  expect(sampleHeights.every(height => height >= 5 && height <= 9)).toBe(true)
   const segmentGroups = page.locator('[data-topology-edge-samples]')
   await expect(segmentGroups).toHaveCount(3)
+  for (const segment of await segmentGroups.all())
+    await expect(segment.locator('[data-topology-sample]')).toHaveCount(10)
   const averageRenderedHeight = async (groupIndex: number) => {
     const heights = await segmentGroups.nth(groupIndex).locator('[data-topology-sample]').evaluateAll(elements => elements.map(element => Number(element.getAttribute('data-topology-sample-height'))))
     return heights.reduce((sum, height) => sum + height, 0) / heights.length
   }
-  expect(Math.abs(await averageRenderedHeight(1) - await averageRenderedHeight(2))).toBeLessThan(3)
+  expect(Math.abs(await averageRenderedHeight(1) - await averageRenderedHeight(2))).toBeLessThan(2)
   await expect(segmentGroups.nth(1).locator('[data-topology-sample]').first()).toHaveAttribute('aria-label', /\d{2,3} ms/)
   await expect(segmentGroups.nth(2).locator('[data-topology-sample]').first()).toHaveAttribute('aria-label', /[012] ms/)
   const firstSample = samples.first()
@@ -84,8 +86,14 @@ test('PandaOps desktop topology and cards remain contained', async ({ page }) =>
   await expect(sampleDetail).toBeVisible()
   await expect(sampleDetail).toContainText(/\d+ ms/)
   await expect(sampleDetail).toContainText('丢包')
-  await expect(sampleDetail).toContainText(/第 [12] 段/)
+  await expect(sampleDetail).toContainText(/\d{2}:\d{2}:\d{2}/)
   await expect(firstSample).toHaveAttribute('aria-label', /ms，丢包/)
+  const firstMetric = page.locator('[data-topology-current-metric]').first()
+  const firstBaseline = page.locator('[data-topology-edge-baseline]').first()
+  await expect.poll(async () => {
+    const [metricBox, baselineBox] = await Promise.all([firstMetric.boundingBox(), firstBaseline.boundingBox()])
+    return Boolean(metricBox && baselineBox && metricBox.y + metricBox.height < baselineBox.y)
+  }).toBe(true)
   await page.getByRole('heading', { name: '线路状态' }).hover()
   await expect(sampleDetail).toBeHidden()
   await historyButtons.first().click()

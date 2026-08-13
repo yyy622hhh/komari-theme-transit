@@ -32,16 +32,16 @@ const latency = computed(() => ping.hasData.value ? ping.avgLatency.value : conf
 const loss = computed(() => ping.hasData.value ? ping.avgLoss.value : config.value.fallbackLoss)
 const sourceState = computed(() => {
   if (!config.value.live)
-    return { label: '静态基线', dot: 'bg-slate-500', line: 'bg-slate-500/55' }
+    return { label: '静态基线', line: 'bg-slate-500/55' }
   if (!sourceNode.value)
-    return { label: '探测节点未找到', dot: 'bg-rose-400', line: 'bg-rose-400/55' }
+    return { label: '探测节点未找到', line: 'bg-rose-400/55' }
   if (ping.loading.value)
-    return { label: '正在读取实时任务', dot: 'bg-amber-400 animate-pulse', line: 'bg-amber-400/55' }
+    return { label: '正在读取实时任务', line: 'bg-amber-400/55' }
   if (ping.error.value)
-    return { label: '实时任务读取失败', dot: 'bg-rose-400', line: 'bg-rose-400/55' }
+    return { label: '实时任务读取失败', line: 'bg-rose-400/55' }
   if (!ping.hasData.value)
-    return { label: '暂无匹配的实时数据，当前显示备用基线', dot: 'bg-amber-400', line: 'bg-amber-400/55' }
-  return { label: '实时 Ping 数据', dot: 'bg-emerald-400', line: 'bg-emerald-400/75' }
+    return { label: '暂无匹配的实时数据，当前显示备用基线', line: 'bg-amber-400/55' }
+  return { label: '实时 Ping 数据', line: 'bg-slate-600/70' }
 })
 const lossTone = computed(() => {
   if (loss.value === null || loss.value <= 1)
@@ -78,14 +78,14 @@ function median(values: number[]): number {
 
 function sampleHeight(latency: number | null, baseline: number): number {
   if (latency === null)
-    return 6
+    return 5
   if (baseline <= 0)
-    return 8
-  return Math.round(Math.min(11, Math.max(6, 8 + (latency / baseline - 1) * 8)))
+    return 7
+  return Math.round(Math.min(9, Math.max(5, 7 + (latency / baseline - 1) * 6)))
 }
 
 const sampleBars = computed(() => {
-  const points = ping.history.value.slice(-6)
+  const points = ping.history.value.slice(-10)
   const validLatencies = points
     .map(point => point.latency)
     .filter((value): value is number => value !== null && Number.isFinite(value))
@@ -93,7 +93,8 @@ const sampleBars = computed(() => {
   return points.map((point, index) => ({
     key: `${props.segmentIndex}-${point.time}-${index}`,
     height: sampleHeight(point.latency, baseline),
-    alert: point.loss !== null && point.loss > 3,
+    alert: (point.loss !== null && point.loss > 3)
+      || (point.latency !== null && baseline > 0 && point.latency > baseline * 1.18),
     unavailable: point.latency === null,
     latency: point.latency,
     loss: point.loss,
@@ -102,30 +103,26 @@ const sampleBars = computed(() => {
     segmentLabel: `${props.sourceLabel} → ${props.targetLabel}`,
   }))
 })
-const sampleSplitIndex = computed(() => Math.ceil(sampleBars.value.length / 2))
-const olderSamples = computed(() => sampleBars.value.slice(0, sampleSplitIndex.value))
-const recentSamples = computed(() => sampleBars.value.slice(sampleSplitIndex.value))
 </script>
 
 <template>
   <div
-    class="flex min-w-[118px] flex-1 items-center justify-center gap-2"
+    class="relative flex h-10 min-w-[190px] flex-1 items-center"
     :data-topology-edge-samples="sampleBars.length ? '' : undefined"
     :title="`${sourceState.label}${config.live ? ` · ${config.taskFilter || '未指定任务'}` : ''}`"
     :aria-label="`${sourceState.label}：${formatTopologyLatency(latency)}，丢包 ${formatTopologyLoss(loss)}`"
   >
-    <TopologyEdgeSamples :bars="olderSamples" :line-class="sourceState.line" />
+    <TopologyEdgeSamples :bars="sampleBars" :line-class="sourceState.line" />
     <button
       type="button"
-      class="shrink-0 whitespace-nowrap rounded px-0.5 text-[10px] font-medium tabular-nums text-slate-300 transition-colors hover:text-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-400/60 sm:text-[11px]"
+      data-topology-current-metric
+      class="absolute left-1/2 top-0 z-2 -translate-x-1/2 whitespace-nowrap rounded px-1 text-[10px] font-medium tabular-nums text-slate-400 transition-colors hover:text-slate-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-400/60 sm:text-[11px]"
       aria-label="查看线路历史"
       @click="emit('openDetail')"
     >
-      <i class="mr-1 inline-block size-1.5 rounded-full align-middle" :class="sourceState.dot" />
       {{ formatTopologyLatency(latency) }}
       <span class="mx-0.5 text-slate-600">/</span>
       <span :class="lossTone">{{ formatTopologyLoss(loss) }}</span>
     </button>
-    <TopologyEdgeSamples :bars="recentSamples" :line-class="sourceState.line" />
   </div>
 </template>

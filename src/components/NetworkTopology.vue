@@ -169,7 +169,7 @@ function openRouteDetail(route: RouteRow): void {
     aria-labelledby="topology-title"
   >
     <div class="panda-panel overflow-hidden rounded-2xl">
-      <header class="flex h-11 items-center justify-between gap-3 border-b border-white/[0.055] px-4 sm:px-5">
+      <header class="flex h-12 items-center justify-between gap-3 border-b border-white/[0.055] px-4 sm:px-5">
         <div class="flex items-center gap-2">
           <Icon icon="tabler:route" :width="17" class="text-emerald-400" />
           <h2 id="topology-title" class="text-sm font-semibold">
@@ -192,12 +192,12 @@ function openRouteDetail(route: RouteRow): void {
         </div>
       </header>
 
-      <div class="topology-scroll overflow-x-auto px-3 pb-2 pt-1 sm:px-4">
-        <div class="min-w-[760px]">
+      <div class="topology-scroll overflow-x-auto px-3 sm:px-4">
+        <div class="min-w-[980px]">
           <article
             v-for="route in routes"
             :key="route.key"
-            class="group grid min-h-12 grid-cols-[138px_minmax(118px,1fr)_170px_minmax(118px,1fr)_184px] items-center gap-2 border-b border-white/[0.045] px-2 transition-colors last:border-b-0 hover:bg-white/[0.018]"
+            class="group grid min-h-16 grid-cols-[144px_minmax(190px,1fr)_178px_minmax(190px,1fr)_190px] items-center gap-3 border-b border-white/[0.045] px-2 transition-colors last:border-b-0 hover:bg-white/[0.018]"
           >
             <div class="flex min-w-0 items-center gap-2">
               <span
@@ -224,7 +224,7 @@ function openRouteDetail(route: RouteRow): void {
 
             <button
               type="button"
-              class="flex min-w-0 items-center gap-2 text-left disabled:cursor-default"
+              class="flex min-w-0 items-center gap-2.5 text-left disabled:cursor-default"
               :disabled="!route.nodes[1]?.node"
               @click="route.nodes[1] && openNode(route.nodes[1])"
             >
@@ -233,10 +233,12 @@ function openRouteDetail(route: RouteRow): void {
                 v-if="route.nodes[1]?.region"
                 :src="`/images/flags/${getRegionCode(route.nodes[1].region)}.svg`"
                 :alt="route.nodes[1].region"
-                class="h-3.5 w-5 shrink-0 rounded-[2px] object-cover"
+                class="h-4 w-6 shrink-0 rounded-[3px] object-cover"
               >
-              <span class="truncate text-[13px] font-semibold">{{ route.nodes[1]?.name }}</span>
-              <span class="shrink-0 text-[10px] text-slate-500">· {{ route.nodes[1]?.role }}</span>
+              <span class="flex min-w-0 flex-col leading-tight">
+                <span class="truncate text-[13px] font-semibold">{{ route.nodes[1]?.name }}</span>
+                <span class="mt-0.5 truncate text-[10px] text-slate-500">{{ route.nodes[1]?.role }}</span>
+              </span>
             </button>
 
             <TopologyEdgeMetric
@@ -251,7 +253,7 @@ function openRouteDetail(route: RouteRow): void {
 
             <button
               type="button"
-              class="flex min-w-0 items-center gap-2 text-left disabled:cursor-default"
+              class="flex min-w-0 items-center gap-2.5 text-left disabled:cursor-default"
               :disabled="!route.nodes[2]?.node"
               @click="route.nodes[2] && openNode(route.nodes[2])"
             >
@@ -260,10 +262,12 @@ function openRouteDetail(route: RouteRow): void {
                 v-if="route.nodes[2]?.region"
                 :src="`/images/flags/${getRegionCode(route.nodes[2].region)}.svg`"
                 :alt="route.nodes[2].region"
-                class="h-3.5 w-5 shrink-0 rounded-[2px] object-cover"
+                class="h-4 w-6 shrink-0 rounded-[3px] object-cover"
               >
-              <span class="truncate text-[13px] font-semibold">{{ route.nodes[2]?.name }}</span>
-              <span class="shrink-0 text-[10px] text-slate-500">· {{ route.nodes[2]?.role }}</span>
+              <span class="flex min-w-0 flex-col leading-tight">
+                <span class="truncate text-[13px] font-semibold">{{ route.nodes[2]?.name }}</span>
+                <span class="mt-0.5 truncate text-[10px] text-slate-500">{{ route.nodes[2]?.role }}</span>
+              </span>
             </button>
           </article>
         </div>

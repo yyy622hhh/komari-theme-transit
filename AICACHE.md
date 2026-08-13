@@ -688,3 +688,11 @@
 - Each route segment now owns its six recent samples directly inside the two connector rails surrounding that segment's latency/loss value. Older samples sit on the left rail and newer samples on the right rail.
 - Hover/focus tooltips retain exact segment, latency, packet loss and timestamp data. Clicking either segment metric opens the existing full route history dialog, preserving detailed inspection without a trailing chevron block.
 - Segment health is now emitted by `TopologyEdgeMetric`, eliminating the duplicate ping-stat observer previously required by `TopologyStability`.
+
+## 2026-08-14 PandaOps continuous topology rails
+
+- Status: done (M4/M6), release version `3.3.5-panda.12`.
+- Replaced the split left/value/right connector treatment with one uninterrupted rail per route segment. The current latency and packet loss sit above the rail, so the telemetry line remains visually continuous.
+- Each live segment renders its ten latest samples directly on the rail. Samples remain normalized to that segment's median, use a restrained 5-9px range, and turn amber for material latency deviation or packet loss.
+- The hover/focus tooltip is intentionally reduced to exact latency, loss and time. Segment identity stays in accessible text, while clicking the current metric continues to open the full history dialog.
+- Relay and exit nodes now use a two-level name/role stack matching the approved design mockup, and the obsolete trailing status area remains removed.
