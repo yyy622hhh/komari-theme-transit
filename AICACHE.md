@@ -12,12 +12,13 @@
 
 ## 当前任务
 
-- 状态：in-progress，准备发布 `3.3.5-panda.19`
+- 状态：done，`3.3.5-panda.19` 已部署到 `monitor.example.com`
 - 目标：让 PandaOps 从“看到指标”推进到“快速判断与可控处置”，补齐线路健康评分、异常时间线、节点维护和告警静默。
 - 设计：保持现有高密度探针信息架构，不新增首页大卡片；线路评分嵌入入口区域，详情展示扣分原因；事件通过拓扑标题栏进入；节点控制收进管理员卡片菜单。
 - 实现：基于每段延迟、丢包、波动、新鲜度和节点状态计算 0–100 分；浏览器本地保留 7 天异常/恢复/运维事件；维护与静默保存到托管主题设置并在所有设备同步，保存前验证 `nodeTopology` 权限；维护节点从在线统计、离线筛选和异常汇总排除，静默节点仅从异常汇总排除。
 - 验证：`npm run type-check`、`npm run lint`、`npm run build-only`、`git diff --check` 通过；完整 Playwright 视觉与交互回归 28/28 通过，新增健康详情、时间线和维护保存/即时告警更新断言。
 - 隐私边界：异常时间线只写入当前浏览器 localStorage，不上传事件明细；节点运维控制只在已验证管理员会话开放。
+- 发布：提交 `9e5f178`，构建包 `komari-theme-PandaOps-build-9e5f178.zip`，本机与服务器 SHA-256 均为 `b9f7bec35c73587e3edef6dc77f8b848f916f1def9c3d014d36f1cd019a00032`。旧活动主题完整备份到 `/var/lib/komari/backups/PandaOps-panda18-before-panda19-20260814`，新目录原子切换后 Komari 服务 active，本机首页 200；公网首页实际引用 `index-DPqYB99L.js`，入口、`PandaOpsDashboard-jrG7aCaN.js` 与 `PandaOpsNodeControlDialog-ByTnKF-7.js` GET 均为 200，线上代码已确认包含线路健康评分、异常时间线、维护模式和告警静默。
 
 - 状态：done，`3.3.5-panda.18` 已部署到 `monitor.example.com`，PandaOps 质量收口与线上性能优化完成
 - 目标：修复异常摘要漏计与瞬时误报、Ping 缓存新鲜度、统一采样交互的重复全局监听、PandaOps 卡片尺寸配置、移动端资产/异常摘要布局，并补齐 monitor.example.com 的静态资源压缩、缓存与安全响应头。
