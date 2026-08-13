@@ -2,6 +2,7 @@
 import type { NodeData } from '@/stores/nodes'
 import { Icon } from '@iconify/vue'
 import { computed } from 'vue'
+import TelemetrySampleStrip from '@/components/TelemetrySampleStrip.vue'
 import { Badge } from '@/components/ui/badge'
 import { CardX } from '@/components/ui/card-x'
 import { DataTooltip } from '@/components/ui/data-tooltip'
@@ -449,63 +450,61 @@ function hasRegion(region: string | null | undefined): boolean {
 
         <!-- 延迟 + 丢包 -->
         <div class="grid grid-cols-2 gap-1.5">
-          <button
-            type="button"
+          <div
             class="group/panel relative flex flex-col rounded-lg bg-slate-500/5"
             :class="[nodeCardPingPanelClass, nodeCardPanelClass, !props.node.online ? 'blur-xs opacity-50' : '']"
             :title="latencyPanelTooltip"
-            :aria-label="`${props.node.name} 延迟监测`"
-            @click.stop="emit('pingClick')"
           >
-            <div class="flex items-center justify-between text-[11px] leading-none">
+            <button
+              type="button"
+              class="flex items-center justify-between text-[11px] leading-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-400/60"
+              :aria-label="`${props.node.name} 延迟监测`"
+              @click.stop="emit('pingClick')"
+            >
               <span class="text-muted-foreground">延迟</span>
               <span class="font-medium">{{ latencyDisplay }}</span>
-            </div>
+            </button>
             <div
               data-node-ping-bars="latency"
-              class="grid min-h-0 min-w-0 w-full flex-1 items-end gap-[1px] opacity-80 group-hover/panel:opacity-100"
-              :style="{ gridTemplateColumns: `repeat(${latencyRenderBars.length}, minmax(0, 1fr))` }"
+              class="mt-auto min-h-0 min-w-0 w-full opacity-80 group-hover/panel:opacity-100"
             >
-              <DataTooltip
-                v-for="bar in latencyRenderBars" :key="bar.key"
-                placement="top" :content="bar.tooltip" class="h-full w-full"
-              >
-                <span
-                  class="block h-full w-full rounded-[1px] transition-transform duration-150 group-hover/data-tooltip:scale-y-160 group-hover/panel:opacity-60 group-hover/data-tooltip:!opacity-100"
-                  :class="bar.className"
-                />
-              </DataTooltip>
+              <TelemetrySampleStrip
+                :samples="latencyRenderBars"
+                :label="`${props.node.name}延迟`"
+                kind="ping"
+                variant="bars"
+                class="w-full"
+              />
             </div>
-          </button>
+          </div>
 
-          <button
-            type="button"
+          <div
             class="group/panel relative flex flex-col rounded-lg bg-slate-500/5"
             :class="[nodeCardPingPanelClass, nodeCardPanelClass, !props.node.online ? 'blur-xs opacity-50' : '']"
             :title="lossPanelTooltip"
-            :aria-label="`${props.node.name} 丢包监测`"
-            @click.stop="emit('pingClick')"
           >
-            <div class="flex items-center justify-between text-[11px] leading-none">
+            <button
+              type="button"
+              class="flex items-center justify-between text-[11px] leading-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-400/60"
+              :aria-label="`${props.node.name} 丢包监测`"
+              @click.stop="emit('pingClick')"
+            >
               <span class="text-muted-foreground">丢包</span>
               <span class="font-medium">{{ lossDisplay }}</span>
-            </div>
+            </button>
             <div
               data-node-ping-bars="loss"
-              class="grid min-h-0 min-w-0 w-full flex-1 items-end gap-[1px] opacity-80 group-hover/panel:opacity-100"
-              :style="{ gridTemplateColumns: `repeat(${lossRenderBars.length}, minmax(0, 1fr))` }"
+              class="mt-auto min-h-0 min-w-0 w-full opacity-80 group-hover/panel:opacity-100"
             >
-              <DataTooltip
-                v-for="bar in lossRenderBars" :key="bar.key"
-                placement="top" :content="bar.tooltip" class="h-full w-full"
-              >
-                <span
-                  class="block h-full w-full rounded-[1px] transition-transform duration-150 group-hover/data-tooltip:scale-y-160 group-hover/panel:opacity-60 group-hover/data-tooltip:!opacity-100"
-                  :class="bar.className"
-                />
-              </DataTooltip>
+              <TelemetrySampleStrip
+                :samples="lossRenderBars"
+                :label="`${props.node.name}丢包`"
+                kind="ping"
+                variant="bars"
+                class="w-full"
+              />
             </div>
-          </button>
+          </div>
         </div>
 
         <!-- 自定义标签 -->

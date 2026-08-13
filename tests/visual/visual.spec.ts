@@ -31,8 +31,22 @@ async function expectNodePingBars(page: Page): Promise<void> {
   for (const metric of ['latency', 'loss']) {
     const bars = card.locator(`[data-node-ping-bars="${metric}"]`)
     await expect(bars).toBeVisible()
+    await expect(bars.locator('[data-sample-strip][data-sample-kind="ping"]')).toBeVisible()
     await expect.poll(() => bars.evaluate(element => element.getBoundingClientRect().width)).toBeGreaterThan(0)
   }
+}
+
+async function expectSharedPingSampleInteraction(page: Page, scope = page.locator('body')): Promise<void> {
+  const sample = scope.locator('[data-node-ping-sample][aria-label*="ms"]').first()
+  await sample.hover()
+  const tooltip = page.locator('[data-node-ping-sample-tooltip]')
+  await expect(tooltip).toBeVisible()
+  await expect(tooltip).toContainText(/ms/)
+  await expect(tooltip).toContainText('丢包')
+  await sample.click()
+  await expect(tooltip).toBeVisible()
+  await page.getByRole('heading', { name: 'Komari Visual Lab' }).click()
+  await expect(tooltip).toBeHidden()
 }
 
 test('home light desktop', async ({ page }) => {
@@ -41,6 +55,7 @@ test('home light desktop', async ({ page }) => {
   await openStablePage(page)
   await expectNodeMetricIcons(page)
   await expectNodePingBars(page)
+  await expectSharedPingSampleInteraction(page, page.getByRole('button', { name: '查看节点 主控-洛杉矶 详情' }))
   await expect(page).toHaveScreenshot('home-light-desktop.png', { fullPage: false })
 })
 
@@ -58,6 +73,8 @@ test('PandaOps desktop topology and cards remain contained', async ({ page }) =>
   await openStablePage(page)
 
   await expect(page.getByRole('heading', { name: '线路状态' })).toBeVisible()
+  await expect(page.locator('[data-panda-alert-strip]')).toBeVisible()
+  await expect(page.locator('[data-topology-direction]')).toHaveCount(3)
   const historyButtons = page.getByRole('button', { name: '查看线路历史' })
   await expect(historyButtons).toHaveCount(4)
   await expect(page.locator('[data-topology-status]')).toHaveCount(0)
@@ -88,6 +105,8 @@ test('PandaOps desktop topology and cards remain contained', async ({ page }) =>
   await expect(sampleDetail).toContainText('丢包')
   await expect(sampleDetail).toContainText(/\d{2}:\d{2}:\d{2}/)
   await expect(firstSample).toHaveAttribute('aria-label', /ms，丢包/)
+  await expect(firstSample).toHaveAttribute('data-sample-trigger', '')
+  await expect(firstSample.locator('xpath=..')).toHaveAttribute('data-sample-kind', 'topology')
   const firstMetric = page.locator('[data-topology-current-metric]').first()
   const firstBaseline = page.locator('[data-topology-edge-baseline]').first()
   await expect.poll(async () => {
@@ -109,13 +128,23 @@ test('PandaOps desktop topology and cards remain contained', async ({ page }) =>
   const carrierTooltip = page.locator('[data-carrier-sample-tooltip]')
   await expect(carrierTooltip).toBeVisible()
   await expect(carrierTooltip).toContainText(/ms/)
+  await expect(carrierTooltip).toContainText('丢包')
+  await expect(carrierTooltip).toHaveAttribute('data-sample-kind', 'carrier')
   await page.getByRole('heading', { name: '线路状态' }).hover()
   await expect(carrierTooltip).toBeHidden()
   await carrierSample.click()
   await expect(carrierTooltip).toBeVisible()
   await expect(page).toHaveURL('/')
+  const carrierStrip = carrierSample.locator('xpath=..')
+  await carrierStrip.focus()
+  await carrierStrip.press('ArrowLeft')
+  await expect(carrierTooltip).toBeVisible()
+  await carrierStrip.press('Escape')
+  await expect(carrierTooltip).toBeHidden()
+  await carrierSample.click()
   await page.getByRole('heading', { name: '线路状态' }).click()
   await expect(carrierTooltip).toBeHidden()
+  await expect(page.locator('[data-node-alert-reason]').first()).toBeVisible()
   const expiryDate = page.getByRole('button', { name: '查看节点 台北-流量预警 详情' }).locator('xpath=..').locator('[data-node-expiry-date]')
   await expect(expiryDate).toHaveText('2026-08-02')
   await expect.poll(() => expiryDate.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
@@ -130,6 +159,17 @@ test('PandaOps mobile keeps document width contained', async ({ page }) => {
   await openStablePage(page)
 
   await expect(page.getByRole('heading', { name: '线路状态' })).toBeVisible()
+  await expect(page.locator('[data-topology-mobile-route]')).toHaveCount(2)
+  await expect(page.locator('.topology-scroll')).toHaveCount(0)
+  await expect(page.locator('[data-topology-mobile-node]')).toHaveCount(4)
+  const firstMobileRoute = page.locator('[data-topology-mobile-route]').first()
+  await expect.poll(() => firstMobileRoute.evaluate(element => element.getBoundingClientRect().height)).toBeGreaterThan(150)
+  const mobileSample = firstMobileRoute.locator('[data-topology-sample]').first()
+  await mobileSample.click()
+  await expect(page.locator('[data-sample-tooltip][data-sample-kind="topology"]')).toBeVisible()
+  const singaporeDirection = page.getByRole('button', { name: '新加坡方向 1' })
+  await singaporeDirection.click()
+  await expect(page.locator('[data-topology-mobile-route]')).toHaveCount(1)
   await expect(page.locator('html')).toHaveJSProperty('scrollWidth', await page.locator('html').evaluate(element => element.clientWidth))
 })
 
@@ -197,7 +237,7 @@ test('home quick controls, node comparison and network data change visible resul
   await page.getByRole('button', { name: '东京-高负载', exact: true }).click()
   await expect(page.getByText('已选 2 / 4')).toBeVisible()
   await expect(page.getByText('实时快照')).toBeVisible()
-  await expect(page.getByText('96.4%')).toBeVisible()
+  await expect(page.getByText('96.4%', { exact: true })).toBeVisible()
 
   await page.getByRole('button', { name: /网络：/ }).click()
   await expect(page.getByText('IP 网络归属')).toBeVisible()
@@ -291,6 +331,7 @@ test('home accessible list desktop', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 })
   await installKomariFixture(page, { colorVisionFriendly: true, viewMode: 'list', hideEarth: true })
   await openStablePage(page)
+  await expectSharedPingSampleInteraction(page)
   await expect(page).toHaveScreenshot('home-accessible-list-desktop.png', { fullPage: false })
 })
 

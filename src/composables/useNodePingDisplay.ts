@@ -1,4 +1,5 @@
 import type { MaybeRefOrGetter } from 'vue'
+import type { TelemetrySample, TelemetrySampleTone } from '@/types/telemetry'
 import { computed, toValue } from 'vue'
 import { useNodePingStats } from '@/composables/useNodePingStats'
 import { PING_SUMMARY_MAX_COUNT } from '@/constants/load'
@@ -7,11 +8,7 @@ import { formatDateTime } from '@/utils/helper'
 
 export type NodePingMetric = 'latency' | 'loss'
 
-export interface NodePingBar {
-  key: string
-  className: string
-  tooltip: string
-}
+export type NodePingBar = TelemetrySample
 
 interface UseNodePingDisplayOptions {
   enabled?: MaybeRefOrGetter<boolean>
@@ -23,28 +20,34 @@ interface UseNodePingDisplayOptions {
 
 const EMPTY_PING_BAR_COUNT = 20
 
-function getLatencyToneClass(latency: number): string {
+function getLatencyTone(latency: number): { tone: TelemetrySampleTone, toneClass: string } {
   if (latency <= 60)
-    return 'bg-signal-1'
+    return { tone: 'healthy', toneClass: 'bg-signal-1' }
   if (latency <= 100)
-    return 'bg-signal-2'
+    return { tone: 'healthy', toneClass: 'bg-signal-2' }
   if (latency <= 160)
-    return 'bg-signal-3 ping-signal-pattern-2'
+    return { tone: 'notice', toneClass: 'bg-signal-3 ping-signal-pattern-2' }
   if (latency <= 200)
-    return 'bg-signal-4 ping-signal-pattern-3'
-  return 'bg-signal-5 ping-signal-pattern-4'
+    return { tone: 'warning', toneClass: 'bg-signal-4 ping-signal-pattern-3' }
+  return { tone: 'critical', toneClass: 'bg-signal-5 ping-signal-pattern-4' }
 }
 
-function getLossToneClass(loss: number): string {
+function getLossTone(loss: number): { tone: TelemetrySampleTone, toneClass: string } {
   if (loss <= 1)
-    return 'bg-signal-1'
+    return { tone: 'healthy', toneClass: 'bg-signal-1' }
   if (loss <= 3)
-    return 'bg-signal-2'
+    return { tone: 'healthy', toneClass: 'bg-signal-2' }
   if (loss <= 6)
-    return 'bg-signal-3 ping-signal-pattern-2'
+    return { tone: 'notice', toneClass: 'bg-signal-3 ping-signal-pattern-2' }
   if (loss <= 9)
-    return 'bg-signal-4 ping-signal-pattern-3'
-  return 'bg-signal-5 ping-signal-pattern-4'
+    return { tone: 'warning', toneClass: 'bg-signal-4 ping-signal-pattern-3' }
+  return { tone: 'critical', toneClass: 'bg-signal-5 ping-signal-pattern-4' }
+}
+
+function formatLoss(value: number | null): string {
+  if (value === null)
+    return '-'
+  return `${value.toFixed(value >= 10 ? 0 : 1)}%`
 }
 
 export function useNodePingDisplay(
@@ -81,19 +84,21 @@ export function useNodePingDisplay(
 
     return points.map((point, index) => {
       const value = point[metric]
+      const visual = value === null
+        ? { tone: 'muted' as const, toneClass: 'bg-muted-foreground/15' }
+        : metric === 'latency'
+          ? getLatencyTone(value)
+          : getLossTone(value)
+      const latencyText = point.latency === null ? '无响应' : `${Math.round(point.latency)} ms`
+      const lossText = `丢包 ${formatLoss(point.loss)}`
 
       return {
         key: `${point.time}-${index}`,
-        className: value === null
-          ? 'bg-muted-foreground/15'
-          : metric === 'latency'
-            ? getLatencyToneClass(value)
-            : getLossToneClass(value),
-        tooltip: value === null
-          ? `${formatDateTime(point.time, 'HH:mm:ss')}\n无采样数据`
-          : metric === 'latency'
-            ? `${formatDateTime(point.time, 'HH:mm:ss')}\n${Math.round(value)} ms`
-            : `${formatDateTime(point.time, 'HH:mm:ss')}\n${value.toFixed(1)}%`,
+        ...visual,
+        valueText: metric === 'latency' ? latencyText : lossText,
+        secondaryText: metric === 'latency' ? lossText : latencyText,
+        timeText: formatDateTime(point.time, 'HH:mm:ss'),
+        ariaLabel: `${latencyText}，${lossText}，${formatDateTime(point.time)}`,
       }
     })
   }
@@ -111,8 +116,10 @@ export function useNodePingDisplay(
 
     return Array.from({ length: EMPTY_PING_BAR_COUNT }, (_, index) => ({
       key: `${metric}-empty-${index}`,
-      className: 'bg-muted-foreground/10',
-      tooltip,
+      tone: 'muted',
+      toneClass: 'bg-muted-foreground/10',
+      valueText: tooltip,
+      ariaLabel: tooltip,
     }))
   }
 

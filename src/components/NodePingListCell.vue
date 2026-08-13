@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import TelemetrySampleStrip from '@/components/TelemetrySampleStrip.vue'
 import { useNodePingDisplay } from '@/composables/useNodePingDisplay'
 
 const props = defineProps<{
@@ -18,43 +19,38 @@ const {
 </script>
 
 <template>
-  <button
-    type="button"
-    class="group flex w-full flex-col gap-[1px] pr-4 text-left"
-    aria-label="打开延迟和丢包监测"
-    @click.stop="emit('click')"
-  >
-    <div class="group/panel relative items-center gap-1 opacity-80 hover:opacity-100">
+  <div class="group relative flex w-full flex-col gap-[1px] pr-4 text-left">
+    <button
+      type="button"
+      class="absolute inset-0 z-0 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-400/60"
+      aria-label="打开延迟和丢包监测"
+      @click.stop="emit('click')"
+    />
+    <div class="group/panel relative z-1 items-center gap-1 opacity-80 hover:opacity-100">
       <div
-        class="grid h-1 cursor-auto items-end gap-[1px] transition-all hover:h-2.5"
-        :style="{ gridTemplateColumns: `repeat(${latencyRenderBars.length}, minmax(0, 1fr))` }"
+        data-node-ping-bars="latency"
+        class="h-3 min-w-0"
       >
-        <span
-          v-for="bar in latencyRenderBars"
-          :key="bar.key"
-          :title="bar.tooltip"
-          :aria-label="bar.tooltip"
-          class="h-full w-full"
-        >
-          <span class="block h-full w-full rounded-[1px] transition-all group-hover:opacity-50 hover:scale-y-160 hover:opacity-100" :class="bar.className" />
-        </span>
+        <TelemetrySampleStrip
+          :samples="latencyRenderBars"
+          label="列表延迟"
+          kind="ping"
+          variant="bars"
+        />
       </div>
     </div>
-    <div class="group/panel relative items-center gap-1 opacity-80 hover:opacity-100">
+    <div class="group/panel relative z-1 items-center gap-1 opacity-80 hover:opacity-100">
       <div
-        class="grid h-1 cursor-auto items-end gap-[1px] transition-all hover:h-2.5"
-        :style="{ gridTemplateColumns: `repeat(${lossRenderBars.length}, minmax(0, 1fr))` }"
+        data-node-ping-bars="loss"
+        class="h-3 min-w-0"
       >
-        <span
-          v-for="bar in lossRenderBars"
-          :key="bar.key"
-          :title="bar.tooltip"
-          :aria-label="bar.tooltip"
-          class="h-full w-full"
-        >
-          <span class="block h-full w-full rounded-[1px] transition-all group-hover:opacity-50 hover:scale-y-160 hover:opacity-100" :class="bar.className" />
-        </span>
+        <TelemetrySampleStrip
+          :samples="lossRenderBars"
+          label="列表丢包"
+          kind="ping"
+          variant="bars"
+        />
       </div>
     </div>
-  </button>
+  </div>
 </template>

@@ -9,6 +9,7 @@ import { formatBytesPerSecondWithConfig, formatBytesWithConfig, formatDateTime, 
 import { getDiskPercentage, getMemoryPercentage, getTrafficUsed, getTrafficUsedPercentage, hasTrafficLimit } from '@/utils/nodeMetricsHelper'
 import { getConfiguredNodeRole, getNodeRole } from '@/utils/nodeRoleHelper'
 import { getOSImage, getOSName } from '@/utils/osImageHelper'
+import { getPrimaryNodeAlert } from '@/utils/pandaOpsAlert'
 import { getRegionCode, getRegionDisplayName } from '@/utils/regionHelper'
 import { formatPriceWithCycle, getDaysUntilExpired, getExpireStatus, parseTags } from '@/utils/tagHelper'
 
@@ -47,6 +48,7 @@ const expiryDate = computed(() => expiryStatus.value === 'unknown' || expiryStat
   : formatDateTime(props.node.expired_at, 'YYYY-MM-DD'))
 
 const { carrierDisplays, carrierScopeLabel } = useNodeCarrierPingDisplay(() => props.node.uuid)
+const primaryAlert = computed(() => getPrimaryNodeAlert(props.node, carrierDisplays.value, carrierScopeLabel.value))
 const formatBytes = (value: number) => formatBytesWithConfig(value, appStore.byteDecimals)
 const formatSpeed = (value: number) => formatBytesPerSecondWithConfig(value, appStore.byteDecimals)
 
@@ -62,6 +64,10 @@ function lossTone(loss: string): string {
     return 'text-amber-300'
   return 'text-rose-400'
 }
+
+const alertTone = computed(() => primaryAlert.value?.severity === 'critical'
+  ? 'text-rose-400 border-rose-400/15 bg-rose-400/[0.035]'
+  : 'text-amber-300 border-amber-400/15 bg-amber-400/[0.035]')
 </script>
 
 <template>
@@ -101,7 +107,17 @@ function lossTone(loss: string): string {
       </div>
     </header>
 
-    <div class="pointer-events-none relative z-1 mt-3 grid grid-cols-3 gap-3 border-y border-white/[0.055] py-2.5">
+    <div
+      v-if="primaryAlert && node.online"
+      data-node-alert-reason
+      class="pointer-events-none relative z-1 mt-2 flex min-w-0 items-center gap-1.5 rounded-md border px-2 py-1 text-[9px] font-medium tabular-nums"
+      :class="alertTone"
+    >
+      <span class="size-1.5 shrink-0 rounded-full bg-current" />
+      <span class="truncate">{{ primaryAlert.detail }}</span>
+    </div>
+
+    <div class="pointer-events-none relative z-1 grid grid-cols-3 gap-3 border-y border-white/[0.055] py-2.5" :class="primaryAlert && node.online ? 'mt-2' : 'mt-3'">
       <div>
         <div class="flex items-center justify-between gap-2 text-[10px]">
           <span class="text-slate-500">CPU</span>

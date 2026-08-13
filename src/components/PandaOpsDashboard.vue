@@ -3,6 +3,7 @@ import type { NodeData } from '@/stores/nodes'
 import type { CurrencyCode } from '@/utils/financeHelper'
 import { computed, onMounted, ref } from 'vue'
 import NetworkTopology from '@/components/NetworkTopology.vue'
+import PandaOpsAlertStrip from '@/components/PandaOpsAlertStrip.vue'
 import { useAppStore } from '@/stores/app'
 import * as financeHelper from '@/utils/financeHelper'
 import { formatBytesPerSecondWithConfig, formatBytesWithConfig } from '@/utils/helper'
@@ -88,6 +89,8 @@ onMounted(async () => {
           </div>
         </div>
       </div>
+
+      <PandaOpsAlertStrip :nodes="nodes" />
 
       <NetworkTopology v-if="appStore.topologyEnabled" embedded :nodes="nodes" />
     </div>

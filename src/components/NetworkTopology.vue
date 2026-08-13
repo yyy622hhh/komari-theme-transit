@@ -3,8 +3,8 @@ import type { TopologyRouteDetail } from '@/components/TopologyRouteDetailDialog
 import type { NodeData } from '@/stores/nodes'
 import type { TopologyRouteHealth } from '@/utils/topologyHealth'
 import { Icon } from '@iconify/vue'
-import { useStorageAsync } from '@vueuse/core'
-import { computed, ref } from 'vue'
+import { useMediaQuery, useStorageAsync } from '@vueuse/core'
+import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import TopologyEdgeMetric from '@/components/TopologyEdgeMetric.vue'
 import TopologyManagerDialog from '@/components/TopologyManagerDialog.vue'
@@ -36,6 +36,14 @@ interface RouteRow {
   probeKey: string
   nodes: RouteNode[]
   metrics: string[]
+  directionKey: string
+  directionLabel: string
+}
+
+interface RouteDirection {
+  key: string
+  label: string
+  count: number
 }
 
 const props = withDefaults(defineProps<{ nodes: NodeData[], embedded?: boolean }>(), { embedded: false })
@@ -46,12 +54,36 @@ const managerOpen = ref(false)
 const detailOpen = ref(false)
 const selectedRoute = ref<TopologyRouteDetail | null>(null)
 const routeSegmentHealth = ref<Record<string, Record<number, TopologyRouteHealth>>>({})
+const activeDirection = ref('all')
+const isDesktop = useMediaQuery('(min-width: 768px)')
 
 const routeGroups = computed(() => splitTopologyGroups(appStore.topologyRoute))
 const metricGroups = computed(() => splitTopologyGroups(appStore.topologyMetrics))
 
 function findNode(name: string): NodeData | undefined {
   return props.nodes.find(node => node.name.trim().toLowerCase() === name.trim().toLowerCase())
+}
+
+const DIRECTION_LABELS: Record<string, string> = {
+  AU: '澳洲方向',
+  CA: '加拿大方向',
+  DE: '德国方向',
+  GB: '英国方向',
+  HK: '香港方向',
+  JP: '日本方向',
+  KR: '韩国方向',
+  SG: '新加坡方向',
+  TW: '台湾方向',
+  US: '美国方向',
+}
+
+function getRouteDirection(nodes: RouteNode[]): { key: string, label: string } {
+  const region = nodes.at(-1)?.region || nodes[1]?.region || ''
+  const code = getRegionCode(region).toUpperCase()
+  return {
+    key: code || 'OTHER',
+    label: DIRECTION_LABELS[code] || `${region || '其他'}方向`,
+  }
 }
 
 const routes = computed<RouteRow[]>(() => routeGroups.value.map((group, routeIndex) => {
@@ -78,14 +110,39 @@ const routes = computed<RouteRow[]>(() => routeGroups.value.map((group, routeInd
   if (nodes[0])
     nodes[0].name = probe.label
 
+  const direction = getRouteDirection(nodes)
+
   return {
     key: `route-${routeIndex}`,
     probeStorageKey,
     probeKey,
     nodes,
     metrics,
+    directionKey: direction.key,
+    directionLabel: direction.label,
   }
 }).filter(route => route.nodes.length >= 2))
+
+const directions = computed<RouteDirection[]>(() => {
+  const counts = new Map<string, RouteDirection>()
+  for (const route of routes.value) {
+    const current = counts.get(route.directionKey)
+    if (current)
+      current.count += 1
+    else
+      counts.set(route.directionKey, { key: route.directionKey, label: route.directionLabel, count: 1 })
+  }
+  return [...counts.values()]
+})
+
+const visibleRoutes = computed(() => activeDirection.value === 'all'
+  ? routes.value
+  : routes.value.filter(route => route.directionKey === activeDirection.value))
+
+watch(directions, (items) => {
+  if (activeDirection.value !== 'all' && !items.some(item => item.key === activeDirection.value))
+    activeDirection.value = 'all'
+})
 
 function getRouteHealth(route: RouteRow): TopologyRouteHealth {
   const configuredNodes = route.nodes.slice(1)
@@ -169,7 +226,7 @@ function openRouteDetail(route: RouteRow): void {
     aria-labelledby="topology-title"
   >
     <div class="panda-panel overflow-hidden rounded-2xl">
-      <header class="flex h-12 items-center justify-between gap-3 border-b border-white/[0.055] px-4 sm:px-5">
+      <header class="flex min-h-12 items-center justify-between gap-3 border-b border-white/[0.055] px-4 py-2 sm:px-5">
         <div class="flex items-center gap-2">
           <Icon icon="tabler:route" :width="17" class="text-emerald-400" />
           <h2 id="topology-title" class="text-sm font-semibold">
@@ -192,10 +249,39 @@ function openRouteDetail(route: RouteRow): void {
         </div>
       </header>
 
-      <div class="topology-scroll overflow-x-auto px-3 sm:px-4">
+      <nav
+        v-if="directions.length > 1"
+        aria-label="线路方向"
+        class="topology-direction-scroll flex min-w-0 gap-1 overflow-x-auto border-b border-white/[0.045] px-3 py-2 sm:px-4"
+      >
+        <button
+          type="button"
+          data-topology-direction
+          class="shrink-0 rounded-md border px-2.5 py-1 text-[10px] transition-colors"
+          :class="activeDirection === 'all' ? 'border-emerald-400/25 bg-emerald-400/[0.055] text-emerald-300' : 'border-white/[0.055] text-slate-500 hover:text-slate-300'"
+          :aria-pressed="activeDirection === 'all'"
+          @click="activeDirection = 'all'"
+        >
+          全部 {{ routes.length }}
+        </button>
+        <button
+          v-for="direction in directions"
+          :key="direction.key"
+          type="button"
+          data-topology-direction
+          class="shrink-0 rounded-md border px-2.5 py-1 text-[10px] transition-colors"
+          :class="activeDirection === direction.key ? 'border-emerald-400/25 bg-emerald-400/[0.055] text-emerald-300' : 'border-white/[0.055] text-slate-500 hover:text-slate-300'"
+          :aria-pressed="activeDirection === direction.key"
+          @click="activeDirection = direction.key"
+        >
+          {{ direction.label }} {{ direction.count }}
+        </button>
+      </nav>
+
+      <div v-if="isDesktop" class="topology-scroll overflow-x-auto px-3 sm:px-4">
         <div class="min-w-[980px]">
           <article
-            v-for="route in routes"
+            v-for="route in visibleRoutes"
             :key="route.key"
             class="group grid min-h-16 grid-cols-[144px_minmax(190px,1fr)_178px_minmax(190px,1fr)_190px] items-center gap-3 border-b border-white/[0.045] px-2 transition-colors last:border-b-0 hover:bg-white/[0.018]"
           >
@@ -272,6 +358,108 @@ function openRouteDetail(route: RouteRow): void {
           </article>
         </div>
       </div>
+
+      <div v-else class="px-3">
+        <article
+          v-for="route in visibleRoutes"
+          :key="route.key"
+          data-topology-mobile-route
+          class="border-b border-white/[0.045] py-3 last:border-b-0"
+        >
+          <div class="grid grid-cols-[22px_minmax(0,1fr)] items-center gap-2">
+            <span class="grid place-items-center">
+              <span
+                data-topology-route-status
+                :data-status="getRouteHealth(route)"
+                class="size-2 rounded-full ring-4 ring-[#101820]"
+                :class="routeDotClass(route)"
+              />
+            </span>
+            <TopologyProbeSelect
+              :model-value="route.probeKey"
+              @update:model-value="updateProbe(route, $event)"
+            />
+          </div>
+
+          <div class="grid grid-cols-[22px_minmax(0,1fr)] gap-2">
+            <span class="flex justify-center"><span class="h-full w-px bg-slate-700/65" /></span>
+            <TopologyEdgeMetric
+              mobile
+              :metric="route.metrics[0] || '-,-'"
+              :nodes="nodes"
+              :source-label="route.nodes[0]?.name || '入口'"
+              :target-label="route.nodes[1]?.name || '线路机'"
+              :segment-index="0"
+              @open-detail="openRouteDetail(route)"
+              @status-change="updateRouteSegmentHealth(route.key, 0, $event)"
+            />
+          </div>
+
+          <button
+            type="button"
+            data-topology-mobile-node
+            class="grid w-full grid-cols-[22px_minmax(0,1fr)] items-center gap-2 text-left disabled:cursor-default"
+            :disabled="!route.nodes[1]?.node"
+            @click="route.nodes[1] && openNode(route.nodes[1])"
+          >
+            <span class="grid place-items-center">
+              <span class="size-1.5 rounded-full ring-4 ring-[#101820]" :class="!route.nodes[1]?.node ? 'bg-amber-400' : route.nodes[1].node.online ? 'bg-emerald-400' : 'bg-rose-400'" />
+            </span>
+            <span class="flex min-w-0 items-center gap-2.5">
+              <img
+                v-if="route.nodes[1]?.region"
+                :src="`/images/flags/${getRegionCode(route.nodes[1].region)}.svg`"
+                :alt="route.nodes[1].region"
+                class="h-4 w-6 shrink-0 rounded-[3px] object-cover"
+              >
+              <span class="flex min-w-0 flex-col leading-tight">
+                <span class="truncate text-[13px] font-semibold">{{ route.nodes[1]?.name }}</span>
+                <span class="mt-0.5 truncate text-[10px] text-slate-500">{{ route.nodes[1]?.role }}</span>
+              </span>
+            </span>
+          </button>
+
+          <template v-if="route.nodes[2]">
+            <div class="grid grid-cols-[22px_minmax(0,1fr)] gap-2">
+              <span class="flex justify-center"><span class="h-full w-px bg-slate-700/65" /></span>
+              <TopologyEdgeMetric
+                mobile
+                :metric="route.metrics[1] || '-,-'"
+                :nodes="nodes"
+                :source-label="route.nodes[1]?.name || '线路机'"
+                :target-label="route.nodes[2]?.name || '落地机'"
+                :segment-index="1"
+                @open-detail="openRouteDetail(route)"
+                @status-change="updateRouteSegmentHealth(route.key, 1, $event)"
+              />
+            </div>
+
+            <button
+              type="button"
+              data-topology-mobile-node
+              class="grid w-full grid-cols-[22px_minmax(0,1fr)] items-center gap-2 text-left disabled:cursor-default"
+              :disabled="!route.nodes[2]?.node"
+              @click="route.nodes[2] && openNode(route.nodes[2])"
+            >
+              <span class="grid place-items-center">
+                <span class="size-1.5 rounded-full ring-4 ring-[#101820]" :class="!route.nodes[2]?.node ? 'bg-amber-400' : route.nodes[2].node.online ? 'bg-emerald-400' : 'bg-rose-400'" />
+              </span>
+              <span class="flex min-w-0 items-center gap-2.5">
+                <img
+                  v-if="route.nodes[2]?.region"
+                  :src="`/images/flags/${getRegionCode(route.nodes[2].region)}.svg`"
+                  :alt="route.nodes[2].region"
+                  class="h-4 w-6 shrink-0 rounded-[3px] object-cover"
+                >
+                <span class="flex min-w-0 flex-col leading-tight">
+                  <span class="truncate text-[13px] font-semibold">{{ route.nodes[2]?.name }}</span>
+                  <span class="mt-0.5 truncate text-[10px] text-slate-500">{{ route.nodes[2]?.role }}</span>
+                </span>
+              </span>
+            </button>
+          </template>
+        </article>
+      </div>
     </div>
     <TopologyManagerDialog v-model:open="managerOpen" :nodes="nodes" />
     <TopologyRouteDetailDialog v-model:open="detailOpen" :route="selectedRoute" :nodes="nodes" />
@@ -282,5 +470,13 @@ function openRouteDetail(route: RouteRow): void {
 .topology-scroll {
   scrollbar-width: thin;
   scrollbar-color: rgb(47 207 155 / 0.22) transparent;
+}
+
+.topology-direction-scroll {
+  scrollbar-width: none;
+}
+
+.topology-direction-scroll::-webkit-scrollbar {
+  display: none;
 }
 </style>

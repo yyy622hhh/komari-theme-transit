@@ -1,15 +1,12 @@
 import type { MaybeRefOrGetter } from 'vue'
 import type { ChinaCarrierKey, NodePingHistoryPoint } from '@/composables/useNodePingStats'
+import type { TelemetrySample, TelemetrySampleTone } from '@/types/telemetry'
 import { computed } from 'vue'
 import { useNodeCarrierPingStats } from '@/composables/useNodePingStats'
 import { useAppStore } from '@/stores/app'
 import { formatDateTime } from '@/utils/helper'
 
-export interface CarrierPingBar {
-  key: string
-  className: string
-  tooltip: string
-}
+export type CarrierPingBar = TelemetrySample
 
 export interface CarrierPingDisplay {
   key: ChinaCarrierKey
@@ -33,28 +30,34 @@ const CARRIER_DOT_CLASSES: Record<ChinaCarrierKey, string> = {
   mobile: 'bg-emerald-500',
 }
 
-function getLatencyToneClass(latency: number): string {
+function getLatencyTone(latency: number): { tone: TelemetrySampleTone, toneClass: string } {
   if (latency <= 60)
-    return 'bg-emerald-600/90'
+    return { tone: 'healthy', toneClass: 'bg-emerald-600/90' }
   if (latency <= 100)
-    return 'bg-green-400/80'
+    return { tone: 'healthy', toneClass: 'bg-green-400/80' }
   if (latency <= 160)
-    return 'bg-lime-400/80'
+    return { tone: 'notice', toneClass: 'bg-lime-400/80' }
   if (latency <= 200)
-    return 'bg-yellow-400/80'
-  return 'bg-rose-500/80'
+    return { tone: 'warning', toneClass: 'bg-yellow-400/80' }
+  return { tone: 'critical', toneClass: 'bg-rose-500/80' }
 }
 
-function getLossToneClass(loss: number): string {
+function getLossTone(loss: number): { tone: TelemetrySampleTone, toneClass: string } {
   if (loss <= 1)
-    return 'bg-emerald-600/90'
+    return { tone: 'healthy', toneClass: 'bg-emerald-600/90' }
   if (loss <= 3)
-    return 'bg-green-400/90'
+    return { tone: 'healthy', toneClass: 'bg-green-400/90' }
   if (loss <= 6)
-    return 'bg-lime-400/90'
+    return { tone: 'notice', toneClass: 'bg-lime-400/90' }
   if (loss <= 9)
-    return 'bg-yellow-400/90'
-  return 'bg-rose-500/80'
+    return { tone: 'warning', toneClass: 'bg-yellow-400/90' }
+  return { tone: 'critical', toneClass: 'bg-rose-500/80' }
+}
+
+function formatLoss(value: number | null): string {
+  if (value === null)
+    return '-'
+  return `${value.toFixed(value >= 10 ? 0 : 1)}%`
 }
 
 function buildHistoryBars(
@@ -65,29 +68,34 @@ function buildHistoryBars(
 ): CarrierPingBar[] {
   return history.map((point, index) => {
     const value = point[metric]
-    const valueText = value === null
-      ? 'N/A'
+    const visual = value === null
+      ? { tone: 'muted' as const, toneClass: 'bg-muted-foreground/15' }
       : metric === 'latency'
-        ? `${Math.round(value)} ms`
-        : `${value.toFixed(1)}%`
+        ? getLatencyTone(value)
+        : getLossTone(value)
+    const latencyText = point.latency === null ? '无响应' : `${Math.round(point.latency)} ms`
+    const lossText = `丢包 ${formatLoss(point.loss)}`
 
     return {
       key: `${carrierKey}-${metric}-${point.time}-${index}`,
-      className: value === null
-        ? 'bg-muted-foreground/15'
-        : metric === 'latency'
-          ? getLatencyToneClass(value)
-          : getLossToneClass(value),
-      tooltip: `${carrierLabel}\n${formatDateTime(point.time, 'HH:mm:ss')}\n${valueText}`,
+      ...visual,
+      valueText: metric === 'latency' ? latencyText : lossText,
+      secondaryText: metric === 'latency' ? lossText : latencyText,
+      timeText: formatDateTime(point.time, 'HH:mm:ss'),
+      title: carrierLabel,
+      ariaLabel: `${carrierLabel}，${latencyText}，${lossText}，${formatDateTime(point.time)}`,
     }
   })
 }
 
-function buildEmptyBars(carrierKey: ChinaCarrierKey, metric: 'latency' | 'loss', tooltip: string): CarrierPingBar[] {
+function buildEmptyBars(carrierLabel: string, carrierKey: ChinaCarrierKey, metric: 'latency' | 'loss', reason: string): CarrierPingBar[] {
   return Array.from({ length: EMPTY_PING_BAR_COUNT }, (_, index) => ({
     key: `${carrierKey}-${metric}-empty-${index}`,
-    className: 'bg-muted-foreground/10',
-    tooltip,
+    tone: 'muted',
+    toneClass: 'bg-muted-foreground/10',
+    valueText: reason,
+    title: carrierLabel,
+    ariaLabel: `${carrierLabel}，${reason}`,
   }))
 }
 
@@ -146,10 +154,10 @@ export function useNodeCarrierPingDisplay(uuid: MaybeRefOrGetter<string>) {
 
     const latencyBars = carrier.stats.history.length
       ? buildHistoryBars(label, carrier.key, carrier.stats.history, 'latency')
-      : buildEmptyBars(carrier.key, 'latency', emptyReason)
+      : buildEmptyBars(label, carrier.key, 'latency', emptyReason)
     const lossBars = carrier.stats.history.length
       ? buildHistoryBars(label, carrier.key, carrier.stats.history, 'loss')
-      : buildEmptyBars(carrier.key, 'loss', emptyReason)
+      : buildEmptyBars(label, carrier.key, 'loss', emptyReason)
 
     const latencyDisplay = carrier.hasLatency
       ? `${Math.round(carrier.stats.avgLatency)} ms`

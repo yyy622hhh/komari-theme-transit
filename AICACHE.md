@@ -12,6 +12,17 @@
 
 ## 当前任务
 
+- 状态：done，`3.3.5-panda.13` 已部署到 `monitor.example.com`
+- 目标：按已确认的 PandaOps 高保真设计稿实现异常摘要、线路方向分组、桌面/移动响应式拓扑，并统一拓扑与节点三网采样的悬浮、键盘、触屏和固定交互。
+- 里程碑：M4 UI/UX + M5 交互一致性；不修改 Komari 后端、Ping 数据契约或现有拓扑持久化格式。
+- 范围：PandaOps 首页摘要、`NetworkTopology`、采样通用组件、节点异常原因、相关 Playwright 回归与线上部署验证。
+- 不做：不重构普通 Glassmorphism 首页、不新增网络请求接口、不改变公开/私有权限边界。
+- 实现：新增统一 `TelemetrySampleStrip` 采样交互内核，拓扑线路、PandaOps 三网质量与普通卡片/列表 Ping 共用即时悬浮、点击/触屏固定、点击外部关闭、方向键/Home/End、Enter/Space 与 Escape 交互；浮窗统一展示延迟、丢包、时间和可选标题。
+- PandaOps：新增异常摘要条和节点异常原因，集中 CPU/内存/硬盘/流量/离线/三网延迟与丢包阈值；拓扑新增按落地方向筛选，桌面保持横向连续轨道，移动端改为无横向滚动的真正纵向链路。
+- 验证：`bun run type-check`、`bun run lint`、`bun run build`、`git diff --check` 与完整 Playwright 视觉/交互矩阵均通过；Playwright 共 23 项通过，普通主题既有桌面/移动基线无回归。
+- 发布：现网 `3.3.5-panda.12` 已完整备份到 `/var/lib/komari/backups/PandaOps-panda12-before-unified-sampling-20260814`，活动目录原子切换为 `3.3.5-panda.13`；Komari 服务 active，本机首页 200，公网首页与新版 entry/PandaOps chunk 均为 200，并确认线上 chunk 包含异常摘要和线路方向功能。
+- 构建资产：`komari-theme-PandaOps-build-feae669.zip`，SHA-256 `5aebb2830289ad7c8ed6e6a431c7e7c4231646236dbeced38cbf044c03101a8f`；zip 内版本为 `3.3.5-panda.13`。源码工作树没有 `preview.png`，发布时已从最终 zip 补齐并校验为 740,647 bytes。
+
 - 状态：in-progress，本地修复与验证完成，正在发布 v3.3.5
 - 目标：修复详情页延迟任务卡片、图例和主页 Ping 指标线与 Komari 后台任务排序不一致的问题。
 - 里程碑：M4 UI/UX 兼容性修复，不修改后端任务权重或接口契约。

@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import type { NodeData } from '@/stores/nodes'
+import type { TelemetrySample } from '@/types/telemetry'
 import type { TopologyRouteHealth } from '@/utils/topologyHealth'
 import { computed, watch } from 'vue'
 import TopologyEdgeSamples from '@/components/TopologyEdgeSamples.vue'
 import { useNodePingStats } from '@/composables/useNodePingStats'
+import { formatDateTime } from '@/utils/helper'
 import { formatTopologyLatency, formatTopologyLoss, parseTopologyMetric } from '@/utils/topologyHelper'
 
 const props = defineProps<{
@@ -12,6 +14,7 @@ const props = defineProps<{
   sourceLabel: string
   targetLabel: string
   segmentIndex: number
+  mobile?: boolean
 }>()
 const emit = defineEmits<{
   openDetail: []
@@ -84,35 +87,45 @@ function sampleHeight(latency: number | null, baseline: number): number {
   return Math.round(Math.min(9, Math.max(5, 7 + (latency / baseline - 1) * 6)))
 }
 
-const sampleBars = computed(() => {
+const sampleBars = computed<TelemetrySample[]>(() => {
   const points = ping.history.value.slice(-10)
   const validLatencies = points
     .map(point => point.latency)
     .filter((value): value is number => value !== null && Number.isFinite(value))
   const baseline = median(validLatencies)
-  return points.map((point, index) => ({
-    key: `${props.segmentIndex}-${point.time}-${index}`,
-    height: sampleHeight(point.latency, baseline),
-    alert: (point.loss !== null && point.loss > 3)
-      || (point.latency !== null && baseline > 0 && point.latency > baseline * 1.18),
-    unavailable: point.latency === null,
-    latency: point.latency,
-    loss: point.loss,
-    time: point.time,
-    segmentIndex: props.segmentIndex,
-    segmentLabel: `${props.sourceLabel} → ${props.targetLabel}`,
-  }))
+  return points.map((point, index) => {
+    const alert = (point.loss !== null && point.loss > 3)
+      || (point.latency !== null && baseline > 0 && point.latency > baseline * 1.18)
+    const unavailable = point.latency === null
+    const latencyText = unavailable ? '无响应' : `${Math.round(point.latency ?? 0)} ms`
+    const lossText = `丢包 ${formatTopologyLoss(point.loss)}`
+    return {
+      key: `${props.segmentIndex}-${point.time}-${index}`,
+      height: sampleHeight(point.latency, baseline),
+      tone: unavailable ? 'critical' : alert ? 'warning' : 'healthy',
+      toneClass: unavailable ? 'bg-rose-400 opacity-75' : alert ? 'bg-amber-400' : 'bg-emerald-400',
+      valueText: latencyText,
+      secondaryText: lossText,
+      timeText: formatDateTime(point.time, 'HH:mm:ss'),
+      ariaLabel: `${props.sourceLabel}到${props.targetLabel}，${latencyText}，${lossText}，${formatDateTime(point.time)}`,
+    }
+  })
 })
 </script>
 
 <template>
   <div
-    class="relative flex h-10 min-w-[190px] flex-1 items-center"
+    class="relative flex h-10 flex-1 items-center"
+    :class="mobile ? 'min-w-0' : 'min-w-[190px]'"
     :data-topology-edge-samples="sampleBars.length ? '' : undefined"
     :title="`${sourceState.label}${config.live ? ` · ${config.taskFilter || '未指定任务'}` : ''}`"
     :aria-label="`${sourceState.label}：${formatTopologyLatency(latency)}，丢包 ${formatTopologyLoss(loss)}`"
   >
-    <TopologyEdgeSamples :bars="sampleBars" :line-class="sourceState.line" />
+    <TopologyEdgeSamples
+      :bars="sampleBars"
+      :line-class="sourceState.line"
+      :label="`${sourceLabel}到${targetLabel}`"
+    />
     <button
       type="button"
       data-topology-current-metric
