@@ -12,6 +12,13 @@
 
 ## 当前任务
 
+- 状态：done，`3.3.5-panda.15` 已部署到 `monitor.example.com`
+- 目标：恢复异常摘要条与线路状态面板之间和页面其他区块一致的 12px 垂直间距。
+- 根因：`PandaOpsAlertStrip` 根节点使用 `display: contents`，使 `PandaOpsDashboard` 父容器的 `space-y-3` 无法把异常条视为独立布局盒；两个圆角面板因此直接贴合。
+- 实现：有异常时让摘要组件生成普通块级根盒，无异常时继续使用 `contents`，避免健康状态下产生空白间距；浏览器回归直接断言两面板间距为 12px。
+- 验证：`bun run type-check`、`bun run lint`、`git diff --check` 通过；PandaOps 浅色桌面与深色拓扑两项聚焦回归通过，浅色基线人工复核无额外布局变化。
+- 发布：`3.3.5-panda.14` 完整备份到 `/var/lib/komari/backups/PandaOps-panda14-before-panel-gap-20260814`；活动主题为 `3.3.5-panda.15`，本机与公网首页 200，公网已加载 `PandaOpsDashboard-eqFRX0Pn.js`。构建包 `komari-theme-PandaOps-build-25906e3.zip`，SHA-256 `36002bf6c5db87cb4857b88693cdd0307924cc1acb0083a5988287f19dae99db`，服务器端校验一致。
+
 - 状态：done，`3.3.5-panda.14` 已部署到 `monitor.example.com`
 - 目标：修复 PandaOps 浅色模式只切换页面/面板背景，但节点卡片、资产数值、拓扑文字、分隔线与采样浮窗仍残留深色硬编码的问题。
 - 根因：`PandaOpsNodeCard.vue` scoped CSS 固定使用深色卡片表面；新 PandaOps 组件直接使用 `text-slate-100/200`、`border-white`、深色圆点 ring，绕过了全局主题变量。

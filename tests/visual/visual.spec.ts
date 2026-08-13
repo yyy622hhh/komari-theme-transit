@@ -106,6 +106,12 @@ test('PandaOps desktop topology and cards remain contained', async ({ page }) =>
 
   await expect(page.getByRole('heading', { name: '线路状态' })).toBeVisible()
   await expect(page.locator('[data-panda-alert-strip]')).toBeVisible()
+  const alertStrip = page.locator('[data-panda-alert-strip]')
+  const topologySection = page.getByRole('heading', { name: '线路状态' }).locator('xpath=ancestor::section[1]')
+  await expect.poll(async () => {
+    const [alertBox, topologyBox] = await Promise.all([alertStrip.boundingBox(), topologySection.boundingBox()])
+    return alertBox && topologyBox ? Math.round(topologyBox.y - alertBox.y - alertBox.height) : 0
+  }).toBe(12)
   await expect(page.locator('[data-topology-direction]')).toHaveCount(3)
   const historyButtons = page.getByRole('button', { name: '查看线路历史' })
   await expect(historyButtons).toHaveCount(4)

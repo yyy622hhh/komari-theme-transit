@@ -54,7 +54,7 @@ function openNode(alert: PandaOpsAlert): void {
 </script>
 
 <template>
-  <div class="contents">
+  <div :class="alerts.length ? 'block' : 'contents'">
     <PandaOpsNodeAlertObserver
       v-for="node in observedNodes"
       :key="node.uuid"
