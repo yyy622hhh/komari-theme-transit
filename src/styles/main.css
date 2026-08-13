@@ -111,6 +111,9 @@
   --panda-hover-bg: rgb(15 23 42 / 0.025);
   --panda-dot-ring: rgb(241 245 249 / 0.96);
   --panda-rail: rgb(100 116 139 / 0.42);
+  --panda-text-primary: rgb(30 41 59);
+  --panda-text-secondary: rgb(71 85 105);
+  --panda-text-tertiary: rgb(100 116 139);
   --panda-panel-shadow: inset 0 1px 0 rgb(255 255 255 / 0.72), 0 18px 50px -42px rgb(15 23 42 / 0.3);
   --panda-card-shadow: inset 0 1px 0 rgb(255 255 255 / 0.78), 0 16px 38px -34px rgb(15 23 42 / 0.34);
 }
@@ -161,6 +164,9 @@
   --panda-hover-bg: rgb(255 255 255 / 0.018);
   --panda-dot-ring: rgb(16 24 32 / 0.98);
   --panda-rail: rgb(71 85 105 / 0.65);
+  --panda-text-primary: rgb(226 232 240);
+  --panda-text-secondary: rgb(148 163 184);
+  --panda-text-tertiary: rgb(125 142 166);
   --panda-panel-shadow: inset 0 1px 0 rgb(255 255 255 / 0.025), 0 18px 50px -42px rgb(0 0 0 / 0.72);
   --panda-card-shadow: inset 0 1px 0 rgb(255 255 255 / 0.025), 0 18px 50px -42px rgb(0 0 0 / 0.95);
 }

@@ -99,6 +99,18 @@ test('PandaOps light mobile keeps the vertical route readable', async ({ page })
   await expect(page).toHaveScreenshot('pandaops-light-mobile.png', { fullPage: false })
 })
 
+test('PandaOps dark asset summary keeps a readable text hierarchy', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, { pandaOps: true, dark: true })
+  await openStablePage(page)
+
+  const telemetry = page.locator('#asset-summary .telemetry-item')
+  await expect(telemetry.first()).toHaveCSS('color', 'rgb(148, 163, 184)')
+  await expect(telemetry.first().locator('strong')).toHaveCSS('color', 'rgb(226, 232, 240)')
+  await expect(telemetry.nth(1).locator('em')).toHaveCSS('color', 'rgb(125, 142, 166)')
+  await expect(page).toHaveScreenshot('pandaops-dark-desktop.png', { fullPage: false })
+})
+
 test('PandaOps desktop topology and cards remain contained', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await installKomariFixture(page, { pandaOps: true, dark: true })

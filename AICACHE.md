@@ -12,6 +12,13 @@
 
 ## 当前任务
 
+- 状态：done，`3.3.5-panda.16` 已部署到 `monitor.example.com`
+- 目标：修复 PandaOps 暗色模式顶部资产汇总的低对比度文字，尤其是“剩余价值”、标签和容量分母。
+- 根因：`PandaOpsDashboard.vue` 依赖 scoped CSS 内的 `:global(.dark)` 覆盖暗色文字，构建后的选择器未稳定命中，导致暗色背景继续使用浅色模式的深色文字值。
+- 实现：把资产汇总的主值、标签、辅助值改为根主题语义变量；暗色档位对比度约为 15.1:1、7.3:1、5.6:1，并新增暗色桌面计算颜色断言和视觉基线。
+- 验证：`bun run type-check`、`bun run lint`、`git diff --check` 通过；完整 Playwright 视觉与交互回归 26/26 通过，新增暗色桌面基线已人工复核。
+- 发布：活动主题为 `3.3.5-panda.16`，Komari 服务 active，本机与公网首页 200；公网已加载 `index-BHlwbWbk.js`、`index-DUTTHKeK.css`、`PandaOpsDashboard-B56CYSB-.js` 和 `PandaOpsDashboard-BZ7DhYBS.css`，并确认线上 CSS 包含三档暗色语义文字值。旧版完整备份位于 `/var/lib/komari/backups/PandaOps-panda15-before-dark-telemetry-20260814`。构建包 `komari-theme-PandaOps-build-85ab572.zip`，SHA-256 `dc21e7cf16e7f90dc7d246cc8a3d4f06762c665aa7a86bbd3382a74897f3769b`，服务器端校验一致。
+
 - 状态：done，`3.3.5-panda.15` 已部署到 `monitor.example.com`
 - 目标：恢复异常摘要条与线路状态面板之间和页面其他区块一致的 12px 垂直间距。
 - 根因：`PandaOpsAlertStrip` 根节点使用 `display: contents`，使 `PandaOpsDashboard` 父容器的 `space-y-3` 无法把异常条视为独立布局盒；两个圆角面板因此直接贴合。

@@ -119,7 +119,7 @@ onMounted(async () => {
   padding: 0.75rem 1rem;
   white-space: nowrap;
   font-size: 0.72rem;
-  color: rgb(71 85 105);
+  color: var(--panda-text-secondary);
 }
 
 @media (max-width: 640px) {
@@ -130,7 +130,7 @@ onMounted(async () => {
 }
 
 .telemetry-item strong {
-  color: rgb(30 41 59);
+  color: var(--panda-text-primary);
   font-size: 0.79rem;
   font-style: normal;
   font-weight: 600;
@@ -138,16 +138,8 @@ onMounted(async () => {
 }
 
 .telemetry-item em {
-  color: rgb(100 116 139);
+  color: var(--panda-text-tertiary);
   font-style: normal;
   font-weight: 500;
-}
-
-:global(.dark) .telemetry-item {
-  color: rgb(148 163 184);
-}
-
-:global(.dark) .telemetry-item strong {
-  color: rgb(241 245 249);
 }
 </style>
