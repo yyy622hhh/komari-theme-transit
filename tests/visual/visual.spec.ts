@@ -127,6 +127,9 @@ test('PandaOps desktop topology and cards remain contained', async ({ page }) =>
     return alertBox && topologyBox ? Math.round(topologyBox.y - alertBox.y - alertBox.height) : 0
   }).toBe(12)
   await expect(page.locator('[data-topology-direction]')).toHaveCount(3)
+  const routeScores = page.locator('[data-topology-route-score]')
+  await expect(routeScores).toHaveCount(2)
+  await expect(routeScores.first()).toContainText(/\d+ 分/)
   const historyButtons = page.getByRole('button', { name: '查看线路历史' })
   await expect(historyButtons).toHaveCount(4)
   await expect(page.locator('[data-topology-status]')).toHaveCount(0)
@@ -169,7 +172,13 @@ test('PandaOps desktop topology and cards remain contained', async ({ page }) =>
   await expect(sampleDetail).toBeHidden()
   await historyButtons.first().click()
   await expect(page.getByRole('dialog')).toContainText('查看每一段链路的实时延迟、丢包与历史波动。')
+  await expect(page.getByRole('dialog')).toContainText('健康评分')
   await page.getByRole('dialog').getByRole('button', { name: '关闭' }).click()
+  await page.getByRole('button', { name: '查看异常时间线' }).click()
+  const timelineDialog = page.getByRole('dialog', { name: '异常时间线' })
+  await expect(timelineDialog).toBeVisible()
+  await expect(timelineDialog.locator('[data-panda-incident-event]').first()).toBeVisible()
+  await timelineDialog.getByRole('button', { name: '关闭' }).click()
   const nodeCard = page.getByRole('button', { name: '查看节点 主控-洛杉矶 详情' })
   await expect(nodeCard).toBeVisible()
   const nodeCardSurface = nodeCard.locator('xpath=..')
@@ -307,6 +316,30 @@ test('PandaOps topology manager lists configured Ping tasks without recent sampl
   const taskSelect = dialog.getByLabel('第 2 条线路第 1 段 Ping 任务')
   await expect(taskSelect).toBeVisible()
   await expect(taskSelect.locator('option')).toContainText(['Configured-No-Recent-Sample'])
+})
+
+test('PandaOps node maintenance saves globally and updates alerts immediately', async ({ page }) => {
+  const saves: Record<string, unknown>[] = []
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, { pandaOps: true, dark: true, authenticated: true })
+  page.on('request', (request) => {
+    if (request.method() === 'PUT' && request.url().includes('/api/admin/theme/config?short=PandaOps'))
+      saves.push(request.postDataJSON() as Record<string, unknown>)
+  })
+  await openStablePage(page)
+
+  const nodeCard = page.getByRole('button', { name: '查看节点 东京-高负载 详情' }).locator('xpath=..')
+  await nodeCard.getByRole('button', { name: '管理节点 东京-高负载' }).click()
+  const dialog = page.getByRole('dialog', { name: /节点运维/ })
+  await expect(dialog).toBeVisible()
+  await dialog.getByRole('button', { name: '30 分钟' }).click()
+
+  await expect.poll(() => saves.length).toBe(1)
+  const controls = JSON.parse(String(saves[0]?.pandaOpsNodeControls)) as Record<string, { maintenanceUntil?: number }>
+  expect(Object.values(controls).some(control => Number(control.maintenanceUntil) > 0)).toBe(true)
+  await dialog.getByRole('button', { name: '关闭' }).click()
+  await expect(nodeCard).toContainText('维护中')
+  await expect(page.locator('[data-panda-alert-strip]').getByRole('heading', { name: '11 个异常需要关注' })).toBeVisible()
 })
 
 test('home quick controls, node comparison and network data change visible results', async ({ page }) => {

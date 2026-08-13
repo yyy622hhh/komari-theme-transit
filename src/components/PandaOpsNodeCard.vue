@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { NodeData } from '@/stores/nodes'
+import { Icon } from '@iconify/vue'
 import { computed } from 'vue'
 import CarrierPingSamples from '@/components/CarrierPingSamples.vue'
 import { ProgressThin } from '@/components/ui/progress-thin'
@@ -15,8 +16,11 @@ import { getRegionCode, getRegionDisplayName } from '@/utils/regionHelper'
 import { formatPriceWithCycle, getDaysUntilExpired, getExpireStatus, parseTags } from '@/utils/tagHelper'
 
 const props = defineProps<{ node: NodeData }>()
-const emit = defineEmits<{ click: [] }>()
+const emit = defineEmits<{ click: [], manage: [] }>()
 const appStore = useAppStore()
+const nodeControl = computed(() => appStore.pandaOpsNodeControls[props.node.uuid])
+const isMaintenance = computed(() => Boolean(nodeControl.value?.maintenanceUntil))
+const isSilenced = computed(() => Boolean(nodeControl.value?.silenceUntil))
 
 const memoryPercentage = computed(() => getMemoryPercentage(props.node))
 const diskPercentage = computed(() => getDiskPercentage(props.node))
@@ -50,6 +54,7 @@ const expiryDate = computed(() => expiryStatus.value === 'unknown' || expiryStat
 
 const { carrierDisplays, carrierScopeLabel, stale: carrierStatsStale } = useNodeCarrierPingDisplay(() => props.node.uuid)
 const primaryAlert = usePandaOpsNodeAlert(() => props.node.uuid)
+const visibleAlert = computed(() => isMaintenance.value ? null : primaryAlert.value)
 const formatBytes = (value: number) => formatBytesWithConfig(value, appStore.byteDecimals)
 const formatSpeed = (value: number) => formatBytesPerSecondWithConfig(value, appStore.byteDecimals)
 
@@ -66,10 +71,10 @@ function lossTone(loss: string): string {
   return 'text-rose-600 dark:text-rose-400'
 }
 
-const alertTone = computed(() => primaryAlert.value?.severity === 'critical'
+const alertTone = computed(() => visibleAlert.value?.severity === 'critical'
   ? 'text-rose-600 dark:text-rose-400'
   : 'text-amber-700 dark:text-amber-300')
-const alertEdgeTone = computed(() => primaryAlert.value?.severity === 'critical'
+const alertEdgeTone = computed(() => visibleAlert.value?.severity === 'critical'
   ? 'bg-rose-500/85 dark:bg-rose-400/75'
   : 'bg-amber-500/90 dark:bg-amber-300/80')
 </script>
@@ -88,7 +93,7 @@ const alertEdgeTone = computed(() => primaryAlert.value?.severity === 'critical'
     />
 
     <span
-      v-if="primaryAlert && node.online"
+      v-if="visibleAlert && node.online"
       data-node-alert-edge
       class="pointer-events-none absolute inset-y-3 left-0 z-1 w-0.5 rounded-r-full"
       :class="alertEdgeTone"
@@ -97,13 +102,25 @@ const alertEdgeTone = computed(() => primaryAlert.value?.severity === 'critical'
     <header class="panda-node-card__header pointer-events-none relative z-1 min-h-[2.65rem]">
       <div class="flex min-w-0 items-center justify-between gap-3">
         <div class="flex min-w-0 items-center gap-2">
-          <span class="size-2.5 shrink-0 rounded-full" :class="node.online ? 'bg-emerald-400' : 'bg-rose-400'" />
+          <span class="size-2.5 shrink-0 rounded-full" :class="isMaintenance ? 'bg-amber-400' : node.online ? 'bg-emerald-400' : 'bg-rose-400'" />
           <h3 class="truncate text-[15px] font-semibold tracking-[-0.01em] text-slate-900 dark:text-slate-100">
             {{ node.name }}
           </h3>
           <span v-if="role" class="shrink-0 text-[10px] text-slate-500">· {{ role }}</span>
         </div>
         <div class="flex shrink-0 items-center gap-2">
+          <button
+            v-if="appStore.privateFeaturesAllowed"
+            type="button"
+            data-node-control-button
+            class="pointer-events-auto grid size-6 place-items-center rounded-md text-slate-500 transition-colors hover:bg-slate-500/10 hover:text-slate-800 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500/60 dark:hover:text-slate-200"
+            :class="(isMaintenance || isSilenced) && 'text-amber-700 dark:text-amber-300'"
+            :aria-label="`管理节点 ${node.name}`"
+            :title="isMaintenance ? '维护中' : isSilenced ? '告警已静默' : '节点运维'"
+            @click.stop="emit('manage')"
+          >
+            <Icon :icon="isMaintenance ? 'tabler:tools' : isSilenced ? 'tabler:bell-off' : 'tabler:dots'" :width="14" />
+          </button>
           <img :src="getOSImage(node.os)" :alt="getOSName(node.os)" class="size-3.5 opacity-75">
           <img
             v-if="node.region"
@@ -115,10 +132,13 @@ const alertEdgeTone = computed(() => primaryAlert.value?.severity === 'critical'
       </div>
       <div class="mt-1.5 flex min-w-0 items-center justify-between gap-3 text-[10px] text-slate-500">
         <div class="flex min-w-0 shrink-0 items-center gap-2">
-          <span>{{ node.online ? `在线 ${getUptimeDays(node.uptime)} 天` : '离线' }}</span>
+          <span :class="isMaintenance && 'font-medium text-amber-700 dark:text-amber-300'">
+            {{ isMaintenance ? '维护中' : node.online ? `在线 ${getUptimeDays(node.uptime)} 天` : '离线' }}
+          </span>
           <span v-if="price">{{ price }}</span>
+          <span v-if="isSilenced && !isMaintenance" class="font-medium text-slate-600 dark:text-slate-300">已静默</span>
         </div>
-        <TooltipProvider v-if="primaryAlert && node.online" :delay-duration="160">
+        <TooltipProvider v-if="visibleAlert && node.online" :delay-duration="160">
           <Tooltip>
             <TooltipTrigger as-child>
               <span
@@ -128,11 +148,11 @@ const alertEdgeTone = computed(() => primaryAlert.value?.severity === 'critical'
                 @click="emit('click')"
               >
                 <span class="size-1.5 shrink-0 rounded-full bg-current" />
-                <span class="truncate">{{ primaryAlert.detail }}</span>
+                <span class="truncate">{{ visibleAlert.detail }}</span>
               </span>
             </TooltipTrigger>
             <TooltipContent data-node-alert-tooltip side="top" :side-offset="7" class="max-w-[260px] text-[10px] tabular-nums">
-              {{ primaryAlert.detail }}
+              {{ visibleAlert.detail }}
             </TooltipContent>
           </Tooltip>
         </TooltipProvider>

@@ -1,10 +1,11 @@
 import type { PermissionKey, VerifyLoginOptions } from '@/services/auth.service'
 import type { MeInfo, PublicSettings } from '@/utils/api'
 import type { ByteDecimalsConfig } from '@/utils/helper'
-import { useStorageAsync } from '@vueuse/core'
+import { useNow, useStorageAsync } from '@vueuse/core'
 import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
 import { getAuthSession, requirePermission, setAuthSessionFromLogin, verifyLogin } from '@/services/auth.service'
+import { parsePandaOpsNodeControls } from '@/utils/pandaOpsNodeControl'
 
 export type ThemeMode = 'auto' | 'light' | 'dark'
 export type ManagedThemeMode = 'beijing' | 'light' | 'dark'
@@ -912,6 +913,7 @@ const useAppStore = defineStore('app', () => {
   }
 
   const themeSettings = computed(() => normalizeThemeSettings(publicSettings.value?.theme_settings))
+  const pandaOpsNodeControlNow = useNow({ interval: 60_000 })
   const visitorAuditSupported = computed(() => typeof publicSettings.value?.visitor_audit_enabled === 'boolean')
   const visitorAuditEnabled = computed(() => publicSettings.value?.visitor_audit_enabled === true)
 
@@ -1024,6 +1026,11 @@ const useAppStore = defineStore('app', () => {
   const topologyRoute = computed<string>(() => readStringSetting(themeSettings.value, 'topologyRoute'))
 
   const topologyMetrics = computed<string>(() => readStringSetting(themeSettings.value, 'topologyMetrics'))
+
+  const pandaOpsNodeControls = computed(() => parsePandaOpsNodeControls(
+    themeSettings.value.pandaOpsNodeControls,
+    pandaOpsNodeControlNow.value.getTime(),
+  ))
 
   const carrierPingRegion = computed<string>(() => {
     const value = readStringSetting(themeSettings.value, 'carrierPingRegion')
@@ -1333,6 +1340,7 @@ const useAppStore = defineStore('app', () => {
     topologyEnabled,
     topologyRoute,
     topologyMetrics,
+    pandaOpsNodeControls,
     carrierPingRegion,
     generalCardEnabledMap,
     generalCardOrder,

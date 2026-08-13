@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import type { TopologyRouteDetail } from '@/components/TopologyRouteDetailDialog.vue'
 import type { NodeData } from '@/stores/nodes'
-import type { TopologyRouteHealth } from '@/utils/topologyHealth'
+import type { TopologyRouteHealth, TopologyRouteScore, TopologySegmentTelemetry } from '@/utils/topologyHealth'
 import { Icon } from '@iconify/vue'
 import { useMediaQuery, useStorageAsync } from '@vueuse/core'
 import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import PandaOpsIncidentTimelineDialog from '@/components/PandaOpsIncidentTimelineDialog.vue'
 import TopologyEdgeMetric from '@/components/TopologyEdgeMetric.vue'
 import TopologyManagerDialog from '@/components/TopologyManagerDialog.vue'
 import TopologyProbeSelect from '@/components/TopologyProbeSelect.vue'
@@ -13,6 +14,7 @@ import TopologyRouteDetailDialog from '@/components/TopologyRouteDetailDialog.vu
 import { useAppStore } from '@/stores/app'
 import { getNodeRole } from '@/utils/nodeRoleHelper'
 import { getRegionCode } from '@/utils/regionHelper'
+import { calculateTopologyRouteScore } from '@/utils/topologyHealth'
 import {
   findTopologyProbeKey,
   formatTopologyMetricForProbe,
@@ -51,9 +53,11 @@ const appStore = useAppStore()
 const router = useRouter()
 const probeSelections = useStorageAsync<Record<string, string>>('pandaTopologyProbeSelections', {}, localStorage)
 const managerOpen = ref(false)
+const timelineOpen = ref(false)
 const detailOpen = ref(false)
 const selectedRoute = ref<TopologyRouteDetail | null>(null)
 const routeSegmentHealth = ref<Record<string, Record<number, TopologyRouteHealth>>>({})
+const routeSegmentMetrics = ref<Record<string, Record<number, TopologySegmentTelemetry>>>({})
 const activeDirection = ref('all')
 const isDesktop = useMediaQuery('(min-width: 768px)')
 
@@ -169,6 +173,34 @@ function updateRouteSegmentHealth(routeKey: string, segmentIndex: number, status
   }
 }
 
+function updateRouteSegmentMetrics(routeKey: string, segmentIndex: number, metrics: TopologySegmentTelemetry): void {
+  const current = routeSegmentMetrics.value[routeKey] ?? {}
+  const previous = current[segmentIndex]
+  if (previous
+    && previous.status === metrics.status
+    && previous.latency === metrics.latency
+    && previous.loss === metrics.loss
+    && previous.volatility === metrics.volatility
+    && previous.hasLiveData === metrics.hasLiveData
+    && previous.stale === metrics.stale) {
+    return
+  }
+  routeSegmentMetrics.value = {
+    ...routeSegmentMetrics.value,
+    [routeKey]: { ...current, [segmentIndex]: metrics },
+  }
+}
+
+function getRouteScore(route: RouteRow): TopologyRouteScore {
+  const expectedSegments = Math.max(1, route.nodes.length - 1)
+  return calculateTopologyRouteScore({
+    segments: Array.from({ length: expectedSegments }, (_, index) => routeSegmentMetrics.value[route.key]?.[index]),
+    segmentLabels: Array.from({ length: expectedSegments }, (_, index) => `${route.nodes[index]?.name || `第 ${index + 1} 段`}至${route.nodes[index + 1]?.name || '目标'}`),
+    hasOfflineNode: route.nodes.slice(1).some(item => item.node?.online === false),
+    hasMissingNode: route.nodes.slice(1).some(item => !item.node),
+  })
+}
+
 const healthCounts = computed(() => routes.value.reduce((counts, route) => {
   counts[getRouteHealth(route)] += 1
   return counts
@@ -213,8 +245,20 @@ function openRouteDetail(route: RouteRow): void {
     key: route.key,
     nodeNames: route.nodes.map(node => node.name),
     metrics: route.metrics,
+    score: getRouteScore(route),
   }
   detailOpen.value = true
+}
+
+function routeScoreClass(route: RouteRow): string {
+  const tone = getRouteScore(route).tone
+  if (tone === 'critical')
+    return 'text-rose-600 dark:text-rose-400'
+  if (tone === 'warning')
+    return 'text-amber-700 dark:text-amber-300'
+  if (tone === 'pending')
+    return 'text-slate-500 dark:text-slate-400'
+  return 'text-emerald-700 dark:text-emerald-300'
 }
 </script>
 
@@ -238,6 +282,16 @@ function openRouteDetail(route: RouteRow): void {
           <span class="text-slate-400 dark:text-slate-700">·</span>
           <span>{{ healthSummary.label }}</span>
           <span class="size-1.5 rounded-full" :class="healthSummary.dot" />
+          <button
+            type="button"
+            data-panda-incident-timeline-button
+            class="panda-divider ml-1 inline-flex h-7 items-center gap-1 rounded-md border px-2 text-slate-600 transition-colors hover:border-emerald-500/30 hover:text-slate-900 dark:text-slate-400 dark:hover:border-emerald-400/25 dark:hover:text-slate-200"
+            aria-label="查看异常时间线"
+            @click="timelineOpen = true"
+          >
+            <Icon icon="tabler:timeline-event" :width="13" />
+            <span class="hidden sm:inline">事件</span>
+          </button>
           <button
             v-if="appStore.privateFeaturesAllowed"
             type="button"
@@ -285,17 +339,29 @@ function openRouteDetail(route: RouteRow): void {
             :key="route.key"
             class="panda-divider panda-hover-surface group grid min-h-16 grid-cols-[144px_minmax(190px,1fr)_178px_minmax(190px,1fr)_190px] items-center gap-3 border-b px-2 transition-colors last:border-b-0"
           >
-            <div class="flex min-w-0 items-center gap-2">
-              <span
-                data-topology-route-status
-                :data-status="getRouteHealth(route)"
-                class="size-2 shrink-0 rounded-full"
-                :class="routeDotClass(route)"
-              />
-              <TopologyProbeSelect
-                :model-value="route.probeKey"
-                @update:model-value="updateProbe(route, $event)"
-              />
+            <div class="min-w-0">
+              <div class="flex min-w-0 items-center gap-2">
+                <span
+                  data-topology-route-status
+                  :data-status="getRouteHealth(route)"
+                  class="size-2 shrink-0 rounded-full"
+                  :class="routeDotClass(route)"
+                />
+                <TopologyProbeSelect
+                  :model-value="route.probeKey"
+                  @update:model-value="updateProbe(route, $event)"
+                />
+              </div>
+              <button
+                type="button"
+                data-topology-route-score
+                class="ml-4 mt-0.5 whitespace-nowrap text-[9px] font-medium tabular-nums transition-colors hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500/60"
+                :class="routeScoreClass(route)"
+                :aria-label="`线路健康评分 ${getRouteScore(route).score} 分，${getRouteScore(route).label}，查看详情`"
+                @click="openRouteDetail(route)"
+              >
+                {{ getRouteScore(route).score }} 分 {{ getRouteScore(route).label }}
+              </button>
             </div>
 
             <TopologyEdgeMetric
@@ -306,6 +372,7 @@ function openRouteDetail(route: RouteRow): void {
               :segment-index="0"
               @open-detail="openRouteDetail(route)"
               @status-change="updateRouteSegmentHealth(route.key, 0, $event)"
+              @metrics-change="updateRouteSegmentMetrics(route.key, 0, $event)"
             />
 
             <button
@@ -335,6 +402,7 @@ function openRouteDetail(route: RouteRow): void {
               :segment-index="1"
               @open-detail="openRouteDetail(route)"
               @status-change="updateRouteSegmentHealth(route.key, 1, $event)"
+              @metrics-change="updateRouteSegmentMetrics(route.key, 1, $event)"
             />
 
             <button
@@ -366,7 +434,7 @@ function openRouteDetail(route: RouteRow): void {
           data-topology-mobile-route
           class="panda-divider border-b py-3 last:border-b-0"
         >
-          <div class="grid grid-cols-[22px_minmax(0,1fr)] items-center gap-2">
+          <div class="grid grid-cols-[22px_minmax(0,1fr)_auto] items-center gap-2">
             <span class="grid place-items-center">
               <span
                 data-topology-route-status
@@ -379,6 +447,16 @@ function openRouteDetail(route: RouteRow): void {
               :model-value="route.probeKey"
               @update:model-value="updateProbe(route, $event)"
             />
+            <button
+              type="button"
+              data-topology-route-score
+              class="whitespace-nowrap text-[9px] font-medium tabular-nums focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500/60"
+              :class="routeScoreClass(route)"
+              :aria-label="`线路健康评分 ${getRouteScore(route).score} 分，${getRouteScore(route).label}，查看详情`"
+              @click="openRouteDetail(route)"
+            >
+              {{ getRouteScore(route).score }} {{ getRouteScore(route).label }}
+            </button>
           </div>
 
           <div class="grid grid-cols-[22px_minmax(0,1fr)] gap-2">
@@ -392,6 +470,7 @@ function openRouteDetail(route: RouteRow): void {
               :segment-index="0"
               @open-detail="openRouteDetail(route)"
               @status-change="updateRouteSegmentHealth(route.key, 0, $event)"
+              @metrics-change="updateRouteSegmentMetrics(route.key, 0, $event)"
             />
           </div>
 
@@ -431,6 +510,7 @@ function openRouteDetail(route: RouteRow): void {
                 :segment-index="1"
                 @open-detail="openRouteDetail(route)"
                 @status-change="updateRouteSegmentHealth(route.key, 1, $event)"
+                @metrics-change="updateRouteSegmentMetrics(route.key, 1, $event)"
               />
             </div>
 
@@ -461,6 +541,7 @@ function openRouteDetail(route: RouteRow): void {
         </article>
       </div>
     </div>
+    <PandaOpsIncidentTimelineDialog v-model:open="timelineOpen" />
     <TopologyManagerDialog v-model:open="managerOpen" :nodes="nodes" />
     <TopologyRouteDetailDialog v-model:open="detailOpen" :route="selectedRoute" :nodes="nodes" />
   </section>

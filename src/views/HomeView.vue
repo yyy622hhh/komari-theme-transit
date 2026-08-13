@@ -52,6 +52,7 @@ const NodeGeneralCards = defineAsyncComponent(() => import('@/components/NodeGen
 const NodeList = defineAsyncComponent(() => import('@/components/NodeList.vue'))
 const NodeComparePanel = defineAsyncComponent(() => import('@/components/NodeComparePanel.vue'))
 const PandaOpsDashboard = defineAsyncComponent(() => import('@/components/PandaOpsDashboard.vue'))
+const PandaOpsNodeControlDialog = defineAsyncComponent(() => import('@/components/PandaOpsNodeControlDialog.vue'))
 const PandaOpsNodeCard = defineAsyncComponent(() => import('@/components/PandaOpsNodeCard.vue'))
 const PingMonitorDialog = defineAsyncComponent(() => import('@/components/PingMonitorDialog.vue'))
 const NodeTopologyPanel = defineAsyncComponent(() => import('@/components/NodeTopologyPanel.vue'))
@@ -89,6 +90,7 @@ const activeQuickControl = ref<HomeQuickControlKey | null>(null)
 const exchangeRates = ref(financeHelper.DEFAULT_EXCHANGE_RATES)
 const excludeFreeNodes = ref(true)
 const pingDialogNode = ref<NodeData | null>(null)
+const nodeControlDialogNode = ref<NodeData | null>(null)
 
 const homeToolPermissionMap: Record<PrivateHomeToolKey, PermissionKey> = {
   topology: 'nodeTopology',
@@ -196,6 +198,10 @@ function placeOfflineNodesLast(nodes: NodeData[]): NodeData[] {
   })
 }
 
+function isNodeInMaintenance(node: NodeData): boolean {
+  return Boolean(appStore.pandaOpsNodeControls[node.uuid]?.maintenanceUntil)
+}
+
 function getQuickControlNodes(nodes: NodeData[], control: HomeQuickControlKey | null): NodeData[] {
   let result: NodeData[]
 
@@ -218,7 +224,7 @@ function getQuickControlNodes(nodes: NodeData[], control: HomeQuickControlKey | 
       result = sortNodesByComputedValue(nodes, getRealtimePeakSpeed)
       break
     case 'offline':
-      return nodes.filter(node => !node.online)
+      return nodes.filter(node => !node.online && !isNodeInMaintenance(node))
     case 'highLoad':
       result = nodes.filter(node => isHighLoadNode(node, appStore.homeHighLoadThreshold))
       break
@@ -238,7 +244,7 @@ function getQuickControlCount(nodes: NodeData[], control: HomeQuickControlKey): 
     case 'favorite':
       return nodes.reduce((count, node) => count + (appStore.isFavoriteNode(node.uuid) ? 1 : 0), 0)
     case 'offline':
-      return nodes.reduce((count, node) => count + (node.online ? 0 : 1), 0)
+      return nodes.reduce((count, node) => count + (!node.online && !isNodeInMaintenance(node) ? 1 : 0), 0)
     case 'highLoad':
       return nodes.reduce((count, node) => count + (isHighLoadNode(node, appStore.homeHighLoadThreshold) ? 1 : 0), 0)
     case 'expiring':
@@ -583,6 +589,7 @@ const nodeCardGridClass = computed(() => {
                     v-if="appStore.opsDashboardEnabled"
                     :node="node"
                     @click="handleNodeClick(node)"
+                    @manage="nodeControlDialogNode = node"
                   />
                   <NodeCard
                     v-else
@@ -617,6 +624,12 @@ const nodeCardGridClass = computed(() => {
       :uuid="pingDialogNode.uuid"
       :node-name="pingDialogNode.name"
       @update:open="!$event && (pingDialogNode = null)"
+    />
+    <PandaOpsNodeControlDialog
+      v-if="nodeControlDialogNode"
+      :open="Boolean(nodeControlDialogNode)"
+      :node="nodeControlDialogNode"
+      @update:open="!$event && (nodeControlDialogNode = null)"
     />
   </div>
 </template>

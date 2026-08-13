@@ -1,6 +1,7 @@
 import type { MaybeRefOrGetter } from 'vue'
 import type { PandaOpsAlert } from '@/utils/pandaOpsAlert'
 import { computed, shallowReactive, toValue } from 'vue'
+import { recordPandaOpsAlertTransition } from '@/composables/usePandaOpsIncidentTimeline'
 import { PANDA_OPS_ALERT_STABILITY } from '@/constants/pandaOps'
 
 interface AlertTracker {
@@ -24,10 +25,12 @@ function requiredSamples(alert: PandaOpsAlert): number {
 }
 
 function publish(uuid: string, alert: PandaOpsAlert | null): void {
+  const previous = alertRegistry.get(uuid) ?? null
   if (alert)
     alertRegistry.set(uuid, alert)
   else
     alertRegistry.delete(uuid)
+  recordPandaOpsAlertTransition(previous, alert)
 }
 
 export function reportPandaOpsNodeAlert(uuid: string, candidate: PandaOpsAlert | null, sampleToken: string): void {
@@ -105,6 +108,11 @@ export function reportPandaOpsNodeAlert(uuid: string, candidate: PandaOpsAlert |
 export function resetPandaOpsNodeAlert(uuid: string): void {
   alertTrackers.delete(uuid)
   alertRegistry.delete(uuid)
+}
+
+export function suppressPandaOpsNodeAlert(uuid: string): void {
+  alertTrackers.delete(uuid)
+  publish(uuid, null)
 }
 
 export function getPandaOpsNodeAlert(uuid: string): PandaOpsAlert | null {

@@ -16,7 +16,9 @@ const currency = ref<CurrencyCode>('CNY')
 const excludeFreeNodes = ref(true)
 
 const showPrice = computed(() => appStore.isLoggedIn || !appStore.hidePriceWhenLoggedOut)
-const onlineNodes = computed(() => props.nodes.filter(node => node.online))
+const maintenanceNodes = computed(() => props.nodes.filter(node => appStore.pandaOpsNodeControls[node.uuid]?.maintenanceUntil))
+const serviceNodes = computed(() => props.nodes.filter(node => !appStore.pandaOpsNodeControls[node.uuid]?.maintenanceUntil))
+const onlineNodes = computed(() => serviceNodes.value.filter(node => node.online))
 
 const totals = computed(() => {
   const memoryUsed = props.nodes.reduce((sum, node) => sum + (node.ram || 0), 0)
@@ -62,7 +64,7 @@ onMounted(async () => {
         <div class="panda-telemetry-grid grid min-w-[840px] grid-cols-[0.82fr_1.28fr_1.28fr_1fr_1.18fr_1.5fr] divide-x">
           <div class="telemetry-item">
             <span>在线</span>
-            <strong>{{ onlineNodes.length }} / {{ nodes.length }}</strong>
+            <strong>{{ onlineNodes.length }} / {{ serviceNodes.length }} <em v-if="maintenanceNodes.length">维护 {{ maintenanceNodes.length }}</em></strong>
           </div>
           <div class="telemetry-item">
             <span>内存</span>

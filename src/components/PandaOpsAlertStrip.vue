@@ -8,13 +8,17 @@ import { useRouter } from 'vue-router'
 import PandaOpsNodeAlertObserver from '@/components/PandaOpsNodeAlertObserver.vue'
 import { getPandaOpsNodeAlert } from '@/composables/usePandaOpsAlertState'
 import { PANDA_OPS_ALERT_LIMITS } from '@/constants/pandaOps'
+import { useAppStore } from '@/stores/app'
 
 const props = defineProps<{ nodes: NodeData[] }>()
 const router = useRouter()
+const appStore = useAppStore()
 const expanded = ref(false)
 const isMobile = useMediaQuery('(max-width: 639px)')
 
 const alerts = computed(() => props.nodes
+  .filter(node => !appStore.pandaOpsNodeControls[node.uuid]?.maintenanceUntil
+    && !appStore.pandaOpsNodeControls[node.uuid]?.silenceUntil)
   .map(node => getPandaOpsNodeAlert(node.uuid))
   .filter((alert): alert is PandaOpsAlert => Boolean(alert))
   .sort((left, right) => right.score - left.score))

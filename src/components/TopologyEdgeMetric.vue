@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { NodeData } from '@/stores/nodes'
 import type { TelemetrySample } from '@/types/telemetry'
-import type { TopologyRouteHealth } from '@/utils/topologyHealth'
+import type { TopologyRouteHealth, TopologySegmentTelemetry } from '@/utils/topologyHealth'
 import { computed, watch } from 'vue'
 import TopologyEdgeSamples from '@/components/TopologyEdgeSamples.vue'
 import { useNodePingStats } from '@/composables/useNodePingStats'
@@ -19,6 +19,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   openDetail: []
   statusChange: [status: TopologyRouteHealth]
+  metricsChange: [metrics: TopologySegmentTelemetry]
 }>()
 const config = computed(() => parseTopologyMetric(props.metric))
 const sourceNode = computed(() => props.nodes.find(node => node.name.trim().toLowerCase() === config.value.nodeName.toLowerCase()))
@@ -31,8 +32,8 @@ const ping = useNodePingStats(
   },
 )
 
-const latency = computed(() => ping.hasData.value ? ping.avgLatency.value : config.value.fallbackLatency)
-const loss = computed(() => ping.hasData.value ? ping.avgLoss.value : config.value.fallbackLoss)
+const latency = computed(() => ping.hasData.value && !ping.stale.value ? ping.avgLatency.value : config.value.fallbackLatency)
+const loss = computed(() => ping.hasData.value && !ping.stale.value ? ping.avgLoss.value : config.value.fallbackLoss)
 const sourceState = computed(() => {
   if (!config.value.live)
     return { label: '静态基线', line: 'bg-slate-400/70 dark:bg-slate-500/55' }
@@ -42,6 +43,8 @@ const sourceState = computed(() => {
     return { label: '正在读取实时任务', line: 'bg-amber-400/55' }
   if (ping.error.value)
     return { label: '实时任务读取失败', line: 'bg-rose-400/55' }
+  if (ping.stale.value)
+    return { label: '实时数据已过期，当前显示备用基线', line: 'bg-amber-400/55' }
   if (!ping.hasData.value)
     return { label: '暂无匹配的实时数据，当前显示备用基线', line: 'bg-amber-400/55' }
   return { label: '实时 Ping 数据', line: 'bg-slate-400/70 dark:bg-slate-600/70' }
@@ -62,12 +65,25 @@ const health = computed<TopologyRouteHealth>(() => {
   }
   if (!sourceNode.value || ping.error.value)
     return 'error'
+  if (ping.stale.value)
+    return 'pending'
   if (ping.loading.value || !ping.hasData.value)
     return 'pending'
   return ping.avgLoss.value > 3 || ping.avgVolatility.value > 1.8 ? 'warning' : 'healthy'
 })
 
 watch(health, value => emit('statusChange', value), { immediate: true })
+
+const telemetry = computed<TopologySegmentTelemetry>(() => ({
+  status: health.value,
+  latency: latency.value,
+  loss: loss.value,
+  volatility: ping.hasData.value && !ping.stale.value ? ping.avgVolatility.value : null,
+  hasLiveData: config.value.live && ping.hasData.value && !ping.stale.value,
+  stale: ping.stale.value,
+}))
+
+watch(telemetry, value => emit('metricsChange', value), { immediate: true })
 
 function median(values: number[]): number {
   if (!values.length)
