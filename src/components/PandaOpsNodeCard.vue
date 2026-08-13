@@ -80,7 +80,7 @@ function lossTone(loss: string): string {
     @click="emit('click')"
     @keydown="handleKeyboardOpen"
   >
-    <header class="flex items-start justify-between gap-3">
+    <header class="panda-node-card__header flex items-start justify-between gap-3">
       <div class="min-w-0">
         <div class="flex min-w-0 items-center gap-2">
           <span class="size-2.5 shrink-0 rounded-full" :class="node.online ? 'bg-emerald-400' : 'bg-rose-400'" />
@@ -204,6 +204,13 @@ function lossTone(loss: string): string {
     inset 0 1px 0 rgb(255 255 255 / 0.025),
     0 18px 50px -42px rgb(0 0 0 / 0.95);
   backdrop-filter: blur(18px) saturate(118%);
+}
+
+.panda-node-card__header {
+  background: transparent !important;
+  border-bottom: 0 !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
 }
 
 .node-card-cell {

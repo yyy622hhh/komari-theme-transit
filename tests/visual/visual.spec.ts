@@ -59,7 +59,10 @@ test('PandaOps desktop topology and cards remain contained', async ({ page }) =>
 
   await expect(page.getByRole('heading', { name: '线路状态' })).toBeVisible()
   await expect(page.getByRole('button', { name: '查看线路历史' })).toHaveCount(2)
-  await expect(page.getByRole('button', { name: '查看节点 主控-洛杉矶 详情' })).toBeVisible()
+  const nodeCard = page.getByRole('button', { name: '查看节点 主控-洛杉矶 详情' })
+  await expect(nodeCard).toBeVisible()
+  await expect(nodeCard.locator('.panda-node-card__header')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
+  await expect(nodeCard.locator('.panda-node-card__header')).toHaveCSS('border-bottom-width', '0px')
   await expect(page.locator('html')).toHaveJSProperty('scrollWidth', await page.locator('html').evaluate(element => element.clientWidth))
 })
 

@@ -613,3 +613,8 @@
 - Clicking a route stability cell opens 1h, 24h and 7d segment history. Missing live tasks degrade to the configured fallback and are labelled as waiting for task data instead of reporting a false live value.
 - The entrance selector retains Beijing/Shanghai/Guangzhou Telecom, Unicom and Mobile presets per route. Node cards use the same task-aware statistics for the configured three-network region.
 - Validation baseline: `bun run type-check`, `bun run lint`, `bun run build-only`, `git diff --check` and the dedicated PandaOps desktop/mobile Playwright checks pass on the v3.3.5 base. The existing large globe chunk warning remains an upstream optional-renderer warning and does not affect PandaOps home loading.
+
+## 2026-08-13 PandaOps node-card header hotfix
+
+- Scoped the upstream global semantic `header` glass rule out of PandaOps node-card headers. Card titles now sit directly on the card surface without a second dark slab, divider or blur layer.
+- Added a browser regression assertion for the transparent PandaOps card header and bumped the managed theme version to `3.3.5-panda.2`.
