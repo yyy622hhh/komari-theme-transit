@@ -248,7 +248,14 @@ async function handleRpc(route: Route, clientFixtures = clients, options: Visual
         { id: 10, name: '浙江联通', interval: 60, loss: 0, weight: 1 },
         { id: 20, name: '浙江电信', interval: 60, loss: 0, weight: 2 },
       ]
-    : [{ id: 1, name: 'Tokyo', interval: 60, loss: 3.2, weight: 1 }]
+    : options.pandaOps
+      ? [
+          { id: 1, name: 'Tokyo', interval: 60, loss: 3.2, weight: 1 },
+          { id: 11, name: '北京联通', interval: 60, loss: 0, weight: 2 },
+          { id: 12, name: '北京电信', interval: 60, loss: 0, weight: 3 },
+          { id: 13, name: '北京移动', interval: 60, loss: 0, weight: 4 },
+        ]
+      : [{ id: 1, name: 'Tokyo', interval: 60, loss: 3.2, weight: 1 }]
   if (options.pandaOpsNoRecentTask) {
     pingTasks.push({
       id: 99,

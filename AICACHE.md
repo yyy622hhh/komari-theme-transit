@@ -664,3 +664,11 @@
 - Desktop sample inspection now uses an immediate hover/focus tooltip rather than a click popover. Moving over any stability bar reveals its route segment, exact latency, packet loss and sample time; moving away closes it.
 - Coarse-pointer and touch devices retain tap-to-toggle behavior as a fallback. The full history chevron remains a separate action.
 - Browser coverage now verifies both hover-open and pointer-away close behavior against a real fixture sample.
+
+## 2026-08-13 PandaOps carrier sample interaction
+
+- Status: done (M4/M6), release version `3.3.5-panda.9`.
+- Node-card carrier history bars now expose a styled shared sample tooltip on hover and keyboard focus. Clicking or tapping a bar pins the tooltip; clicking outside closes it without navigating to node detail.
+- The visual bars keep their compact 4px height while using a 12px pointer target. Each carrier series is one keyboard stop with left/right, Home/End, Enter/Space and Escape support, avoiding hundreds of tab stops across the dashboard.
+- Node cards now use a sibling full-card detail button instead of making the entire article an interactive role, so carrier sample controls are no longer nested inside another button-like surface.
+- Browser coverage verifies hover, click pinning, outside dismissal and that carrier interaction leaves the home URL unchanged.

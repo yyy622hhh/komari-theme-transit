@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { NodeData } from '@/stores/nodes'
 import { computed } from 'vue'
+import CarrierPingSamples from '@/components/CarrierPingSamples.vue'
 import { ProgressThin } from '@/components/ui/progress-thin'
 import { useNodeCarrierPingDisplay } from '@/composables/useNodeCarrierPingDisplay'
 import { useAppStore } from '@/stores/app'
@@ -49,13 +50,6 @@ const { carrierDisplays, carrierScopeLabel } = useNodeCarrierPingDisplay(() => p
 const formatBytes = (value: number) => formatBytesWithConfig(value, appStore.byteDecimals)
 const formatSpeed = (value: number) => formatBytesPerSecondWithConfig(value, appStore.byteDecimals)
 
-function handleKeyboardOpen(event: KeyboardEvent) {
-  if (event.key !== 'Enter' && event.key !== ' ')
-    return
-  event.preventDefault()
-  emit('click')
-}
-
 function resourceStatus(value: number) {
   return getStatus(value)
 }
@@ -74,13 +68,15 @@ function lossTone(loss: string): string {
   <article
     class="panda-node-card group relative min-w-0 cursor-pointer overflow-hidden rounded-2xl p-3.5 transition duration-200 hover:-translate-y-px hover:border-emerald-400/25"
     :class="!node.online ? 'opacity-75' : ''"
-    role="button"
-    tabindex="0"
-    :aria-label="`查看节点 ${node.name} 详情`"
-    @click="emit('click')"
-    @keydown="handleKeyboardOpen"
   >
-    <header class="panda-node-card__header flex items-start justify-between gap-3">
+    <button
+      type="button"
+      class="absolute inset-0 z-0 cursor-pointer rounded-2xl border-0 bg-transparent p-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-400/70"
+      :aria-label="`查看节点 ${node.name} 详情`"
+      @click="emit('click')"
+    />
+
+    <header class="panda-node-card__header pointer-events-none relative z-1 flex items-start justify-between gap-3">
       <div class="min-w-0">
         <div class="flex min-w-0 items-center gap-2">
           <span class="size-2.5 shrink-0 rounded-full" :class="node.online ? 'bg-emerald-400' : 'bg-rose-400'" />
@@ -105,7 +101,7 @@ function lossTone(loss: string): string {
       </div>
     </header>
 
-    <div class="mt-3 grid grid-cols-3 gap-3 border-y border-white/[0.055] py-2.5">
+    <div class="pointer-events-none relative z-1 mt-3 grid grid-cols-3 gap-3 border-y border-white/[0.055] py-2.5">
       <div>
         <div class="flex items-center justify-between gap-2 text-[10px]">
           <span class="text-slate-500">CPU</span>
@@ -138,7 +134,7 @@ function lossTone(loss: string): string {
       </div>
     </div>
 
-    <div class="mt-2.5 grid grid-cols-[0.78fr_0.92fr_1.65fr] gap-2">
+    <div class="pointer-events-none relative z-1 mt-2.5 grid grid-cols-[0.78fr_0.92fr_1.65fr] gap-2">
       <div class="node-card-cell flex flex-col justify-center px-2.5 py-2 text-[10px] tabular-nums">
         <span class="text-emerald-400">↑ {{ formatSpeed(node.net_out) }}</span>
         <span class="mt-1 text-slate-300">↓ {{ formatSpeed(node.net_in) }}</span>
@@ -167,9 +163,10 @@ function lossTone(loss: string): string {
         <div class="space-y-1">
           <div v-for="carrier in carrierDisplays" :key="carrier.key" class="grid grid-cols-[26px_1fr_38px_34px] items-center gap-1 text-[8px] leading-none">
             <span class="flex items-center gap-1 text-slate-500"><i class="size-1.5 rounded-full" :class="carrier.dotClass" />{{ carrier.label }}</span>
-            <span class="grid h-1 grid-flow-col auto-cols-fr gap-px overflow-hidden rounded-sm">
-              <i v-for="bar in carrier.latencyBars.slice(-12)" :key="bar.key" class="block h-full" :class="bar.className" :title="bar.tooltip" />
-            </span>
+            <CarrierPingSamples
+              :bars="carrier.latencyBars.slice(-12)"
+              :label="`${carrier.label}延迟`"
+            />
             <strong class="text-right font-medium tabular-nums text-slate-200">{{ carrier.latencyDisplay.replace(' ms', '') }}</strong>
             <strong class="text-right font-medium tabular-nums" :class="lossTone(carrier.lossDisplay)">{{ carrier.lossDisplay }}</strong>
           </div>
@@ -177,13 +174,13 @@ function lossTone(loss: string): string {
       </div>
     </div>
 
-    <footer v-if="tags.length" class="mt-2.5 flex min-w-0 gap-1 overflow-hidden">
+    <footer v-if="tags.length" class="pointer-events-none relative z-1 mt-2.5 flex min-w-0 gap-1 overflow-hidden">
       <span v-for="tag in tags" :key="tag" class="shrink-0 rounded-full border border-white/[0.07] px-2 py-0.5 text-[9px] text-slate-500">
         {{ tag }}
       </span>
     </footer>
 
-    <div v-if="!node.online" class="absolute inset-0 grid place-items-center bg-[#080c11]/55 backdrop-blur-[1px]">
+    <div v-if="!node.online" class="pointer-events-none absolute inset-0 z-2 grid place-items-center bg-[#080c11]/55 backdrop-blur-[1px]">
       <div class="rounded-lg border border-rose-400/20 bg-[#11161d] px-3 py-2 text-center">
         <div class="text-xs font-semibold text-rose-400">
           离线
