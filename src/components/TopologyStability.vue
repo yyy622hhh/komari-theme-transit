@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { NodeData } from '@/stores/nodes'
-import { PopoverArrow, PopoverContent, PopoverPortal, PopoverRoot, PopoverTrigger } from 'reka-ui'
-import { computed, watch } from 'vue'
+import { TooltipArrow, TooltipContent, TooltipPortal, TooltipProvider, TooltipRoot, TooltipTrigger } from 'reka-ui'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useNodePingStats } from '@/composables/useNodePingStats'
 import { formatDateTime } from '@/utils/helper'
 import { parseTopologyMetric } from '@/utils/topologyHelper'
@@ -10,6 +10,9 @@ export type TopologyRouteHealth = 'healthy' | 'warning' | 'pending' | 'error' | 
 
 const props = defineProps<{ metrics: string[], nodeNames: string[], nodes: NodeData[] }>()
 const emit = defineEmits<{ statusChange: [status: TopologyRouteHealth] }>()
+const isTouchTooltipMode = ref(false)
+const activeSampleKey = ref<string | null>(null)
+let coarsePointerMediaQuery: MediaQueryList | null = null
 const configs = [
   computed(() => parseTopologyMetric(props.metrics[0] || '-,-')),
   computed(() => parseTopologyMetric(props.metrics[1] || '-,-')),
@@ -103,6 +106,39 @@ function formatLoss(value: number | null): string {
   return `${value.toFixed(value >= 10 ? 0 : 1)}%`
 }
 
+function syncTouchTooltipMode(): void {
+  if (typeof window === 'undefined') {
+    isTouchTooltipMode.value = false
+    return
+  }
+
+  isTouchTooltipMode.value = window.matchMedia('(hover: none), (pointer: coarse)').matches
+  if (!isTouchTooltipMode.value)
+    activeSampleKey.value = null
+}
+
+function setSampleTooltipOpen(key: string, open: boolean): void {
+  if (!isTouchTooltipMode.value)
+    return
+  activeSampleKey.value = open ? key : activeSampleKey.value === key ? null : activeSampleKey.value
+}
+
+function toggleSampleTooltip(key: string): void {
+  if (!isTouchTooltipMode.value)
+    return
+  activeSampleKey.value = activeSampleKey.value === key ? null : key
+}
+
+onMounted(() => {
+  syncTouchTooltipMode()
+  coarsePointerMediaQuery = window.matchMedia('(hover: none), (pointer: coarse)')
+  coarsePointerMediaQuery.addEventListener('change', syncTouchTooltipMode)
+})
+
+onBeforeUnmount(() => {
+  coarsePointerMediaQuery?.removeEventListener('change', syncTouchTooltipMode)
+})
+
 const statusMeta = computed(() => {
   const values = {
     healthy: { label: configs.every(config => !config.value.live) ? '基线' : '稳定', tone: 'text-slate-400' },
@@ -117,64 +153,67 @@ const statusMeta = computed(() => {
 
 <template>
   <div class="flex min-w-0 items-center justify-end gap-2">
-    <div v-if="bars.length" class="hidden h-5 min-w-0 flex-1 items-end gap-[2px] sm:flex">
-      <PopoverRoot
-        v-for="bar in bars"
-        :key="bar.key"
-      >
-        <PopoverTrigger as-child>
-          <button
-            type="button"
-            data-topology-sample
-            class="group/sample flex h-full min-w-[3px] flex-1 cursor-pointer items-end justify-center rounded-[2px] focus-visible:outline-none"
-            :aria-label="`${bar.segmentLabel}，${formatLatency(bar.latency)}，丢包 ${formatLoss(bar.loss)}，${formatDateTime(bar.time)}`"
-            @click.stop
-          >
-            <span
-              class="block w-full max-w-1 rounded-[1px] bg-emerald-400/70 transition-[filter,opacity] group-hover/sample:brightness-125 group-focus-visible/sample:ring-1 group-focus-visible/sample:ring-white/80"
-              :class="bar.unavailable ? '!bg-rose-400/80' : bar.alert ? '!bg-amber-400/80' : ''"
-              :style="{ height: `${bar.height}%` }"
-            />
-          </button>
-        </PopoverTrigger>
-        <PopoverPortal>
-          <PopoverContent
-            data-topology-sample-detail
-            side="top"
-            :side-offset="7"
-            class="z-50 w-52 rounded-lg border border-white/10 bg-[#101820]/95 px-3 py-2.5 text-slate-100 shadow-xl outline-none backdrop-blur-xl data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95"
-            @open-auto-focus.prevent
-          >
-            <div class="min-w-0">
-              <div class="mb-2 flex min-w-0 items-center justify-between gap-3 border-b border-white/8 pb-2">
-                <span class="min-w-0 truncate text-[11px] font-semibold">第 {{ bar.segmentIndex + 1 }} 段</span>
-                <span class="shrink-0 text-[12px] font-semibold tabular-nums" :class="bar.unavailable ? 'text-rose-300' : bar.alert ? 'text-amber-300' : 'text-emerald-300'">
-                  {{ formatLatency(bar.latency) }}
-                </span>
+    <TooltipProvider v-if="bars.length" :delay-duration="0" :skip-delay-duration="0">
+      <div class="hidden h-5 min-w-0 flex-1 items-end gap-[2px] sm:flex">
+        <TooltipRoot
+          v-for="bar in bars"
+          :key="bar.key"
+          :open="isTouchTooltipMode ? activeSampleKey === bar.key : undefined"
+          @update:open="(open) => setSampleTooltipOpen(bar.key, open)"
+        >
+          <TooltipTrigger as-child>
+            <button
+              type="button"
+              data-topology-sample
+              class="group/sample flex h-full min-w-[3px] flex-1 cursor-default items-end justify-center rounded-[2px] focus-visible:outline-none"
+              :aria-label="`${bar.segmentLabel}，${formatLatency(bar.latency)}，丢包 ${formatLoss(bar.loss)}，${formatDateTime(bar.time)}`"
+              @click.stop="toggleSampleTooltip(bar.key)"
+            >
+              <span
+                class="block w-full max-w-1 rounded-[1px] bg-emerald-400/70 transition-[filter,opacity] group-hover/sample:brightness-125 group-focus-visible/sample:ring-1 group-focus-visible/sample:ring-white/80"
+                :class="bar.unavailable ? '!bg-rose-400/80' : bar.alert ? '!bg-amber-400/80' : ''"
+                :style="{ height: `${bar.height}%` }"
+              />
+            </button>
+          </TooltipTrigger>
+          <TooltipPortal>
+            <TooltipContent
+              data-topology-sample-detail
+              side="top"
+              :side-offset="7"
+              class="z-50 w-52 rounded-lg border border-white/10 bg-[#101820]/95 px-3 py-2.5 text-slate-100 shadow-xl backdrop-blur-xl data-[state=delayed-open]:animate-in data-[state=delayed-open]:fade-in-0 data-[state=delayed-open]:zoom-in-95 data-[state=instant-open]:animate-in data-[state=instant-open]:fade-in-0 data-[state=instant-open]:zoom-in-95"
+            >
+              <div class="min-w-0">
+                <div class="mb-2 flex min-w-0 items-center justify-between gap-3 border-b border-white/8 pb-2">
+                  <span class="min-w-0 truncate text-[11px] font-semibold">第 {{ bar.segmentIndex + 1 }} 段</span>
+                  <span class="shrink-0 text-[12px] font-semibold tabular-nums" :class="bar.unavailable ? 'text-rose-300' : bar.alert ? 'text-amber-300' : 'text-emerald-300'">
+                    {{ formatLatency(bar.latency) }}
+                  </span>
+                </div>
+                <p class="mb-2 truncate text-[10px] text-slate-400" :title="bar.segmentLabel">
+                  {{ bar.segmentLabel }}
+                </p>
+                <dl class="grid grid-cols-[36px_1fr] gap-x-3 gap-y-1 text-[10px]">
+                  <dt class="text-slate-500">
+                    丢包
+                  </dt>
+                  <dd class="text-right font-medium tabular-nums" :class="bar.alert ? 'text-amber-300' : 'text-slate-200'">
+                    {{ formatLoss(bar.loss) }}
+                  </dd>
+                  <dt class="text-slate-500">
+                    时间
+                  </dt>
+                  <dd class="text-right font-medium tabular-nums text-slate-300">
+                    {{ formatDateTime(bar.time, 'MM-DD HH:mm:ss') }}
+                  </dd>
+                </dl>
               </div>
-              <p class="mb-2 truncate text-[10px] text-slate-400" :title="bar.segmentLabel">
-                {{ bar.segmentLabel }}
-              </p>
-              <dl class="grid grid-cols-[36px_1fr] gap-x-3 gap-y-1 text-[10px]">
-                <dt class="text-slate-500">
-                  丢包
-                </dt>
-                <dd class="text-right font-medium tabular-nums" :class="bar.alert ? 'text-amber-300' : 'text-slate-200'">
-                  {{ formatLoss(bar.loss) }}
-                </dd>
-                <dt class="text-slate-500">
-                  时间
-                </dt>
-                <dd class="text-right font-medium tabular-nums text-slate-300">
-                  {{ formatDateTime(bar.time, 'MM-DD HH:mm:ss') }}
-                </dd>
-              </dl>
-            </div>
-            <PopoverArrow class="size-2.5 rotate-45 rounded-[2px] bg-[#101820]/95 fill-[#101820]" />
-          </PopoverContent>
-        </PopoverPortal>
-      </PopoverRoot>
-    </div>
+              <TooltipArrow class="size-2.5 rotate-45 rounded-[2px] bg-[#101820]/95 fill-[#101820]" />
+            </TooltipContent>
+          </TooltipPortal>
+        </TooltipRoot>
+      </div>
+    </TooltipProvider>
     <span data-topology-status class="shrink-0 whitespace-nowrap text-[10px]" :class="statusMeta.tone">
       {{ statusMeta.label }}
     </span>

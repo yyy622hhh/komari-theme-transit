@@ -657,3 +657,10 @@
 - Every visible topology stability bar is now an accessible historical sample trigger. Click, keyboard activation, or tap reveals its route segment, exact latency, packet loss and sample time without expanding the compact route row.
 - The separate chevron remains the entry point for the full 1h/24h/7d route history, avoiding nested interactive controls and preserving both quick inspection and detailed analysis.
 - Browser coverage clicks a real fixture sample and verifies the millisecond, loss and segment fields in the rendered portal tooltip.
+
+## 2026-08-13 PandaOps topology sample hover correction
+
+- Status: done (M4/M6), release version `3.3.5-panda.8`.
+- Desktop sample inspection now uses an immediate hover/focus tooltip rather than a click popover. Moving over any stability bar reveals its route segment, exact latency, packet loss and sample time; moving away closes it.
+- Coarse-pointer and touch devices retain tap-to-toggle behavior as a fallback. The full history chevron remains a separate action.
+- Browser coverage now verifies both hover-open and pointer-away close behavior against a real fixture sample.
