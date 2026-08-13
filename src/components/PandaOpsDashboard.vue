@@ -59,7 +59,7 @@ onMounted(async () => {
   <section id="asset-summary" class="relative z-1 scroll-mt-20 px-4 pb-3 pt-3">
     <div class="mx-auto max-w-[1560px] space-y-3">
       <div class="panda-panel telemetry-scroll overflow-x-auto rounded-2xl">
-        <div class="grid min-w-[840px] grid-cols-[0.82fr_1.28fr_1.28fr_1fr_1.18fr_1.5fr] divide-x divide-white/[0.055]">
+        <div class="panda-telemetry-grid grid min-w-[840px] grid-cols-[0.82fr_1.28fr_1.28fr_1fr_1.18fr_1.5fr] divide-x">
           <div class="telemetry-item">
             <span>在线</span>
             <strong>{{ onlineNodes.length }} / {{ nodes.length }}</strong>
@@ -83,8 +83,8 @@ onMounted(async () => {
           <div class="telemetry-item">
             <span>实时</span>
             <strong class="flex items-center gap-3">
-              <span class="text-emerald-400">↑ {{ formatSpeed(totals.upload) }}</span>
-              <span class="text-slate-300">↓ {{ formatSpeed(totals.download) }}</span>
+              <span class="text-emerald-600 dark:text-emerald-400">↑ {{ formatSpeed(totals.upload) }}</span>
+              <span class="text-slate-700 dark:text-slate-300">↓ {{ formatSpeed(totals.download) }}</span>
             </strong>
           </div>
         </div>
@@ -106,6 +106,10 @@ onMounted(async () => {
   display: none;
 }
 
+.panda-telemetry-grid > :not(:last-child) {
+  border-color: var(--panda-divider);
+}
+
 .telemetry-item {
   display: flex;
   min-height: 3.4rem;
@@ -115,7 +119,7 @@ onMounted(async () => {
   padding: 0.75rem 1rem;
   white-space: nowrap;
   font-size: 0.72rem;
-  color: rgb(148 163 184);
+  color: rgb(71 85 105);
 }
 
 @media (max-width: 640px) {
@@ -126,7 +130,7 @@ onMounted(async () => {
 }
 
 .telemetry-item strong {
-  color: rgb(241 245 249);
+  color: rgb(30 41 59);
   font-size: 0.79rem;
   font-style: normal;
   font-weight: 600;
@@ -137,5 +141,13 @@ onMounted(async () => {
   color: rgb(100 116 139);
   font-style: normal;
   font-weight: 500;
+}
+
+:global(.dark) .telemetry-item {
+  color: rgb(148 163 184);
+}
+
+:global(.dark) .telemetry-item strong {
+  color: rgb(241 245 249);
 }
 </style>

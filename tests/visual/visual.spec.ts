@@ -67,6 +67,38 @@ test('home dark mobile', async ({ page }) => {
   await expect(page).toHaveScreenshot('home-dark-mobile.png', { fullPage: false })
 })
 
+test('PandaOps light desktop uses light surfaces and readable telemetry', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, { pandaOps: true })
+  await openStablePage(page)
+
+  const assetValue = page.locator('#asset-summary .telemetry-item strong').first()
+  await expect(assetValue).toHaveCSS('color', 'rgb(30, 41, 59)')
+  const nodeCard = page.getByRole('button', { name: '查看节点 主控-洛杉矶 详情' }).locator('xpath=..')
+  await expect(nodeCard).toHaveCSS('background-color', 'rgba(248, 250, 252, 0.9)')
+  await expect(nodeCard.getByRole('heading', { name: '主控-洛杉矶' })).toHaveCSS('color', /oklch\(0\.208/)
+  await expect(page.getByLabel(/当前入口/).first()).toHaveCSS('color', /oklch\(0\.279/)
+
+  const sample = nodeCard.locator('[data-carrier-sample][aria-label*="ms"]').first()
+  await sample.hover()
+  const tooltip = page.locator('[data-carrier-sample-tooltip]')
+  await expect(tooltip).toBeVisible()
+  await expect(tooltip).toHaveCSS('background-color', /oklab\(.+\/ 0\.96\)/)
+  await expect(page).toHaveScreenshot('pandaops-light-desktop.png', { fullPage: false })
+})
+
+test('PandaOps light mobile keeps the vertical route readable', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await installKomariFixture(page, { pandaOps: true })
+  await openStablePage(page)
+
+  await expect(page.locator('[data-topology-mobile-route]')).toHaveCount(2)
+  await expect(page.locator('.topology-scroll')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '查看节点 主控-洛杉矶 详情' }).locator('xpath=..')).toHaveCSS('background-color', 'rgba(248, 250, 252, 0.9)')
+  await expect(page.locator('html')).toHaveJSProperty('scrollWidth', await page.locator('html').evaluate(element => element.clientWidth))
+  await expect(page).toHaveScreenshot('pandaops-light-mobile.png', { fullPage: false })
+})
+
 test('PandaOps desktop topology and cards remain contained', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await installKomariFixture(page, { pandaOps: true, dark: true })

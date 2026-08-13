@@ -59,15 +59,15 @@ function resourceStatus(value: number) {
 function lossTone(loss: string): string {
   const value = Number.parseFloat(loss)
   if (!Number.isFinite(value) || value <= 1)
-    return 'text-slate-300'
+    return 'text-slate-700 dark:text-slate-300'
   if (value <= 3)
-    return 'text-amber-300'
-  return 'text-rose-400'
+    return 'text-amber-700 dark:text-amber-300'
+  return 'text-rose-600 dark:text-rose-400'
 }
 
 const alertTone = computed(() => primaryAlert.value?.severity === 'critical'
-  ? 'text-rose-400 border-rose-400/15 bg-rose-400/[0.035]'
-  : 'text-amber-300 border-amber-400/15 bg-amber-400/[0.035]')
+  ? 'text-rose-700 border-rose-500/20 bg-rose-500/[0.055] dark:text-rose-400 dark:border-rose-400/15 dark:bg-rose-400/[0.035]'
+  : 'text-amber-700 border-amber-500/20 bg-amber-500/[0.06] dark:text-amber-300 dark:border-amber-400/15 dark:bg-amber-400/[0.035]')
 </script>
 
 <template>
@@ -86,7 +86,7 @@ const alertTone = computed(() => primaryAlert.value?.severity === 'critical'
       <div class="min-w-0">
         <div class="flex min-w-0 items-center gap-2">
           <span class="size-2.5 shrink-0 rounded-full" :class="node.online ? 'bg-emerald-400' : 'bg-rose-400'" />
-          <h3 class="truncate text-[15px] font-semibold tracking-[-0.01em] text-slate-100">
+          <h3 class="truncate text-[15px] font-semibold tracking-[-0.01em] text-slate-900 dark:text-slate-100">
             {{ node.name }}
           </h3>
           <span v-if="role" class="shrink-0 text-[10px] text-slate-500">· {{ role }}</span>
@@ -117,34 +117,34 @@ const alertTone = computed(() => primaryAlert.value?.severity === 'critical'
       <span class="truncate">{{ primaryAlert.detail }}</span>
     </div>
 
-    <div class="pointer-events-none relative z-1 grid grid-cols-3 gap-3 border-y border-white/[0.055] py-2.5" :class="primaryAlert && node.online ? 'mt-2' : 'mt-3'">
+    <div class="panda-divider pointer-events-none relative z-1 grid grid-cols-3 gap-3 border-y py-2.5" :class="primaryAlert && node.online ? 'mt-2' : 'mt-3'">
       <div>
         <div class="flex items-center justify-between gap-2 text-[10px]">
           <span class="text-slate-500">CPU</span>
-          <strong class="font-medium tabular-nums text-slate-200">{{ node.cpu.toFixed(1) }}%</strong>
+          <strong class="font-medium tabular-nums text-slate-700 dark:text-slate-200">{{ node.cpu.toFixed(1) }}%</strong>
         </div>
         <ProgressThin class="mt-1.5" :percentage="node.cpu" :status="resourceStatus(node.cpu)" :height="3" />
-        <div class="mt-1 truncate text-[9px] tabular-nums text-slate-600">
+        <div class="mt-1 truncate text-[9px] tabular-nums text-slate-500 dark:text-slate-600">
           {{ node.load.toFixed(2) }}, {{ node.load5.toFixed(2) }}, {{ node.load15.toFixed(2) }}
         </div>
       </div>
       <div>
         <div class="flex items-center justify-between gap-2 text-[10px]">
           <span class="text-slate-500">内存</span>
-          <strong class="font-medium tabular-nums text-slate-200">{{ memoryPercentage.toFixed(1) }}%</strong>
+          <strong class="font-medium tabular-nums text-slate-700 dark:text-slate-200">{{ memoryPercentage.toFixed(1) }}%</strong>
         </div>
         <ProgressThin class="mt-1.5" :percentage="memoryPercentage" :status="resourceStatus(memoryPercentage)" :height="3" />
-        <div class="mt-1 truncate text-[9px] tabular-nums text-slate-600">
+        <div class="mt-1 truncate text-[9px] tabular-nums text-slate-500 dark:text-slate-600">
           {{ formatBytes(node.ram) }} / {{ formatBytes(node.mem_total) }}
         </div>
       </div>
       <div>
         <div class="flex items-center justify-between gap-2 text-[10px]">
           <span class="text-slate-500">硬盘</span>
-          <strong class="font-medium tabular-nums text-slate-200">{{ diskPercentage.toFixed(1) }}%</strong>
+          <strong class="font-medium tabular-nums text-slate-700 dark:text-slate-200">{{ diskPercentage.toFixed(1) }}%</strong>
         </div>
         <ProgressThin class="mt-1.5" :percentage="diskPercentage" :status="resourceStatus(diskPercentage)" :height="3" />
-        <div class="mt-1 truncate text-[9px] tabular-nums text-slate-600">
+        <div class="mt-1 truncate text-[9px] tabular-nums text-slate-500 dark:text-slate-600">
           {{ formatBytes(node.disk) }} / {{ formatBytes(node.disk_total) }}
         </div>
       </div>
@@ -152,8 +152,8 @@ const alertTone = computed(() => primaryAlert.value?.severity === 'critical'
 
     <div class="pointer-events-none relative z-1 mt-2.5 grid grid-cols-[0.78fr_0.92fr_1.65fr] gap-2">
       <div class="node-card-cell flex flex-col justify-center px-2.5 py-2 text-[10px] tabular-nums">
-        <span class="text-emerald-400">↑ {{ formatSpeed(node.net_out) }}</span>
-        <span class="mt-1 text-slate-300">↓ {{ formatSpeed(node.net_in) }}</span>
+        <span class="text-emerald-600 dark:text-emerald-400">↑ {{ formatSpeed(node.net_out) }}</span>
+        <span class="mt-1 text-slate-700 dark:text-slate-300">↓ {{ formatSpeed(node.net_in) }}</span>
       </div>
 
       <div class="node-card-cell min-w-0 px-2.5 py-2 text-[9px]">
@@ -161,7 +161,7 @@ const alertTone = computed(() => primaryAlert.value?.severity === 'critical'
           <span>累计流量</span>
           <span v-if="hasTrafficLimit(node)" class="tabular-nums">{{ trafficPercentage.toFixed(1) }}%</span>
         </div>
-        <div class="mt-1 truncate text-[10px] font-medium tabular-nums text-slate-200">
+        <div class="mt-1 truncate text-[10px] font-medium tabular-nums text-slate-700 dark:text-slate-200">
           {{ formatBytes(trafficUsed) }}<template v-if="hasTrafficLimit(node)">
             / {{ formatBytes(node.traffic_limit) }}
           </template>
@@ -183,7 +183,7 @@ const alertTone = computed(() => primaryAlert.value?.severity === 'critical'
               :bars="carrier.latencyBars.slice(-12)"
               :label="`${carrier.label}延迟`"
             />
-            <strong class="text-right font-medium tabular-nums text-slate-200">{{ carrier.latencyDisplay.replace(' ms', '') }}</strong>
+            <strong class="text-right font-medium tabular-nums text-slate-700 dark:text-slate-200">{{ carrier.latencyDisplay.replace(' ms', '') }}</strong>
             <strong class="text-right font-medium tabular-nums" :class="lossTone(carrier.lossDisplay)">{{ carrier.lossDisplay }}</strong>
           </div>
         </div>
@@ -191,14 +191,14 @@ const alertTone = computed(() => primaryAlert.value?.severity === 'critical'
     </div>
 
     <footer v-if="tags.length" class="pointer-events-none relative z-1 mt-2.5 flex min-w-0 gap-1 overflow-hidden">
-      <span v-for="tag in tags" :key="tag" class="shrink-0 rounded-full border border-white/[0.07] px-2 py-0.5 text-[9px] text-slate-500">
+      <span v-for="tag in tags" :key="tag" class="panda-divider shrink-0 rounded-full border px-2 py-0.5 text-[9px] text-slate-500">
         {{ tag }}
       </span>
     </footer>
 
-    <div v-if="!node.online" class="pointer-events-none absolute inset-0 z-2 grid place-items-center bg-[#080c11]/55 backdrop-blur-[1px]">
-      <div class="rounded-lg border border-rose-400/20 bg-[#11161d] px-3 py-2 text-center">
-        <div class="text-xs font-semibold text-rose-400">
+    <div v-if="!node.online" class="pointer-events-none absolute inset-0 z-2 grid place-items-center bg-slate-200/70 backdrop-blur-[1px] dark:bg-[#080c11]/55">
+      <div class="rounded-lg border border-rose-500/20 bg-white/90 px-3 py-2 text-center dark:border-rose-400/20 dark:bg-[#11161d]">
+        <div class="text-xs font-semibold text-rose-600 dark:text-rose-400">
           离线
         </div>
         <div class="mt-1 text-[9px] text-slate-500">
@@ -210,15 +210,6 @@ const alertTone = computed(() => primaryAlert.value?.severity === 'critical'
 </template>
 
 <style scoped>
-.panda-node-card {
-  border: 1px solid rgb(41 49 61 / 0.78);
-  background: rgb(14 19 25 / 0.84);
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.025),
-    0 18px 50px -42px rgb(0 0 0 / 0.95);
-  backdrop-filter: blur(18px) saturate(118%);
-}
-
 .panda-node-card__header {
   background: transparent !important;
   border-bottom: 0 !important;
@@ -227,8 +218,8 @@ const alertTone = computed(() => primaryAlert.value?.severity === 'critical'
 }
 
 .node-card-cell {
-  border: 1px solid rgb(255 255 255 / 0.055);
+  border: 1px solid var(--panda-divider);
   border-radius: 0.65rem;
-  background: rgb(255 255 255 / 0.018);
+  background: var(--panda-cell-bg);
 }
 </style>

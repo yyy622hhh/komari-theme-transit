@@ -31,12 +31,12 @@ const maximumLatency = computed(() => Math.max(...history.value.map(point => poi
 const hasLiveData = computed(() => config.value.live && ping.hasData.value)
 const status = computed(() => {
   if (ping.loading.value)
-    return { label: '读取中', tone: 'text-slate-400', dot: 'bg-slate-500' }
+    return { label: '读取中', tone: 'text-slate-500 dark:text-slate-400', dot: 'bg-slate-500' }
   if (!hasLiveData.value)
-    return { label: config.value.live ? '等待任务数据' : '静态基线', tone: 'text-slate-400', dot: 'bg-slate-500' }
+    return { label: config.value.live ? '等待任务数据' : '静态基线', tone: 'text-slate-500 dark:text-slate-400', dot: 'bg-slate-500' }
   if ((loss.value ?? 0) > 3 || ping.avgVolatility.value > 1.8)
-    return { label: '存在波动', tone: 'text-amber-300', dot: 'bg-amber-400' }
-  return { label: '实时稳定', tone: 'text-emerald-300', dot: 'bg-emerald-400' }
+    return { label: '存在波动', tone: 'text-amber-700 dark:text-amber-300', dot: 'bg-amber-400' }
+  return { label: '实时稳定', tone: 'text-emerald-700 dark:text-emerald-300', dot: 'bg-emerald-400' }
 })
 
 function pointHeight(latency: number | null): string {

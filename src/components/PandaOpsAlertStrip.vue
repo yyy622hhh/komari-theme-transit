@@ -43,7 +43,9 @@ function updateCarrierAlert(uuid: string, alert: PandaOpsAlert | null): void {
 }
 
 function toneClass(alert: PandaOpsAlert): string {
-  return alert.severity === 'critical' ? 'text-rose-400' : 'text-amber-300'
+  return alert.severity === 'critical'
+    ? 'text-rose-600 dark:text-rose-400'
+    : 'text-amber-700 dark:text-amber-300'
 }
 
 function openNode(alert: PandaOpsAlert): void {
@@ -67,29 +69,35 @@ function openNode(alert: PandaOpsAlert): void {
       aria-labelledby="panda-alert-title"
     >
       <div class="grid min-h-12 md:grid-cols-[220px_1fr]">
-        <div class="flex items-center gap-2 border-b border-white/[0.055] px-4 py-3 md:border-b-0 md:border-r">
-          <Icon icon="tabler:alert-circle" :width="16" class="text-amber-300" />
-          <h2 id="panda-alert-title" class="text-xs font-semibold text-slate-200">
+        <div class="panda-divider flex items-center gap-2 border-b px-4 py-3 md:border-b-0 md:border-r">
+          <Icon icon="tabler:alert-circle" :width="16" class="text-amber-700 dark:text-amber-300" />
+          <h2 id="panda-alert-title" class="text-xs font-semibold text-slate-800 dark:text-slate-200">
             {{ alerts.length }} 个异常需要关注
           </h2>
         </div>
-        <div class="grid divide-y divide-white/[0.045] sm:grid-cols-2 sm:divide-x sm:divide-y-0 xl:grid-cols-4">
+        <div class="panda-alert-grid grid divide-y sm:grid-cols-2 sm:divide-x sm:divide-y-0 xl:grid-cols-4">
           <button
             v-for="alert in alerts"
             :key="alert.key"
             type="button"
-            class="group flex min-w-0 items-center gap-2 px-4 py-2.5 text-left transition-colors hover:bg-white/[0.02] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-emerald-400/60"
+            class="panda-hover-surface group flex min-w-0 items-center gap-2 px-4 py-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-emerald-500/60"
             @click="openNode(alert)"
           >
             <Icon :icon="alert.icon" :width="15" class="shrink-0" :class="toneClass(alert)" />
             <span class="min-w-0 flex-1">
-              <strong class="block truncate text-[11px] font-semibold text-slate-200">{{ alert.nodeName }}</strong>
+              <strong class="block truncate text-[11px] font-semibold text-slate-800 dark:text-slate-200">{{ alert.nodeName }}</strong>
               <span class="mt-0.5 block truncate text-[9px] tabular-nums" :class="toneClass(alert)">{{ alert.detail }}</span>
             </span>
-            <Icon icon="tabler:chevron-right" :width="13" class="shrink-0 text-slate-600 transition-transform group-hover:translate-x-0.5" />
+            <Icon icon="tabler:chevron-right" :width="13" class="shrink-0 text-slate-400 transition-transform group-hover:translate-x-0.5 dark:text-slate-600" />
           </button>
         </div>
       </div>
     </section>
   </div>
 </template>
+
+<style scoped>
+.panda-alert-grid > :not(:last-child) {
+  border-color: var(--panda-divider);
+}
+</style>

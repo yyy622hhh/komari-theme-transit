@@ -226,22 +226,22 @@ function openRouteDetail(route: RouteRow): void {
     aria-labelledby="topology-title"
   >
     <div class="panda-panel overflow-hidden rounded-2xl">
-      <header class="flex min-h-12 items-center justify-between gap-3 border-b border-white/[0.055] px-4 py-2 sm:px-5">
+      <header class="panda-divider flex min-h-12 items-center justify-between gap-3 border-b px-4 py-2 sm:px-5">
         <div class="flex items-center gap-2">
           <Icon icon="tabler:route" :width="17" class="text-emerald-400" />
           <h2 id="topology-title" class="text-sm font-semibold">
             线路状态
           </h2>
         </div>
-        <div class="flex items-center gap-2 text-[10px] text-slate-400 sm:text-[11px]">
+        <div class="flex items-center gap-2 text-[10px] text-slate-600 dark:text-slate-400 sm:text-[11px]">
           <span>{{ routes.length }} 条线路</span>
-          <span class="text-slate-700">·</span>
+          <span class="text-slate-400 dark:text-slate-700">·</span>
           <span>{{ healthSummary.label }}</span>
           <span class="size-1.5 rounded-full" :class="healthSummary.dot" />
           <button
             v-if="appStore.privateFeaturesAllowed"
             type="button"
-            class="ml-1 inline-flex h-7 items-center gap-1 rounded-md border border-white/8 px-2 text-slate-400 transition-colors hover:border-emerald-400/25 hover:text-slate-200"
+            class="panda-divider ml-1 inline-flex h-7 items-center gap-1 rounded-md border px-2 text-slate-600 transition-colors hover:border-emerald-500/30 hover:text-slate-900 dark:text-slate-400 dark:hover:border-emerald-400/25 dark:hover:text-slate-200"
             @click="managerOpen = true"
           >
             <Icon icon="tabler:settings" :width="13" />管理
@@ -252,13 +252,13 @@ function openRouteDetail(route: RouteRow): void {
       <nav
         v-if="directions.length > 1"
         aria-label="线路方向"
-        class="topology-direction-scroll flex min-w-0 gap-1 overflow-x-auto border-b border-white/[0.045] px-3 py-2 sm:px-4"
+        class="panda-divider topology-direction-scroll flex min-w-0 gap-1 overflow-x-auto border-b px-3 py-2 sm:px-4"
       >
         <button
           type="button"
           data-topology-direction
           class="shrink-0 rounded-md border px-2.5 py-1 text-[10px] transition-colors"
-          :class="activeDirection === 'all' ? 'border-emerald-400/25 bg-emerald-400/[0.055] text-emerald-300' : 'border-white/[0.055] text-slate-500 hover:text-slate-300'"
+          :class="activeDirection === 'all' ? 'border-emerald-500/30 bg-emerald-500/[0.07] text-emerald-700 dark:border-emerald-400/25 dark:bg-emerald-400/[0.055] dark:text-emerald-300' : 'panda-divider text-slate-600 hover:text-slate-900 dark:text-slate-500 dark:hover:text-slate-300'"
           :aria-pressed="activeDirection === 'all'"
           @click="activeDirection = 'all'"
         >
@@ -270,7 +270,7 @@ function openRouteDetail(route: RouteRow): void {
           type="button"
           data-topology-direction
           class="shrink-0 rounded-md border px-2.5 py-1 text-[10px] transition-colors"
-          :class="activeDirection === direction.key ? 'border-emerald-400/25 bg-emerald-400/[0.055] text-emerald-300' : 'border-white/[0.055] text-slate-500 hover:text-slate-300'"
+          :class="activeDirection === direction.key ? 'border-emerald-500/30 bg-emerald-500/[0.07] text-emerald-700 dark:border-emerald-400/25 dark:bg-emerald-400/[0.055] dark:text-emerald-300' : 'panda-divider text-slate-600 hover:text-slate-900 dark:text-slate-500 dark:hover:text-slate-300'"
           :aria-pressed="activeDirection === direction.key"
           @click="activeDirection = direction.key"
         >
@@ -283,7 +283,7 @@ function openRouteDetail(route: RouteRow): void {
           <article
             v-for="route in visibleRoutes"
             :key="route.key"
-            class="group grid min-h-16 grid-cols-[144px_minmax(190px,1fr)_178px_minmax(190px,1fr)_190px] items-center gap-3 border-b border-white/[0.045] px-2 transition-colors last:border-b-0 hover:bg-white/[0.018]"
+            class="panda-divider panda-hover-surface group grid min-h-16 grid-cols-[144px_minmax(190px,1fr)_178px_minmax(190px,1fr)_190px] items-center gap-3 border-b px-2 transition-colors last:border-b-0"
           >
             <div class="flex min-w-0 items-center gap-2">
               <span
@@ -314,7 +314,7 @@ function openRouteDetail(route: RouteRow): void {
               :disabled="!route.nodes[1]?.node"
               @click="route.nodes[1] && openNode(route.nodes[1])"
             >
-              <span class="size-1.5 shrink-0 rounded-full ring-4 ring-[#101820]" :class="!route.nodes[1]?.node ? 'bg-amber-400' : route.nodes[1].node.online ? 'bg-emerald-400' : 'bg-rose-400'" />
+              <span class="panda-dot-ring size-1.5 shrink-0 rounded-full ring-4" :class="!route.nodes[1]?.node ? 'bg-amber-400' : route.nodes[1].node.online ? 'bg-emerald-400' : 'bg-rose-400'" />
               <img
                 v-if="route.nodes[1]?.region"
                 :src="`/images/flags/${getRegionCode(route.nodes[1].region)}.svg`"
@@ -343,7 +343,7 @@ function openRouteDetail(route: RouteRow): void {
               :disabled="!route.nodes[2]?.node"
               @click="route.nodes[2] && openNode(route.nodes[2])"
             >
-              <span class="size-1.5 shrink-0 rounded-full ring-4 ring-[#101820]" :class="!route.nodes[2]?.node ? 'bg-amber-400' : route.nodes[2].node.online ? 'bg-emerald-400' : 'bg-rose-400'" />
+              <span class="panda-dot-ring size-1.5 shrink-0 rounded-full ring-4" :class="!route.nodes[2]?.node ? 'bg-amber-400' : route.nodes[2].node.online ? 'bg-emerald-400' : 'bg-rose-400'" />
               <img
                 v-if="route.nodes[2]?.region"
                 :src="`/images/flags/${getRegionCode(route.nodes[2].region)}.svg`"
@@ -364,14 +364,14 @@ function openRouteDetail(route: RouteRow): void {
           v-for="route in visibleRoutes"
           :key="route.key"
           data-topology-mobile-route
-          class="border-b border-white/[0.045] py-3 last:border-b-0"
+          class="panda-divider border-b py-3 last:border-b-0"
         >
           <div class="grid grid-cols-[22px_minmax(0,1fr)] items-center gap-2">
             <span class="grid place-items-center">
               <span
                 data-topology-route-status
                 :data-status="getRouteHealth(route)"
-                class="size-2 rounded-full ring-4 ring-[#101820]"
+                class="panda-dot-ring size-2 rounded-full ring-4"
                 :class="routeDotClass(route)"
               />
             </span>
@@ -382,7 +382,7 @@ function openRouteDetail(route: RouteRow): void {
           </div>
 
           <div class="grid grid-cols-[22px_minmax(0,1fr)] gap-2">
-            <span class="flex justify-center"><span class="h-full w-px bg-slate-700/65" /></span>
+            <span class="flex justify-center"><span class="panda-rail h-full w-px" /></span>
             <TopologyEdgeMetric
               mobile
               :metric="route.metrics[0] || '-,-'"
@@ -403,7 +403,7 @@ function openRouteDetail(route: RouteRow): void {
             @click="route.nodes[1] && openNode(route.nodes[1])"
           >
             <span class="grid place-items-center">
-              <span class="size-1.5 rounded-full ring-4 ring-[#101820]" :class="!route.nodes[1]?.node ? 'bg-amber-400' : route.nodes[1].node.online ? 'bg-emerald-400' : 'bg-rose-400'" />
+              <span class="panda-dot-ring size-1.5 rounded-full ring-4" :class="!route.nodes[1]?.node ? 'bg-amber-400' : route.nodes[1].node.online ? 'bg-emerald-400' : 'bg-rose-400'" />
             </span>
             <span class="flex min-w-0 items-center gap-2.5">
               <img
@@ -421,7 +421,7 @@ function openRouteDetail(route: RouteRow): void {
 
           <template v-if="route.nodes[2]">
             <div class="grid grid-cols-[22px_minmax(0,1fr)] gap-2">
-              <span class="flex justify-center"><span class="h-full w-px bg-slate-700/65" /></span>
+              <span class="flex justify-center"><span class="panda-rail h-full w-px" /></span>
               <TopologyEdgeMetric
                 mobile
                 :metric="route.metrics[1] || '-,-'"
@@ -442,7 +442,7 @@ function openRouteDetail(route: RouteRow): void {
               @click="route.nodes[2] && openNode(route.nodes[2])"
             >
               <span class="grid place-items-center">
-                <span class="size-1.5 rounded-full ring-4 ring-[#101820]" :class="!route.nodes[2]?.node ? 'bg-amber-400' : route.nodes[2].node.online ? 'bg-emerald-400' : 'bg-rose-400'" />
+                <span class="panda-dot-ring size-1.5 rounded-full ring-4" :class="!route.nodes[2]?.node ? 'bg-amber-400' : route.nodes[2].node.online ? 'bg-emerald-400' : 'bg-rose-400'" />
               </span>
               <span class="flex min-w-0 items-center gap-2.5">
                 <img

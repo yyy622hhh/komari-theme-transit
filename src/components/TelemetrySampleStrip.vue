@@ -21,8 +21,8 @@ const tooltipPosition = ref({ left: 0, top: 0, below: false })
 const activeSample = computed(() => activeIndex.value === null ? null : props.samples[activeIndex.value] ?? null)
 
 const rootClass = computed(() => props.variant === 'ticks'
-  ? 'absolute inset-x-2 bottom-0 flex h-4 items-center justify-between outline-none focus-visible:ring-1 focus-visible:ring-emerald-300/70'
-  : 'grid h-3 min-w-0 grid-flow-col auto-cols-fr items-center gap-px rounded-sm outline-none focus-visible:ring-1 focus-visible:ring-emerald-300/70')
+  ? 'absolute inset-x-2 bottom-0 flex h-4 items-center justify-between outline-none focus-visible:ring-1 focus-visible:ring-emerald-500/70 dark:focus-visible:ring-emerald-300/70'
+  : 'grid h-3 min-w-0 grid-flow-col auto-cols-fr items-center gap-px rounded-sm outline-none focus-visible:ring-1 focus-visible:ring-emerald-500/70 dark:focus-visible:ring-emerald-300/70')
 
 const sampleButtonClass = computed(() => props.variant === 'ticks'
   ? 'group/sample relative z-1 flex h-4 min-w-3 flex-1 cursor-pointer items-center justify-center focus:outline-none'
@@ -34,14 +34,14 @@ const sampleMarkClass = computed(() => props.variant === 'ticks'
 
 const activeTextClass = computed(() => {
   if (activeSample.value?.tone === 'critical')
-    return 'text-rose-300'
+    return 'text-rose-600 dark:text-rose-300'
   if (activeSample.value?.tone === 'warning')
-    return 'text-amber-300'
+    return 'text-amber-700 dark:text-amber-300'
   if (activeSample.value?.tone === 'notice')
-    return 'text-lime-300'
+    return 'text-lime-700 dark:text-lime-300'
   if (activeSample.value?.tone === 'muted')
-    return 'text-slate-400'
-  return 'text-emerald-300'
+    return 'text-slate-500 dark:text-slate-400'
+  return 'text-emerald-700 dark:text-emerald-300'
 })
 
 function closeTooltip(): void {
@@ -216,7 +216,7 @@ onClickOutside(root, closeTooltip)
         :data-carrier-sample-tooltip="kind === 'carrier' ? '' : undefined"
         :data-node-ping-sample-tooltip="kind === 'ping' ? '' : undefined"
         role="tooltip"
-        class="pointer-events-none fixed z-50 min-w-32 rounded-lg border border-white/10 bg-[#101820]/96 px-3 py-2 text-[10px] text-slate-300 shadow-xl backdrop-blur-xl"
+        class="pointer-events-none fixed z-50 min-w-32 rounded-lg border border-slate-900/10 bg-white/96 px-3 py-2 text-[10px] text-slate-700 shadow-[0_12px_34px_rgb(15_23_42/0.2)] backdrop-blur-xl dark:border-white/10 dark:bg-[#101820]/96 dark:text-slate-300 dark:shadow-xl"
         :style="{
           left: `${tooltipPosition.left}px`,
           top: `${tooltipPosition.top}px`,
@@ -228,7 +228,7 @@ onClickOutside(root, closeTooltip)
         </div>
         <div class="flex items-center justify-between gap-4">
           <strong class="font-semibold tabular-nums" :class="activeTextClass">{{ activeSample.valueText }}</strong>
-          <strong v-if="activeSample.secondaryText" class="font-medium tabular-nums text-slate-300">{{ activeSample.secondaryText }}</strong>
+          <strong v-if="activeSample.secondaryText" class="font-medium tabular-nums text-slate-700 dark:text-slate-300">{{ activeSample.secondaryText }}</strong>
         </div>
         <div v-if="activeSample.timeText" class="mt-1 tabular-nums text-slate-500">
           {{ activeSample.timeText }}

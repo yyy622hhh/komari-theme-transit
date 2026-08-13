@@ -12,6 +12,14 @@
 
 ## 当前任务
 
+- 状态：done，`3.3.5-panda.14` 已部署到 `monitor.example.com`
+- 目标：修复 PandaOps 浅色模式只切换页面/面板背景，但节点卡片、资产数值、拓扑文字、分隔线与采样浮窗仍残留深色硬编码的问题。
+- 根因：`PandaOpsNodeCard.vue` scoped CSS 固定使用深色卡片表面；新 PandaOps 组件直接使用 `text-slate-100/200`、`border-white`、深色圆点 ring，绕过了全局主题变量。
+- 实现：新增一组 PandaOps 语义表面变量，统一 panel/card/control/cell/border/divider/hover/ring/rail/shadow；节点卡片、资产摘要、异常条、拓扑、入口选择器、线路指标、历史状态和统一采样浮窗改为成对的 light/dark 对比色。
+- 回归：新增 PandaOps 浅色桌面与移动视觉基线，直接断言资产数值、卡片表面、标题、入口选择器和采样浮窗的计算颜色；完整 Playwright 25 项通过，既有普通主题与深色 PandaOps 基线无回归。
+- 发布：现网 `3.3.5-panda.13` 已完整备份到 `/var/lib/komari/backups/PandaOps-panda13-before-light-theme-20260814`；活动主题切换为 `3.3.5-panda.14`，Komari 服务 active，本机与公网首页均为 200，公网已加载新版 `index-DkgWtl0u.css` 和 `PandaOpsDashboard-t8U8VS3G.js`。
+- 构建资产：`komari-theme-PandaOps-build-96e33f6.zip`，SHA-256 `64e40a2f75d83039f736debffe8859f1668e3f0b41b3a3ceefa3287d90d21c26`；服务器端上传后 SHA-256 复核一致。首次流式上传被远端中断，原子切换前发现并保留现网 `.13`，随后改用带保活 SCP 完成；识别出的 2.5MB 不完整隐藏暂存目录已删除，不影响回滚备份。
+
 - 状态：done，`3.3.5-panda.13` 已部署到 `monitor.example.com`
 - 目标：按已确认的 PandaOps 高保真设计稿实现异常摘要、线路方向分组、桌面/移动响应式拓扑，并统一拓扑与节点三网采样的悬浮、键盘、触屏和固定交互。
 - 里程碑：M4 UI/UX + M5 交互一致性；不修改 Komari 后端、Ping 数据契约或现有拓扑持久化格式。
