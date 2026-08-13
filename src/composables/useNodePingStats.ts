@@ -19,6 +19,10 @@ export interface NodePingStatsState {
   avgLatency: number
   avgLoss: number
   avgVolatility: number
+  p50Latency: number | null
+  p95Latency: number | null
+  availability: number | null
+  sampleCount: number
   history: NodePingHistoryPoint[]
   hasData: boolean
 }
@@ -62,7 +66,7 @@ interface SharedPingRecordsEntry {
 }
 
 const HISTORY_BUCKET_COUNT = 20
-const CACHE_VERSION = 9
+const CACHE_VERSION = 10
 const CACHE_KEY_PREFIX = 'komari-theme-emerald:node-ping-stats'
 const FULL_LOSS_EPSILON = 1e-6
 const PING_RECORD_REFRESH_INTERVAL_MS = 60_000
@@ -86,6 +90,10 @@ function createEmptyStats(): NodePingStatsState {
     avgLatency: 0,
     avgLoss: 0,
     avgVolatility: 0,
+    p50Latency: null,
+    p95Latency: null,
+    availability: null,
+    sampleCount: 0,
     history: [],
     hasData: false,
   }
@@ -168,6 +176,10 @@ function isValidStatsState(value: unknown): value is NodePingStatsState {
   return typeof state.avgLatency === 'number'
     && typeof state.avgLoss === 'number'
     && typeof state.avgVolatility === 'number'
+    && (state.p50Latency === null || typeof state.p50Latency === 'number')
+    && (state.p95Latency === null || typeof state.p95Latency === 'number')
+    && (state.availability === null || typeof state.availability === 'number')
+    && typeof state.sampleCount === 'number'
     && typeof state.hasData === 'boolean'
     && Array.isArray(state.history)
     && state.history.every(isValidHistoryPoint)
@@ -575,6 +587,16 @@ function getPercentile(values: number[], percentile: number): number | null {
   return lowerValue + (upperValue - lowerValue) * (position - lowerIndex)
 }
 
+function availabilityFromLoss(loss: number, hasSamples: boolean): number | null {
+  return hasSamples ? Math.max(0, Math.min(100, 100 - loss)) : null
+}
+
+function metricLossPercent(points?: MetricLossPoint[]): number | null {
+  if (!points?.length)
+    return null
+  return weightedAverage(points.map(point => ({ value: point.value * 100, weight: point.count })))
+}
+
 function buildStats(records: PingRecord[], metricStats?: PingMetricTaskStats[], metricLossPoints?: MetricLossPoint[]): NodePingStatsState {
   const statsWithSamples = (metricStats ?? []).filter(stat => stat.total > 0)
   if (statsWithSamples.length) {
@@ -593,12 +615,27 @@ function buildStats(records: PingRecord[], metricStats?: PingMetricTaskStats[], 
       .filter(stat => stat.valid > 0 && isFiniteNumber(stat.p99_p50_ratio))
       .map(stat => ({ value: stat.p99_p50_ratio!, weight: stat.valid }))
 
-    const avgLoss = weightedAverage(lossValues)
+    const metricLoss = metricLossPercent(metricLossPoints)
+    const avgLoss = lossValues.length ? weightedAverage(lossValues) : (metricLoss ?? 0)
+    const recordLatencies = records
+      .map(record => record.value)
+      .filter(value => value >= 0 && Number.isFinite(value))
+    const p50Values = statsWithSamples
+      .filter(stat => stat.valid > 0 && isFiniteNumber(stat.p50))
+      .map(stat => ({ value: stat.p50!, weight: stat.valid }))
+    const p99Values = statsWithSamples
+      .filter(stat => stat.valid > 0 && isFiniteNumber(stat.p99))
+      .map(stat => ({ value: stat.p99!, weight: stat.valid }))
+    const sampleCount = statsWithSamples.reduce((sum, stat) => sum + stat.total, 0)
 
     return {
       avgLatency: latencyValues.length ? weightedAverage(latencyValues) : average(latestLatencyValues),
       avgLoss,
       avgVolatility: weightedAverage(volatilityValues),
+      p50Latency: getPercentile(recordLatencies, 0.5) ?? (p50Values.length ? weightedAverage(p50Values) : null),
+      p95Latency: getPercentile(recordLatencies, 0.95) ?? (p99Values.length ? weightedAverage(p99Values) : null),
+      availability: availabilityFromLoss(avgLoss, sampleCount > 0),
+      sampleCount,
       history,
       hasData: true,
     }
@@ -652,14 +689,22 @@ function buildStats(records: PingRecord[], metricStats?: PingMetricTaskStats[], 
     .filter(isFiniteNumber)
 
   const avgLatency = latencyValues.length ? average(latencyValues) : average(historyLatencyValues)
-  const avgLoss = taskLossValues.length ? average(taskLossValues) : average(historyLossValues)
+  const metricLoss = metricLossPercent(metricLossPoints)
+  const avgLoss = metricLoss ?? (taskLossValues.length ? average(taskLossValues) : average(historyLossValues))
   const avgVolatility = average(volatilityValues)
   const hasData = history.length > 0 || latencyValues.length > 0 || taskLossValues.length > 0
+  const validLatencyValues = filteredRecords
+    .map(record => record.value)
+    .filter(value => value >= 0 && Number.isFinite(value))
 
   return {
     avgLatency,
     avgLoss,
     avgVolatility,
+    p50Latency: getPercentile(validLatencyValues, 0.5),
+    p95Latency: getPercentile(validLatencyValues, 0.95),
+    availability: availabilityFromLoss(avgLoss, filteredRecords.length > 0),
+    sampleCount: filteredRecords.length,
     history,
     hasData,
   }
@@ -847,6 +892,10 @@ export function useNodePingStats(
     avgLatency: computed(() => stats.value.avgLatency),
     avgLoss: computed(() => stats.value.avgLoss),
     avgVolatility: computed(() => stats.value.avgVolatility),
+    p50Latency: computed(() => stats.value.p50Latency),
+    p95Latency: computed(() => stats.value.p95Latency),
+    availability: computed(() => stats.value.availability),
+    sampleCount: computed(() => stats.value.sampleCount),
     hasData: computed(() => stats.value.hasData),
     lastFetchedAt,
     stale,

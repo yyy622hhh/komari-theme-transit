@@ -30,6 +30,7 @@ export interface VisualFixtureOptions {
   authenticated?: boolean
   pandaOpsMissingNode?: boolean
   pandaOpsNoRecentTask?: boolean
+  pandaOpsComparableRoutes?: boolean
   visitorAuditSupported?: boolean
 }
 
@@ -198,7 +199,7 @@ function metricValue(key: string, index: number): number {
     'gpu.memory.total': 0,
     'gpu.temperature': 0,
     'ping.latency_ms': 88 + Math.sin(index / 3) * 15,
-    'ping.loss': index % 13 === 0 ? 8 : 1.5,
+    'ping.loss': index % 13 === 0 ? 0.08 : 0.015,
   }
   return values[key] ?? 0
 }
@@ -232,7 +233,9 @@ function buildMetricResponse(
             ? 1.1 + Math.sin(point.index / 4) * 0.15
             : task?.name === 'PandaOps-Local-Hop' && key === 'ping.loss'
               ? 0
-              : metricValue(key, point.index) + (task?.id ?? 0),
+              : key === 'ping.loss'
+                ? metricValue(key, point.index)
+                : metricValue(key, point.index) + (task?.id ?? 0),
         })),
       }))
     })
@@ -402,10 +405,12 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
     topologyEnabled: options.pandaOps ?? false,
     carrierPingRegion: 'all',
     topologyRoute: options.pandaOps
-      ? `北京电信|CN|入口;主控-洛杉矶|US|线路机;${options.pandaOpsMissingNode ? '未纳管-西雅图' : '香港边缘节点-超长名称布局测试'}|${options.pandaOpsMissingNode ? 'US' : 'HK'}|落地机||北京电信|CN|入口;东京-高负载|JP|线路机;新加坡-A100|SG|落地机`
+      ? `北京电信|CN|入口;主控-洛杉矶|US|线路机;${options.pandaOpsMissingNode ? '未纳管-西雅图' : '香港边缘节点-超长名称布局测试'}|${options.pandaOpsMissingNode ? 'US' : 'HK'}|落地机||北京电信|CN|入口;东京-高负载|JP|线路机;${options.pandaOpsComparableRoutes ? '香港边缘节点-超长名称布局测试-10|HK' : '新加坡-A100|SG'}|落地机`
       : '',
     topologyMetrics: options.pandaOps
-      ? 'live@主控-洛杉矶@Tokyo@51@0;84,0||live@东京-高负载@Tokyo@72@0;live@东京-高负载@PandaOps-Local-Hop@1.1@0'
+      ? options.pandaOpsComparableRoutes
+        ? 'live@主控-洛杉矶@Tokyo@51@0;live@主控-洛杉矶@PandaOps-Local-Hop@84@0||live@东京-高负载@Tokyo@72@0;live@东京-高负载@PandaOps-Local-Hop@1.1@0'
+        : 'live@主控-洛杉矶@Tokyo@51@0;84,0||live@东京-高负载@Tokyo@72@0;live@东京-高负载@PandaOps-Local-Hop@1.1@0'
       : '',
   }
 

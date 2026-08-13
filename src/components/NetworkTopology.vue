@@ -2,6 +2,7 @@
 import type { TopologyRouteDetail } from '@/components/TopologyRouteDetailDialog.vue'
 import type { NodeData } from '@/stores/nodes'
 import type { TopologyRouteHealth, TopologyRouteScore, TopologySegmentTelemetry } from '@/utils/topologyHealth'
+import type { TopologyRouteRanking, TopologyRouteReliability, TopologySegmentReliabilitySnapshot } from '@/utils/topologyIntelligence'
 import { Icon } from '@iconify/vue'
 import { useMediaQuery, useStorageAsync } from '@vueuse/core'
 import { computed, ref, watch } from 'vue'
@@ -11,6 +12,7 @@ import TopologyEdgeMetric from '@/components/TopologyEdgeMetric.vue'
 import TopologyManagerDialog from '@/components/TopologyManagerDialog.vue'
 import TopologyProbeSelect from '@/components/TopologyProbeSelect.vue'
 import TopologyRouteDetailDialog from '@/components/TopologyRouteDetailDialog.vue'
+import TopologySegmentReliabilityObserver from '@/components/TopologySegmentReliabilityObserver.vue'
 import { useAppStore } from '@/stores/app'
 import { getNodeRole } from '@/utils/nodeRoleHelper'
 import { getRegionCode } from '@/utils/regionHelper'
@@ -23,6 +25,7 @@ import {
   parseTopologyNodes,
   splitTopologyGroups,
 } from '@/utils/topologyHelper'
+import { aggregateTopologyRouteReliability, rankTopologyRoutes } from '@/utils/topologyIntelligence'
 
 interface RouteNode {
   key: string
@@ -58,6 +61,7 @@ const detailOpen = ref(false)
 const selectedRoute = ref<TopologyRouteDetail | null>(null)
 const routeSegmentHealth = ref<Record<string, Record<number, TopologyRouteHealth>>>({})
 const routeSegmentMetrics = ref<Record<string, Record<number, TopologySegmentTelemetry>>>({})
+const routeSegmentReliability = ref<Record<string, Record<number, TopologySegmentReliabilitySnapshot>>>({})
 const activeDirection = ref('all')
 const isDesktop = useMediaQuery('(min-width: 768px)')
 
@@ -191,6 +195,17 @@ function updateRouteSegmentMetrics(routeKey: string, segmentIndex: number, metri
   }
 }
 
+function updateRouteSegmentReliability(routeKey: string, segmentIndex: number, snapshot: TopologySegmentReliabilitySnapshot): void {
+  const current = routeSegmentReliability.value[routeKey] ?? {}
+  const previous = current[segmentIndex]
+  if (previous && JSON.stringify(previous) === JSON.stringify(snapshot))
+    return
+  routeSegmentReliability.value = {
+    ...routeSegmentReliability.value,
+    [routeKey]: { ...current, [segmentIndex]: snapshot },
+  }
+}
+
 function getRouteScore(route: RouteRow): TopologyRouteScore {
   const expectedSegments = Math.max(1, route.nodes.length - 1)
   return calculateTopologyRouteScore({
@@ -200,6 +215,21 @@ function getRouteScore(route: RouteRow): TopologyRouteScore {
     hasMissingNode: route.nodes.slice(1).some(item => !item.node),
   })
 }
+
+function getRouteReliability(route: RouteRow): TopologyRouteReliability {
+  const expectedSegments = Math.max(1, route.nodes.length - 1)
+  return aggregateTopologyRouteReliability(
+    Array.from({ length: expectedSegments }, (_, index) => routeSegmentMetrics.value[route.key]?.[index]),
+    Array.from({ length: expectedSegments }, (_, index) => routeSegmentReliability.value[route.key]?.[index]),
+  )
+}
+
+const routeRankings = computed<Record<string, TopologyRouteRanking>>(() => rankTopologyRoutes(routes.value.map(route => ({
+  key: route.key,
+  directionKey: route.directionKey,
+  healthScore: getRouteScore(route).score,
+  reliability: getRouteReliability(route),
+}))))
 
 const healthCounts = computed(() => routes.value.reduce((counts, route) => {
   counts[getRouteHealth(route)] += 1
@@ -246,6 +276,9 @@ function openRouteDetail(route: RouteRow): void {
     nodeNames: route.nodes.map(node => node.name),
     metrics: route.metrics,
     score: getRouteScore(route),
+    reliability: getRouteReliability(route),
+    ranking: routeRankings.value[route.key],
+    directionLabel: route.directionLabel,
   }
   detailOpen.value = true
 }
@@ -259,6 +292,13 @@ function routeScoreClass(route: RouteRow): string {
   if (tone === 'pending')
     return 'text-slate-500 dark:text-slate-400'
   return 'text-emerald-700 dark:text-emerald-300'
+}
+
+function routeRankingLabel(route: RouteRow): string {
+  const ranking = routeRankings.value[route.key]
+  if (!ranking || ranking.total <= 1)
+    return ''
+  return ranking.recommended ? '推荐' : `#${ranking.rank}/${ranking.total}`
 }
 </script>
 
@@ -355,12 +395,16 @@ function routeScoreClass(route: RouteRow): string {
               <button
                 type="button"
                 data-topology-route-score
+                :data-topology-route-ranking="routeRankingLabel(route) || undefined"
                 class="ml-4 mt-0.5 whitespace-nowrap text-[9px] font-medium tabular-nums transition-colors hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500/60"
                 :class="routeScoreClass(route)"
-                :aria-label="`线路健康评分 ${getRouteScore(route).score} 分，${getRouteScore(route).label}，查看详情`"
+                :aria-label="`线路健康评分 ${getRouteScore(route).score} 分，${getRouteScore(route).label}${routeRankingLabel(route) ? `，${routeRankingLabel(route)}` : ''}，查看详情`"
                 @click="openRouteDetail(route)"
               >
                 {{ getRouteScore(route).score }} 分 {{ getRouteScore(route).label }}
+                <span v-if="routeRankingLabel(route)" class="ml-1 rounded border border-current/20 px-1 py-px text-[8px] no-underline">
+                  {{ routeRankingLabel(route) }}
+                </span>
               </button>
             </div>
 
@@ -450,12 +494,16 @@ function routeScoreClass(route: RouteRow): string {
             <button
               type="button"
               data-topology-route-score
+              :data-topology-route-ranking="routeRankingLabel(route) || undefined"
               class="whitespace-nowrap text-[9px] font-medium tabular-nums focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500/60"
               :class="routeScoreClass(route)"
-              :aria-label="`线路健康评分 ${getRouteScore(route).score} 分，${getRouteScore(route).label}，查看详情`"
+              :aria-label="`线路健康评分 ${getRouteScore(route).score} 分，${getRouteScore(route).label}${routeRankingLabel(route) ? `，${routeRankingLabel(route)}` : ''}，查看详情`"
               @click="openRouteDetail(route)"
             >
               {{ getRouteScore(route).score }} {{ getRouteScore(route).label }}
+              <span v-if="routeRankingLabel(route)" class="ml-1 rounded border border-current/20 px-1 py-px text-[8px]">
+                {{ routeRankingLabel(route) }}
+              </span>
             </button>
           </div>
 
@@ -539,6 +587,19 @@ function routeScoreClass(route: RouteRow): string {
             </button>
           </template>
         </article>
+      </div>
+
+      <div class="hidden" aria-hidden="true">
+        <template v-for="route in routes" :key="`${route.key}-reliability`">
+          <TopologySegmentReliabilityObserver
+            v-for="(metric, segmentIndex) in route.metrics.slice(0, Math.max(1, route.nodes.length - 1))"
+            :key="`${route.key}-${segmentIndex}-reliability`"
+            :metric="metric || '-,-'"
+            :nodes="nodes"
+            :current="routeSegmentMetrics[route.key]?.[segmentIndex]"
+            @snapshot-change="updateRouteSegmentReliability(route.key, segmentIndex, $event)"
+          />
+        </template>
       </div>
     </div>
     <PandaOpsIncidentTimelineDialog v-model:open="timelineOpen" />

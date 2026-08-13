@@ -173,6 +173,7 @@ test('PandaOps desktop topology and cards remain contained', async ({ page }) =>
   await historyButtons.first().click()
   await expect(page.getByRole('dialog')).toContainText('查看每一段链路的实时延迟、丢包与历史波动。')
   await expect(page.getByRole('dialog')).toContainText('健康评分')
+  await expect(page.getByRole('dialog').locator('[data-topology-score-detail]')).toContainText('1/2 段有数据')
   await page.getByRole('dialog').getByRole('button', { name: '关闭' }).click()
   await page.getByRole('button', { name: '查看异常时间线' }).click()
   const timelineDialog = page.getByRole('dialog', { name: '异常时间线' })
@@ -238,6 +239,30 @@ test('PandaOps desktop topology and cards remain contained', async ({ page }) =>
   await expect(page.locator('html')).toHaveJSProperty('scrollWidth', await page.locator('html').evaluate(element => element.clientWidth))
   await nodeCard.click({ position: { x: 18, y: 18 } })
   await expect(page).toHaveURL('/instance/00000000-0000-4000-8000-000000000001')
+})
+
+test('PandaOps ranks comparable routes with real reliability windows', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, { pandaOps: true, dark: true, pandaOpsComparableRoutes: true })
+  await openStablePage(page)
+
+  const rankings = page.locator('[data-topology-route-ranking]')
+  await expect(rankings).toHaveCount(2)
+  const recommendation = page.locator('[data-topology-route-ranking="推荐"]')
+  await expect(recommendation).toHaveCount(1)
+  await expect(page.locator('[data-topology-route-ranking^="#"]')).toHaveCount(1)
+
+  await recommendation.click()
+  const dialog = page.getByRole('dialog')
+  await expect(dialog.locator('[data-topology-detail-ranking]')).toContainText(/香港方向第 1 \/ 2/)
+  await expect(dialog).toContainText('推荐依据')
+  await expect(dialog).toContainText('24h 可用率')
+  await expect(dialog).toContainText('7d 可用率')
+  await expect(dialog).toContainText('24h P95')
+  await expect(dialog).toContainText('相对智能基线')
+  await expect(dialog).toContainText(/\d+\.\d+%/)
+  await expect(dialog.locator('[data-topology-score-detail]')).toContainText('基线稳定')
+  await expect.poll(() => dialog.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
 })
 
 test('PandaOps mobile keeps document width contained', async ({ page }) => {

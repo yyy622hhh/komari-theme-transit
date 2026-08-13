@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { NodeData } from '@/stores/nodes'
 import type { TopologyRouteScore } from '@/utils/topologyHealth'
+import type { TopologyRouteRanking, TopologyRouteReliability } from '@/utils/topologyIntelligence'
 import { computed, ref } from 'vue'
 import TopologySegmentHistory from '@/components/TopologySegmentHistory.vue'
 import { AppDialog } from '@/components/ui/app-dialog'
@@ -10,6 +11,9 @@ export interface TopologyRouteDetail {
   nodeNames: string[]
   metrics: string[]
   score: TopologyRouteScore
+  reliability: TopologyRouteReliability
+  ranking?: TopologyRouteRanking
+  directionLabel: string
 }
 
 const props = defineProps<{ open: boolean, route: TopologyRouteDetail | null, nodes: NodeData[] }>()
@@ -32,6 +36,31 @@ function scoreTone(score: TopologyRouteScore): string {
     return 'text-slate-500 dark:text-slate-400'
   return 'text-emerald-700 dark:text-emerald-300'
 }
+
+function formatAvailability(value: number | null): string {
+  return value === null ? '-' : `${value.toFixed(value >= 99.95 ? 2 : 1)}%`
+}
+
+function formatLatency(value: number | null): string {
+  return value === null ? '-' : `${Math.round(value)} ms`
+}
+
+function formatDeviation(value: number | null): string {
+  if (value === null)
+    return '待数据'
+  const rounded = Math.round(value)
+  return `${rounded > 0 ? '+' : ''}${rounded}%`
+}
+
+function baselineTone(reliability: TopologyRouteReliability): string {
+  if (reliability.adaptive.tone === 'critical')
+    return 'text-rose-600 dark:text-rose-400'
+  if (reliability.adaptive.tone === 'warning')
+    return 'text-amber-700 dark:text-amber-300'
+  if (reliability.adaptive.tone === 'healthy')
+    return 'text-emerald-700 dark:text-emerald-300'
+  return 'text-muted-foreground'
+}
 </script>
 
 <template>
@@ -51,8 +80,12 @@ function scoreTone(score: TopologyRouteScore): string {
           </div>
         </div>
         <div class="min-w-0">
-          <div class="text-[10px] text-muted-foreground">
-            主要扣分项
+          <div class="flex min-w-0 items-center justify-between gap-3 text-[10px] text-muted-foreground">
+            <span>主要扣分项</span>
+            <span v-if="route.ranking && route.ranking.total > 1" data-topology-detail-ranking class="min-w-0 truncate text-right">
+              {{ route.directionLabel }}第 {{ route.ranking.rank }} / {{ route.ranking.total }}
+              <span v-if="route.ranking.recommended" class="ml-1 text-emerald-700 dark:text-emerald-300">推荐</span>
+            </span>
           </div>
           <div v-if="route.score.deductions.length" class="mt-1.5 grid gap-1 sm:grid-cols-2">
             <div v-for="item in route.score.deductions.slice(0, 4)" :key="item.key" class="flex min-w-0 items-center justify-between gap-3 text-[11px]">
@@ -62,6 +95,56 @@ function scoreTone(score: TopologyRouteScore): string {
           </div>
           <div v-else class="mt-1.5 text-[11px] text-emerald-700 dark:text-emerald-300">
             当前没有明显扣分项
+          </div>
+          <div v-if="route.ranking?.recommended" class="mt-1.5 truncate text-[10px] text-muted-foreground" :title="route.ranking.reason">
+            推荐依据：{{ route.ranking.reason }}
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-x-3 gap-y-2 border-t border-border/50 pt-3 sm:col-span-2 sm:grid-cols-4">
+          <div class="min-w-0">
+            <div class="text-[9px] text-muted-foreground">
+              24h 可用率
+            </div>
+            <div class="mt-0.5 text-sm font-semibold tabular-nums">
+              {{ formatAvailability(route.reliability.day.availability) }}
+            </div>
+            <div class="truncate text-[9px] text-muted-foreground">
+              {{ route.reliability.day.hasData ? `最弱分段 · ${route.reliability.day.sampleCount} 次` : `${route.reliability.completeSegments}/${route.reliability.totalSegments} 段有数据` }}
+            </div>
+          </div>
+          <div class="min-w-0">
+            <div class="text-[9px] text-muted-foreground">
+              7d 可用率
+            </div>
+            <div class="mt-0.5 text-sm font-semibold tabular-nums">
+              {{ formatAvailability(route.reliability.week.availability) }}
+            </div>
+            <div class="truncate text-[9px] text-muted-foreground">
+              {{ route.reliability.week.hasData ? `最弱分段 · ${route.reliability.week.sampleCount} 次` : '历史数据待积累' }}
+            </div>
+          </div>
+          <div class="min-w-0">
+            <div class="text-[9px] text-muted-foreground">
+              24h P95
+            </div>
+            <div class="mt-0.5 text-sm font-semibold tabular-nums">
+              {{ formatLatency(route.reliability.day.p95Latency) }}
+            </div>
+            <div class="truncate text-[9px] text-muted-foreground">
+              高位延迟参考
+            </div>
+          </div>
+          <div class="min-w-0">
+            <div class="text-[9px] text-muted-foreground">
+              相对智能基线
+            </div>
+            <div class="mt-0.5 text-sm font-semibold tabular-nums" :class="baselineTone(route.reliability)">
+              {{ formatDeviation(route.reliability.adaptive.deviationPercent) }}
+            </div>
+            <div class="truncate text-[9px]" :class="baselineTone(route.reliability)">
+              {{ route.reliability.adaptive.label }}
+            </div>
           </div>
         </div>
       </section>
