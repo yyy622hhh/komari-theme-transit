@@ -42,17 +42,17 @@ const lossTone = computed(() => {
 
 <template>
   <div
-    class="flex min-w-[118px] flex-1 items-center gap-2"
+    class="flex min-w-[118px] flex-1 items-center justify-center gap-2"
     :title="`${sourceState.label}${config.live ? ` · ${config.taskFilter || '未指定任务'}` : ''}`"
     :aria-label="`${sourceState.label}：${formatTopologyLatency(latency)}，丢包 ${formatTopologyLoss(loss)}`"
   >
-    <span class="h-px min-w-2 flex-1" :class="sourceState.line" />
+    <span data-topology-edge-line class="h-px min-w-2 max-w-16 flex-1" :class="sourceState.line" />
     <span class="shrink-0 whitespace-nowrap text-[10px] font-medium tabular-nums text-slate-300 sm:text-[11px]">
       <i class="mr-1 inline-block size-1.5 rounded-full align-middle" :class="sourceState.dot" />
       {{ formatTopologyLatency(latency) }}
       <span class="mx-0.5 text-slate-600">/</span>
       <span :class="lossTone">{{ formatTopologyLoss(loss) }}</span>
     </span>
-    <span class="h-px min-w-2 flex-1" :class="sourceState.line" />
+    <span data-topology-edge-line class="h-px min-w-2 max-w-16 flex-1" :class="sourceState.line" />
   </div>
 </template>

@@ -63,6 +63,10 @@ test('PandaOps desktop topology and cards remain contained', async ({ page }) =>
     await expect(status).toHaveCSS('white-space', 'nowrap')
     await expect.poll(() => status.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
   }
+  for (const line of await page.locator('[data-topology-edge-line]').all()) {
+    await expect.poll(() => line.evaluate(element => element.getBoundingClientRect().width)).toBeGreaterThan(7)
+    await expect.poll(() => line.evaluate(element => element.getBoundingClientRect().width)).toBeLessThanOrEqual(64)
+  }
   const nodeCard = page.getByRole('button', { name: '查看节点 主控-洛杉矶 详情' })
   await expect(nodeCard).toBeVisible()
   await expect(nodeCard.locator('.panda-node-card__header')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')

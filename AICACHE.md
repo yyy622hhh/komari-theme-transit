@@ -644,3 +644,9 @@
 - Expanded the topology health column from 72px to 112px and made the spark bars flex within the remaining width. Health labels are now shrink-proof and `white-space: nowrap`, so `稳定` no longer stacks vertically or clips at the panel edge.
 - Made the node expiry description the flexible/truncatable side and the exact `YYYY-MM-DD` date the shrink-proof side. The date uses tabular 8px numerals to remain fully visible inside the compact billing cell.
 - Browser guards assert that all topology health labels and the full expiry date have no internal overflow at the PandaOps desktop breakpoint.
+
+## 2026-08-13 PandaOps compact edge hotfix
+
+- Status: done (M4/M6), release version `3.3.5-panda.6`.
+- Capped each line beside a topology latency/loss label at 64px while keeping it flex-shrinkable at narrow widths. The complete edge metric is centered within its grid column, so different metric lengths remain aligned without long decorative rules dominating the row.
+- Browser guards require every rendered topology line to stay between 8px and 64px at the PandaOps desktop breakpoint.
