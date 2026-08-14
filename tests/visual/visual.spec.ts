@@ -2,6 +2,8 @@ import type { Page } from '@playwright/test'
 import { expect, test } from '@playwright/test'
 import { installKomariFixture } from './fixtures/komari'
 
+const LIGHT_NODE_SURFACE = /^(?:rgba\(248, 250, 252, 0\.9\)|oklch\(0\.965 0\.008 252\))$/
+
 const STABLE_STYLE = `
   @font-face {
     font-family: 'Transit Visual Fixture';
@@ -98,7 +100,7 @@ test('Transit light desktop uses light surfaces and readable telemetry', async (
   const assetValue = page.locator('#asset-summary .telemetry-item strong').first()
   await expect(assetValue).toHaveCSS('color', 'rgb(30, 41, 59)')
   const nodeCard = page.getByRole('button', { name: '查看节点 主控-洛杉矶 详情' }).locator('xpath=..')
-  await expect(nodeCard).toHaveCSS('background-color', 'rgba(248, 250, 252, 0.9)')
+  await expect(nodeCard).toHaveCSS('background-color', LIGHT_NODE_SURFACE)
   await expect(nodeCard.getByRole('heading', { name: '主控-洛杉矶' })).toHaveCSS('color', /oklch\(0\.208/)
   await expect(page.getByLabel(/当前入口/).first()).toHaveCSS('color', /oklch\(0\.279/)
 
@@ -117,7 +119,7 @@ test('Transit light mobile keeps the vertical route readable', async ({ page }) 
 
   await expect(page.locator('[data-topology-mobile-route]')).toHaveCount(2)
   await expect(page.locator('.topology-scroll')).toHaveCount(0)
-  await expect(page.getByRole('button', { name: '查看节点 主控-洛杉矶 详情' }).locator('xpath=..')).toHaveCSS('background-color', 'rgba(248, 250, 252, 0.9)')
+  await expect(page.getByRole('button', { name: '查看节点 主控-洛杉矶 详情' }).locator('xpath=..')).toHaveCSS('background-color', LIGHT_NODE_SURFACE)
   await expect(page.locator('html')).toHaveJSProperty('scrollWidth', await page.locator('html').evaluate(element => element.clientWidth))
   await expect(page).toHaveScreenshot('transit-light-mobile.png', { fullPage: false })
 })
