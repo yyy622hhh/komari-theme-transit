@@ -33,7 +33,7 @@ interface QuickControlOption {
   icon: string
 }
 
-type HomeToolKey = 'nodes' | 'nodeCompare' | 'topology' | 'providerValue' | 'healthSummary' | 'snapshotExport' | 'auditLog'
+type HomeToolKey = 'nodes' | 'nodeCompare' | 'serverList' | 'topology' | 'providerValue' | 'healthSummary' | 'snapshotExport' | 'auditLog'
 type PrivateHomeToolKey = Exclude<HomeToolKey, 'nodes' | 'nodeCompare'>
 
 interface HomeToolOption {
@@ -58,6 +58,7 @@ const PingMonitorDialog = defineAsyncComponent(() => import('@/components/PingMo
 const NodeTopologyPanel = defineAsyncComponent(() => import('@/components/NodeTopologyPanel.vue'))
 const ProviderValuePanel = defineAsyncComponent(() => import('@/components/ProviderValuePanel.vue'))
 const SnapshotExportPanel = defineAsyncComponent(() => import('@/components/SnapshotExportPanel.vue'))
+const ServerListPanel = defineAsyncComponent(() => import('@/components/ServerListPanel.vue'))
 
 const nodeItemStaggerMs = UI_CONFIG.motion.staggerMs
 const nodeItemStaggerLimit = UI_CONFIG.motion.staggerLimit
@@ -93,6 +94,7 @@ const pingDialogNode = ref<NodeData | null>(null)
 const nodeControlDialogNode = ref<NodeData | null>(null)
 
 const homeToolPermissionMap: Record<PrivateHomeToolKey, PermissionKey> = {
+  serverList: 'serverList',
   topology: 'nodeTopology',
   providerValue: 'providerValue',
   healthSummary: 'healthSummary',
@@ -122,7 +124,7 @@ const homeTools = computed<HomeToolOption[]>(() => {
   if (!appStore.privateFeaturesAllowed)
     return tools
 
-  return [...tools, { key: 'topology', label: '网络', icon: 'tabler:route', description: '网络归属、配置链路与离线聚类' }, { key: 'providerValue', label: '性价比', icon: 'tabler:scale', description: '单机资源成本对比' }, { key: 'healthSummary', label: '健康', icon: 'tabler:heartbeat', description: '日周月历史健康概览' }, { key: 'snapshotExport', label: '导出', icon: 'tabler:download', description: 'CSV / JSON 数据快照' }, { key: 'auditLog', label: '日志', icon: 'tabler:list-details', description: '管理员操作审计日志' }]
+  return [...tools, { key: 'serverList', label: '服务器', icon: 'tabler:server-2', description: '实时服务器清单与运维入口' }, { key: 'topology', label: '网络', icon: 'tabler:route', description: '网络归属、配置链路与离线聚类' }, { key: 'providerValue', label: '性价比', icon: 'tabler:scale', description: '单机资源成本对比' }, { key: 'healthSummary', label: '健康', icon: 'tabler:heartbeat', description: '日周月历史健康概览' }, { key: 'snapshotExport', label: '导出', icon: 'tabler:download', description: 'CSV / JSON 数据快照' }, { key: 'auditLog', label: '日志', icon: 'tabler:list-details', description: '管理员操作审计日志' }]
 })
 
 const updateDebouncedSearch = useDebounceFn((value: string) => {
@@ -558,6 +560,12 @@ const nodeCardGridClass = computed(() => {
             </div>
             <NodeTopologyPanel v-if="activeHomeTool === 'topology'" :nodes="groupNodeList" />
             <NodeComparePanel v-else-if="activeHomeTool === 'nodeCompare'" :nodes="groupNodeList" />
+            <ServerListPanel
+              v-else-if="activeHomeTool === 'serverList'"
+              :nodes="groupNodeList"
+              @open-node="handleNodeClick"
+              @manage-node="nodeControlDialogNode = $event"
+            />
             <ProviderValuePanel v-else-if="activeHomeTool === 'providerValue'" :nodes="groupNodeList" />
             <HealthSummaryPanel v-else-if="activeHomeTool === 'healthSummary'" :nodes="groupNodeList" />
             <SnapshotExportPanel v-else-if="activeHomeTool === 'snapshotExport'" :nodes="groupNodeList" />

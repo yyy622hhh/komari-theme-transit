@@ -427,6 +427,68 @@ test('home quick controls, node comparison and network data change visible resul
   await expect(page.getByText('ASN / BGP 拓扑')).toHaveCount(0)
 })
 
+test('Transit server list filters and sorts reactive nodes without the blocked admin endpoint', async ({ page }) => {
+  let blockedAdminListRequests = 0
+  page.on('request', (request) => {
+    if (request.url().includes('/api/admin/client/list'))
+      blockedAdminListRequests++
+  })
+
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, { pandaOps: true, authenticated: true })
+  await openStablePage(page)
+
+  await page.getByRole('button', { name: '显示首页工具' }).click()
+  await page.getByRole('button', { name: /服务器：/ }).click()
+
+  const panel = page.locator('[data-server-list-panel]')
+  await expect(panel.getByRole('heading', { name: '服务器列表' })).toBeVisible()
+  await expect(panel).toContainText('12 台服务器')
+  await expect(panel.locator('tbody tr')).toHaveCount(12)
+  await expect(panel.getByRole('link', { name: '官方后台' })).toHaveAttribute('href', '/admin/servers')
+  await page.locator('.sticky').first().evaluate((element) => {
+    element.setAttribute('style', 'display: none !important')
+  })
+  await expect(panel).toHaveScreenshot('server-list-desktop.png')
+
+  await panel.getByRole('button', { name: /离线\s*1/ }).click()
+  await expect(panel.locator('tbody tr')).toHaveCount(1)
+  await expect(panel).toContainText('伦敦-离线归档')
+
+  await panel.getByRole('button', { name: /全部\s*12/ }).click()
+  await panel.getByRole('textbox', { name: '搜索服务器' }).fill('东京')
+  await expect(panel.locator('tbody tr')).toHaveCount(2)
+  await expect(panel).toContainText('东京-高负载')
+  await expect(panel).not.toContainText('主控-洛杉矶')
+
+  await panel.getByRole('textbox', { name: '搜索服务器' }).fill('')
+  await panel.getByRole('button', { name: /^CPU/ }).click()
+  await expect(panel.locator('tbody tr').first()).toContainText('东京-高负载')
+  await panel.getByRole('button', { name: '运维 东京-高负载', exact: true }).click()
+  await expect(page.getByRole('dialog', { name: /节点运维/ })).toBeVisible()
+  await page.getByRole('dialog', { name: /节点运维/ }).getByRole('button', { name: '关闭' }).click()
+
+  expect(blockedAdminListRequests).toBe(0)
+})
+
+test('Transit server list stays contained on mobile', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await installKomariFixture(page, { pandaOps: true, authenticated: true })
+  await openStablePage(page)
+
+  await page.getByRole('button', { name: '显示首页工具' }).click()
+  await page.getByRole('button', { name: /服务器：/ }).click()
+
+  const panel = page.locator('[data-server-list-panel]')
+  await expect(panel.locator('table')).toBeHidden()
+  await expect(panel.locator('article')).toHaveCount(12)
+  await panel.getByRole('button', { name: /离线\s*1/ }).click()
+  await expect(panel.locator('article')).toHaveCount(1)
+  await expect(panel).toContainText('伦敦-离线归档')
+  await expect(page.locator('html')).toHaveJSProperty('scrollWidth', await page.locator('html').evaluate(element => element.clientWidth))
+  await expect(panel).toHaveScreenshot('server-list-mobile.png')
+})
+
 test('health range reloads the selected period and snapshot export downloads real data', async ({ page }) => {
   const healthHours: number[] = []
   page.on('request', (request) => {

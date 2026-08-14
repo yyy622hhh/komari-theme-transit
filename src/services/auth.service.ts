@@ -9,6 +9,7 @@ export type PermissionKey
     | 'healthSummary'
     | 'providerValue'
     | 'nodeTopology'
+    | 'serverList'
     | 'auditLog'
     | 'diskPrediction'
     | 'providerGeoLookup'

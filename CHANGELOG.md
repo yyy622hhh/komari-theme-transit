@@ -4,6 +4,23 @@
 
 ## [Unreleased]
 
+## [1.0.3] - 2026-08-15
+
+### Added
+
+- 新增登录后可用的 Transit 原生服务器列表，支持实时状态、搜索、在线/离线/维护筛选、CPU/流量/更新时间排序、节点详情和运维入口。
+- 新增桌面表格与移动端紧凑卡片回归，覆盖搜索、筛选、排序、运维弹窗和页面宽度约束。
+
+### Fixed
+
+- 服务器列表直接使用主题现有的 Vue 响应式节点仓库，不再依赖可能被浏览器过滤的 `/api/admin/client/list` 请求。
+
+### Security and privacy
+
+- 新列表完全由 Transit 自有代码实现；Release 继续排除 `komari-web` 源码、补丁和派生构建，服务器配置仍进入 Komari 官方后台。
+
+## [1.0.2] - 2026-08-14
+
 ### Security and privacy
 
 - 默认关闭访客公网信息查询，并在主题设置与 `PRIVACY.md` 明示 `ipwho.is`、`ipapi.co`、`api.ip.sb` 第三方请求。
@@ -49,6 +66,8 @@
 - 亮暗主题、桌面/移动布局和 Transit 风格内嵌 Komari 管理端。
 - Playwright 视觉与交互回归、自动构建和 GitHub Release 发布流程。
 
-[Unreleased]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.1...HEAD
+[Unreleased]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.3...HEAD
+[1.0.3]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.2...v1.0.3
+[1.0.2]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/yyy622hhh/komari-theme-transit/releases/tag/v1.0.0
