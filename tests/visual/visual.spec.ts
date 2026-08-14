@@ -67,7 +67,7 @@ test('home dark mobile', async ({ page }) => {
   await expect(page).toHaveScreenshot('home-dark-mobile.png', { fullPage: false })
 })
 
-test('PandaOps light desktop uses light surfaces and readable telemetry', async ({ page }) => {
+test('Transit light desktop uses light surfaces and readable telemetry', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await installKomariFixture(page, { pandaOps: true })
   await openStablePage(page)
@@ -84,10 +84,10 @@ test('PandaOps light desktop uses light surfaces and readable telemetry', async 
   const tooltip = page.locator('[data-carrier-sample-tooltip]')
   await expect(tooltip).toBeVisible()
   await expect(tooltip).toHaveCSS('background-color', /oklab\(.+\/ 0\.96\)/)
-  await expect(page).toHaveScreenshot('pandaops-light-desktop.png', { fullPage: false })
+  await expect(page).toHaveScreenshot('transit-light-desktop.png', { fullPage: false })
 })
 
-test('PandaOps light mobile keeps the vertical route readable', async ({ page }) => {
+test('Transit light mobile keeps the vertical route readable', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await installKomariFixture(page, { pandaOps: true })
   await openStablePage(page)
@@ -96,10 +96,10 @@ test('PandaOps light mobile keeps the vertical route readable', async ({ page })
   await expect(page.locator('.topology-scroll')).toHaveCount(0)
   await expect(page.getByRole('button', { name: '查看节点 主控-洛杉矶 详情' }).locator('xpath=..')).toHaveCSS('background-color', 'rgba(248, 250, 252, 0.9)')
   await expect(page.locator('html')).toHaveJSProperty('scrollWidth', await page.locator('html').evaluate(element => element.clientWidth))
-  await expect(page).toHaveScreenshot('pandaops-light-mobile.png', { fullPage: false })
+  await expect(page).toHaveScreenshot('transit-light-mobile.png', { fullPage: false })
 })
 
-test('PandaOps dark asset summary keeps a readable text hierarchy', async ({ page }) => {
+test('Transit dark asset summary keeps a readable text hierarchy', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await installKomariFixture(page, { pandaOps: true, dark: true })
   await openStablePage(page)
@@ -108,10 +108,10 @@ test('PandaOps dark asset summary keeps a readable text hierarchy', async ({ pag
   await expect(telemetry.first()).toHaveCSS('color', 'rgb(148, 163, 184)')
   await expect(telemetry.first().locator('strong')).toHaveCSS('color', 'rgb(226, 232, 240)')
   await expect(telemetry.nth(1).locator('em')).toHaveCSS('color', 'rgb(125, 142, 166)')
-  await expect(page).toHaveScreenshot('pandaops-dark-desktop.png', { fullPage: false })
+  await expect(page).toHaveScreenshot('transit-dark-desktop.png', { fullPage: false })
 })
 
-test('PandaOps desktop topology and cards remain contained', async ({ page }) => {
+test('Transit desktop topology and cards remain contained', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await installKomariFixture(page, { pandaOps: true, dark: true })
   await openStablePage(page)
@@ -241,7 +241,7 @@ test('PandaOps desktop topology and cards remain contained', async ({ page }) =>
   await expect(page).toHaveURL('/instance/00000000-0000-4000-8000-000000000001')
 })
 
-test('PandaOps ranks comparable routes with real reliability windows', async ({ page }) => {
+test('Transit ranks comparable routes with real reliability windows', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await installKomariFixture(page, { pandaOps: true, dark: true, pandaOpsComparableRoutes: true })
   await openStablePage(page)
@@ -265,7 +265,7 @@ test('PandaOps ranks comparable routes with real reliability windows', async ({ 
   await expect.poll(() => dialog.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
 })
 
-test('PandaOps mobile keeps document width contained', async ({ page }) => {
+test('Transit mobile keeps document width contained', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await installKomariFixture(page, { pandaOps: true, dark: true })
   await openStablePage(page)
@@ -296,7 +296,7 @@ test('PandaOps mobile keeps document width contained', async ({ page }) => {
   await expect(page.locator('html')).toHaveJSProperty('scrollWidth', await page.locator('html').evaluate(element => element.clientWidth))
 })
 
-test('PandaOps topology reports an unresolved configured node as an error', async ({ page }) => {
+test('Transit topology reports an unresolved configured node as an error', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await installKomariFixture(page, { pandaOps: true, dark: true, pandaOpsMissingNode: true })
   await openStablePage(page)
@@ -306,12 +306,12 @@ test('PandaOps topology reports an unresolved configured node as an error', asyn
   await expect(page.getByText('异常', { exact: true })).toHaveCount(0)
 })
 
-test('PandaOps topology manager saves through managed theme API', async ({ page }) => {
+test('Transit topology manager saves through managed theme API', async ({ page }) => {
   const saves: unknown[] = []
   await page.setViewportSize({ width: 1440, height: 900 })
   await installKomariFixture(page, { pandaOps: true, dark: true, authenticated: true })
   page.on('request', (request) => {
-    if (request.method() === 'PUT' && request.url().includes('/api/admin/theme/config?short=PandaOps'))
+    if (request.method() === 'PUT' && request.url().includes('/api/admin/theme/config?short=Transit'))
       saves.push(request.postDataJSON())
   })
   await openStablePage(page)
@@ -326,7 +326,7 @@ test('PandaOps topology manager saves through managed theme API', async ({ page 
   expect(saves[0]).toMatchObject({ topologyEnabled: true })
 })
 
-test('PandaOps topology manager lists configured Ping tasks without recent samples', async ({ page }) => {
+test('Transit topology manager lists configured Ping tasks without recent samples', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await installKomariFixture(page, {
     pandaOps: true,
@@ -343,12 +343,12 @@ test('PandaOps topology manager lists configured Ping tasks without recent sampl
   await expect(taskSelect.locator('option')).toContainText(['Configured-No-Recent-Sample'])
 })
 
-test('PandaOps node maintenance saves globally and updates alerts immediately', async ({ page }) => {
+test('Transit node maintenance saves globally and updates alerts immediately', async ({ page }) => {
   const saves: Record<string, unknown>[] = []
   await page.setViewportSize({ width: 1440, height: 900 })
   await installKomariFixture(page, { pandaOps: true, dark: true, authenticated: true })
   page.on('request', (request) => {
-    if (request.method() === 'PUT' && request.url().includes('/api/admin/theme/config?short=PandaOps'))
+    if (request.method() === 'PUT' && request.url().includes('/api/admin/theme/config?short=Transit'))
       saves.push(request.postDataJSON() as Record<string, unknown>)
   })
   await openStablePage(page)
@@ -511,7 +511,7 @@ test('home mini card metric icons remain accessible', async ({ page }) => {
   await expect(card.getByRole('img', { name: '内存' })).toBeVisible()
 })
 
-test('PandaOps node card size changes the real desktop grid density', async ({ page }) => {
+test('Transit node card size changes the real desktop grid density', async ({ page }) => {
   await page.setViewportSize({ width: 1700, height: 1000 })
   await installKomariFixture(page, { pandaOps: true, dark: true, nodeCardSize: 'mini' })
   await openStablePage(page)

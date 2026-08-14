@@ -8,7 +8,7 @@
   scrollbar-width: thin;
 }
 
-/* PandaOps compact monitoring surface. */
+/* Transit compact monitoring surface. */
 .panda-panel {
   border: 1px solid var(--panda-border);
   background: var(--panda-panel-bg);

@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Root-scope guide for AI agents working in `komari-theme-Glassmorphism`.
+Root-scope guide for AI agents working in `komari-theme-transit`.
 
 For the complete AI/developer manual, read [AIAGENTREADME.md](AIAGENTREADME.md). For persistent task handoff and progress tracking, read and update [AICACHE.md](AICACHE.md).
 
@@ -32,7 +32,7 @@ This repository builds a Komari theme package, not a generic deployed web app.
 
 Release contract:
 
-- `bun run build` must output `dist/` and `komari-theme-Glassmorphism-build-<short-sha>.zip`.
+- `bun run build` must output `dist/` and `komari-theme-Transit-build-<short-sha>.zip`.
 - Zip layout must stay: `komari-theme.json`, `preview.png`, `dist/`.
 - Packaged `preview.png` comes from [docs/preview.png](docs/preview.png).
 - Do not rename [komari-theme.json](komari-theme.json), [docs/preview.png](docs/preview.png), or the zip pattern.
