@@ -1,6 +1,6 @@
-# v3 Architecture
+# Transit Architecture
 
-Komari Theme Glassmorphism v3 moves new code toward a layered architecture:
+Transit organizes new code around a layered architecture:
 
 ```text
 Vue Component
@@ -40,7 +40,7 @@ Vue Component
 
 ## Current M2-M6 scope
 
-M2-M6 build on the v3 foundation without changing the public route contract:
+Future work builds on this foundation without changing the public route contract:
 
 - M2 keeps user interactions stable while routing history-heavy paths through shared request/cache infrastructure and virtualizing dense lists.
 - M3 gates private tools, sensitive metadata, snapshot export, and disk prediction through verified auth; ordinary node and Ping history metrics stay public.

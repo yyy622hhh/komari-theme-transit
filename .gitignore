@@ -13,6 +13,9 @@ dist
 dist-ssr
 coverage
 *.local
+.env
+.env.*
+!.env.example
 
 # Editor directories and files
 .vscode/*
@@ -29,7 +32,6 @@ coverage
 
 .eslintcache
 
-.env.development
 # Cypress
 /cypress/videos/
 /cypress/screenshots/

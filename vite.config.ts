@@ -63,6 +63,7 @@ function komariThemeZip(): Plugin {
       const commitHash = getCommitHash()
       const zipFileName = `komari-theme-Transit-build-${commitHash}.zip`
       const distDir = resolve(__dirname, 'dist')
+      const embeddedAdminDir = resolve(distDir, 'admin-app')
       const previewPath = resolve(__dirname, 'docs/preview.png')
       const outputPath = resolve(__dirname, zipFileName)
       const themeManifest = readThemeManifest()
@@ -73,6 +74,10 @@ function komariThemeZip(): Plugin {
       if (!existsSync(distDir)) {
         console.log('[komari-theme-zip] dist directory not found, skipping zip creation')
         return
+      }
+
+      if (existsSync(embeddedAdminDir)) {
+        throw new Error('Release blocked: dist/admin-app must not be redistributed without an explicit komari-web license')
       }
 
       const output = fs.createWriteStream(outputPath)

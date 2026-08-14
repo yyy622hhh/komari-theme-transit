@@ -12,8 +12,6 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Komari Monitor" />
-    <link rel="manifest" href="/admin-app/manifest.json" />
-    <link rel="apple-touch-icon" href="/admin-app/assets/pwa-icon.png" />
     <style>
       .legacy-browser-message {
         display: none;
@@ -31,19 +29,6 @@
     <script>
       ;(function () {
         try {
-          var officialAppRoute = /^\/(admin|terminal|manage)(\/|$)/
-          if (officialAppRoute.test(location.pathname)) {
-            var officialRoute = location.pathname + location.search + location.hash
-            var adminEntry = '/admin-app/index.html'
-            try {
-              sessionStorage.setItem('komariOfficialAppRoute', officialRoute)
-              location.replace(adminEntry)
-            } catch {
-              location.replace(adminEntry + '?__komari_route=' + encodeURIComponent(officialRoute))
-            }
-            return
-          }
-
           var root = document.documentElement
           var css = window.CSS
           var supportsModernColor =

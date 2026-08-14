@@ -115,6 +115,10 @@ jobs:
         if: steps.version.outputs.version_changed == 'true' || steps.tag.outputs.exists == 'false'
         run: bun run build
 
+      - name: Audit release package
+        if: steps.version.outputs.version_changed == 'true' || steps.tag.outputs.exists == 'false'
+        run: bun run audit:release
+
       - name: Create and push release tag
         if: (steps.version.outputs.version_changed == 'true' || steps.tag.outputs.exists == 'false') && steps.tag.outputs.exists == 'false'
         env:

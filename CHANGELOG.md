@@ -4,6 +4,18 @@
 
 ## [Unreleased]
 
+### Security and privacy
+
+- 默认关闭访客公网信息查询，并在主题设置与 `PRIVACY.md` 明示 `ipwho.is`、`ipapi.co`、`api.ip.sb` 第三方请求。
+- 新增独立的 `visitorAuditClientEnabled` 选择加入开关；只有它与 Komari 核心访客审计同时开启时，才采集页面事件、设备特征和哈希指纹。
+- 从源码仓库、测试和 Release 中移除授权状态不明确的内嵌 `komari-web` 管理端、补丁与派生截图；构建检测到 `dist/admin-app/` 时会失败。
+
+### Changed
+
+- 新安装的拓扑配置默认为空，登录用户会看到“配置第一条线路”引导，不再引用维护者自己的节点。
+- 改用 `.env.example` 记录本地 API 目标，并忽略开发者自己的 `.env`。
+- 清理 Glassmorphism v2.3.0、v3 里程碑和“没有测试套件”等过期资料。
+
 ### Fixed
 
 - 视觉回归使用锁定的 Noto Sans SC 测试字体，避免不同 CI 机器的中英文字形和布局漂移。
@@ -12,7 +24,7 @@
 
 ### Documentation
 
-- 重写 README，完整说明可视化拓扑管理器、实时 Ping 绑定、入口探测点、运维工具、Transit 管理端接入、PandaOps 迁移与常见问题。
+- 重写 README，完整说明可视化拓扑管理器、实时 Ping 绑定、入口探测点、运维工具、PandaOps 迁移与常见问题。
 - 新增拓扑管理器实机截图，并移除尚未启用的 GitHub Discussions 链接。
 
 ## [1.0.1] - 2026-08-14

@@ -58,6 +58,10 @@ preview.png
 dist/
 ```
 
+然后执行 `bun run audit:release`，确认发布物没有额外顶层文件或内嵌管理端。
+
+Release 不得包含 `public/admin-app/`、`dist/admin-app/`、第三方管理端补丁或其他没有明确再分发许可的内容。加入第三方代码或资产时，PR 必须说明来源、固定版本、许可证与 NOTICE 要求。
+
 ## Pull Request
 
 - 一个 PR 解决一个清晰问题，避免混入无关格式化。

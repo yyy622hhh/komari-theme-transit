@@ -37,6 +37,9 @@ export interface VisualFixtureOptions {
   pandaOpsMissingNode?: boolean
   pandaOpsNoRecentTask?: boolean
   pandaOpsComparableRoutes?: boolean
+  emptyTopology?: boolean
+  visitorInfoEnabled?: boolean
+  visitorAuditClientEnabled?: boolean
   visitorAuditSupported?: boolean
 }
 
@@ -414,7 +417,8 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
     earthRenderer: options.earthRenderer ?? 'realistic',
     hideEarth: options.hideEarth ?? false,
     stopEarth: true,
-    visitorInfoEnabled: true,
+    visitorInfoEnabled: options.visitorInfoEnabled ?? true,
+    visitorAuditClientEnabled: options.visitorAuditClientEnabled ?? true,
     colorVisionMode: options.colorVisionFriendly ? '色觉友好' : '标准',
     hideAdminEntryWhenLoggedOut: false,
     hidePriceWhenLoggedOut: false,
@@ -425,10 +429,10 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
     opsDashboardEnabled: options.pandaOps ?? false,
     topologyEnabled: options.pandaOps ?? false,
     carrierPingRegion: 'all',
-    topologyRoute: options.pandaOps
+    topologyRoute: options.pandaOps && !options.emptyTopology
       ? `北京电信|CN|入口;主控-洛杉矶|US|线路机;${options.pandaOpsMissingNode ? '未纳管-西雅图' : '香港边缘节点-超长名称布局测试'}|${options.pandaOpsMissingNode ? 'US' : 'HK'}|落地机||北京电信|CN|入口;东京-高负载|JP|线路机;${options.pandaOpsComparableRoutes ? '香港边缘节点-超长名称布局测试-10|HK' : '新加坡-A100|SG'}|落地机`
       : '',
-    topologyMetrics: options.pandaOps
+    topologyMetrics: options.pandaOps && !options.emptyTopology
       ? options.pandaOpsComparableRoutes
         ? 'live@主控-洛杉矶@Tokyo@51@0;live@主控-洛杉矶@PandaOps-Local-Hop@84@0||live@东京-高负载@Tokyo@72@0;live@东京-高负载@PandaOps-Local-Hop@1.1@0'
         : 'live@主控-洛杉矶@Tokyo@51@0;84,0||live@东京-高负载@Tokyo@72@0;live@东京-高负载@PandaOps-Local-Hop@1.1@0'

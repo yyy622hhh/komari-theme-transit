@@ -46,9 +46,11 @@ const totalPages = computed(() => Math.max(1, Math.ceil(total.value / limit.valu
 const pageStart = computed(() => total.value === 0 ? 0 : (page.value - 1) * limit.value + 1)
 const pageEnd = computed(() => Math.min(total.value, page.value * limit.value))
 const visitorAuditStatus = computed(() => {
+  if (!appStore.visitorAuditClientEnabled)
+    return { icon: 'tabler:shield-off', tone: 'text-warning', text: 'Transit 访客审计默认关闭。需先在主题设置中明确允许客户端采集；已有记录仍可查看。' }
   if (!appStore.visitorAuditEnabled)
-    return { icon: 'tabler:shield-off', tone: 'text-warning', text: '核心已支持访客审计，但 visitor_audit_enabled 当前关闭。已有记录仍可查看。' }
-  return { icon: 'tabler:shield-check', tone: 'text-success', text: '访客审计已启用；IP 与 User-Agent 由服务端可信记录，前端只提交受限操作摘要。' }
+    return { icon: 'tabler:shield-off', tone: 'text-warning', text: 'Transit 已获准采集，但 Komari 核心 visitor_audit_enabled 当前关闭。已有记录仍可查看。' }
+  return { icon: 'tabler:shield-check', tone: 'text-success', text: '访客审计已启用；将向你的 Komari 上报页面事件、设备特征和哈希指纹，字段详见 PRIVACY.md。' }
 })
 
 function buildAuditLogRow(log: AuditLogEntry): AuditLogRow {

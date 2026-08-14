@@ -602,10 +602,40 @@ function routeRankingLabel(route: RouteRow): string {
         </template>
       </div>
     </div>
-    <PandaOpsIncidentTimelineDialog v-model:open="timelineOpen" />
-    <TopologyManagerDialog v-model:open="managerOpen" :nodes="nodes" />
-    <TopologyRouteDetailDialog v-model:open="detailOpen" :route="selectedRoute" :nodes="nodes" />
   </section>
+  <section
+    v-else-if="appStore.privateFeaturesAllowed"
+    :class="embedded ? '' : 'px-4 pb-4'"
+    class="relative z-1 scroll-mt-20 pointer-events-auto"
+    aria-labelledby="topology-empty-title"
+  >
+    <div class="panda-panel flex flex-col gap-3 rounded-2xl px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+      <div class="flex min-w-0 items-start gap-3">
+        <span class="grid size-9 shrink-0 place-items-center rounded-lg border border-emerald-500/20 bg-emerald-500/[0.07] text-emerald-600 dark:text-emerald-300">
+          <Icon icon="tabler:route-square-2" :width="18" />
+        </span>
+        <div class="min-w-0">
+          <h2 id="topology-empty-title" class="text-sm font-semibold">
+            还没有配置线路
+          </h2>
+          <p class="mt-1 text-xs leading-5 text-slate-600 dark:text-slate-400">
+            选择入口、线路机、落地机和 Ping 任务，创建第一条实时网络拓扑。
+          </p>
+        </div>
+      </div>
+      <button
+        type="button"
+        class="inline-flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-emerald-500/25 bg-emerald-500/[0.08] px-3 text-xs font-medium text-emerald-700 transition-colors hover:bg-emerald-500/[0.13] dark:text-emerald-300"
+        @click="managerOpen = true"
+      >
+        <Icon icon="tabler:plus" :width="15" />
+        配置第一条线路
+      </button>
+    </div>
+  </section>
+  <PandaOpsIncidentTimelineDialog v-model:open="timelineOpen" />
+  <TopologyManagerDialog v-model:open="managerOpen" :nodes="nodes" />
+  <TopologyRouteDetailDialog v-model:open="detailOpen" :route="selectedRoute" :nodes="nodes" />
 </template>
 
 <style scoped>

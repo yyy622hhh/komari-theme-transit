@@ -331,6 +331,16 @@ test('Transit topology reports an unresolved configured node as an error', async
   await expect(page.getByText('异常', { exact: true })).toHaveCount(0)
 })
 
+test('Transit empty topology guides an authenticated operator into the manager', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, { pandaOps: true, authenticated: true, emptyTopology: true })
+  await openStablePage(page)
+
+  await expect(page.getByRole('heading', { name: '还没有配置线路' })).toBeVisible()
+  await page.getByRole('button', { name: '配置第一条线路' }).click()
+  await expect(page.getByRole('heading', { name: '拓扑管理' })).toBeVisible()
+})
+
 test('Transit topology manager saves through managed theme API', async ({ page }) => {
   const saves: unknown[] = []
   await page.setViewportSize({ width: 1440, height: 900 })
@@ -497,6 +507,25 @@ test('supported visitor audit toggle writes the core setting', async ({ page }) 
   await expect.poll(() => settingUpdates.length).toBe(1)
   expect(settingUpdates[0]).toMatchObject({ visitor_audit_enabled: true })
   await expect(page.getByRole('button', { name: '暂停采集' })).toBeVisible()
+})
+
+test('disabled visitor info does not call public IP lookup providers', async ({ page }) => {
+  const visitorLookupUrls = new Set([
+    'https://ipwho.is/',
+    'https://ipapi.co/json/',
+    'https://api.ip.sb/geoip',
+  ])
+  const requests: string[] = []
+  page.on('request', (request) => {
+    if (visitorLookupUrls.has(request.url()))
+      requests.push(request.url())
+  })
+
+  await installKomariFixture(page, { visitorInfoEnabled: false })
+  await openStablePage(page)
+  await page.waitForTimeout(250)
+
+  expect(requests).toEqual([])
 })
 
 test('home accessible list desktop', async ({ page }) => {

@@ -37,3 +37,6 @@ jobs:
 
       - name: Build application
         run: bun run build-only
+
+      - name: Audit release package
+        run: bun run audit:release

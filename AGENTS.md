@@ -20,7 +20,8 @@ Root-scope development guide for `komari-theme-transit`.
    - M5 new feature
    - M6 docs/tests/DX
 3. Validate with `bun run lint:check`, `bun run type-check` and `bun run build-only`; UI changes also run `bun run test:visual`.
-4. Use [CONTRIBUTING.md](CONTRIBUTING.md) for the public contribution and release checklist.
+4. Release-related changes also run `bun run build` and `bun run audit:release`.
+5. Use [CONTRIBUTING.md](CONTRIBUTING.md) for the public contribution and release checklist.
 
 ## What this repo builds
 

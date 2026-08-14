@@ -8,7 +8,7 @@ import { getVisitorSecurityProfile } from '@/utils/visitorFingerprint'
 export function useVisitorAudit() {
   const appStore = useAppStore()
   const supported = computed(() => appStore.visitorAuditSupported)
-  const enabled = computed(() => appStore.visitorAuditEnabled)
+  const enabled = computed(() => appStore.visitorAuditEnabled && appStore.visitorAuditClientEnabled)
 
   async function record(event: VisitorAuditEventParams, includeSecurityProfile = false): Promise<void> {
     if (!enabled.value)

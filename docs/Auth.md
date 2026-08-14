@@ -1,4 +1,4 @@
-# v3 Auth Flow
+# Transit Auth Flow
 
 ## Source of truth
 

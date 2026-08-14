@@ -8,7 +8,7 @@
 [![License](https://img.shields.io/github/license/yyy622hhh/komari-theme-transit?style=flat-square)](LICENSE)
 [![Vue 3](https://img.shields.io/badge/Vue-3-42b883?style=flat-square&logo=vuedotjs&logoColor=white)](https://vuejs.org/)
 
-Transit 是一个面向多节点、多线路和跨境链路监控的 Komari 社区主题。它把“入口 → 线路机 → 落地机”的链路拓扑、北京/上海/广州三网 Ping、实时资源、异常告警和资产信息放进同一套紧凑界面，并提供可视化拓扑管理器与 Transit 风格管理后台。
+Transit 是一个面向多节点、多线路和跨境链路监控的 Komari 社区主题。它把“入口 → 线路机 → 落地机”的链路拓扑、北京/上海/广州三网 Ping、实时资源、异常告警和资产信息放进同一套紧凑界面，并提供可视化拓扑管理器。
 
 ![Transit 暗色总览](docs/screenshots/transit-overview-dark.png)
 
@@ -20,8 +20,8 @@ Transit 是一个面向多节点、多线路和跨境链路监控的 Komari 社�
 - **统一采样交互**：鼠标悬停显示时间、延迟与丢包；移动端可点击固定浮窗。
 - **运维视角**：提供异常摘要、线路可靠性、维护状态、事件时间线、健康统计和审计日志。
 - **资产视角**：同时展示价格、剩余价值、到期日、流量配额和厂商信息。
-- **完整管理能力**：内嵌基于官方 `komari-web` 的 Transit 管理端，不重新实现服务端权限。
-- **隐私优先**：默认不提供公网 IP 检测，不把访客地址发送给额外的第三方查询服务。
+- **沿用官方后台**：主题只负责公开监控界面和主题内工具，服务器管理继续使用 Komari 自带后台。
+- **隐私默认关闭**：公网信息查询和 Transit 访客审计均为明确选择加入，默认不会触发。
 
 ## 功能一览
 
@@ -34,7 +34,6 @@ Transit 是一个面向多节点、多线路和跨境链路监控的 Komari 社�
 | 首页工具 | 节点对比、厂商性价比、健康摘要、快照导出、网络信息和核心审计日志                   |
 | 节点详情 | 自定义概览卡、完整负载图、Ping 延迟/丢包历史、GPU 与磁盘耗尽预测                   |
 | 显示     | 亮色/暗色/北京时间自动模式、四档卡片密度、卡片/列表视图和移动端布局                |
-| 管理端   | 运维总览、服务器、任务、通知、主题、插件、系统设置、数据库与终端等官方功能         |
 
 ## 界面预览
 
@@ -48,19 +47,13 @@ Transit 是一个面向多节点、多线路和跨境链路监控的 Komari 社�
 
 ![Transit 拓扑管理器](docs/screenshots/transit-topology-manager.png)
 
-### Transit 管理端
-
-| 运维总览                                                          | 独立设置页                                                     |
-| ----------------------------------------------------------------- | -------------------------------------------------------------- |
-| ![Transit 管理总览](docs/screenshots/transit-admin-dashboard.png) | ![Transit 设置页](docs/screenshots/transit-admin-settings.png) |
-
 ## 快速开始
 
 1. 前往 [Releases](https://github.com/yyy622hhh/komari-theme-transit/releases) 下载最新的 `komari-theme-Transit-build-*.zip`。
 2. 登录 Komari 管理后台，在主题管理中上传这个 zip；不要上传 GitHub 自动生成的源码压缩包。
 3. 启用短名称为 `Transit` 的主题。
 4. 打开主题设置，选择主题模式、节点卡密度和三网地区。
-5. 返回首页，在“线路状态”右上角打开拓扑管理器，配置线路并保存。
+5. 新安装不会预置任何真实节点；返回首页，按“还没有配置线路”的引导创建第一条拓扑并保存。
 
 发布 zip 的根目录固定为：
 
@@ -81,7 +74,7 @@ Transit 使用独立短名称 `Transit`，不会覆盖已有的 PandaOps、Glass
 - 北京电信、北京联通、北京移动
 - 上海电信、上海联通、上海移动
 - 广东电信、广东联通、广东移动
-- 线路机到落地机的自定义任务，例如 `Transit-JP-Relay-to-Transit-US-Edge`
+- 线路机到落地机的自定义任务，例如 `Relay-JP-to-Exit-US`
 
 任务名称可以自定义，但管理器绑定时必须选择或填写准确名称。
 
@@ -152,7 +145,7 @@ Transit 使用独立短名称 `Transit`，不会覆盖已有的 PandaOps、Glass
 多条线路使用 `||` 分隔：
 
 ```text
-北京电信|CN|入口;Transit-JP-Relay|JP|线路机;Transit-US-Edge|US|落地机||北京电信|CN|入口;Transit-US-Relay|US|线路机;Transit-US-Edge-2|US|落地机
+北京电信|CN|入口;Relay-JP|JP|线路机;Exit-US|US|落地机||上海联通|CN|入口;Relay-SG|SG|线路机;Exit-DE|DE|落地机
 ```
 
 静态指标格式为 `延迟,丢包`，同一线路的两段使用 `;` 分隔：
@@ -170,7 +163,7 @@ live@探测来源节点@Ping任务名称@备用延迟@备用丢包
 完整示例：
 
 ```text
-live@Transit-JP-Relay@北京电信@51@0;live@Transit-JP-Relay@Transit-JP-Relay-to-Transit-US-Edge@84@0||live@Transit-US-Relay@北京电信@148@0;live@Transit-US-Relay@Transit-US-Relay-to-Transit-US-Edge-2@1.1@0
+live@Relay-JP@北京电信@51@0;live@Relay-JP@Relay-JP-to-Exit-US@84@0||live@Relay-SG@上海联通@72@0;live@Relay-SG@Relay-SG-to-Exit-DE@165@0
 ```
 
 使用 `-` 表示没有备用值。旧版 `live@节点@地区@运营商@备用延迟@备用丢包` 格式仍可读取。
@@ -212,7 +205,7 @@ Transit 的托管设置按使用路径分为八组：
 | 01 · 基础与外观     | 主题模式、刷新间隔、RPC 模式、默认视图、节点卡尺寸     |
 | 02 · 首页布局       | 公告、地球样式、拓扑、三网地区、配色方案、色觉辅助模式 |
 | 03 · 首页总览卡片   | 官方/基础/运维/资源/财务等预设与自定义卡片 keys        |
-| 04 · 高级工具与隐私 | 高级工具、访客显示、价格隐藏、厂商别名、减少动画       |
+| 04 · 高级工具与隐私 | 高级工具、访客信息、访客审计、价格隐藏和减少动画       |
 | 05 · 节点卡片与列表 | 快捷筛选、列表字段、离线置底、告警阈值、磁盘预测       |
 | 06 · 节点详情概览   | 分区标签、详情卡片预设与自定义 keys                    |
 | 07 · 节点详情图表   | CPU、内存、磁盘、网络、GPU、Ping 等图表组合            |
@@ -220,52 +213,20 @@ Transit 的托管设置按使用路径分为八组：
 
 完整 key、默认值与帮助文本以 [komari-theme.json](komari-theme.json) 为准。Komari 1.2.6 Metric Store 适配细节见 [docs/Komari-1.2.6-theme-adaptation.md](docs/Komari-1.2.6-theme-adaptation.md)。
 
-## Transit 管理端
+## 隐私
 
-`dist/admin-app/` 是基于官方 [komari-web](https://github.com/komari-monitor/komari-web) 构建的完整管理端。Transit 修改导航、运维总览、设置页布局和主题样式，但服务器、Agent、任务、通知、主题、插件、数据库、终端、账号和权限等能力仍使用官方实现与 Komari API。
+Transit 将两类可选行为默认关闭：
 
-主题启用后，可直接访问：
+- **访客公网信息**：开启 `visitorInfoEnabled` 后，访客浏览器会依次请求 `ipwho.is`、`ipapi.co`、`api.ip.sb`，直到一家返回成功。相应服务会看到访客 IP，并返回 IP、地区和运营商信息。
+- **访客审计**：只有 `visitorAuditClientEnabled` 与 Komari 核心的 `visitor_audit_enabled` 同时开启时，Transit 才会上报页面事件、设备特征和哈希指纹到站点自己的 Komari。
 
-```text
-/admin-app/index.html?__komari_route=/admin/dashboard
-```
+部署者在启用前应向访客说明用途、第三方接收方、保留期限和退出方式。完整字段、数据流与运营者检查清单见 [PRIVACY.md](PRIVACY.md)。
 
-Komari 核心会优先接管 `/admin/*`，所以仅上传主题时，直接打开 `/admin/dashboard` 仍可能看到官方默认样式。这不影响功能。若希望原管理地址自动进入 Transit，可以在 Nginx 的站点 `server` 中、通用 `location /` 之前加入：
+## 官方管理后台与授权边界
 
-```nginx
-location = /admin {
-    return 302 /admin-app/index.html?__komari_route=/admin/dashboard;
-}
+Transit 不再内嵌或再分发 `komari-web` 构建物。服务器、Agent、Ping 任务、通知、主题、插件、数据库、终端、账号和权限等管理能力继续使用 Komari 安装包自带的官方后台；主题顶部的后台入口也直接进入官方地址。
 
-location ^~ /admin/ {
-    return 302 /admin-app/index.html?__komari_route=$uri;
-}
-
-location = /manage {
-    return 302 /admin-app/index.html?__komari_route=/manage/;
-}
-
-location ^~ /manage/ {
-    return 302 /admin-app/index.html?__komari_route=$uri;
-}
-
-location = /terminal {
-    return 302 /admin-app/index.html?__komari_route=/terminal;
-}
-
-location ^~ /terminal/ {
-    return 302 /admin-app/index.html?__komari_route=$uri;
-}
-```
-
-应用前先备份配置，并执行：
-
-```bash
-sudo nginx -t
-sudo systemctl reload nginx
-```
-
-这些规则不匹配 `/api/admin/*`，管理 API、登录和权限仍由 Komari 处理。使用 Caddy 或其他反向代理时遵循同样原则：只改浏览器页面路由，不代理或改写管理 API。
+截至本版本发布时，[komari-monitor/komari-web](https://github.com/komari-monitor/komari-web) 没有声明可供第三方修改和再分发的许可证。因此 Transit 的源码仓库和 Release 都不包含它的源码、补丁、构建文件或派生管理端截图。若上游未来提供明确许可，可在符合其条款的前提下重新评估集成。
 
 ## 兼容性
 
@@ -289,7 +250,7 @@ Transit 与 PandaOps 使用不同短名称，因此两套主题可以并存，�
 2. 上传并启用 Transit，不要删除 PandaOps。
 3. 在 Transit 设置中恢复主题模式、卡片方案和告警阈值。
 4. 使用拓扑管理器重新确认线路、探测来源和 Ping 任务。
-5. 验证首页、节点详情和管理端后，再决定是否保留旧主题。
+5. 验证首页、节点详情和拓扑配置后，再决定是否保留旧主题。
 
 服务器管理员可以在完整数据库备份后复制对应 `theme_configurations`，但不建议普通用户直接修改 Komari 数据库。
 
@@ -318,13 +279,13 @@ Transit 不执行数据库迁移。主题设置格式发生变化时会保留旧
 
 检查来源节点、任务名称和目标是否对应正确链路。任务名称匹配成功但尚无样本时，等待至少一个采样周期。
 
-### `/admin/dashboard` 仍是官方样式
+### 为什么管理后台仍是官方样式
 
-直接访问 `/admin-app/index.html?__komari_route=/admin/dashboard`，或按“Transit 管理端”一节配置反向代理页面路由。
+这是预期行为。Transit 只发布主题界面，不再分发授权状态不明确的 `komari-web` 派生管理端；管理操作请使用 Komari 自带后台。
 
 ### 上传主题失败
 
-确认上传的是 Release 附件中的 `komari-theme-Transit-build-*.zip`，并检查反向代理上传大小限制。当前主题包约 7 MB，建议允许至少 10 MB。
+确认上传的是 Release 附件中的 `komari-theme-Transit-build-*.zip`，并检查反向代理上传大小限制；不要上传 GitHub 自动生成的源码压缩包。
 
 ### 更新后仍显示旧页面
 
@@ -332,7 +293,7 @@ Transit 不执行数据库迁移。主题设置格式发生变化时会保留旧
 
 ### 私有站点打开首页后跳转登录
 
-这是 Komari 的私有站点策略。完成登录后，公开监控、Transit 高级工具和管理端会按当前会话权限显示。
+这是 Komari 的私有站点策略。完成登录后，公开监控和 Transit 高级工具会按当前会话权限显示，管理操作仍进入官方后台。
 
 ## 本地开发
 
@@ -358,20 +319,14 @@ bun run build
 - `dist/`
 - `komari-theme-Transit-build-<short-sha>.zip`
 
-视觉回归覆盖亮暗主题、桌面/移动端、拓扑管理器、统一采样交互、节点卡等高布局、管理总览和独立设置页。像素基准由 Playwright Chromium 在 macOS 环境维护，Linux CI 另外执行 lint、类型检查和生产构建。更新截图基准前必须人工确认设计差异。
+视觉回归覆盖亮暗主题、桌面/移动端、拓扑管理器、统一采样交互和节点卡等高布局。像素基准由 Playwright Chromium 在 macOS 环境维护，Linux CI 另外执行 lint、类型检查和生产构建。更新截图基准前必须人工确认设计差异。
 
-## 重建内嵌管理端
+## 发布物授权边界
 
-仓库中的 `public/admin-app/` 来自官方 `komari-web`，通过补丁与同步脚本实现 Transit 外观。具体源提交记录在 `public/admin-app/komari-admin-source.json`。
-
-```bash
-git clone https://github.com/komari-monitor/komari-web.git ../komari-web
-git -C ../komari-web checkout 4a74e8a
-git -C ../komari-web apply ../komari-theme-transit/patches/komari-web-transit-admin.patch
-bun run sync:admin ../komari-web
-```
-
-同步脚本会重新构建官方管理端、修正嵌入路径并记录源信息。后台敏感操作仍由 Komari 自身的登录和权限系统控制。
+- Release 只打包本仓库可依法再分发的主题代码和资产。
+- 构建检测到 `dist/admin-app/` 时会直接失败，避免误把外部管理端带入主题包。
+- 外部项目的名称、链接与截图仅用于兼容性说明或致谢，不表示其许可证自动适用于 Transit。
+- 如需加入第三方代码，贡献者必须同时提交来源、固定版本、许可证文本和必要的 NOTICE。
 
 ## 架构与安全边界
 
@@ -393,11 +348,11 @@ bun run sync:admin ../komari-web
 Transit 是社区二次开发项目，不是 Komari 官方主题。感谢以下开源项目与作者提供的基础：
 
 - [Komari](https://github.com/komari-monitor/komari) — 监控服务端与生态基础。
-- [komari-web](https://github.com/komari-monitor/komari-web) — 官方管理端与前端实现。
+- [komari-web](https://github.com/komari-monitor/komari-web) — Komari 官方管理界面；Transit 仅保持 API 与使用流程兼容，不打包或再分发其代码。
 - [komari-theme-Glassmorphism](https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism) — 原始主题、组件结构与 MIT 授权基础。
 - [komari-theme-Glassmorphism-three-network](https://github.com/vlongx/komari-theme-Glassmorphism-three-network) — 三网 Ping 展示与后续二开基础。
 
-在这些项目的基础上，Transit 重新设计了网络拓扑、可视化拓扑管理器、节点卡片、告警体系、采样交互、亮暗主题和管理后台。感谢所有上游贡献者。
+在已获许可的主题基础上，Transit 重新设计了网络拓扑、可视化拓扑管理器、节点卡片、告警体系、采样交互和亮暗主题。感谢所有上游贡献者。
 
 ## 参与与支持
 
@@ -409,4 +364,4 @@ Transit 是社区二次开发项目，不是 Komari 官方主题。感谢以下�
 
 ## 许可证
 
-本项目继续采用 [MIT License](LICENSE)。发布和再分发时请保留原始版权与许可证声明。
+本仓库中由 Transit 提供、且未另行标注的代码采用 [MIT License](LICENSE)。发布和再分发时请保留版权与许可证声明；MIT 不会替未授权的第三方作品授予许可。
