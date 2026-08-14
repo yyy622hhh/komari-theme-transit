@@ -950,6 +950,10 @@ export class KomariRpc {
     await this.client.call('admin:editSettings', settings, signal)
   }
 
+  async orderClients(order: Record<string, number>, signal?: AbortSignal): Promise<void> {
+    await this.client.call('admin:orderClients', order, signal)
+  }
+
   // ==================== Public 方法（主题/公开页优先使用） ====================
 
   async getPublicMe(): Promise<unknown> {

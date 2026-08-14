@@ -4,6 +4,18 @@
 
 ## [Unreleased]
 
+## [1.0.4] - 2026-08-15
+
+### Added
+
+- 服务器列表新增“官方顺序”默认项、桌面与移动端统一的排序字段选择和升降序控制。
+- 登录管理员可以在 Transit 内使用上下箭头编辑并保存首页服务器顺序，保存后立即同步节点卡片和官方后台权重。
+
+### Fixed
+
+- 从官方后台标签页返回 Transit 时立即刷新节点元数据，后台调整顺序不再最多等待 60 秒轮询周期。
+- 相同权重的节点使用稳定名称顺序，避免 Komari 返回 UUID 映射时出现随机抖动。
+
 ## [1.0.3] - 2026-08-15
 
 ### Added
@@ -66,7 +78,8 @@
 - 亮暗主题、桌面/移动布局和 Transit 风格内嵌 Komari 管理端。
 - Playwright 视觉与交互回归、自动构建和 GitHub Release 发布流程。
 
-[Unreleased]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.3...HEAD
+[Unreleased]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.4...HEAD
+[1.0.4]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.0...v1.0.1

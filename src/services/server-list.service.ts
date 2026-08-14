@@ -1,9 +1,10 @@
 import type { NodeData } from '@/stores/nodes'
 import { getRealtimeTotalSpeed } from '@/utils/nodeMetricsHelper'
 import { isNodeMatchSearch } from '@/utils/nodeSearch'
+import { getSharedRpc } from '@/utils/rpc'
 
 export type ServerListStatusFilter = 'all' | 'online' | 'offline' | 'maintenance'
-export type ServerListSortKey = 'status' | 'name' | 'cpu' | 'traffic' | 'updated'
+export type ServerListSortKey = 'official' | 'status' | 'name' | 'cpu' | 'traffic' | 'updated'
 export type ServerListSortDirection = 'asc' | 'desc'
 
 export interface ServerListSummary {
@@ -52,12 +53,27 @@ function getUpdatedTimestamp(node: NodeData): number {
   return Number.isFinite(timestamp) ? timestamp : 0
 }
 
+function getOfficialWeight(node: NodeData): number {
+  return Number.isFinite(node.weight) ? node.weight : Number.MAX_SAFE_INTEGER
+}
+
+export function compareOfficialServerOrder(left: NodeData, right: NodeData): number {
+  const result = getOfficialWeight(left) - getOfficialWeight(right)
+  return result === 0 ? left.name.localeCompare(right.name, 'zh-CN') : result
+}
+
+export function sortServersByOfficialOrder(nodes: NodeData[]): NodeData[] {
+  return [...nodes].sort(compareOfficialServerOrder)
+}
+
 function compareNodeValue(
   left: NodeData,
   right: NodeData,
   key: ServerListSortKey,
   maintenanceIds: ReadonlySet<string>,
 ): number {
+  if (key === 'official')
+    return compareOfficialServerOrder(left, right)
   if (key === 'name')
     return left.name.localeCompare(right.name, 'zh-CN')
   if (key === 'cpu')
@@ -67,6 +83,15 @@ function compareNodeValue(
   if (key === 'updated')
     return getUpdatedTimestamp(left) - getUpdatedTimestamp(right)
   return getStatusRank(left, maintenanceIds) - getStatusRank(right, maintenanceIds)
+}
+
+export async function saveServerOrder(orderedUuids: string[]): Promise<Record<string, number>> {
+  if (!orderedUuids.length || new Set(orderedUuids).size !== orderedUuids.length)
+    throw new Error('服务器顺序无效，请刷新后重试')
+
+  const order = Object.fromEntries(orderedUuids.map((uuid, index) => [uuid, index]))
+  await getSharedRpc().orderClients(order)
+  return order
 }
 
 export function summarizeServerList(

@@ -563,6 +563,7 @@ const nodeCardGridClass = computed(() => {
             <ServerListPanel
               v-else-if="activeHomeTool === 'serverList'"
               :nodes="groupNodeList"
+              :can-edit-order="appStore.nodeSelectedGroup === 'all'"
               @open-node="handleNodeClick"
               @manage-node="nodeControlDialogNode = $event"
             />

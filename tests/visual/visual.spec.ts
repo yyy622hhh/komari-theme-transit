@@ -429,9 +429,18 @@ test('home quick controls, node comparison and network data change visible resul
 
 test('Transit server list filters and sorts reactive nodes without the blocked admin endpoint', async ({ page }) => {
   let blockedAdminListRequests = 0
+  let nodeMetadataRequests = 0
+  const savedOrders: Array<Record<string, number>> = []
   page.on('request', (request) => {
     if (request.url().includes('/api/admin/client/list'))
       blockedAdminListRequests++
+    if (!request.url().endsWith('/api/rpc2'))
+      return
+    const payload = request.postDataJSON() as { method?: string, params?: Record<string, number> } | null
+    if (payload?.method === 'common:getNodes')
+      nodeMetadataRequests++
+    if (payload?.method === 'admin:orderClients' && payload.params)
+      savedOrders.push(payload.params)
   })
 
   await page.setViewportSize({ width: 1440, height: 900 })
@@ -445,6 +454,8 @@ test('Transit server list filters and sorts reactive nodes without the blocked a
   await expect(panel.getByRole('heading', { name: '服务器列表' })).toBeVisible()
   await expect(panel).toContainText('12 台服务器')
   await expect(panel.locator('tbody tr')).toHaveCount(12)
+  await expect(panel.getByRole('combobox', { name: '排序方式' })).toHaveValue('official')
+  await expect(panel.locator('tbody tr').first()).toContainText('主控-洛杉矶')
   await expect(panel.getByRole('link', { name: '官方后台' })).toHaveAttribute('href', '/admin/servers')
   await page.locator('.sticky').first().evaluate((element) => {
     element.setAttribute('style', 'display: none !important')
@@ -468,6 +479,19 @@ test('Transit server list filters and sorts reactive nodes without the blocked a
   await expect(page.getByRole('dialog', { name: /节点运维/ })).toBeVisible()
   await page.getByRole('dialog', { name: /节点运维/ }).getByRole('button', { name: '关闭' }).click()
 
+  await panel.getByRole('combobox', { name: '排序方式' }).selectOption('official')
+  await panel.getByRole('button', { name: '编辑首页顺序' }).click()
+  await panel.getByRole('button', { name: '下移 主控-洛杉矶', exact: true }).click()
+  await panel.getByRole('button', { name: '保存顺序' }).click()
+  await expect.poll(() => savedOrders.length).toBe(1)
+  expect(savedOrders[0]?.['00000000-0000-4000-8000-000000000001']).toBe(1)
+  expect(savedOrders[0]?.['00000000-0000-4000-8000-000000000002']).toBe(0)
+  await expect(panel.locator('tbody tr').first()).toContainText('香港边缘节点-超长名称布局测试')
+
+  const requestsBeforeFocus = nodeMetadataRequests
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect.poll(() => nodeMetadataRequests).toBeGreaterThan(requestsBeforeFocus)
+
   expect(blockedAdminListRequests).toBe(0)
 })
 
@@ -482,6 +506,10 @@ test('Transit server list stays contained on mobile', async ({ page }) => {
   const panel = page.locator('[data-server-list-panel]')
   await expect(panel.locator('table')).toBeHidden()
   await expect(panel.locator('article')).toHaveCount(12)
+  await panel.getByRole('combobox', { name: '排序方式' }).selectOption('cpu')
+  await expect(panel.locator('article').first()).toContainText('东京-高负载')
+  await panel.getByRole('button', { name: '当前降序，切换为升序' }).click()
+  await expect(panel.locator('article').first()).toContainText('伦敦-离线归档')
   await panel.getByRole('button', { name: /离线\s*1/ }).click()
   await expect(panel.locator('article')).toHaveCount(1)
   await expect(panel).toContainText('伦敦-离线归档')

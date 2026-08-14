@@ -19,6 +19,7 @@ import {
 import { getRegionDisplayName } from '@/utils/regionHelper'
 
 const props = defineProps<{
+  canEditOrder: boolean
   nodes: NodeData[]
 }>()
 
@@ -29,13 +30,24 @@ const emit = defineEmits<{
 
 const appStore = useAppStore()
 const {
+  beginOrderEdit,
+  cancelOrderEdit,
+  editingOrder,
+  isOrderBoundary,
+  moveOrder,
+  orderDirty,
+  persistOrder,
   query,
   rows,
+  savingOrder,
+  selectSort,
   setSort,
   sortKey,
+  sortDirection,
   sortMark,
   statusFilter,
   summary,
+  toggleSortDirection,
 } = useServerList(() => props.nodes)
 
 const statusOptions = computed<Array<{ key: ServerListStatusFilter, label: string, count: number }>>(() => [
@@ -46,6 +58,7 @@ const statusOptions = computed<Array<{ key: ServerListStatusFilter, label: strin
 ])
 
 const mobileSortOptions: Array<{ key: ServerListSortKey, label: string }> = [
+  { key: 'official', label: '官方顺序' },
   { key: 'status', label: '状态' },
   { key: 'name', label: '名称' },
   { key: 'cpu', label: 'CPU' },
@@ -100,10 +113,33 @@ function formatRegion(node: NodeData): string {
   return getRegionDisplayName(node.region) || node.region || '-'
 }
 
-function setMobileSort(event: Event): void {
+function setSortFromSelect(event: Event): void {
   const key = (event.target as HTMLSelectElement).value as ServerListSortKey
-  if (sortKey.value !== key)
-    setSort(key)
+  selectSort(key)
+}
+
+function startOrderEdit(): void {
+  if (!props.canEditOrder) {
+    window.$message?.warning('请先切换到“全部节点”再编辑首页顺序。')
+    return
+  }
+  beginOrderEdit()
+}
+
+async function saveOrder(): Promise<void> {
+  const granted = await appStore.requireLoginPermission('serverList', { force: true })
+  if (!granted) {
+    window.$message?.warning('登录状态已过期，请重新登录后保存。')
+    return
+  }
+
+  try {
+    await persistOrder()
+    window.$message?.success('首页服务器顺序已保存。')
+  }
+  catch (error) {
+    window.$message?.error(`保存服务器顺序失败：${error instanceof Error ? error.message : String(error)}`)
+  }
 }
 </script>
 
@@ -118,10 +154,31 @@ function setMobileSort(event: Event): void {
           {{ summary.total }} 台服务器 · {{ summary.online }} 在线 · {{ summary.offline }} 离线
         </p>
       </div>
-      <Button as="a" href="/admin/servers" target="_blank" rel="noopener" variant="outline" size="sm" class="self-start sm:self-auto">
-        <Icon icon="tabler:settings" />
-        官方后台
-      </Button>
+      <div class="flex shrink-0 flex-wrap gap-2 self-start sm:self-auto">
+        <Button v-if="!editingOrder" variant="outline" size="sm" :title="canEditOrder ? '编辑首页顺序' : '请先切换到全部节点'" @click="startOrderEdit">
+          <Icon icon="tabler:arrows-move-vertical" />
+          编辑首页顺序
+        </Button>
+        <Button as="a" href="/admin/servers" target="_blank" rel="noopener" variant="outline" size="sm">
+          <Icon icon="tabler:settings" />
+          官方后台
+        </Button>
+      </div>
+    </div>
+
+    <div v-if="editingOrder" class="flex flex-col gap-2 border-b border-border/60 pb-3 sm:flex-row sm:items-center sm:justify-between">
+      <p class="text-xs text-muted-foreground">
+        使用每行的上下箭头调整全局顺序；保存后首页和官方后台同步更新。
+      </p>
+      <div class="flex shrink-0 gap-2">
+        <Button variant="ghost" size="sm" :disabled="savingOrder" @click="cancelOrderEdit">
+          取消
+        </Button>
+        <Button size="sm" :disabled="savingOrder || !orderDirty" @click="saveOrder">
+          <Icon :icon="savingOrder ? 'tabler:loader-2' : 'tabler:device-floppy'" :class="savingOrder && 'animate-spin'" />
+          保存顺序
+        </Button>
+      </div>
     </div>
 
     <div class="grid grid-cols-2 gap-px overflow-hidden rounded-md border border-border/60 bg-border/60 sm:grid-cols-4">
@@ -140,6 +197,7 @@ function setMobileSort(event: Event): void {
         <Icon icon="tabler:search" class="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" width="15" height="15" />
         <Input
           v-model="query"
+          :disabled="editingOrder"
           aria-label="搜索服务器"
           placeholder="搜索名称、地区、IP、系统、CPU"
           class="h-8 pl-8 shadow-none"
@@ -150,6 +208,7 @@ function setMobileSort(event: Event): void {
           v-for="option in statusOptions"
           :key="option.key"
           type="button"
+          :disabled="editingOrder"
           class="inline-flex h-7 shrink-0 items-center gap-1 rounded-sm px-2.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
           :class="statusFilter === option.key && 'bg-background text-foreground shadow-xs'"
           :aria-pressed="statusFilter === option.key"
@@ -159,15 +218,25 @@ function setMobileSort(event: Event): void {
           <span class="tabular-nums text-[10px] opacity-70">{{ option.count }}</span>
         </button>
       </div>
-      <label class="flex h-8 items-center gap-2 rounded-md border border-border bg-background px-2 text-xs md:hidden">
+      <label class="flex h-8 min-w-36 items-center gap-2 rounded-md border border-border bg-background px-2 text-xs">
         <Icon icon="tabler:arrows-sort" class="text-muted-foreground" width="14" height="14" />
         <span class="sr-only">排序方式</span>
-        <select :value="sortKey" class="min-w-0 flex-1 bg-transparent outline-none" @change="setMobileSort">
+        <select :value="sortKey" :disabled="editingOrder" class="min-w-0 flex-1 bg-transparent outline-none" aria-label="排序方式" @change="setSortFromSelect">
           <option v-for="option in mobileSortOptions" :key="option.key" :value="option.key">
             {{ option.label }}
           </option>
         </select>
       </label>
+      <Button
+        variant="outline"
+        size="icon-sm"
+        :disabled="editingOrder"
+        :aria-label="sortDirection === 'asc' ? '当前升序，切换为降序' : '当前降序，切换为升序'"
+        :title="sortDirection === 'asc' ? '升序' : '降序'"
+        @click="toggleSortDirection"
+      >
+        <Icon :icon="sortDirection === 'asc' ? 'tabler:sort-ascending' : 'tabler:sort-descending'" />
+      </Button>
     </div>
 
     <div v-if="rows.length" class="hidden overflow-x-auto rounded-md border border-border/60 md:block">
@@ -175,12 +244,12 @@ function setMobileSort(event: Event): void {
         <thead class="bg-muted/45 text-muted-foreground">
           <tr>
             <th class="w-24 px-3 py-2.5 font-medium">
-              <button type="button" @click="setSort('status')">
+              <button type="button" :disabled="editingOrder" @click="setSort('status')">
                 状态{{ sortMark('status') }}
               </button>
             </th>
             <th class="w-52 px-3 py-2.5 font-medium">
-              <button type="button" @click="setSort('name')">
+              <button type="button" :disabled="editingOrder" @click="setSort('name')">
                 服务器{{ sortMark('name') }}
               </button>
             </th>
@@ -191,7 +260,7 @@ function setMobileSort(event: Event): void {
               系统
             </th>
             <th class="w-32 px-3 py-2.5 font-medium">
-              <button type="button" @click="setSort('cpu')">
+              <button type="button" :disabled="editingOrder" @click="setSort('cpu')">
                 CPU{{ sortMark('cpu') }}
               </button>
             </th>
@@ -199,12 +268,12 @@ function setMobileSort(event: Event): void {
               内存
             </th>
             <th class="w-40 px-3 py-2.5 font-medium">
-              <button type="button" @click="setSort('traffic')">
+              <button type="button" :disabled="editingOrder" @click="setSort('traffic')">
                 实时流量{{ sortMark('traffic') }}
               </button>
             </th>
             <th class="w-40 px-3 py-2.5 font-medium">
-              <button type="button" @click="setSort('updated')">
+              <button type="button" :disabled="editingOrder" @click="setSort('updated')">
                 更新时间{{ sortMark('updated') }}
               </button>
             </th>
@@ -256,12 +325,22 @@ function setMobileSort(event: Event): void {
             </td>
             <td class="px-3 py-3">
               <div class="flex justify-end gap-1">
-                <Button variant="ghost" size="icon-xs" :aria-label="`查看 ${node.name} 详情`" :title="`查看 ${node.name} 详情`" @click="emit('openNode', node)">
-                  <Icon icon="tabler:external-link" />
-                </Button>
-                <Button variant="ghost" size="icon-xs" :aria-label="`运维 ${node.name}`" :title="`运维 ${node.name}`" @click="emit('manageNode', node)">
-                  <Icon icon="tabler:adjustments-horizontal" />
-                </Button>
+                <template v-if="editingOrder">
+                  <Button variant="ghost" size="icon-xs" :disabled="isOrderBoundary(node.uuid, 'first')" :aria-label="`上移 ${node.name}`" :title="`上移 ${node.name}`" @click="moveOrder(node.uuid, -1)">
+                    <Icon icon="tabler:arrow-up" />
+                  </Button>
+                  <Button variant="ghost" size="icon-xs" :disabled="isOrderBoundary(node.uuid, 'last')" :aria-label="`下移 ${node.name}`" :title="`下移 ${node.name}`" @click="moveOrder(node.uuid, 1)">
+                    <Icon icon="tabler:arrow-down" />
+                  </Button>
+                </template>
+                <template v-else>
+                  <Button variant="ghost" size="icon-xs" :aria-label="`查看 ${node.name} 详情`" :title="`查看 ${node.name} 详情`" @click="emit('openNode', node)">
+                    <Icon icon="tabler:external-link" />
+                  </Button>
+                  <Button variant="ghost" size="icon-xs" :aria-label="`运维 ${node.name}`" :title="`运维 ${node.name}`" @click="emit('manageNode', node)">
+                    <Icon icon="tabler:adjustments-horizontal" />
+                  </Button>
+                </template>
               </div>
             </td>
           </tr>
@@ -287,12 +366,22 @@ function setMobileSort(event: Event): void {
             </p>
           </div>
           <div class="flex shrink-0 gap-1">
-            <Button variant="ghost" size="icon-xs" :aria-label="`查看 ${node.name} 详情`" @click="emit('openNode', node)">
-              <Icon icon="tabler:external-link" />
-            </Button>
-            <Button variant="ghost" size="icon-xs" :aria-label="`运维 ${node.name}`" @click="emit('manageNode', node)">
-              <Icon icon="tabler:adjustments-horizontal" />
-            </Button>
+            <template v-if="editingOrder">
+              <Button variant="ghost" size="icon-xs" :disabled="isOrderBoundary(node.uuid, 'first')" :aria-label="`上移 ${node.name}`" @click="moveOrder(node.uuid, -1)">
+                <Icon icon="tabler:arrow-up" />
+              </Button>
+              <Button variant="ghost" size="icon-xs" :disabled="isOrderBoundary(node.uuid, 'last')" :aria-label="`下移 ${node.name}`" @click="moveOrder(node.uuid, 1)">
+                <Icon icon="tabler:arrow-down" />
+              </Button>
+            </template>
+            <template v-else>
+              <Button variant="ghost" size="icon-xs" :aria-label="`查看 ${node.name} 详情`" @click="emit('openNode', node)">
+                <Icon icon="tabler:external-link" />
+              </Button>
+              <Button variant="ghost" size="icon-xs" :aria-label="`运维 ${node.name}`" @click="emit('manageNode', node)">
+                <Icon icon="tabler:adjustments-horizontal" />
+              </Button>
+            </template>
           </div>
         </div>
         <div class="mt-3 grid grid-cols-2 gap-x-3 gap-y-2 border-t border-border/50 pt-2 text-[11px]">

@@ -50,9 +50,20 @@ class InitManager {
   private destroyed = false
   private postFailureCount = 0
   private lastClientsFetchedAt = 0
+  private clientsRefreshPromise: Promise<Record<string, Client>> | null = null
   private isInitialized = false
+  private metadataRefreshListenersAttached = false
   private redirectingToAdmin = false
   private useWebSocket: boolean | null = null // 根据主题配置决定
+  private readonly handleWindowFocus = (): void => {
+    void this.refreshNodeClients().catch(error => console.warn('[InitManager] Failed to refresh node order on focus:', error))
+  }
+
+  private readonly handleVisibilityChange = (): void => {
+    if (document.visibilityState === 'visible')
+      this.handleWindowFocus()
+  }
+
   constructor(config: InitConfig = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config }
     this.rpc = getSharedRpc()
@@ -87,6 +98,7 @@ class InitManager {
 
       // 首次数据请求即使失败，也启动实时连接和轮询以便自动恢复。
       this.startWebSocketAndPolling()
+      this.attachMetadataRefreshListeners()
       this.isInitialized = true
     }
     catch (error) {
@@ -137,6 +149,7 @@ class InitManager {
     const recovered = await this.runStartupRequests()
     if (!this.isInitialized && !this.destroyed && !this.redirectingToAdmin) {
       this.startWebSocketAndPolling()
+      this.attachMetadataRefreshListeners()
       this.isInitialized = true
     }
     return recovered
@@ -223,7 +236,7 @@ class InitManager {
     try {
       // 并行获取节点信息和最新状态
       const [clientsResult, statusesResult] = await Promise.all([
-        this.rpc.getNodes() as Promise<Record<string, Client>>,
+        this.fetchClientsSnapshot(),
         this.rpc.getNodesLatestStatus() as Promise<Record<string, NodeStatus>>,
       ])
 
@@ -235,6 +248,44 @@ class InitManager {
       console.error('[InitManager] Failed to fetch nodes data:', error)
       throw error
     }
+  }
+
+  private fetchClientsSnapshot(): Promise<Record<string, Client>> {
+    if (this.clientsRefreshPromise)
+      return this.clientsRefreshPromise
+
+    const request = this.rpc.getNodes() as Promise<Record<string, Client>>
+    this.clientsRefreshPromise = request.finally(() => {
+      this.clientsRefreshPromise = null
+    })
+    return this.clientsRefreshPromise
+  }
+
+  async refreshNodeClients(): Promise<void> {
+    if (this.destroyed || this.redirectingToAdmin)
+      return
+
+    const clients = await this.fetchClientsSnapshot()
+    if (this.destroyed)
+      return
+    this.nodesStore.updateNodeClients(clients)
+    this.lastClientsFetchedAt = Date.now()
+  }
+
+  private attachMetadataRefreshListeners(): void {
+    if (this.metadataRefreshListenersAttached)
+      return
+    window.addEventListener('focus', this.handleWindowFocus)
+    document.addEventListener('visibilitychange', this.handleVisibilityChange)
+    this.metadataRefreshListenersAttached = true
+  }
+
+  private detachMetadataRefreshListeners(): void {
+    if (!this.metadataRefreshListenersAttached)
+      return
+    window.removeEventListener('focus', this.handleWindowFocus)
+    document.removeEventListener('visibilitychange', this.handleVisibilityChange)
+    this.metadataRefreshListenersAttached = false
   }
 
   /**
@@ -407,7 +458,7 @@ class InitManager {
       const [statusesResult, clientsResult] = await Promise.all([
         this.rpc.getNodesLatestStatus() as Promise<Record<string, NodeStatus>>,
         shouldRefreshClients
-          ? this.rpc.getNodes() as Promise<Record<string, Client>>
+          ? this.fetchClientsSnapshot()
           : Promise.resolve(null),
       ])
 
@@ -454,6 +505,7 @@ class InitManager {
   destroy(): void {
     this.destroyed = true
     this.stopPolling()
+    this.detachMetadataRefreshListeners()
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer)
       this.reconnectTimer = null

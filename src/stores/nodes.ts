@@ -400,7 +400,21 @@ const useNodesStore = defineStore('nodes', () => {
    * 按 weight 升序排序节点（weight 越小越靠前）
    */
   function sortNodesByWeight(): void {
-    nodes.value.sort((a, b) => a.weight - b.weight)
+    nodes.value.sort((a, b) => {
+      const result = a.weight - b.weight
+      return result === 0 ? a.name.localeCompare(b.name, 'zh-CN') : result
+    })
+  }
+
+  /** 立即应用管理员保存的全局节点顺序。 */
+  function applyNodeOrder(orderedUuids: string[]): void {
+    const weights = new Map(orderedUuids.map((uuid, index) => [uuid, index]))
+    nodes.value.forEach((node) => {
+      const weight = weights.get(node.uuid)
+      if (weight !== undefined && node.weight !== weight)
+        node.weight = weight
+    })
+    sortNodesByWeight()
   }
 
   /**
@@ -490,6 +504,7 @@ const useNodesStore = defineStore('nodes', () => {
     initNodes,
     updateNodeStatuses,
     updateNodeClients,
+    applyNodeOrder,
     sortNodesByWeight,
     updateWsState,
     clearNodes,
