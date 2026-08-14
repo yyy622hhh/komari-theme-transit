@@ -17,7 +17,7 @@
 - 实现：主题清单、公开页脚、后台品牌、构建包和 Release 工作流统一使用 Transit；README 包含安装、功能、拓扑格式、开发、后台复现、隐私与上游致谢；加入 4 张真实产品截图、1280x720 主题预览和可在官方 `komari-web` 基线 `4a74e8a` 上通过 `git apply` 复现的后台补丁。保留 PandaOps 内部类型、存储键和 CSS 类名，避免破坏已部署用户的设置兼容性。
 - 后台源码：同级 `komari-web` 分支 `codex/transit-admin`，提交 `b442e15`；lint 为 0 errors / 25 个上游既有 warnings，生产构建通过，嵌入元数据记录同一源码提交。
 - 验证：`bun run lint`、`bun run type-check`、`bun run build-only`、`git diff --check` 全部通过；最终完整 Playwright 视觉与交互回归 33/33 通过；后台补丁在临时检出基线上通过 `git apply --check`。
-- 发布：主题内容提交 `d6bf189`；通过 merge 提交 `6442745` 保留目标仓库原有 `e00918d` 占位历史，没有强推，也没有修改 origin/upstream。远端 `refs/heads/main` 已核对为 `6442745ede9998eb925706880ae66466421d8685`。验证包 `komari-theme-Transit-build-6442745.zip` 的 SHA-256 为 `e7cfb642cfc543ebcdf598138c60be0aef89fb8f3a65cad65d0bef522efa28d6`。
+- 发布：主题内容提交 `d6bf189`；通过 merge 提交 `6442745` 保留目标仓库原有 `e00918d` 占位历史，没有强推，也没有修改 origin/upstream。功能发布锚点为 `6442745ede9998eb925706880ae66466421d8685`，其后的提交只更新本交接日志。验证包 `komari-theme-Transit-build-6442745.zip` 的 SHA-256 为 `e7cfb642cfc543ebcdf598138c60be0aef89fb8f3a65cad65d0bef522efa28d6`。
 
 - 状态：done，`3.3.5-panda.21` 后台重构已部署到 `monitor.example.com`
 - 目标：把 Komari 官方后台重构成可日常使用的 PandaOps 运维控制台，并保持设置页为独立页面，不改变现有路由、接口和权限边界。
