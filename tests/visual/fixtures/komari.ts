@@ -299,6 +299,12 @@ async function handleRpc(route: Route, clientFixtures = clients, options: Visual
     case 'common:getNodesLatestStatus':
       result = statuses
       break
+    case 'common:getVersion':
+      result = { version: '1.2.6-visual', hash: 'visual' }
+      break
+    case 'admin:listPlugins':
+      result = []
+      break
     case 'common:getNodeRecentStatus':
       result = { count: 48, records: buildRecords(uuid) }
       break
@@ -414,9 +420,11 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
       : '',
   }
 
-  await page.addInitScript(({ fixedNow }) => {
+  await page.addInitScript(({ fixedNow, dark }) => {
     localStorage.clear()
     sessionStorage.clear()
+    localStorage.setItem('appearance', dark ? 'dark' : 'light')
+    localStorage.setItem('color', 'green')
     const NativeDate = Date
     class FixedDate extends NativeDate {
       constructor(...args: ConstructorParameters<typeof Date>) {
@@ -428,7 +436,7 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
       }
     }
     window.Date = FixedDate as DateConstructor
-  }, { fixedNow: FIXED_NOW })
+  }, { fixedNow: FIXED_NOW, dark: options.dark ?? false })
 
   await page.route('**/api/public', route => route.fulfill({
     contentType: 'application/json',
@@ -457,6 +465,26 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
   await page.route('**/api/me', route => route.fulfill({
     contentType: 'application/json',
     body: JSON.stringify({ logged_in: options.authenticated ?? false, username: options.authenticated ? 'visual-admin' : 'visual-guest' }),
+  }))
+  await page.route('**/api/admin/settings', route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({
+      status: 'success',
+      message: 'ok',
+      data: {
+        sitename: 'Komari Visual Lab',
+        description: '固定虚构节点视觉回归环境',
+        eula_accepted: true,
+        auto_discovery_key: 'VISUAL-TEST-AUTO-DISCOVERY-KEY',
+        geo_ip_enabled: true,
+        geo_ip_provider: 'mmdb',
+        cors_origin_check_enabled: true,
+      },
+    }),
+  }))
+  await page.route('**/api/admin/database/size', route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({ status: 'success', data: { main: { size: 12 * 1024 ** 2 }, monitoring: { size: 486 * 1024 ** 2 } } }),
   }))
   await page.route('**/api/admin/theme/config?short=*', route => route.fulfill({
     contentType: 'application/json',
