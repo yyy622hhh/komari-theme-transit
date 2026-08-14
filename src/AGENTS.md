@@ -1,6 +1,6 @@
 # Source AGENTS.md
 
-This guide applies to [src/](./). For full project context, read [../AIAGENTREADME.md](../AIAGENTREADME.md). For current work handoff, read/update [../AICACHE.md](../AICACHE.md).
+This guide applies to [src/](./). Project contribution and release rules live in [../CONTRIBUTING.md](../CONTRIBUTING.md).
 
 ## Source-tree rule of thumb
 
@@ -116,10 +116,10 @@ Do not rename/move these files without updating helper mappings and checking all
 For source changes, run from repo root:
 
 ```bash
-bun run lint
-bun run build
+bun run lint:check
+bun run type-check
+bun run build-only
+bun run test:visual
 ```
 
-There is no test suite. Do not invent one.
-
-Update [../AICACHE.md](../AICACHE.md) with validation results or explain why validation was skipped.
+Summarize validation results in the Pull Request and note any intentionally skipped checks.

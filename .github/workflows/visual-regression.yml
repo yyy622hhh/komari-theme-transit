@@ -15,8 +15,11 @@ concurrency:
 
 jobs:
   screenshots:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # The committed baselines were generated with Playwright Chromium on macOS.
+    # Running pixel comparisons on the same OS avoids false failures caused by
+    # platform font rasterization while keeping the screenshots deterministic.
+    runs-on: macos-15
+    timeout-minutes: 30
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -30,7 +33,7 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Install Chromium
-        run: bunx playwright install --with-deps chromium
+        run: bunx playwright install chromium
 
       - name: Run visual regression tests
         run: bun run test:visual

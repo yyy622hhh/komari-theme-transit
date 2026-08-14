@@ -22,7 +22,8 @@
     "test:visual": "bun run build-only && playwright test",
     "test:visual:update": "bun run build-only && playwright test --update-snapshots",
     "lint": "eslint . --fix --cache",
-    "lint:eslint": "eslint . --fix --cache"
+    "lint:eslint": "eslint . --fix --cache",
+    "lint:check": "eslint ."
   },
   "dependencies": {
     "@iconify/vue": "^4.3.0",

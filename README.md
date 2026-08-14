@@ -3,7 +3,8 @@
 > A topology-first network operations theme for Komari.
 
 [![Release](https://img.shields.io/github/v/release/yyy622hhh/komari-theme-transit?style=flat-square&color=10b981)](https://github.com/yyy622hhh/komari-theme-transit/releases)
-[![Build](https://img.shields.io/github/actions/workflow/status/yyy622hhh/komari-theme-transit/release-on-version-bump.yml?branch=main&style=flat-square)](https://github.com/yyy622hhh/komari-theme-transit/actions)
+[![Quality](https://img.shields.io/github/actions/workflow/status/yyy622hhh/komari-theme-transit/quality.yml?branch=main&style=flat-square&label=quality)](https://github.com/yyy622hhh/komari-theme-transit/actions/workflows/quality.yml)
+[![Visual Regression](https://img.shields.io/github/actions/workflow/status/yyy622hhh/komari-theme-transit/visual-regression.yml?branch=main&style=flat-square&label=visual)](https://github.com/yyy622hhh/komari-theme-transit/actions/workflows/visual-regression.yml)
 [![License](https://img.shields.io/github/license/yyy622hhh/komari-theme-transit?style=flat-square)](LICENSE)
 [![Vue 3](https://img.shields.io/badge/Vue-3-42b883?style=flat-square&logo=vuedotjs&logoColor=white)](https://vuejs.org/)
 
@@ -41,6 +42,19 @@ Transit 是一个面向多节点、多线路和跨境链路监控的 Komari 社�
 
 Transit 使用独立短名称 `Transit`，可以与已有的 PandaOps 或 Glassmorphism 主题配置并存。
 
+升级前建议先在 Komari 后台导出当前主题设置。若新版不符合预期，重新上传并启用上一版 Release 即可回滚；Transit 不修改 Komari 数据库结构或 Agent 配置。
+
+## 兼容性
+
+| 项目   | 支持范围                                                                   |
+| ------ | -------------------------------------------------------------------------- |
+| Komari | 重点验证 `1.2.6`；保留 `1.2.5` 旧 records 接口回退；更早版本不保证完整功能 |
+| 浏览器 | Chromium 为正式验证目标；最新稳定版 Edge、Safari、Firefox按尽力兼容处理    |
+| 设备   | 桌面与移动端响应式布局，最低验证宽度 390px                                 |
+| 升级   | 同一 `Transit` 短名称下保留托管主题设置；发布包不修改服务端数据库与 Agent  |
+
+Komari 新增接口时，Transit 会优先使用 Metric Store；接口不可用时再回退到兼容 records 路径。完整适配说明见 [Komari 1.2.6 主题适配](docs/Komari-1.2.6-theme-adaptation.md)。
+
 ## 拓扑配置
 
 推荐登录后使用首页的“管理”按钮配置。需要手工维护时，主题仍支持文本格式：
@@ -59,14 +73,16 @@ Transit 使用独立短名称 `Transit`，可以与已有的 PandaOps 或 Glassm
 需要 Node.js 20.19+ 或 22.12+，并建议使用项目声明的 Bun 版本。
 
 ```bash
-bun install
+bun install --frozen-lockfile
 bun run dev
-bun run lint
+bun run lint:check
 bun run type-check
 bun run build-only
-bunx playwright test
+bun run test:visual
 bun run build
 ```
+
+像素基准由 Playwright Chromium 在 macOS 环境维护；Linux CI 另外执行 lint、类型检查和生产构建。更新截图基准前请人工确认差异确实是预期设计变化。
 
 `bun run build` 会生成：
 
@@ -98,6 +114,14 @@ Transit 是社区二次开发项目，不是 Komari 官方主题。感谢以下�
 - [komari-theme-Glassmorphism-three-network](https://github.com/vlongx/komari-theme-Glassmorphism-three-network) - 三网 Ping 展示与后续二开基础。
 
 在这些项目的基础上，Transit 重新设计了网络拓扑、节点卡片、告警体系、采样交互、亮暗主题和管理后台。感谢所有上游贡献者。
+
+## 参与与支持
+
+- 使用问题和方案讨论请使用 [GitHub Discussions](https://github.com/yyy622hhh/komari-theme-transit/discussions)。
+- 可复现缺陷请按 [Issue 模板](https://github.com/yyy622hhh/komari-theme-transit/issues/new/choose) 提交，并先打码 IP、域名和日志中的私密信息。
+- 贡献代码前请阅读 [CONTRIBUTING.md](CONTRIBUTING.md)。
+- 安全问题请遵循 [SECURITY.md](SECURITY.md)，不要公开披露漏洞或敏感运行信息。
+- 版本变化记录见 [CHANGELOG.md](CHANGELOG.md)。
 
 ## 许可证
 

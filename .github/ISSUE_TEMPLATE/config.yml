@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 使用问题与讨论
+    url: https://github.com/yyy622hhh/komari-theme-transit/discussions
+    about: 安装、配置和一般使用问题请优先在 Discussions 交流。
+  - name: 安全问题
+    url: https://github.com/yyy622hhh/komari-theme-transit/security/advisories/new
+    about: 涉及安全或隐私的问题请勿公开提交 Issue。

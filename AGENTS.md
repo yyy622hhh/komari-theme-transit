@@ -1,30 +1,26 @@
 # AGENTS.md
 
-Root-scope guide for AI agents working in `komari-theme-transit`.
-
-For the complete AI/developer manual, read [AIAGENTREADME.md](AIAGENTREADME.md). For persistent task handoff and progress tracking, read and update [AICACHE.md](AICACHE.md).
+Root-scope development guide for `komari-theme-transit`.
 
 ## Snapshot
 
-- Updated: 2026-07-12
+- Updated: 2026-08-14
 - Branch: `main`
 - App: Vue 3 + Vite + reka-ui + Tailwind CSS v4 theme for Komari Monitor
-- Package manager: `bun` >= 1.2
+- Package manager: `bun` 1.3.14 with a committed lockfile
 - Theme manifest and version source: [komari-theme.json](komari-theme.json)
 
 ## Required workflow for agents
 
-1. Read [AIAGENTREADME.md](AIAGENTREADME.md).
-2. Read [AICACHE.md](AICACHE.md) and preserve/update useful handoff notes.
-3. Check the nearest scoped `AGENTS.md`; [src/AGENTS.md](src/AGENTS.md) overrides this file for app source.
-4. Before broad edits, identify the milestone class:
+1. Check the nearest scoped `AGENTS.md`; [src/AGENTS.md](src/AGENTS.md) overrides this file for app source.
+2. Before broad edits, identify the milestone class:
    - M2 performance only
    - M3 security/permissions only
    - M4 UI/UX only
    - M5 new feature
    - M6 docs/tests/DX
-5. For multi-file or interruptible work, record plan/progress/results in [AICACHE.md](AICACHE.md).
-6. Validate with `bun run lint` and `bun run build` unless the change is docs-only or you explicitly record why validation was skipped.
+3. Validate with `bun run lint:check`, `bun run type-check` and `bun run build-only`; UI changes also run `bun run test:visual`.
+4. Use [CONTRIBUTING.md](CONTRIBUTING.md) for the public contribution and release checklist.
 
 ## What this repo builds
 
@@ -44,16 +40,17 @@ Run from repo root only:
 ```bash
 bun run dev
 bun run lint
+bun run lint:check
+bun run type-check
+bun run test:visual
 bun run build
 bun run preview
 ```
 
-There is no test suite. Do not invent `bun test` / Vitest commands.
-
 ## Root map
 
-- [AIAGENTREADME.md](AIAGENTREADME.md) — full AI/developer guide, architecture, development paths.
-- [AICACHE.md](AICACHE.md) — persistent AI work cache and handoff log.
+- [CONTRIBUTING.md](CONTRIBUTING.md) — contribution workflow, validation and release rules.
+- [SECURITY.md](SECURITY.md) — supported versions and private reporting path.
 - [src/](src/) — Vue app source.
 - [src/AGENTS.md](src/AGENTS.md) — source-tree agent rules.
 - [docs/](docs/) — architecture, auth, cache, data flow, migration, milestones.
@@ -70,7 +67,7 @@ New app code must follow:
 Component -> Composable -> Service -> RequestManager / CacheService -> API / RPC
 ```
 
-Detailed rules are in [AIAGENTREADME.md](AIAGENTREADME.md) and [src/AGENTS.md](src/AGENTS.md).
+Detailed source rules are in [src/AGENTS.md](src/AGENTS.md); architecture details live under [docs/](docs/).
 
 Quick placement guide:
 

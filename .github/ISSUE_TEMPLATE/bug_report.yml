@@ -1,0 +1,69 @@
+name: Bug 报告
+description: 报告可复现的功能、显示或兼容性问题
+title: '[Bug] '
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈。请先确认问题在最新 Transit Release 中仍可复现，并移除截图、日志中的 IP、域名和密钥。
+  - type: input
+    id: transit-version
+    attributes:
+      label: Transit 版本
+      placeholder: 例如 1.0.0
+    validations:
+      required: true
+  - type: input
+    id: komari-version
+    attributes:
+      label: Komari 版本
+      placeholder: 例如 1.2.6
+    validations:
+      required: true
+  - type: dropdown
+    id: browser
+    attributes:
+      label: 浏览器
+      options:
+        - Chrome / Chromium
+        - Edge
+        - Safari
+        - Firefox
+        - 其他
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      placeholder: 请列出从安装或打开页面到问题出现的完整步骤。
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期结果
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际结果
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 截图或日志
+      description: 请先打码 IP、域名、Cookie、Token 和其他私密信息。
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 我使用的是最新 Release，并已搜索过现有 Issue。
+          required: true
+        - label: 我确认提交内容不包含密码、密钥、Token 或未打码的私有地址。
+          required: true
