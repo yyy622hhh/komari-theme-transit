@@ -12,11 +12,12 @@
 
 ## 当前任务
 
-- 状态：in-progress，`3.3.5-panda.21` 后台重构已完成本地验证，待部署到 `monitor.example.com`
+- 状态：done，`3.3.5-panda.21` 后台重构已部署到 `monitor.example.com`
 - 目标：把 Komari 官方后台重构成可日常使用的 PandaOps 运维控制台，并保持设置页为独立页面，不改变现有路由、接口和权限边界。
 - 实现：新增分组侧栏、面包屑、可用的 `Cmd/Ctrl+K` 命令搜索、实时服务器状态表、离线/丢包/到期关注项；站点设置页增加独立标题和说明结构，通用设置按自动发现与 GeoIP 分组；深浅主题、桌面和移动端使用同一套高密度布局。英文和简体中文新增文案均已补齐。
 - 源码：官方 `komari-web` 二开保存在同级仓库分支 `codex/pandaops-admin`，提交 `7197fcf`；嵌入元数据记录源码提交、分支和 PandaOps 定制标识，避免只保留压缩产物。
 - 验证：`komari-web` lint 0 errors（上游既有 25 warnings）和生产构建通过；主题完整 Playwright 回归 33/33 通过，覆盖后台深浅色、桌面/移动端、独立设置页、命令菜单及既有探针首页、拓扑和详情页。
+- 发布：主题提交 `135f726`，构建包 `komari-theme-PandaOps-build-135f726.zip`，本机与服务器 SHA-256 均为 `0d0a804d00112e299ea3fa126b3cc1b4ee6a4f88aac9ab2c67f4c586e232980d`。旧活动目录原子移动到 `/var/lib/komari/backups/PandaOps-panda20-before-panda21-20260814`；重启后的首次探测短暂失败，后续重试成功，未触发回滚。Komari 服务 active，本机首页与公网首页、`/admin`、后台 CSS、源码元数据均为 200；公网已加载 `entry-index-XPtAu2wN.js`、`chunk-dashboard-CRj0W1WM.js`、`chunk-general-D1-C5qus.js` 和 `chunk-_layout-CwlI9Ngp.js`。
 
 - 状态：done，`3.3.5-panda.20` 已部署到 `monitor.example.com`
 - 目标：在现有线路健康分之上增加智能基线、24 小时/7 天线路可靠性和同方向线路排名，让拓扑直接辅助选线。
