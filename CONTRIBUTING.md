@@ -5,7 +5,7 @@
 ## 开始之前
 
 1. 搜索现有 Issue 和 Pull Request，避免重复工作。
-2. 较大的功能或会改变配置格式的方案，请先开 Discussion 或 Issue 对齐方向。
+2. 较大的功能或会改变配置格式的方案，请先开 Issue 对齐方向。
 3. Bug 修复请写清 Transit、Komari 和浏览器版本以及最小复现步骤。
 4. 不要提交密码、Cookie、Token、真实服务器地址、未打码截图或私有运行日志。
 

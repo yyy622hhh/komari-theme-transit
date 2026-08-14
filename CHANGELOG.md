@@ -10,6 +10,11 @@
 - 视觉测试失败会生成 GitHub Actions 原生注解，直接标出失败用例与截图比较详情。
 - 兼容 Chromium 对相同浅色节点背景的 `rgba()` 与 `oklch()` 计算样式序列化结果。
 
+### Documentation
+
+- 重写 README，完整说明可视化拓扑管理器、实时 Ping 绑定、入口探测点、运维工具、Transit 管理端接入、PandaOps 迁移与常见问题。
+- 新增拓扑管理器实机截图，并移除尚未启用的 GitHub Discussions 链接。
+
 ## [1.0.1] - 2026-08-14
 
 ### Added
