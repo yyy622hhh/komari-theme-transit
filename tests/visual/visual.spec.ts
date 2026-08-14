@@ -3,9 +3,26 @@ import { expect, test } from '@playwright/test'
 import { installKomariFixture } from './fixtures/komari'
 
 const STABLE_STYLE = `
+  @font-face {
+    font-family: 'Transit Visual Fixture';
+    font-style: normal;
+    font-weight: 100 900;
+    font-display: block;
+    src: url('/__transit-visual-font-latin.woff2') format('woff2-variations');
+    unicode-range: U+0000-024F;
+  }
+  @font-face {
+    font-family: 'Transit Visual Fixture';
+    font-style: normal;
+    font-weight: 400;
+    font-display: block;
+    src: url('/__transit-visual-font-chinese.woff2') format('woff2');
+    unicode-range: U+2E80-9FFF, U+F900-FAFF, U+FF00-FFEF;
+  }
   *, *::before, *::after {
     animation: none !important;
     caret-color: transparent !important;
+    font-family: 'Transit Visual Fixture', sans-serif !important;
     transition: none !important;
   }
   html { scroll-behavior: auto !important; }
@@ -17,6 +34,12 @@ async function openStablePage(page: Page, path = '/'): Promise<void> {
   await page.goto(path)
   await expect(page.getByRole('heading', { name: 'Komari Visual Lab' })).toBeVisible()
   await page.addStyleTag({ content: STABLE_STYLE })
+  await page.evaluate(async () => {
+    await document.fonts.load('400 16px "Transit Visual Fixture"', '线路 Transit')
+    await document.fonts.ready
+  })
+  await expect(page.locator('body')).toHaveCSS('font-family', /Transit Visual Fixture/)
+  await expect.poll(() => page.evaluate(() => document.fonts.check('400 16px "Transit Visual Fixture"', '线路 Transit'))).toBe(true)
   await page.waitForTimeout(700)
   await expect(page.locator('html')).toHaveJSProperty('scrollWidth', await page.locator('html').evaluate(element => element.clientWidth))
 }

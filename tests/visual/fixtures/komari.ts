@@ -1,4 +1,10 @@
 import type { Page, Route } from '@playwright/test'
+import { fileURLToPath } from 'node:url'
+
+const VISUAL_FONT_FILES = {
+  chinese: fileURLToPath(new URL('../../../node_modules/@fontsource/noto-sans-sc/files/noto-sans-sc-chinese-simplified-400-normal.woff2', import.meta.url)),
+  latin: fileURLToPath(new URL('../../../node_modules/@fontsource-variable/noto-sans-sc/files/noto-sans-sc-latin-wght-normal.woff2', import.meta.url)),
+}
 
 const FIXED_NOW = '2026-07-25T12:00:00.000Z'
 const GIB = 1024 ** 3
@@ -387,6 +393,15 @@ async function handleRpc(route: Route, clientFixtures = clients, options: Visual
 }
 
 export async function installKomariFixture(page: Page, options: VisualFixtureOptions = {}): Promise<void> {
+  await page.route('**/__transit-visual-font-chinese.woff2', route => route.fulfill({
+    path: VISUAL_FONT_FILES.chinese,
+    contentType: 'font/woff2',
+  }))
+  await page.route('**/__transit-visual-font-latin.woff2', route => route.fulfill({
+    path: VISUAL_FONT_FILES.latin,
+    contentType: 'font/woff2',
+  }))
+
   const clientFixtures = options.freePriceNode || options.expiryThresholds
     ? buildClients(options.freePriceNode, options.expiryThresholds)
     : clients
