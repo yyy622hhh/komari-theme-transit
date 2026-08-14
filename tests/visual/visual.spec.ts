@@ -92,6 +92,16 @@ test('home dark mobile', async ({ page }) => {
   await expect(page).toHaveScreenshot('home-dark-mobile.png', { fullPage: false })
 })
 
+test('announcement renders literal symbols without double escaping', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 })
+  await installKomariFixture(page, { announcementEscaping: true })
+  await openStablePage(page)
+
+  const announcement = page.getByText('Status <green> & healthy', { exact: true })
+  await expect(announcement).toBeVisible()
+  await expect(announcement).toHaveText('Status <green> & healthy')
+})
+
 test('Transit light desktop uses light surfaces and readable telemetry', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await installKomariFixture(page, { pandaOps: true })

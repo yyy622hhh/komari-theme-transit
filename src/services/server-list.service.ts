@@ -53,17 +53,44 @@ function getUpdatedTimestamp(node: NodeData): number {
   return Number.isFinite(timestamp) ? timestamp : 0
 }
 
-function getOfficialWeight(node: NodeData): number {
+function getOfficialWeight(node: Pick<NodeData, 'weight'>): number {
   return Number.isFinite(node.weight) ? node.weight : Number.MAX_SAFE_INTEGER
 }
 
-export function compareOfficialServerOrder(left: NodeData, right: NodeData): number {
+export function compareOfficialServerOrder(
+  left: Pick<NodeData, 'name' | 'weight'>,
+  right: Pick<NodeData, 'name' | 'weight'>,
+): number {
   const result = getOfficialWeight(left) - getOfficialWeight(right)
   return result === 0 ? left.name.localeCompare(right.name, 'zh-CN') : result
 }
 
 export function sortServersByOfficialOrder(nodes: NodeData[]): NodeData[] {
   return [...nodes].sort(compareOfficialServerOrder)
+}
+
+/** Keep an in-progress order complete when the live node set changes. */
+export function reconcileServerOrder(
+  orderedUuids: string[],
+  nodes: Array<Pick<NodeData, 'name' | 'uuid' | 'weight'>>,
+): string[] {
+  const currentUuids = new Set(nodes.map(node => node.uuid))
+  const reconciled: string[] = []
+  const included = new Set<string>()
+
+  for (const uuid of orderedUuids) {
+    if (currentUuids.has(uuid) && !included.has(uuid)) {
+      reconciled.push(uuid)
+      included.add(uuid)
+    }
+  }
+
+  const appended = nodes
+    .filter(node => !included.has(node.uuid))
+    .sort(compareOfficialServerOrder)
+    .map(node => node.uuid)
+
+  return [...reconciled, ...appended]
 }
 
 function compareNodeValue(

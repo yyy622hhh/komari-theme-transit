@@ -7,6 +7,7 @@ import type { NodeData } from '@/stores/nodes'
 import { computed, ref, toValue } from 'vue'
 import {
   filterAndSortServerList,
+  reconcileServerOrder,
   saveServerOrder,
   sortServersByOfficialOrder,
   summarizeServerList,
@@ -33,11 +34,13 @@ export function useServerList(nodes: MaybeRefOrGetter<NodeData[]>) {
 
   const summary = computed(() => summarizeServerList(toValue(nodes), maintenanceIds.value))
 
+  const reconciledOrderDraft = computed(() => reconcileServerOrder(orderDraft.value, toValue(nodes)))
+
   const rows = computed(() => {
     const currentNodes = toValue(nodes)
     if (editingOrder.value) {
       const nodesByUuid = new Map(currentNodes.map(node => [node.uuid, node]))
-      return orderDraft.value
+      return reconciledOrderDraft.value
         .map(uuid => nodesByUuid.get(uuid))
         .filter((node): node is NodeData => Boolean(node))
     }
@@ -55,7 +58,8 @@ export function useServerList(nodes: MaybeRefOrGetter<NodeData[]>) {
     if (!editingOrder.value)
       return false
     const currentOrder = sortServersByOfficialOrder(toValue(nodes)).map(node => node.uuid)
-    return currentOrder.some((uuid, index) => orderDraft.value[index] !== uuid)
+    const draft = reconciledOrderDraft.value
+    return currentOrder.length !== draft.length || currentOrder.some((uuid, index) => draft[index] !== uuid)
   })
 
   function setSort(key: ServerListSortKey): void {
@@ -100,12 +104,13 @@ export function useServerList(nodes: MaybeRefOrGetter<NodeData[]>) {
   }
 
   function moveOrder(uuid: string, offset: -1 | 1): void {
-    const currentIndex = orderDraft.value.indexOf(uuid)
+    const currentOrder = reconciledOrderDraft.value
+    const currentIndex = currentOrder.indexOf(uuid)
     const nextIndex = currentIndex + offset
-    if (currentIndex < 0 || nextIndex < 0 || nextIndex >= orderDraft.value.length)
+    if (currentIndex < 0 || nextIndex < 0 || nextIndex >= currentOrder.length)
       return
 
-    const nextOrder = [...orderDraft.value]
+    const nextOrder = [...currentOrder]
     const [nodeUuid] = nextOrder.splice(currentIndex, 1)
     if (!nodeUuid)
       return
@@ -114,8 +119,9 @@ export function useServerList(nodes: MaybeRefOrGetter<NodeData[]>) {
   }
 
   function isOrderBoundary(uuid: string, boundary: 'first' | 'last'): boolean {
-    const index = orderDraft.value.indexOf(uuid)
-    return boundary === 'first' ? index <= 0 : index === orderDraft.value.length - 1
+    const currentOrder = reconciledOrderDraft.value
+    const index = currentOrder.indexOf(uuid)
+    return boundary === 'first' ? index <= 0 : index === currentOrder.length - 1
   }
 
   async function persistOrder(): Promise<void> {
@@ -123,8 +129,9 @@ export function useServerList(nodes: MaybeRefOrGetter<NodeData[]>) {
       return
     savingOrder.value = true
     try {
-      await saveServerOrder(orderDraft.value)
-      nodesStore.applyNodeOrder(orderDraft.value)
+      const order = reconciledOrderDraft.value
+      await saveServerOrder(order)
+      nodesStore.applyNodeOrder(order)
       cancelOrderEdit()
     }
     finally {

@@ -408,11 +408,25 @@ const useNodesStore = defineStore('nodes', () => {
 
   /** 立即应用管理员保存的全局节点顺序。 */
   function applyNodeOrder(orderedUuids: string[]): void {
-    const weights = new Map(orderedUuids.map((uuid, index) => [uuid, index]))
-    nodes.value.forEach((node) => {
-      const weight = weights.get(node.uuid)
-      if (weight !== undefined && node.weight !== weight)
-        node.weight = weight
+    const included = new Set<string>()
+    const orderedNodes: NodeData[] = []
+    for (const uuid of orderedUuids) {
+      const node = nodeIndex.get(uuid)
+      if (!node || included.has(uuid))
+        continue
+      included.add(uuid)
+      orderedNodes.push(node)
+    }
+    const remainingNodes = nodes.value
+      .filter(node => !included.has(node.uuid))
+      .sort((left, right) => {
+        const result = left.weight - right.weight
+        return result === 0 ? left.name.localeCompare(right.name, 'zh-CN') : result
+      })
+
+    ;[...orderedNodes, ...remainingNodes].forEach((node, index) => {
+      if (node.weight !== index)
+        node.weight = index
     })
     sortNodesByWeight()
   }

@@ -88,6 +88,14 @@ export class SharedCache<T> {
       this.evict(key, entry)
   }
 
+  deleteIfValue(key: string, value: T): boolean {
+    const entry = this.entries.get(key)
+    if (!entry || entry.value !== value)
+      return false
+    this.evict(key, entry)
+    return true
+  }
+
   clear(): void {
     for (const [key, entry] of this.entries)
       this.evict(key, entry)
@@ -154,14 +162,9 @@ export class PromiseCache<T> {
       throw error
     }
 
-    const promise = sourcePromise
-      .catch((error) => {
-        this.cache.delete(key)
-        throw error
-      })
-      .finally(() => {
-        this.cache.delete(key)
-      })
+    const promise = sourcePromise.finally(() => {
+      this.cache.deleteIfValue(key, promise)
+    })
     this.cache.set(key, promise)
     return promise
   }

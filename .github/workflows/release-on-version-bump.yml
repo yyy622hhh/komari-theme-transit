@@ -111,6 +111,10 @@ jobs:
         run: |
           echo "komari-theme.json version has not changed and ${{ steps.version.outputs.release_tag }} already exists. Skipping release."
 
+      - name: Unit tests
+        if: steps.version.outputs.version_changed == 'true' || steps.tag.outputs.exists == 'false'
+        run: bun run test:unit
+
       - name: Build project
         if: steps.version.outputs.version_changed == 'true' || steps.tag.outputs.exists == 'false'
         run: bun run build

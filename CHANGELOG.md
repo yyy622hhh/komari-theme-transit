@@ -4,6 +4,21 @@
 
 ## [Unreleased]
 
+## [1.0.6] - 2026-08-15
+
+### Fixed
+
+- 修复取消请求后立即发起同键请求时，旧请求完成清理会移除新请求去重状态的竞态。
+- 修复清空 Promise 缓存并立即重建同键值时，旧 Promise 完成后误删新缓存的竞态。
+- 修复公告中的 `&`、`<`、`>` 被 Vue 二次转义并显示为 HTML 实体的问题。
+- 修复编辑服务器顺序期间节点新增或删除时，保存会漏掉新节点或提交已删除节点的问题；本地节点权重现在保持唯一连续。
+- 修复应用销毁时仍在途的轮询响应重新写回已清空节点状态的问题。
+
+### Testing
+
+- 新增请求管理、Promise 缓存和服务器顺序协调单元测试，并将单元测试加入 Quality 与 Release 工作流。
+- 新增公告特殊字符的浏览器回归测试。
+
 ## [1.0.5] - 2026-08-15
 
 ### Changed
@@ -85,7 +100,8 @@
 - 亮暗主题、桌面/移动布局和 Transit 风格内嵌 Komari 管理端。
 - Playwright 视觉与交互回归、自动构建和 GitHub Release 发布流程。
 
-[Unreleased]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.5...HEAD
+[Unreleased]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.6...HEAD
+[1.0.6]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.5...v1.0.6
 [1.0.5]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.4...v1.0.5
 [1.0.4]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.2...v1.0.3

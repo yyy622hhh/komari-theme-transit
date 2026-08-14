@@ -12,9 +12,6 @@ const ITALIC_ASTERISK_REGEX = /^\*([^*]+)\*/
 const ITALIC_UNDERSCORE_REGEX = /^_([^_]+)_/
 const CODE_REGEX = /^`([^`]+)`/
 const NEXT_SPECIAL_REGEX = /[![*_`\n]/
-const AMP_REGEX = /&/g
-const LT_REGEX = /</g
-const GT_REGEX = />/g
 
 interface Token {
   type: 'text' | 'bold' | 'italic' | 'link' | 'image' | 'code' | 'br'
@@ -75,27 +72,20 @@ function parseMarkdown(text: string): Token[] {
 
     const nextSpecial = remaining.search(NEXT_SPECIAL_REGEX)
     if (nextSpecial === -1) {
-      tokens.push({ type: 'text', content: escapeHtml(remaining) })
+      tokens.push({ type: 'text', content: remaining })
       break
     }
     else if (nextSpecial === 0) {
-      tokens.push({ type: 'text', content: escapeHtml(remaining[0]!) })
+      tokens.push({ type: 'text', content: remaining[0]! })
       remaining = remaining.slice(1)
     }
     else {
-      tokens.push({ type: 'text', content: escapeHtml(remaining.slice(0, nextSpecial)) })
+      tokens.push({ type: 'text', content: remaining.slice(0, nextSpecial) })
       remaining = remaining.slice(nextSpecial)
     }
   }
 
   return tokens
-}
-
-function escapeHtml(text: string): string {
-  return text
-    .replace(AMP_REGEX, '&amp;')
-    .replace(LT_REGEX, '&lt;')
-    .replace(GT_REGEX, '&gt;')
 }
 
 function sanitizeMarkdownUrl(url: string | undefined, type: 'link' | 'image'): string | undefined {

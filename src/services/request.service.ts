@@ -53,7 +53,7 @@ export class RequestManager {
     const retryAttempts = options.retryAttempts ?? REQUEST_CONFIG.retry.attempts
     const shouldRetry = options.shouldRetry ?? (() => true)
 
-    const promise = new Promise<T>((resolve, reject) => {
+    const queuedPromise = new Promise<T>((resolve, reject) => {
       this.queue.push({
         key,
         controller,
@@ -65,8 +65,11 @@ export class RequestManager {
         shouldRetry,
       } as QueuedRequest<unknown>)
       this.drainQueue()
-    }).finally(() => {
-      this.pending.delete(key)
+    })
+    const promise = queuedPromise.finally(() => {
+      const current = this.pending.get(key)
+      if (current?.controller === controller)
+        this.pending.delete(key)
     })
 
     this.pending.set(key, { promise, controller })

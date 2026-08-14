@@ -462,6 +462,9 @@ class InitManager {
           : Promise.resolve(null),
       ])
 
+      if (this.destroyed)
+        return
+
       if (clientsResult) {
         this.nodesStore.updateNodeClients(clientsResult)
         this.lastClientsFetchedAt = now
@@ -474,6 +477,9 @@ class InitManager {
       this.appStore.connectionError = false
     }
     catch (error) {
+      if (this.destroyed)
+        return
+
       if (error instanceof RpcError) {
         console.error('[InitManager] Poll RPC error:', error.message)
       }

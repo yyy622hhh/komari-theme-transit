@@ -41,6 +41,7 @@ export interface VisualFixtureOptions {
   visitorInfoEnabled?: boolean
   visitorAuditClientEnabled?: boolean
   visitorAuditSupported?: boolean
+  announcementEscaping?: boolean
 }
 
 function uuidFor(index: number): string {
@@ -409,6 +410,9 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
     ? buildClients(options.freePriceNode, options.expiryThresholds)
     : clients
   const settings = {
+    alertEnabled: options.announcementEscaping ?? false,
+    alertTitle: options.announcementEscaping ? '状态公告' : '',
+    alertContent: options.announcementEscaping ? 'Status <green> & healthy' : '',
     themeMode: options.dark ? 'dark' : 'light',
     dataUpdateInterval: 60,
     rpcTransportMode: 'http',

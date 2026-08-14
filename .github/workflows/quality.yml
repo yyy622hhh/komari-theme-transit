@@ -35,6 +35,9 @@ jobs:
       - name: Type-check
         run: bun run type-check
 
+      - name: Unit tests
+        run: bun run test:unit
+
       - name: Build application
         run: bun run build-only
 
