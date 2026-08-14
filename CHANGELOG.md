@@ -4,6 +4,19 @@
 
 ## [Unreleased]
 
+## [1.0.7] - 2026-08-15
+
+### Changed
+
+- 服务器全局顺序编辑改为抓手拖拽，桌面表格和移动端卡片均支持，保存后继续同步首页与 Komari 官方后台。
+- 拖拽抓手保留键盘上下方向键操作，并使用更大的触控区域改善移动端操作。
+- 拖拽由固定版本 SortableJS 1.15.7 提供，来源为 SortableJS/Sortable，采用 MIT 许可证；Release 内保留完整许可文本。
+
+### Testing
+
+- 浏览器回归使用真实指针手势验证桌面拖拽、移动端拖拽和保存后的权重请求。
+- 新增服务器列表桌面与移动端拖拽编辑态视觉基准。
+
 ## [1.0.6] - 2026-08-15
 
 ### Fixed
@@ -100,7 +113,8 @@
 - 亮暗主题、桌面/移动布局和 Transit 风格内嵌 Komari 管理端。
 - Playwright 视觉与交互回归、自动构建和 GitHub Release 发布流程。
 
-[Unreleased]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.6...HEAD
+[Unreleased]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.7...HEAD
+[1.0.7]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.6...v1.0.7
 [1.0.6]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.5...v1.0.6
 [1.0.5]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.4...v1.0.5
 [1.0.4]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.3...v1.0.4

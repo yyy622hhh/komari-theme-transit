@@ -106,22 +106,20 @@ export function useServerList(nodes: MaybeRefOrGetter<NodeData[]>) {
   function moveOrder(uuid: string, offset: -1 | 1): void {
     const currentOrder = reconciledOrderDraft.value
     const currentIndex = currentOrder.indexOf(uuid)
-    const nextIndex = currentIndex + offset
-    if (currentIndex < 0 || nextIndex < 0 || nextIndex >= currentOrder.length)
+    moveOrderToIndex(currentIndex, currentIndex + offset)
+  }
+
+  function moveOrderToIndex(fromIndex: number, toIndex: number): void {
+    const currentOrder = reconciledOrderDraft.value
+    if (fromIndex < 0 || toIndex < 0 || fromIndex >= currentOrder.length || toIndex >= currentOrder.length || fromIndex === toIndex)
       return
 
     const nextOrder = [...currentOrder]
-    const [nodeUuid] = nextOrder.splice(currentIndex, 1)
+    const [nodeUuid] = nextOrder.splice(fromIndex, 1)
     if (!nodeUuid)
       return
-    nextOrder.splice(nextIndex, 0, nodeUuid)
+    nextOrder.splice(toIndex, 0, nodeUuid)
     orderDraft.value = nextOrder
-  }
-
-  function isOrderBoundary(uuid: string, boundary: 'first' | 'last'): boolean {
-    const currentOrder = reconciledOrderDraft.value
-    const index = currentOrder.indexOf(uuid)
-    return boundary === 'first' ? index <= 0 : index === currentOrder.length - 1
   }
 
   async function persistOrder(): Promise<void> {
@@ -143,8 +141,8 @@ export function useServerList(nodes: MaybeRefOrGetter<NodeData[]>) {
     beginOrderEdit,
     cancelOrderEdit,
     editingOrder,
-    isOrderBoundary,
     moveOrder,
+    moveOrderToIndex,
     orderDirty,
     persistOrder,
     query,

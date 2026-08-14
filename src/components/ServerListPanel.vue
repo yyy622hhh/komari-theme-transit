@@ -2,13 +2,14 @@
 import type { ServerListSortKey, ServerListStatusFilter } from '@/services/server-list.service'
 import type { NodeData } from '@/stores/nodes'
 import { Icon } from '@iconify/vue'
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Empty } from '@/components/ui/empty'
 import { Input } from '@/components/ui/input'
 import { ProgressThin } from '@/components/ui/progress-thin'
 import { useServerList } from '@/composables/useServerList'
+import { useSortableOrder } from '@/composables/useSortableOrder'
 import { useAppStore } from '@/stores/app'
 import {
   formatBytesPerSecondWithConfig,
@@ -33,8 +34,8 @@ const {
   beginOrderEdit,
   cancelOrderEdit,
   editingOrder,
-  isOrderBoundary,
   moveOrder,
+  moveOrderToIndex,
   orderDirty,
   persistOrder,
   query,
@@ -49,6 +50,14 @@ const {
   summary,
   toggleSortDirection,
 } = useServerList(() => props.nodes)
+
+const desktopOrderContainer = ref<HTMLElement | null>(null)
+const mobileOrderContainer = ref<HTMLElement | null>(null)
+useSortableOrder(
+  [desktopOrderContainer, mobileOrderContainer],
+  () => editingOrder.value && rows.value.length > 1,
+  moveOrderToIndex,
+)
 
 const statusOptions = computed<Array<{ key: ServerListStatusFilter, label: string, count: number }>>(() => [
   { key: 'all', label: '全部', count: summary.value.total },
@@ -168,7 +177,7 @@ async function saveOrder(): Promise<void> {
 
     <div v-if="editingOrder" class="flex flex-col gap-2 border-b border-border/60 pb-3 sm:flex-row sm:items-center sm:justify-between">
       <p class="text-xs text-muted-foreground">
-        使用每行的上下箭头调整全局顺序；保存后首页和官方后台同步更新。
+        首页与官方后台共用此全局顺序。
       </p>
       <div class="flex shrink-0 gap-2">
         <Button variant="ghost" size="sm" :disabled="savingOrder" @click="cancelOrderEdit">
@@ -282,8 +291,14 @@ async function saveOrder(): Promise<void> {
             </th>
           </tr>
         </thead>
-        <tbody class="divide-y divide-border/50">
-          <tr v-for="node in rows" :key="node.uuid" class="bg-background/25 transition-colors hover:bg-background/60">
+        <tbody ref="desktopOrderContainer" class="divide-y divide-border/50">
+          <tr
+            v-for="node in rows"
+            :key="node.uuid"
+            :data-server-order-item="editingOrder ? node.uuid : undefined"
+            class="bg-background/25 transition-[background-color,opacity,box-shadow] hover:bg-background/60"
+            :class="editingOrder && 'select-none'"
+          >
             <td class="px-3 py-3">
               <Badge variant="outline" class="gap-1 rounded-md px-1.5 text-[11px]" :class="getNodeStatus(node).class">
                 <span class="size-1.5 rounded-full" :class="getNodeStatus(node).dot" />
@@ -326,11 +341,17 @@ async function saveOrder(): Promise<void> {
             <td class="px-3 py-3">
               <div class="flex justify-end gap-1">
                 <template v-if="editingOrder">
-                  <Button variant="ghost" size="icon-xs" :disabled="isOrderBoundary(node.uuid, 'first')" :aria-label="`上移 ${node.name}`" :title="`上移 ${node.name}`" @click="moveOrder(node.uuid, -1)">
-                    <Icon icon="tabler:arrow-up" />
-                  </Button>
-                  <Button variant="ghost" size="icon-xs" :disabled="isOrderBoundary(node.uuid, 'last')" :aria-label="`下移 ${node.name}`" :title="`下移 ${node.name}`" @click="moveOrder(node.uuid, 1)">
-                    <Icon icon="tabler:arrow-down" />
+                  <Button
+                    data-order-drag-handle
+                    variant="ghost"
+                    size="icon-sm"
+                    class="cursor-grab touch-none active:cursor-grabbing"
+                    :aria-label="`拖动 ${node.name}`"
+                    :title="`拖动 ${node.name}`"
+                    @keydown.up.prevent="moveOrder(node.uuid, -1)"
+                    @keydown.down.prevent="moveOrder(node.uuid, 1)"
+                  >
+                    <Icon icon="tabler:grip-vertical" />
                   </Button>
                 </template>
                 <template v-else>
@@ -348,8 +369,14 @@ async function saveOrder(): Promise<void> {
       </table>
     </div>
 
-    <div v-if="rows.length" class="space-y-2 md:hidden">
-      <article v-for="node in rows" :key="node.uuid" class="rounded-md border border-border/60 bg-background/35 p-3">
+    <div v-if="rows.length" ref="mobileOrderContainer" class="space-y-2 md:hidden">
+      <article
+        v-for="node in rows"
+        :key="node.uuid"
+        :data-server-order-item="editingOrder ? node.uuid : undefined"
+        class="rounded-md border border-border/60 bg-background/35 p-3 transition-[background-color,opacity,box-shadow]"
+        :class="editingOrder && 'select-none'"
+      >
         <div class="flex items-start gap-2">
           <div class="min-w-0 flex-1">
             <div class="flex min-w-0 items-center gap-2">
@@ -367,11 +394,17 @@ async function saveOrder(): Promise<void> {
           </div>
           <div class="flex shrink-0 gap-1">
             <template v-if="editingOrder">
-              <Button variant="ghost" size="icon-xs" :disabled="isOrderBoundary(node.uuid, 'first')" :aria-label="`上移 ${node.name}`" @click="moveOrder(node.uuid, -1)">
-                <Icon icon="tabler:arrow-up" />
-              </Button>
-              <Button variant="ghost" size="icon-xs" :disabled="isOrderBoundary(node.uuid, 'last')" :aria-label="`下移 ${node.name}`" @click="moveOrder(node.uuid, 1)">
-                <Icon icon="tabler:arrow-down" />
+              <Button
+                data-order-drag-handle
+                variant="ghost"
+                size="icon-sm"
+                class="cursor-grab touch-none active:cursor-grabbing"
+                :aria-label="`拖动 ${node.name}`"
+                :title="`拖动 ${node.name}`"
+                @keydown.up.prevent="moveOrder(node.uuid, -1)"
+                @keydown.down.prevent="moveOrder(node.uuid, 1)"
+              >
+                <Icon icon="tabler:grip-vertical" />
               </Button>
             </template>
             <template v-else>
@@ -402,3 +435,17 @@ async function saveOrder(): Promise<void> {
     <Empty v-if="!rows.length" :description="query.trim() ? '没有匹配的服务器' : '当前筛选下暂无服务器'" class="py-10" />
   </section>
 </template>
+
+<style scoped>
+:global(.server-order-ghost) {
+  opacity: 0.28;
+}
+
+:global(.server-order-chosen) {
+  background-color: color-mix(in srgb, var(--primary) 9%, var(--background));
+}
+
+:global(.server-order-drag) {
+  box-shadow: 0 12px 28px rgb(15 23 42 / 0.2);
+}
+</style>

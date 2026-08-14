@@ -1,4 +1,4 @@
-import type { Page } from '@playwright/test'
+import type { Locator, Page } from '@playwright/test'
 import { expect, test } from '@playwright/test'
 import { installKomariFixture } from './fixtures/komari'
 
@@ -44,6 +44,21 @@ async function openStablePage(page: Page, path = '/'): Promise<void> {
   await expect.poll(() => page.evaluate(() => document.fonts.check('400 16px "Transit Visual Fixture"', '线路 Transit'))).toBe(true)
   await page.waitForTimeout(700)
   await expect(page.locator('html')).toHaveJSProperty('scrollWidth', await page.locator('html').evaluate(element => element.clientWidth))
+}
+
+async function dragOrderHandle(page: Page, handle: Locator, target: Locator): Promise<void> {
+  await handle.scrollIntoViewIfNeeded()
+  await target.scrollIntoViewIfNeeded()
+  const sourceBox = await handle.boundingBox()
+  const targetBox = await target.boundingBox()
+  if (!sourceBox || !targetBox)
+    throw new Error('Drag source or target is not visible')
+
+  await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height, { steps: 4 })
+  await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + targetBox.height * 0.75, { steps: 12 })
+  await page.mouse.up()
 }
 
 async function expectNodeMetricIcons(page: Page): Promise<void> {
@@ -496,7 +511,14 @@ test('Transit server list filters and sorts reactive nodes without the blocked a
 
   await panel.getByRole('combobox', { name: '排序方式' }).selectOption('official')
   await panel.getByRole('button', { name: '编辑首页顺序' }).click()
-  await panel.getByRole('button', { name: '下移 主控-洛杉矶', exact: true }).click()
+  await expect(panel).toHaveScreenshot('server-list-order-edit-desktop.png')
+  const firstOrderHandle = panel.getByRole('button', { name: '拖动 主控-洛杉矶', exact: true })
+  await firstOrderHandle.press('ArrowDown')
+  await expect(panel.locator('tbody tr').first()).toContainText('香港边缘节点-超长名称布局测试')
+  await firstOrderHandle.press('ArrowUp')
+  await expect(panel.locator('tbody tr').first()).toContainText('主控-洛杉矶')
+  await dragOrderHandle(page, firstOrderHandle, panel.locator('tbody tr').nth(1))
+  await expect(panel.locator('tbody tr').first()).toContainText('香港边缘节点-超长名称布局测试')
   await panel.getByRole('button', { name: '保存顺序' }).click()
   await expect.poll(() => savedOrders.length).toBe(1)
   expect(savedOrders[0]?.['00000000-0000-4000-8000-000000000001']).toBe(1)
@@ -530,6 +552,11 @@ test('Transit server list stays contained on mobile', async ({ page }) => {
   await expect(panel).toContainText('伦敦-离线归档')
   await expect(page.locator('html')).toHaveJSProperty('scrollWidth', await page.locator('html').evaluate(element => element.clientWidth))
   await expect(panel).toHaveScreenshot('server-list-mobile.png')
+
+  await panel.getByRole('button', { name: '编辑首页顺序' }).click()
+  await expect(panel.locator('article').first()).toHaveScreenshot('server-list-order-edit-mobile-card.png')
+  await dragOrderHandle(page, panel.getByRole('button', { name: '拖动 主控-洛杉矶', exact: true }), panel.locator('article').nth(1))
+  await expect(panel.locator('article').first()).toContainText('香港边缘节点-超长名称布局测试')
 })
 
 test('health range reloads the selected period and snapshot export downloads real data', async ({ page }) => {
