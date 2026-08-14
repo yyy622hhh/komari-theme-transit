@@ -25,6 +25,12 @@ export function useServerList(nodes: MaybeRefOrGetter<NodeData[]>) {
   const editingOrder = ref(false)
   const savingOrder = ref(false)
   const orderDraft = ref<string[]>([])
+  let viewBeforeOrderEdit: {
+    query: string
+    sortDirection: 'asc' | 'desc'
+    sortKey: ServerListSortKey
+    statusFilter: ServerListStatusFilter
+  } | null = null
 
   const maintenanceIds = computed(() => new Set(
     Object.entries(appStore.pandaOpsNodeControls)
@@ -90,6 +96,15 @@ export function useServerList(nodes: MaybeRefOrGetter<NodeData[]>) {
   }
 
   function beginOrderEdit(): void {
+    if (editingOrder.value)
+      return
+
+    viewBeforeOrderEdit = {
+      query: query.value,
+      sortDirection: sortDirection.value,
+      sortKey: sortKey.value,
+      statusFilter: statusFilter.value,
+    }
     query.value = ''
     statusFilter.value = 'all'
     sortKey.value = 'official'
@@ -101,12 +116,19 @@ export function useServerList(nodes: MaybeRefOrGetter<NodeData[]>) {
   function cancelOrderEdit(): void {
     editingOrder.value = false
     orderDraft.value = []
+    if (viewBeforeOrderEdit) {
+      query.value = viewBeforeOrderEdit.query
+      sortDirection.value = viewBeforeOrderEdit.sortDirection
+      sortKey.value = viewBeforeOrderEdit.sortKey
+      statusFilter.value = viewBeforeOrderEdit.statusFilter
+      viewBeforeOrderEdit = null
+    }
   }
 
-  function moveOrder(uuid: string, offset: -1 | 1): void {
-    const currentOrder = reconciledOrderDraft.value
-    const currentIndex = currentOrder.indexOf(uuid)
-    moveOrderToIndex(currentIndex, currentIndex + offset)
+  function completeOrderEdit(): void {
+    editingOrder.value = false
+    orderDraft.value = []
+    viewBeforeOrderEdit = null
   }
 
   function moveOrderToIndex(fromIndex: number, toIndex: number): void {
@@ -130,7 +152,7 @@ export function useServerList(nodes: MaybeRefOrGetter<NodeData[]>) {
       const order = reconciledOrderDraft.value
       await saveServerOrder(order)
       nodesStore.applyNodeOrder(order)
-      cancelOrderEdit()
+      completeOrderEdit()
     }
     finally {
       savingOrder.value = false
@@ -141,7 +163,6 @@ export function useServerList(nodes: MaybeRefOrGetter<NodeData[]>) {
     beginOrderEdit,
     cancelOrderEdit,
     editingOrder,
-    moveOrder,
     moveOrderToIndex,
     orderDirty,
     persistOrder,

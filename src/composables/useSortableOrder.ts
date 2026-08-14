@@ -16,10 +16,12 @@ export function useSortableOrder(
   }
 
   function handleEnd(event: SortableEvent): void {
-    const { oldIndex, newIndex } = event
-    if (oldIndex === undefined || newIndex === undefined || oldIndex === newIndex)
+    const fromIndex = event.oldDraggableIndex ?? event.oldIndex
+    const toIndex = event.newDraggableIndex ?? event.newIndex
+    if (fromIndex === undefined || toIndex === undefined || fromIndex === toIndex)
       return
-    onMove(oldIndex, newIndex)
+
+    onMove(fromIndex, toIndex)
   }
 
   watch(
@@ -50,6 +52,7 @@ export function useSortableOrder(
           dragClass: 'server-order-drag',
           draggable: '[data-server-order-item]',
           fallbackOnBody: true,
+          forceFallback: true,
           ghostClass: 'server-order-ghost',
           handle: '[data-order-drag-handle]',
           onEnd: handleEnd,

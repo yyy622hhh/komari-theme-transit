@@ -34,7 +34,6 @@ const {
   beginOrderEdit,
   cancelOrderEdit,
   editingOrder,
-  moveOrder,
   moveOrderToIndex,
   orderDirty,
   persistOrder,
@@ -53,10 +52,11 @@ const {
 
 const desktopOrderContainer = ref<HTMLElement | null>(null)
 const mobileOrderContainer = ref<HTMLElement | null>(null)
+const orderAnnouncement = ref('')
 useSortableOrder(
   [desktopOrderContainer, mobileOrderContainer],
   () => editingOrder.value && rows.value.length > 1,
-  moveOrderToIndex,
+  moveOrderWithFeedback,
 )
 
 const statusOptions = computed<Array<{ key: ServerListStatusFilter, label: string, count: number }>>(() => [
@@ -132,7 +132,44 @@ function startOrderEdit(): void {
     window.$message?.warning('请先切换到“全部节点”再编辑首页顺序。')
     return
   }
+  orderAnnouncement.value = ''
   beginOrderEdit()
+}
+
+function announceOrderMove(node: NodeData, toIndex: number): void {
+  orderAnnouncement.value = `${node.name} 已移动到第 ${toIndex + 1} 位，共 ${rows.value.length} 位。`
+}
+
+function moveOrderWithFeedback(fromIndex: number, toIndex: number): void {
+  const node = rows.value[fromIndex]
+  if (!node || fromIndex === toIndex)
+    return
+  moveOrderToIndex(fromIndex, toIndex)
+  announceOrderMove(node, toIndex)
+}
+
+function handleOrderKeydown(event: KeyboardEvent, node: NodeData): void {
+  const fromIndex = rows.value.findIndex(row => row.uuid === node.uuid)
+  if (fromIndex < 0)
+    return
+
+  let toIndex = fromIndex
+  if (event.key === 'ArrowUp')
+    toIndex = fromIndex - 1
+  else if (event.key === 'ArrowDown')
+    toIndex = fromIndex + 1
+  else if (event.key === 'Home')
+    toIndex = 0
+  else if (event.key === 'End')
+    toIndex = rows.value.length - 1
+  else
+    return
+
+  event.preventDefault()
+  if (toIndex < 0 || toIndex >= rows.value.length || toIndex === fromIndex)
+    return
+  moveOrderToIndex(fromIndex, toIndex)
+  announceOrderMove(node, toIndex)
 }
 
 async function saveOrder(): Promise<void> {
@@ -188,6 +225,12 @@ async function saveOrder(): Promise<void> {
           保存顺序
         </Button>
       </div>
+      <p id="server-order-instructions" class="sr-only">
+        使用拖动抓手调整顺序；键盘用户可用上下方向键逐项移动，或用 Home 和 End 移到首尾。
+      </p>
+      <p class="sr-only" aria-live="polite">
+        {{ orderAnnouncement }}
+      </p>
     </div>
 
     <div class="grid grid-cols-2 gap-px overflow-hidden rounded-md border border-border/60 bg-border/60 sm:grid-cols-4">
@@ -293,7 +336,7 @@ async function saveOrder(): Promise<void> {
         </thead>
         <tbody ref="desktopOrderContainer" class="divide-y divide-border/50">
           <tr
-            v-for="node in rows"
+            v-for="(node, index) in rows"
             :key="node.uuid"
             :data-server-order-item="editingOrder ? node.uuid : undefined"
             class="bg-background/25 transition-[background-color,opacity,box-shadow] hover:bg-background/60"
@@ -346,10 +389,10 @@ async function saveOrder(): Promise<void> {
                     variant="ghost"
                     size="icon-sm"
                     class="cursor-grab touch-none active:cursor-grabbing"
-                    :aria-label="`拖动 ${node.name}`"
+                    :aria-label="`拖动 ${node.name}，当前第 ${index + 1} 位，共 ${rows.length} 位`"
+                    aria-describedby="server-order-instructions"
                     :title="`拖动 ${node.name}`"
-                    @keydown.up.prevent="moveOrder(node.uuid, -1)"
-                    @keydown.down.prevent="moveOrder(node.uuid, 1)"
+                    @keydown="handleOrderKeydown($event, node)"
                   >
                     <Icon icon="tabler:grip-vertical" />
                   </Button>
@@ -371,7 +414,7 @@ async function saveOrder(): Promise<void> {
 
     <div v-if="rows.length" ref="mobileOrderContainer" class="space-y-2 md:hidden">
       <article
-        v-for="node in rows"
+        v-for="(node, index) in rows"
         :key="node.uuid"
         :data-server-order-item="editingOrder ? node.uuid : undefined"
         class="rounded-md border border-border/60 bg-background/35 p-3 transition-[background-color,opacity,box-shadow]"
@@ -399,10 +442,10 @@ async function saveOrder(): Promise<void> {
                 variant="ghost"
                 size="icon-sm"
                 class="cursor-grab touch-none active:cursor-grabbing"
-                :aria-label="`拖动 ${node.name}`"
+                :aria-label="`拖动 ${node.name}，当前第 ${index + 1} 位，共 ${rows.length} 位`"
+                aria-describedby="server-order-instructions"
                 :title="`拖动 ${node.name}`"
-                @keydown.up.prevent="moveOrder(node.uuid, -1)"
-                @keydown.down.prevent="moveOrder(node.uuid, 1)"
+                @keydown="handleOrderKeydown($event, node)"
               >
                 <Icon icon="tabler:grip-vertical" />
               </Button>

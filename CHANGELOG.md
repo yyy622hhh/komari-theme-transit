@@ -4,6 +4,18 @@
 
 ## [Unreleased]
 
+## [1.0.8] - 2026-08-15
+
+### Changed
+
+- 服务器排序统一使用 SortableJS fallback 指针路径，减少桌面浏览器原生拖放与移动端触控之间的行为差异。
+- 拖动抓手现在会标明节点当前位置与总数；键盘除上下方向键外，还支持 Home 和 End 快速移到首尾，并通过读屏状态反馈移动结果。
+- 取消顺序编辑后恢复进入编辑前的搜索、状态筛选、排序字段和升降序，不再打断正在查看的列表上下文。
+
+### Testing
+
+- 浏览器回归覆盖同一节点连续多次拖动、拖动与键盘操作混用、取消编辑恢复列表状态，以及最终提交的全局权重。
+
 ## [1.0.7] - 2026-08-15
 
 ### Changed
@@ -113,7 +125,8 @@
 - 亮暗主题、桌面/移动布局和 Transit 风格内嵌 Komari 管理端。
 - Playwright 视觉与交互回归、自动构建和 GitHub Release 发布流程。
 
-[Unreleased]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.7...HEAD
+[Unreleased]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.8...HEAD
+[1.0.8]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.7...v1.0.8
 [1.0.7]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.6...v1.0.7
 [1.0.6]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.5...v1.0.6
 [1.0.5]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.4...v1.0.5

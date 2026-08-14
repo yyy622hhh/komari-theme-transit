@@ -46,7 +46,7 @@ async function openStablePage(page: Page, path = '/'): Promise<void> {
   await expect(page.locator('html')).toHaveJSProperty('scrollWidth', await page.locator('html').evaluate(element => element.clientWidth))
 }
 
-async function dragOrderHandle(page: Page, handle: Locator, target: Locator): Promise<void> {
+async function dragOrderHandle(page: Page, handle: Locator, target: Locator, targetRatio = 0.75): Promise<void> {
   await handle.scrollIntoViewIfNeeded()
   await target.scrollIntoViewIfNeeded()
   const sourceBox = await handle.boundingBox()
@@ -57,8 +57,10 @@ async function dragOrderHandle(page: Page, handle: Locator, target: Locator): Pr
   await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2)
   await page.mouse.down()
   await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height, { steps: 4 })
-  await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + targetBox.height * 0.75, { steps: 12 })
+  await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + targetBox.height * targetRatio, { steps: 12 })
   await page.mouse.up()
+  await page.mouse.move(1, 1)
+  await page.waitForTimeout(200)
 }
 
 async function expectNodeMetricIcons(page: Page): Promise<void> {
@@ -509,14 +511,32 @@ test('Transit server list filters and sorts reactive nodes without the blocked a
   await expect(page.getByRole('dialog', { name: /节点运维/ })).toBeVisible()
   await page.getByRole('dialog', { name: /节点运维/ }).getByRole('button', { name: '关闭' }).click()
 
+  await panel.getByRole('textbox', { name: '搜索服务器' }).fill('东京')
+  await panel.getByRole('button', { name: '编辑首页顺序' }).click()
+  await expect(panel.locator('tbody tr')).toHaveCount(12)
+  await panel.getByRole('button', { name: '取消' }).click()
+  await expect(panel.getByRole('textbox', { name: '搜索服务器' })).toHaveValue('东京')
+  await expect(panel.getByRole('combobox', { name: '排序方式' })).toHaveValue('cpu')
+  await expect(panel.locator('tbody tr')).toHaveCount(2)
+
+  await panel.getByRole('textbox', { name: '搜索服务器' }).fill('')
   await panel.getByRole('combobox', { name: '排序方式' }).selectOption('official')
   await panel.getByRole('button', { name: '编辑首页顺序' }).click()
   await expect(panel).toHaveScreenshot('server-list-order-edit-desktop.png')
-  const firstOrderHandle = panel.getByRole('button', { name: '拖动 主控-洛杉矶', exact: true })
+  const firstOrderHandle = panel.getByRole('button', { name: /^拖动 主控-洛杉矶，/ })
   await firstOrderHandle.press('ArrowDown')
   await expect(panel.locator('tbody tr').first()).toContainText('香港边缘节点-超长名称布局测试')
   await firstOrderHandle.press('ArrowUp')
   await expect(panel.locator('tbody tr').first()).toContainText('主控-洛杉矶')
+  await dragOrderHandle(page, firstOrderHandle, panel.locator('tbody tr').nth(1))
+  await expect(panel.locator('tbody tr').first()).toContainText('香港边缘节点-超长名称布局测试')
+  await expect(firstOrderHandle).toHaveAccessibleName(/当前第 2 位/)
+  await expect(page.locator('.sortable-fallback, .server-order-drag')).toHaveCount(0)
+  await dragOrderHandle(page, firstOrderHandle, panel.locator('tbody tr').nth(3), 0.95)
+  await expect(panel.locator('tbody tr').nth(3)).toContainText('主控-洛杉矶')
+  await firstOrderHandle.press('Home')
+  await expect(panel.locator('tbody tr').first()).toContainText('主控-洛杉矶')
+  await expect(panel).toContainText('主控-洛杉矶 已移动到第 1 位，共 12 位。')
   await dragOrderHandle(page, firstOrderHandle, panel.locator('tbody tr').nth(1))
   await expect(panel.locator('tbody tr').first()).toContainText('香港边缘节点-超长名称布局测试')
   await panel.getByRole('button', { name: '保存顺序' }).click()
@@ -555,7 +575,7 @@ test('Transit server list stays contained on mobile', async ({ page }) => {
 
   await panel.getByRole('button', { name: '编辑首页顺序' }).click()
   await expect(panel.locator('article').first()).toHaveScreenshot('server-list-order-edit-mobile-card.png')
-  await dragOrderHandle(page, panel.getByRole('button', { name: '拖动 主控-洛杉矶', exact: true }), panel.locator('article').nth(1))
+  await dragOrderHandle(page, panel.getByRole('button', { name: /^拖动 主控-洛杉矶，/ }), panel.locator('article').nth(1))
   await expect(panel.locator('article').first()).toContainText('香港边缘节点-超长名称布局测试')
 })
 
