@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+## [1.0.5] - 2026-08-15
+
+### Changed
+
+- Transit 节点卡片左侧状态条补全正常在线的绿色状态；维护或警告保持黄色，严重异常保持红色，离线继续使用遮罩提示。
+- 视觉回归加入真实的健康节点样本，同时覆盖正常、告警和离线状态条。
+
 ## [1.0.4] - 2026-08-15
 
 ### Added
@@ -78,7 +85,8 @@
 - 亮暗主题、桌面/移动布局和 Transit 风格内嵌 Komari 管理端。
 - Playwright 视觉与交互回归、自动构建和 GitHub Release 发布流程。
 
-[Unreleased]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.4...HEAD
+[Unreleased]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.5...HEAD
+[1.0.5]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.4...v1.0.5
 [1.0.4]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.1...v1.0.2

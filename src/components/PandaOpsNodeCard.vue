@@ -74,9 +74,15 @@ function lossTone(loss: string): string {
 const alertTone = computed(() => visibleAlert.value?.severity === 'critical'
   ? 'text-rose-600 dark:text-rose-400'
   : 'text-amber-700 dark:text-amber-300')
-const alertEdgeTone = computed(() => visibleAlert.value?.severity === 'critical'
-  ? 'bg-rose-500/85 dark:bg-rose-400/75'
-  : 'bg-amber-500/90 dark:bg-amber-300/80')
+const statusEdgeTone = computed(() => {
+  if (isMaintenance.value)
+    return 'bg-amber-500/90 dark:bg-amber-300/80'
+  if (visibleAlert.value?.severity === 'critical')
+    return 'bg-rose-500/85 dark:bg-rose-400/75'
+  if (visibleAlert.value)
+    return 'bg-amber-500/90 dark:bg-amber-300/80'
+  return 'bg-emerald-500/85 dark:bg-emerald-400/75'
+})
 </script>
 
 <template>
@@ -93,10 +99,11 @@ const alertEdgeTone = computed(() => visibleAlert.value?.severity === 'critical'
     />
 
     <span
-      v-if="visibleAlert && node.online"
-      data-node-alert-edge
+      v-if="node.online"
+      data-node-status-edge
+      :data-node-alert-edge="visibleAlert ? '' : undefined"
       class="pointer-events-none absolute inset-y-3 left-0 z-1 w-0.5 rounded-r-full"
-      :class="alertEdgeTone"
+      :class="statusEdgeTone"
     />
 
     <header class="panda-node-card__header pointer-events-none relative z-1 min-h-[2.65rem]">

@@ -290,7 +290,7 @@ async function handleRpc(route: Route, clientFixtures = clients, options: Visual
     task_id: task.id,
     client: uuid,
     time: new Date(Date.parse(FIXED_NOW) - (47 - index) * 75_000).toISOString(),
-    value: index % 17 === 0
+    value: uuid !== uuidFor(1) && index % 17 === 0
       ? -1
       : task.name === 'PandaOps-Local-Hop'
         ? 1.1 + Math.sin(index / 4) * 0.15
