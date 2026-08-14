@@ -39,6 +39,7 @@ let authSession: AuthSession = {
   lastVerifiedAt: 0,
 }
 let verifyPromise: Promise<AuthSession> | null = null
+let authSessionRevision = 0
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -67,6 +68,8 @@ export function getCurrentUser(): MeInfo | null {
 }
 
 export function setAuthSessionFromLogin(loggedIn: boolean, user: MeInfo | null = null): AuthSession {
+  authSessionRevision += 1
+  verifyPromise = null
   authSession = {
     status: loggedIn ? 'authenticated' : 'guest',
     authenticated: loggedIn,
@@ -85,10 +88,17 @@ export async function verifyLogin(options: VerifyLoginOptions = {}): Promise<Aut
   if (verifyPromise)
     return verifyPromise
 
-  verifyPromise = getSharedApi().getMe().then((user) => {
+  const revision = authSessionRevision
+  const pendingVerification = getSharedApi().getMe().then((user) => {
+    if (revision !== authSessionRevision)
+      return authSession
+
     authSession = createSessionFromMe(user)
     return authSession
   }).catch((error) => {
+    if (revision !== authSessionRevision)
+      return authSession
+
     authSession = {
       status: 'error',
       authenticated: false,
@@ -98,10 +108,12 @@ export async function verifyLogin(options: VerifyLoginOptions = {}): Promise<Aut
     }
     return authSession
   }).finally(() => {
-    verifyPromise = null
+    if (verifyPromise === pendingVerification)
+      verifyPromise = null
   })
 
-  return verifyPromise
+  verifyPromise = pendingVerification
+  return pendingVerification
 }
 
 export async function requirePermission(permission: PermissionKey, options: VerifyLoginOptions = { force: true }): Promise<PermissionResult> {

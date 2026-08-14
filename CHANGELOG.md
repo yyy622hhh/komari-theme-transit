@@ -4,6 +4,18 @@
 
 ## [Unreleased]
 
+## [1.0.9] - 2026-08-15
+
+### Fixed
+
+- 修复登录校验请求晚于退出或会话刷新返回时，旧响应覆盖最新权限状态的问题；应用启动也统一通过竞态安全的认证服务同步登录状态。
+- 修复 WebSocket 在握手完成前关闭时连接流程永久等待的问题。
+- 修复旧 WebSocket 的延迟关闭事件清空已建立替代连接的问题，避免实时模式重连后再次误判断开。
+
+### Testing
+
+- 新增认证会话失效竞态，以及 WebSocket 握手关闭和替代连接所有权单元回归测试。
+
 ## [1.0.8] - 2026-08-15
 
 ### Changed
@@ -125,7 +137,8 @@
 - 亮暗主题、桌面/移动布局和 Transit 风格内嵌 Komari 管理端。
 - Playwright 视觉与交互回归、自动构建和 GitHub Release 发布流程。
 
-[Unreleased]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.8...HEAD
+[Unreleased]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.9...HEAD
+[1.0.9]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.8...v1.0.9
 [1.0.8]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.7...v1.0.8
 [1.0.7]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.6...v1.0.7
 [1.0.6]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.5...v1.0.6

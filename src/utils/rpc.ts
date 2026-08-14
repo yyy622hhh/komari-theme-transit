@@ -571,9 +571,11 @@ export class RpcClient {
   private initWebSocket(): Promise<void> {
     return new Promise((resolve, reject) => {
       const wsUrl = this.getWebSocketUrl()
+      let opened = false
+      let socket: WebSocket
       const connectTimeout = setTimeout(() => {
-        if (this.ws?.readyState === WebSocket.CONNECTING)
-          this.ws.close()
+        if (socket.readyState === WebSocket.CONNECTING)
+          socket.close()
         reject(new RpcError(-32001, 'WebSocket connection timeout'))
       }, this.timeout)
 
@@ -588,19 +590,21 @@ export class RpcClient {
         }
       }
 
-      this.ws = new WebSocket(wsUrl)
+      socket = new WebSocket(wsUrl)
+      this.ws = socket
 
-      this.ws.onopen = () => {
+      socket.onopen = () => {
+        opened = true
         clearTimeout(connectTimeout)
         resolve()
       }
 
-      this.ws.onerror = () => {
+      socket.onerror = () => {
         clearTimeout(connectTimeout)
         reject(new RpcError(-32000, 'WebSocket connection error'))
       }
 
-      this.ws.onmessage = (event) => {
+      socket.onmessage = (event) => {
         try {
           const data = this.parseJsonRpcResponse(JSON.parse(event.data))
           if (!data || data.id === null)
@@ -622,8 +626,12 @@ export class RpcClient {
         }
       }
 
-      this.ws.onclose = () => {
+      socket.onclose = () => {
         clearTimeout(connectTimeout)
+        if (!opened)
+          reject(new RpcError(-32000, 'WebSocket closed before connection opened'))
+        if (this.ws !== socket)
+          return
         this.ws = null
         this.wsConnectPromise = null
         this.rejectPendingRequests(new RpcError(-32000, 'WebSocket closed'))

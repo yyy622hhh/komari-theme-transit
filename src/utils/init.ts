@@ -218,9 +218,7 @@ class InitManager {
    */
   private async fetchUserInfo(): Promise<void> {
     try {
-      const api = getSharedApi()
-      const userInfo = await api.getMe()
-      this.appStore.updateLoginState(userInfo.logged_in, userInfo)
+      await this.appStore.verifyLoginState({ force: true })
     }
     catch (error) {
       this.appStore.updateLoginState(false)
