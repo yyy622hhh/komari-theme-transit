@@ -10,6 +10,7 @@ import { CardX } from '@/components/ui/card-x'
 import { DataTooltip } from '@/components/ui/data-tooltip'
 import { Empty } from '@/components/ui/empty'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { useDailyExchangeRates } from '@/composables/useDailyExchangeRates'
 import { useNodeProviderMetadata } from '@/composables/useNodeProviderMetadata'
 import { LOAD_RECORD_MAX_COUNT } from '@/constants/load'
 import { loadNodeLoadRecords } from '@/services/history.service'
@@ -32,7 +33,6 @@ const router = useRouter()
 
 const appStore = useAppStore()
 const nodesStore = useNodesStore()
-const exchangeRates = ref(financeHelper.DEFAULT_EXCHANGE_RATES)
 const financeCurrency = ref<CurrencyCode>('CNY')
 
 // 近一天网速峰值（B/s）
@@ -43,6 +43,9 @@ const data = computed(() => nodesStore.visibleNodesByUuid.get(String(route.param
 const detailNodes = computed(() => nodesStore.visibleNodes)
 const detailNodeIndex = computed(() => detailNodes.value.findIndex(node => node.uuid === data.value?.uuid))
 const isFavoriteNode = computed(() => data.value ? appStore.isFavoriteNode(data.value.uuid) : false)
+const showPrice = computed(() => appStore.privateFeaturesAllowed || !appStore.hidePriceWhenLoggedOut)
+const needsExchangeRates = computed(() => showPrice.value && appStore.detailMetricCardOrder.includes('remainingValue'))
+const { rates: exchangeRates } = useDailyExchangeRates(needsExchangeRates)
 
 let trafficPeakSeq = 0
 
@@ -88,11 +91,9 @@ async function fetchTrafficPeak(uuid: string): Promise<void> {
   peakNetIn.value = down
 }
 
-onMounted(async () => {
+onMounted(() => {
   window.scrollTo({ top: 0, behavior: 'instant' })
   financeCurrency.value = financeHelper.getStoredFinanceCurrency()
-  const { rates } = await financeHelper.getDailyExchangeRates()
-  exchangeRates.value = rates
 })
 
 // 当节点数据加载后尝试获取厂商信息
@@ -177,7 +178,6 @@ const ipSupport = computed(() => {
 const hasPeak = computed(() => peakNetOut.value > 0 || peakNetIn.value > 0)
 
 // 未登录且开启「未登录隐藏价格」时，屏蔽金额类指标（剩余时间为天数，仍显示）
-const showPrice = computed(() => appStore.privateFeaturesAllowed || !appStore.hidePriceWhenLoggedOut)
 
 const formatBytes = (bytes: number) => formatBytesWithConfig(bytes, appStore.byteDecimals)
 const formatBytesPerSecond = (bytes: number) => formatBytesPerSecondWithConfig(bytes, appStore.byteDecimals)

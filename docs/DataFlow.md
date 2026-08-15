@@ -39,7 +39,9 @@ Component
   -> PredictionService
 ```
 
-Disk prediction uses `LOAD_RECORD_MAX_COUNT` by default, verifies the `diskPrediction` permission before loading private history, and does not run for logged-out public cards. Ping history is public and shares capped request-manager-backed loads keyed by node, time range, and `maxCount`. Nodes requesting the same Ping window are combined into Metric Store calls with `entity_ids`, then the response is partitioned by node before caching.
+Disk prediction uses `LOAD_RECORD_MAX_COUNT` by default, verifies the `diskPrediction` permission before loading private history, and does not run for logged-out public cards. Ping history is public and shares capped request-manager-backed loads keyed by node, time range, and `maxCount`. Nodes requesting the same Ping window are combined into Metric Store calls with at most 50 deduplicated `entity_ids` each, then every response is partitioned by node before caching.
+
+Exchange rates are loaded through `useDailyExchangeRates()` only when the active public surface can display a monetary value. Hidden logged-out prices and layouts without finance cards stay on local defaults without contacting exchange-rate providers; the finance helper still provides one shared in-flight request and a daily browser cache when rates are needed.
 
 ## Snapshot export
 

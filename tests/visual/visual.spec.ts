@@ -694,6 +694,28 @@ test('logged-out public home does not call visitor or node IP lookup providers',
   expect(requests).toEqual([])
 })
 
+test('hidden public prices do not trigger exchange-rate providers', async ({ page }) => {
+  const requests: string[] = []
+  page.on('request', (request) => {
+    if (/^https:\/\/(?:open\.er-api\.com|api\.frankfurter\.app)\//.test(request.url()))
+      requests.push(request.url())
+  })
+
+  await installKomariFixture(page, {
+    hidePriceWhenLoggedOut: true,
+    pandaOps: true,
+  })
+  await openStablePage(page)
+  await page.waitForTimeout(250)
+  expect(requests).toEqual([])
+
+  await page.getByRole('button', { name: '查看节点 主控-洛杉矶 详情' }).click()
+  await expect(page).toHaveURL('/instance/00000000-0000-4000-8000-000000000001')
+  await expect(page.getByText('硬件信息')).toBeVisible()
+  await page.waitForTimeout(250)
+  expect(requests).toEqual([])
+})
+
 test('home accessible list desktop', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 })
   await installKomariFixture(page, { colorVisionFriendly: true, viewMode: 'list', hideEarth: true })

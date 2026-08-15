@@ -4,7 +4,7 @@ import type { HomeQuickControlKey } from '@/stores/app'
 import type { NodeData } from '@/stores/nodes'
 import { Icon } from '@iconify/vue'
 import { useDebounceFn } from '@vueuse/core'
-import { computed, defineAsyncComponent, nextTick, onActivated, onDeactivated, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onActivated, onDeactivated, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import DeferredRender from '@/components/DeferredRender.vue'
 import MarkdownRenderer from '@/components/MarkdownRenderer.vue'
@@ -17,7 +17,6 @@ import { useVisitorAudit } from '@/composables/useVisitorAudit'
 import { UI_CONFIG } from '@/constants/ui'
 import { useAppStore } from '@/stores/app'
 import { useNodesStore } from '@/stores/nodes'
-import * as financeHelper from '@/utils/financeHelper'
 import {
   getRealtimePeakSpeed,
   getTotalTraffic,
@@ -25,7 +24,6 @@ import {
   isHighLoadNode,
 } from '@/utils/nodeMetricsHelper'
 import { isNodeMatchSearch } from '@/utils/nodeSearch'
-import { isFreeNode } from '@/utils/tagHelper'
 
 interface QuickControlOption {
   key: HomeQuickControlKey
@@ -88,8 +86,6 @@ const searchText = ref('')
 const debouncedSearchText = ref('')
 const activeHomeTool = ref<HomeToolKey>('nodes')
 const activeQuickControl = ref<HomeQuickControlKey | null>(null)
-const exchangeRates = ref(financeHelper.DEFAULT_EXCHANGE_RATES)
-const excludeFreeNodes = ref(true)
 const pingDialogNode = ref<NodeData | null>(null)
 const nodeControlDialogNode = ref<NodeData | null>(null)
 
@@ -158,12 +154,6 @@ watch(
   { immediate: true },
 )
 
-onMounted(async () => {
-  excludeFreeNodes.value = financeHelper.shouldExcludeFreeNodes()
-  const { rates } = await financeHelper.getDailyExchangeRates()
-  exchangeRates.value = rates
-})
-
 watch(
   () => nodesStore.groups,
   (gs) => {
@@ -174,13 +164,6 @@ watch(
   },
   { immediate: true },
 )
-
-function getNodeMonthlyCostCNY(node: NodeData): number {
-  if (excludeFreeNodes.value && isFreeNode(node))
-    return 0
-
-  return financeHelper.calculateMonthlyCostCNY(node, exchangeRates.value)
-}
 
 function sortNodesByComputedValue(nodes: NodeData[], selector: (node: NodeData) => number): NodeData[] {
   return nodes
@@ -210,9 +193,6 @@ function getQuickControlNodes(nodes: NodeData[], control: HomeQuickControlKey | 
   switch (control) {
     case 'favorite':
       return nodes.filter(node => appStore.isFavoriteNode(node.uuid))
-    case 'monthlyCost':
-      result = sortNodesByComputedValue(nodes, getNodeMonthlyCostCNY)
-      break
     case 'totalTraffic':
       result = sortNodesByComputedValue(nodes, getTotalTraffic)
       break

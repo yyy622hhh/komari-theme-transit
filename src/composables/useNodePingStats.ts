@@ -8,7 +8,7 @@ import { PANDA_OPS_PING_STALE_AFTER_MS } from '@/constants/pandaOps'
 import { TIME_MS } from '@/constants/time'
 import { SharedCache } from '@/services/cache.service'
 import { abortPingRecords, loadPingRecords } from '@/services/history.service'
-import { loadPingMetricStats, loadPublicPingTasks, queryMetrics } from '@/services/metrics.service'
+import { loadPingMetricStats, loadPublicPingTasks, partitionMetricEntityIds, queryMetrics } from '@/services/metrics.service'
 import { isPingMetric, normalizeMetricSeriesList, PING_LATENCY_METRIC, PING_LOSS_METRIC, pingTaskId } from '@/utils/metricSeries'
 
 export interface NodePingHistoryPoint {
@@ -95,6 +95,8 @@ const sharedPingRecordsCache = new SharedCache<SharedPingRecordsEntry>({
 })
 const pingRefreshGroups = new Map<string, PingRefreshGroup>()
 const pendingMetricBatches = new Map<string, PendingMetricBatch>()
+const pendingStatsCacheTouches = new Map<string, number>()
+let statsCacheIndexFlushQueued = false
 const pingFreshnessTick = ref(Date.now())
 
 if (typeof window !== 'undefined') {
@@ -258,13 +260,28 @@ function writeStatsCacheIndex(entries: StatsCacheIndexEntry[]): void {
   window.localStorage.setItem(CACHE_INDEX_KEY, JSON.stringify(retained))
 }
 
+function flushStatsCacheTouches(): void {
+  statsCacheIndexFlushQueued = false
+  if (!pendingStatsCacheTouches.size)
+    return
+
+  const entriesByKey = new Map(readStatsCacheIndex().map(entry => [entry.key, entry]))
+  for (const [key, updatedAt] of pendingStatsCacheTouches)
+    entriesByKey.set(key, { key, updatedAt })
+  pendingStatsCacheTouches.clear()
+  writeStatsCacheIndex([...entriesByKey.values()])
+}
+
 function touchStatsCacheKey(key: string, updatedAt: number): void {
-  const entries = readStatsCacheIndex().filter(entry => entry.key !== key)
-  entries.push({ key, updatedAt })
-  writeStatsCacheIndex(entries)
+  pendingStatsCacheTouches.set(key, updatedAt)
+  if (statsCacheIndexFlushQueued)
+    return
+  statsCacheIndexFlushQueued = true
+  queueMicrotask(flushStatsCacheTouches)
 }
 
 function removeStatsCacheKey(key: string): void {
+  pendingStatsCacheTouches.delete(key)
   window.localStorage.removeItem(key)
   writeStatsCacheIndex(readStatsCacheIndex().filter(entry => entry.key !== key))
 }
@@ -472,27 +489,31 @@ function getPingMetricBatchKey(hours: number, maxCount?: number): string {
 async function flushPingMetricBatch(key: string, batch: PendingMetricBatch): Promise<void> {
   pendingMetricBatches.delete(key)
   batch.scheduled = false
-  const entityIds = [...batch.uuids.keys()]
-  const [statsResult, metricsResult] = await Promise.allSettled([
-    loadPingMetricStats({ entity_ids: entityIds, hours: batch.hours, max_points: batch.maxCount }),
-    queryMetrics({
-      metric_keys: [PING_LATENCY_METRIC, PING_LOSS_METRIC],
-      entity_ids: entityIds,
-      hours: batch.hours,
-      downsample: true,
-      fill_empty: true,
-      max_points: batch.maxCount,
-      aggregation: 'avg',
-    }),
-  ])
-  const statsResponse = statsResult.status === 'fulfilled' ? statsResult.value : null
-  const metricsResponse = metricsResult.status === 'fulfilled' ? metricsResult.value : null
+  const entityBatches = partitionMetricEntityIds([...batch.uuids.keys()])
 
-  for (const [uuid, resolvers] of batch.uuids) {
-    const state = buildPingMetricState(uuid, statsResponse, metricsResponse)
-    for (const resolve of resolvers)
-      resolve(state)
-  }
+  await Promise.all(entityBatches.map(async (entityIds) => {
+    const [statsResult, metricsResult] = await Promise.allSettled([
+      loadPingMetricStats({ entity_ids: entityIds, hours: batch.hours, max_points: batch.maxCount }),
+      queryMetrics({
+        metric_keys: [PING_LATENCY_METRIC, PING_LOSS_METRIC],
+        entity_ids: entityIds,
+        hours: batch.hours,
+        downsample: true,
+        fill_empty: true,
+        max_points: batch.maxCount,
+        aggregation: 'avg',
+      }),
+    ])
+    const statsResponse = statsResult.status === 'fulfilled' ? statsResult.value : null
+    const metricsResponse = metricsResult.status === 'fulfilled' ? metricsResult.value : null
+
+    for (const uuid of entityIds) {
+      const resolvers = batch.uuids.get(uuid) ?? []
+      const state = buildPingMetricState(uuid, statsResponse, metricsResponse)
+      for (const resolve of resolvers)
+        resolve(state)
+    }
+  }))
 }
 
 function loadPingMetricRecords(nodeUuid: string, hours: number, maxCount?: number): Promise<SharedPingRecordsState | null> {

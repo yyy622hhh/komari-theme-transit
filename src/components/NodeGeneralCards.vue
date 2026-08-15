@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { GeneralCardKey } from '@/stores/app'
 import type { NodeData } from '@/stores/nodes'
-import type { CurrencyCode, ExchangeRateSource } from '@/utils/financeHelper'
+import type { CurrencyCode } from '@/utils/financeHelper'
 import type { TopNodeMetric } from '@/utils/nodeMetricsHelper'
 import { Icon } from '@iconify/vue'
 import { useNow } from '@vueuse/core'
@@ -9,6 +9,7 @@ import { computed, defineAsyncComponent, onMounted, ref } from 'vue'
 import NodeEarthGlobe from '@/components/NodeEarthGlobe.vue'
 import { CardX } from '@/components/ui/card-x'
 import { DataTooltip } from '@/components/ui/data-tooltip'
+import { useDailyExchangeRates } from '@/composables/useDailyExchangeRates'
 import { UI_CONFIG } from '@/constants/ui'
 import { useAppStore } from '@/stores/app'
 import { useNodesStore } from '@/stores/nodes'
@@ -68,10 +69,17 @@ const nodesStore = useNodesStore()
 const FinanceDetailsDialog = defineAsyncComponent(() => import('@/components/FinanceDetailsDialog.vue'))
 // 未登录且开启「未登录隐藏价格」时，屏蔽金额类信息
 const showPrice = computed(() => appStore.privateFeaturesAllowed || !appStore.hidePriceWhenLoggedOut)
-const exchangeRates = ref(financeHelper.DEFAULT_EXCHANGE_RATES)
-const dailyExchangeRates = ref(financeHelper.DEFAULT_EXCHANGE_RATES)
-const exchangeRateSource = ref<ExchangeRateSource | 'loading'>('loading')
-const exchangeRateUpdatedAt = ref<number | null>(null)
+const financeCardKeys = new Set<GeneralCardKey>(['remainingValue', 'monthlyCost', 'yearlyCost'])
+const needsExchangeRates = computed(() => showPrice.value && (
+  appStore.generalCardOrder.some(key => financeCardKeys.has(key))
+  || (!appStore.hideEarth && appStore.earthRenderer === 'tiled')
+))
+const {
+  rates: exchangeRates,
+  dailyRates: dailyExchangeRates,
+  source: exchangeRateSource,
+  updatedAt: exchangeRateUpdatedAt,
+} = useDailyExchangeRates(needsExchangeRates, { applyOverrides: true })
 const financeCurrency = ref<CurrencyCode>('CNY')
 const excludeFreeNodes = ref(true)
 const financeDetailsOpen = ref(false)
@@ -804,15 +812,9 @@ function resetExchangeRates() {
   exchangeRates.value = { ...dailyExchangeRates.value }
 }
 
-onMounted(async () => {
+onMounted(() => {
   financeCurrency.value = financeHelper.getStoredFinanceCurrency()
   excludeFreeNodes.value = financeHelper.shouldExcludeFreeNodes()
-
-  const { rates, source, updatedAt } = await financeHelper.getDailyExchangeRates()
-  dailyExchangeRates.value = rates
-  exchangeRates.value = financeHelper.applyExchangeRateOverrides(rates)
-  exchangeRateSource.value = source
-  exchangeRateUpdatedAt.value = updatedAt
 })
 </script>
 

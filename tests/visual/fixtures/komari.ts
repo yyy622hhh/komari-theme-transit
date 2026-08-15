@@ -42,6 +42,7 @@ export interface VisualFixtureOptions {
   visitorAuditClientEnabled?: boolean
   visitorAuditSupported?: boolean
   announcementEscaping?: boolean
+  hidePriceWhenLoggedOut?: boolean
 }
 
 function uuidFor(index: number): string {
@@ -427,7 +428,7 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
     visitorAuditClientEnabled: options.visitorAuditClientEnabled ?? true,
     colorVisionMode: options.colorVisionFriendly ? '色觉友好' : '标准',
     hideAdminEntryWhenLoggedOut: false,
-    hidePriceWhenLoggedOut: false,
+    hidePriceWhenLoggedOut: options.hidePriceWhenLoggedOut ?? false,
     disablePageAnimation: true,
     homeQuickControlsEnabled: true,
     homeQuickControlPreset: '完整',
@@ -535,5 +536,24 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
   await page.route('https://ipwho.is/', route => route.fulfill({
     contentType: 'application/json',
     body: JSON.stringify({ success: true, ip: '2001:db8::25', city: 'Tokyo', region: 'Tokyo', country: 'Japan', connection: { org: 'Example Networks' } }),
+  }))
+  await page.route('https://open.er-api.com/v6/latest/CNY', route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({
+      rates: {
+        CNY: 1,
+        USD: 0.142536,
+        HKD: 1.108377,
+        EUR: 0.12102,
+        GBP: 0.105581,
+        JPY: 22.231552,
+        RUB: 13.5,
+        CHF: 0.12,
+        INR: 11.8,
+        VND: 3500,
+        THB: 5,
+        CAD: 0.19,
+      },
+    }),
   }))
 }

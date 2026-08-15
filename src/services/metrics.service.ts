@@ -1,5 +1,6 @@
 import type { MetricDefinition, MetricQueryParams, MetricQueryResponse, PingMetricStatsParams, PingMetricStatsResponse, PingTaskInfo } from '@/utils/rpc'
 import { CACHE_CONFIG } from '@/constants/cache'
+import { REQUEST_CONFIG } from '@/constants/request'
 import { SharedCache } from '@/services/cache.service'
 import { requestManager } from '@/services/request.service'
 import { getSharedRpc, RpcError } from '@/utils/rpc'
@@ -96,6 +97,18 @@ export function getPingMetricStatsRequestKey(params: PingMetricStatsParams): str
 
 export function getPublicPingTasksRequestKey(): string {
   return 'metrics:public-ping-tasks'
+}
+
+export function partitionMetricEntityIds(
+  entityIds: string[],
+  batchSize = REQUEST_CONFIG.metrics.entityBatchSize,
+): string[][] {
+  const safeBatchSize = Number.isFinite(batchSize) && batchSize > 0 ? Math.floor(batchSize) : 1
+  const normalized = [...new Set(entityIds.map(entityId => entityId.trim()).filter(Boolean))]
+  const batches: string[][] = []
+  for (let index = 0; index < normalized.length; index += safeBatchSize)
+    batches.push(normalized.slice(index, index + safeBatchSize))
+  return batches
 }
 
 export function abortQueryMetrics(params: MetricQueryParams): void {

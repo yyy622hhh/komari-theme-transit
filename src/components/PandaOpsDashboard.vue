@@ -4,6 +4,7 @@ import type { CurrencyCode } from '@/utils/financeHelper'
 import { computed, onMounted, ref } from 'vue'
 import NetworkTopology from '@/components/NetworkTopology.vue'
 import PandaOpsAlertStrip from '@/components/PandaOpsAlertStrip.vue'
+import { useDailyExchangeRates } from '@/composables/useDailyExchangeRates'
 import { useAppStore } from '@/stores/app'
 import * as financeHelper from '@/utils/financeHelper'
 import { formatBytesPerSecondWithConfig, formatBytesWithConfig } from '@/utils/helper'
@@ -11,11 +12,11 @@ import { getTrafficUsed } from '@/utils/nodeMetricsHelper'
 
 const props = defineProps<{ nodes: NodeData[] }>()
 const appStore = useAppStore()
-const exchangeRates = ref(financeHelper.DEFAULT_EXCHANGE_RATES)
 const currency = ref<CurrencyCode>('CNY')
 const excludeFreeNodes = ref(true)
 
 const showPrice = computed(() => appStore.isLoggedIn || !appStore.hidePriceWhenLoggedOut)
+const { rates: exchangeRates } = useDailyExchangeRates(showPrice)
 const maintenanceNodes = computed(() => props.nodes.filter(node => appStore.pandaOpsNodeControls[node.uuid]?.maintenanceUntil))
 const serviceNodes = computed(() => props.nodes.filter(node => !appStore.pandaOpsNodeControls[node.uuid]?.maintenanceUntil))
 const onlineNodes = computed(() => serviceNodes.value.filter(node => node.online))
@@ -49,11 +50,9 @@ function formatMoney(amountCNY: number): string {
   return `${formatted.symbol}${formatted.value}`
 }
 
-onMounted(async () => {
+onMounted(() => {
   currency.value = financeHelper.getStoredFinanceCurrency()
   excludeFreeNodes.value = financeHelper.shouldExcludeFreeNodes()
-  const result = await financeHelper.getDailyExchangeRates()
-  exchangeRates.value = result.rates
 })
 </script>
 

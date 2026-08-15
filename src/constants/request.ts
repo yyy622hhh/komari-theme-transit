@@ -13,4 +13,7 @@ export const REQUEST_CONFIG = {
   pool: {
     maxConcurrent: NETWORK_CONFIG.concurrency.maxRequests,
   },
+  metrics: {
+    entityBatchSize: 50,
+  },
 } as const

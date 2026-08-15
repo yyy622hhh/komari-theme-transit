@@ -30,7 +30,9 @@ Shared load-history entries keep subscriber counts. When the last subscriber rel
 
 Load-history memory entries are capped at 32 with a 30-minute TTL. Ping-history memory entries are capped at 500 with the same TTL; their browser persistence keeps at most 200 recently used entries through a small LRU index. This prevents long-running dashboards and frequently changed filters from growing either cache without a bound.
 
-Ping composables sharing the same `hours` and `maxCount` window are refreshed by one timer and one batched Metric Store request using `entity_ids`. Returned series are partitioned by `entity_id` before per-node state is cached. Public Ping task metadata has a one-minute TTL to avoid repeating identical task-list requests.
+Ping composables sharing the same `hours` and `maxCount` window are refreshed by one timer and batched Metric Store requests using `entity_ids`. UUIDs are deduplicated and each request is capped at 50 entities, so large installations do not create an unbounded RPC payload. Returned series are partitioned by `entity_id` before per-node state is cached. Public Ping task metadata has a one-minute TTL to avoid repeating identical task-list requests.
+
+Per-node Ping summaries still persist independently, but cache-index touches from the same reactive flush are merged into one localStorage update. The 200-entry bound is therefore maintained without rewriting and sorting the index once per node.
 
 ## Request deduplication
 
