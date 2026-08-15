@@ -683,7 +683,12 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  // Invalidate a request that may still be resolving after the dialog or route
+  // has gone away. Shared requests stay deduplicated for other consumers, but
+  // this instance can no longer publish their result.
+  fetchRecordsSequence += 1
   coarsePointerMediaQuery?.removeEventListener('change', syncTouchTooltipMode)
+  coarsePointerMediaQuery = null
 })
 </script>
 

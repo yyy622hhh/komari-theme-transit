@@ -18,19 +18,31 @@ function normalizeMaxPoints(maxPoints: number | null | undefined): number | unde
 }
 
 function cachePart(value: unknown): string {
-  if (value === undefined || value === null)
-    return 'all'
-  if (Array.isArray(value))
-    return value.map(item => String(item)).sort().join(',') || 'empty'
-  if (typeof value === 'object') {
-    try {
-      return JSON.stringify(value, Object.keys(value as Record<string, unknown>).sort())
-    }
-    catch {
-      return String(value)
-    }
+  if (value === undefined)
+    return 'undefined'
+  if (value === null)
+    return 'null'
+  if (typeof value !== 'object')
+    return `${typeof value}:${String(value)}`
+
+  const stabilize = (item: unknown): unknown => {
+    if (Array.isArray(item))
+      return item.map(stabilize)
+    if (!item || typeof item !== 'object')
+      return item
+    return Object.fromEntries(
+      Object.entries(item as Record<string, unknown>)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, nestedValue]) => [key, stabilize(nestedValue)]),
+    )
   }
-  return String(value)
+
+  try {
+    return `json:${JSON.stringify(stabilize(value))}`
+  }
+  catch {
+    return String(value)
+  }
 }
 
 function shouldRetryMetricRequest(error: unknown): boolean {
@@ -65,20 +77,12 @@ export function getMetricDefinitionsRequestKey(): string {
 }
 
 export function getQueryMetricsRequestKey(params: MetricQueryParams): string {
-  return [
-    'metrics:query',
-    cachePart(normalizeMetricKeys(params)),
-    cachePart(params.entity_id),
-    cachePart(params.entity_ids),
-    cachePart(params.hours),
-    cachePart(params.start ?? params.start_time),
-    cachePart(params.end ?? params.end_time),
-    cachePart(params.max_points ?? params.downsample_points),
-    cachePart(params.aggregation ?? params.downsample_algorithm ?? params.algorithm),
-    cachePart(params.tags),
-    cachePart(params.downsample ?? params.server_downsample),
-    cachePart(params.fill_empty),
-  ].join(':')
+  return `metrics:query:${cachePart({
+    ...params,
+    metric_key: undefined,
+    metric_keys: normalizeMetricKeys(params),
+    metrics: undefined,
+  })}`
 }
 
 export function getPingMetricStatsRequestKey(params: PingMetricStatsParams): string {

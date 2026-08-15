@@ -820,7 +820,9 @@ const useAppStore = defineStore('app', () => {
   }
 
   const themeSettings = computed(() => normalizeThemeSettings(publicSettings.value?.theme_settings))
-  const pandaOpsNodeControlNow = useNow({ interval: 60_000 })
+  // PandaOps maintenance expiry and Beijing auto theme need the same minute
+  // resolution. Sharing one clock avoids keeping two app-lifetime intervals.
+  const minuteTick = useNow({ interval: 60_000 })
   const visitorAuditSupported = computed(() => typeof publicSettings.value?.visitor_audit_enabled === 'boolean')
   const visitorAuditEnabled = computed(() => publicSettings.value?.visitor_audit_enabled === true)
 
@@ -829,8 +831,6 @@ const useAppStore = defineStore('app', () => {
 
   // 使用 null 表示未设置，等待主题配置加载后决定
   const storedViewMode = useStorageAsync<NodeViewMode | null>('nodeViewMode', null, localStorage)
-
-  const beijingTimeTick = useNow({ interval: 60_000 })
 
   // 计算属性：从主题配置获取默认视图模式
   const defaultViewMode = computed<NodeViewMode>(() => {
@@ -933,7 +933,7 @@ const useAppStore = defineStore('app', () => {
 
   const pandaOpsNodeControls = computed(() => parsePandaOpsNodeControls(
     themeSettings.value.pandaOpsNodeControls,
-    pandaOpsNodeControlNow.value.getTime(),
+    minuteTick.value.getTime(),
   ))
 
   const carrierPingRegion = computed<string>(() => {
@@ -1146,7 +1146,7 @@ const useAppStore = defineStore('app', () => {
   })
 
   const isBeijingDaytime = computed<boolean>(() => {
-    const hour = getBeijingHour(beijingTimeTick.value.getTime())
+    const hour = getBeijingHour(minuteTick.value.getTime())
     return hour >= 7 && hour < 19
   })
 

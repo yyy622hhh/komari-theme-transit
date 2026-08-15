@@ -29,6 +29,14 @@ function shouldRetryHistoryRequest(error: unknown): boolean {
   return true
 }
 
+function shouldFallbackToLegacyRecordsApi(error: unknown): boolean {
+  return error instanceof RpcError && (
+    error.code === -32601
+    || error.code === 404
+    || error.code === 405
+  )
+}
+
 type StatusRecordsPayload = Array<Partial<StatusRecord>> | Record<string, Array<Partial<StatusRecord>>>
 
 function isStatusRecordsMap(records: StatusRecordsPayload): records is Record<string, Array<Partial<StatusRecord>>> {
@@ -162,7 +170,11 @@ export async function loadNodeLoadRecords(uuid: string, hours: number, maxCount?
         const result = await getSharedRpc().getLoadRecords(uuid, safeHours, undefined, safeMaxCount, signal)
         return normalizeStatusRecordsPayload(result.records)
       }
-      catch {
+      catch (error) {
+        if (!shouldFallbackToLegacyRecordsApi(error))
+          throw error
+        if (signal.aborted)
+          throw error
         const result = await getSharedApi().getLoadRecords(uuid, safeHours, safeMaxCount, signal)
         return normalizeStatusRecords(result.records)
       }

@@ -118,3 +118,22 @@ test('all interactive controls expose an accessible name', async ({ page }) => {
   await page.getByRole('button', { name: '管理', exact: true }).click()
   await expectNamedControls(page.getByRole('dialog', { name: '拓扑管理' }))
 })
+
+test('forced colors keeps focus and selected controls visually distinguishable', async ({ page }) => {
+  const session = await page.context().newCDPSession(page)
+  await session.send('Emulation.setEmulatedMedia', {
+    features: [{ name: 'forced-colors', value: 'active' }],
+  })
+  await installKomariFixture(page, { authenticated: true, pandaOps: true })
+  await openReadyPage(page)
+
+  const toolsButton = page.getByRole('button', { name: '显示首页工具' })
+  await toolsButton.focus()
+  await expect(toolsButton).toHaveCSS('outline-style', 'solid')
+  await toolsButton.click()
+  await expect(page.getByRole('button', { name: '收起首页工具' })).toHaveAttribute('aria-pressed', 'true')
+
+  const cardView = page.getByRole('button', { name: '卡片视图' })
+  await expect(cardView).toHaveAttribute('aria-pressed', 'true')
+  await expect(cardView).toHaveCSS('outline-style', 'solid')
+})

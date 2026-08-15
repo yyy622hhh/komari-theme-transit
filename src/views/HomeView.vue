@@ -357,6 +357,12 @@ async function startHomeOrderEdit(): Promise<void> {
   homeOrder.beginOrderEdit()
 }
 
+async function focusHomeOrderEditTrigger(): Promise<void> {
+  await nextTick()
+  const target = document.querySelector<HTMLElement>('[data-home-order-edit-trigger], [aria-label="搜索节点"]')
+  target?.focus({ preventScroll: true })
+}
+
 function restoreHomeOrderView(): void {
   const previous = homeOrderViewBeforeEdit.value
   homeOrderViewBeforeEdit.value = null
@@ -371,6 +377,7 @@ function restoreHomeOrderView(): void {
 function cancelHomeOrderEdit(): void {
   homeOrder.cancelOrderEdit()
   restoreHomeOrderView()
+  void focusHomeOrderEditTrigger()
 }
 
 async function saveHomeOrder(): Promise<void> {
@@ -383,6 +390,7 @@ async function saveHomeOrder(): Promise<void> {
     await homeOrder.persistOrder()
     restoreHomeOrderView()
     window.$message?.success('首页服务器顺序已保存。')
+    await focusHomeOrderEditTrigger()
   }
   catch (error) {
     window.$message?.error(`保存服务器顺序失败：${error instanceof Error ? error.message : String(error)}`)
@@ -542,7 +550,7 @@ const nodeCardGridClass = computed(() => {
       :active="isViewActive"
     />
 
-    <PandaOpsDashboard v-if="appStore.opsDashboardEnabled" :nodes="nodesStore.visibleNodes" />
+    <PandaOpsDashboard v-if="appStore.opsDashboardEnabled && isViewActive" :nodes="nodesStore.visibleNodes" />
 
     <div class="node-info p-3 pt-0 sm:p-4 sm:pt-0 flex flex-col gap-4 relative z-1 pointer-events-none" :class="!appStore.opsDashboardEnabled && !!appStore.hideGeneralCard && 'pt-4'">
       <div class="nodes min-w-0">
@@ -602,6 +610,7 @@ const nodeCardGridClass = computed(() => {
 
               <Button
                 v-if="activeHomeTool === 'nodes' && displayedNodeList.length > 1 && !homeOrder.editingOrder.value"
+                data-home-order-edit-trigger
                 variant="outline" size="sm"
                 class="h-8 border-none bg-background/50 px-2.5 text-xs shadow-none backdrop-blur-xs hover:bg-background/60"
                 title="直接拖动首页节点并同步官方后台顺序"
@@ -659,6 +668,7 @@ const nodeCardGridClass = computed(() => {
           <div
             v-if="homeOrder.editingOrder.value"
             data-home-order-toolbar
+            :aria-busy="homeOrder.savingOrder.value"
             class="pointer-events-auto flex flex-col gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/[0.055] px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between"
           >
             <div class="min-w-0">
@@ -676,7 +686,7 @@ const nodeCardGridClass = computed(() => {
               </Button>
               <Button size="sm" :disabled="homeOrder.savingOrder.value || !homeOrder.orderDirty.value" @click="saveHomeOrder">
                 <Icon :icon="homeOrder.savingOrder.value ? 'tabler:loader-2' : 'tabler:device-floppy'" :class="homeOrder.savingOrder.value && 'animate-spin'" />
-                保存顺序
+                {{ homeOrder.savingOrder.value ? '保存中' : '保存顺序' }}
               </Button>
             </div>
             <p id="home-order-instructions" class="sr-only">
@@ -737,12 +747,11 @@ const nodeCardGridClass = computed(() => {
                 <div :class="homeOrder.editingOrder.value && 'pointer-events-none'">
                   <DeferredRender
                     :enabled="deferNodeCards"
-                    :idle-delay="800 + index * 70"
                     :min-height="deferredNodeCardHeight"
                     :class="appStore.opsDashboardEnabled && 'h-full'"
                   >
                     <PandaOpsNodeCard
-                      v-if="appStore.opsDashboardEnabled"
+                      v-if="appStore.opsDashboardEnabled && isViewActive"
                       :node="node"
                       @click="handleNodeClick(node)"
                       @manage="nodeControlDialogNode = node"

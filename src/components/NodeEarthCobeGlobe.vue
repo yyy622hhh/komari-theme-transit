@@ -41,6 +41,7 @@ let isPointerDown = false
 let lastPointerX = 0
 let lastPointerY = 0
 let staticRedrawUntil = 0
+let rebuildGeneration = 0
 const labelElements = new Map<string, HTMLElement>()
 
 function normalizePhi(value: number): number {
@@ -274,7 +275,10 @@ async function stopGlobe() {
 }
 
 async function rebuildGlobe() {
+  const generation = ++rebuildGeneration
   await stopGlobe()
+  if (generation !== rebuildGeneration)
+    return
   startGlobe()
 }
 
@@ -283,6 +287,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  rebuildGeneration += 1
   pauseRaf()
   globe?.destroy()
   globe = null

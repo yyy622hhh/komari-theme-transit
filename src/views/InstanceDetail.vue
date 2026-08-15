@@ -146,6 +146,15 @@ function toggleCurrentFavorite(): void {
     appStore.toggleFavoriteNode(data.value.uuid)
 }
 
+function returnFromDetail(): void {
+  const previousRoute = window.history.state?.back
+  if (typeof previousRoute === 'string' && previousRoute.startsWith('/') && !previousRoute.startsWith('//') && previousRoute !== route.fullPath) {
+    router.back()
+    return
+  }
+  void router.push('/')
+}
+
 // 机房/厂商展示：城市 · 厂商 · ASN（缺项自动省略）
 const providerMetadata = computed(() => data.value ? getNodeProviderMetadata(data.value) : null)
 const vpsProvider = computed(() => providerMetadata.value?.provider ?? null)
@@ -490,7 +499,7 @@ const metricCards = computed<MetricCard[]>(() => appStore.detailMetricCardOrder.
     <template v-else>
       <!-- 顶部导航 -->
       <div class="px-4 flex flex-wrap gap-2 items-center sm:gap-4">
-        <Button variant="ghost" size="icon-sm" class="bg-background/50 hover:bg-background" aria-label="返回首页" @click="router.push('/')">
+        <Button variant="ghost" size="icon-sm" class="bg-background/50 hover:bg-background" aria-label="返回上一页" @click="returnFromDetail">
           <Icon icon="tabler:arrow-left" :width="16" :height="16" />
         </Button>
         <div class="min-w-0 text-lg font-bold flex gap-2 items-center">

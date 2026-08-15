@@ -699,7 +699,22 @@ export class RpcClient {
     if (signal?.aborted)
       throw new RpcError(-32000, 'Request aborted')
 
-    await this.ensureWebSocketReady()
+    if (signal) {
+      let abortConnectionWait = () => {}
+      const aborted = new Promise<never>((_, reject) => {
+        abortConnectionWait = () => reject(new RpcError(-32000, 'Request aborted'))
+        signal.addEventListener('abort', abortConnectionWait, { once: true })
+      })
+      try {
+        await Promise.race([this.ensureWebSocketReady(), aborted])
+      }
+      finally {
+        signal.removeEventListener('abort', abortConnectionWait)
+      }
+    }
+    else {
+      await this.ensureWebSocketReady()
+    }
 
     return new Promise((resolve, reject) => {
       if (signal?.aborted) {

@@ -4,6 +4,7 @@
  */
 
 import type { Client, KomariRpc, NodeStatus } from '@/utils/rpc'
+import { KOMARI_ADMIN_SERVERS_PATH } from '@/constants/navigation'
 import { REALTIME_CONFIG } from '@/constants/realtime'
 import { useAppStore } from '@/stores/app'
 import { useNodesStore } from '@/stores/nodes'
@@ -186,11 +187,11 @@ class InitManager {
       }
       catch (error) {
         if (isRpcPermissionError(error)) {
-          console.warn('[InitManager] Private site detected, redirecting to /admin/client')
+          console.warn(`[InitManager] Private site detected, redirecting to ${KOMARI_ADMIN_SERVERS_PATH}`)
           this.redirectingToAdmin = true
           this.appStore.updateLoginState(false)
           this.appStore.loading = false
-          location.href = '/admin/client'
+          location.href = KOMARI_ADMIN_SERVERS_PATH
           return
         }
 

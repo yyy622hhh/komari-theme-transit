@@ -180,7 +180,7 @@ test('personal wallpaper upload persists with glass, blur and HD effects', async
   await installKomariFixture(page, { pandaOps: true })
   await openStablePage(page)
 
-  await expect(page.getByRole('link', { name: '后台管理' })).toHaveAttribute('href', '/admin/client')
+  await expect(page.getByRole('link', { name: '后台管理' })).toHaveAttribute('href', '/admin/servers')
   await page.getByRole('button', { name: '壁纸与背景效果' }).click()
   const dialog = page.getByRole('dialog', { name: '壁纸与背景效果' })
   await expect(dialog).toBeVisible()
@@ -749,6 +749,21 @@ test('homepage order save failure keeps the draft available for retry', async ({
   await expect(grid.locator('[data-server-order-item]').first()).toContainText('香港边缘节点-超长名称布局测试')
 })
 
+test('homepage order save and cancel return keyboard focus to the edit trigger', async ({ page }) => {
+  await installKomariFixture(page, { authenticated: true, pandaOps: true })
+  await openStablePage(page)
+
+  const editTrigger = page.getByRole('button', { name: '编辑首页顺序' })
+  await editTrigger.click()
+  await page.getByRole('button', { name: /^拖动 主控-洛杉矶，/ }).press('ArrowDown')
+  await page.getByRole('button', { name: '保存顺序' }).click()
+  await expect(editTrigger).toBeFocused()
+
+  await editTrigger.click()
+  await page.getByRole('button', { name: '取消' }).click()
+  await expect(editTrigger).toBeFocused()
+})
+
 test('expired login blocks homepage order editing before a private RPC call', async ({ page }) => {
   const privateRequests: string[] = []
   page.on('request', (request) => {
@@ -817,7 +832,7 @@ test('Transit server list filters and sorts reactive nodes without the blocked a
   await expect(panel.locator('tbody tr')).toHaveCount(12)
   await expect(panel.getByRole('combobox', { name: '排序方式' })).toHaveValue('official')
   await expect(panel.locator('tbody tr').first()).toContainText('主控-洛杉矶')
-  await expect(panel.getByRole('link', { name: '官方后台' })).toHaveAttribute('href', '/admin/client')
+  await expect(panel.getByRole('link', { name: '官方后台' })).toHaveAttribute('href', '/admin/servers')
   await page.locator('.sticky').first().evaluate((element) => {
     element.setAttribute('style', 'display: none !important')
   })
@@ -906,6 +921,24 @@ test('Transit server list stays contained on mobile', async ({ page }) => {
   await expect(panel.locator('article').first()).toHaveScreenshot('server-list-order-edit-mobile-card.png')
   await dragOrderHandle(page, panel.getByRole('button', { name: /^拖动 主控-洛杉矶，/ }), panel.locator('article').nth(1))
   await expect(panel.locator('article').first()).toContainText('香港边缘节点-超长名称布局测试')
+})
+
+test('server list order save and cancel return keyboard focus to the edit trigger', async ({ page }) => {
+  await installKomariFixture(page, { authenticated: true, pandaOps: true })
+  await openStablePage(page)
+  await page.getByRole('button', { name: '显示首页工具' }).click()
+  await page.getByRole('button', { name: /服务器：/ }).click()
+
+  const panel = page.locator('[data-server-list-panel]')
+  const editTrigger = panel.getByRole('button', { name: '编辑首页顺序' })
+  await editTrigger.click()
+  await panel.getByRole('button', { name: /^拖动 主控-洛杉矶，/ }).press('ArrowDown')
+  await panel.getByRole('button', { name: '保存顺序' }).click()
+  await expect(editTrigger).toBeFocused()
+
+  await editTrigger.click()
+  await panel.getByRole('button', { name: '取消' }).click()
+  await expect(editTrigger).toBeFocused()
 })
 
 test('health range reloads the selected period and snapshot export downloads real data', async ({ page }) => {
@@ -1165,6 +1198,22 @@ test('detail dark mobile', async ({ page }) => {
   await openStablePage(page, '/instance/00000000-0000-4000-8000-000000000002')
   await expect(page.getByText('硬件信息')).toBeVisible()
   await expect(page).toHaveScreenshot('detail-dark-mobile.png', { fullPage: false })
+})
+
+test('detail return restores the previous route and direct entry falls back home', async ({ page }) => {
+  const nodeUuid = '00000000-0000-4000-8000-000000000001'
+  await installKomariFixture(page, { pandaOps: true })
+  await openStablePage(page)
+  await page.getByRole('button', { name: '查看节点 主控-洛杉矶 详情' }).click()
+  await expect(page).toHaveURL(`/instance/${nodeUuid}`)
+  await page.getByRole('button', { name: '返回上一页' }).click()
+  await expect(page).toHaveURL('/')
+
+  await page.goto(`/instance/${nodeUuid}`)
+  await expect(page.getByText('硬件信息')).toBeVisible()
+  await page.evaluate(() => history.replaceState({ ...history.state, back: null }, '', location.href))
+  await page.getByRole('button', { name: '返回上一页' }).click()
+  await expect(page).toHaveURL('/')
 })
 
 test('detail short history falls back when metric history omits CPU', async ({ page }) => {

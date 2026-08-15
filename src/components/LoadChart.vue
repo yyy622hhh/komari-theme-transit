@@ -6,7 +6,7 @@ import type { RecordFormat } from '@/utils/recordHelper'
 import type { MetricQueryParams, PingTaskInfo, StatusRecord } from '@/utils/rpc'
 import { Icon } from '@iconify/vue'
 import { useIntervalFn } from '@vueuse/core'
-import { computed, onMounted, reactive, ref, shallowRef, watch, watchEffect } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, shallowRef, watch, watchEffect } from 'vue'
 import VChart from 'vue-echarts'
 import AsyncDataState from '@/components/AsyncDataState.vue'
 import MetricChartHeader from '@/components/MetricChartHeader.vue'
@@ -22,12 +22,14 @@ import { loadRecentNodeStatus } from '@/services/history.service'
 import { loadMetricDefinitions, loadPublicPingTasks, queryMetrics } from '@/services/metrics.service'
 import { useAppStore } from '@/stores/app'
 import { useNodesStore } from '@/stores/nodes'
+import { createAsyncGeneration } from '@/utils/asyncGeneration'
 import { getChartSeriesPalette, getLoadChartPalette } from '@/utils/chartPalette'
 import { formatBytes, formatBytesSplit } from '@/utils/helper'
 import { getGpuDeviceNames as formatGpuDeviceNames, LOAD_METRIC_KEYS, metricSeriesToChartRecords, metricValue, statusRecordsToChartRecords } from '@/utils/loadMetricRecords'
 import { buildAvailableMetricViews, CUSTOM_METRIC_VIEW_LABEL, formatMetricAxisTime, formatMetricTooltipTime, getMetricCustomRangeError, parseMetricCustomRange } from '@/utils/metricRange'
 import { comparePingTaskOrder, createPingTaskOrderMap, metricTags, normalizeMetricSeriesList } from '@/utils/metricSeries'
 import { fillMissingTimePoints } from '@/utils/recordHelper'
+import { isRpcPermissionError, RpcError } from '@/utils/rpc'
 import '@/utils/echarts' // 共享 ECharts 配置
 
 const props = defineProps<{
@@ -149,6 +151,9 @@ const loading = ref(false)
 const isInitialLoad = ref(true) // 是否为首次加载（用于控制实时模式下的 NSpin 显示）
 const error = ref<string | null>(null)
 let lastRealtimeMetricFetchAt = 0
+const dataRequests = createAsyncGeneration()
+const realtimeMetricRequests = createAsyncGeneration()
+const metricCatalogRequests = createAsyncGeneration()
 
 // 节点信息
 const nodeInfo = computed(() => nodesStore.nodesByUuid.get(props.uuid))
@@ -191,30 +196,44 @@ interface MetricHistoryData {
   series: NormalizedMetricSeries[]
 }
 
+interface MetricHistoryResult {
+  availableKeys: Set<string>
+  history: MetricHistoryData | null
+}
+
+interface LoadChartRequest {
+  generation: number
+  uuid: string
+}
+
 function getGpuDeviceNames(record: RecordFormat | null): string {
   return formatGpuDeviceNames(record, nodeInfo.value?.gpu_name || '')
 }
 
-async function loadMetricCatalog(): Promise<void> {
+async function loadMetricCatalog(): Promise<{ availableKeys: Set<string>, tasks: PingTaskInfo[] }> {
   const [definitions, tasks] = await Promise.all([
     loadMetricDefinitions().catch(() => []),
     loadPublicPingTasks().catch(() => []),
   ])
-  availableMetricKeys.value = new Set(definitions.map(definition => definition.name))
-  pingTasks.value = tasks
+  return {
+    availableKeys: new Set(definitions.map(definition => definition.name)),
+    tasks,
+  }
 }
 
-async function loadMetricHistoryRecords(params: Pick<MetricQueryParams, 'hours' | 'start' | 'end'>): Promise<MetricHistoryData | null> {
+async function loadMetricHistoryRecords(
+  uuid: string,
+  params: Pick<MetricQueryParams, 'hours' | 'start' | 'end'>,
+): Promise<MetricHistoryResult> {
   const definitions = await loadMetricDefinitions()
   const availableKeys = new Set(definitions.map(definition => definition.name))
-  availableMetricKeys.value = availableKeys
   const metricKeys = LOAD_METRIC_KEYS.filter(key => availableKeys.has(key))
   if (!metricKeys.length)
-    return null
+    return { availableKeys, history: null }
 
   const result = await queryMetrics({
     metric_keys: metricKeys,
-    entity_id: props.uuid,
+    entity_id: uuid,
     ...params,
     downsample: true,
     fill_empty: true,
@@ -224,22 +243,26 @@ async function loadMetricHistoryRecords(params: Pick<MetricQueryParams, 'hours' 
 
   const series = normalizeMetricSeriesList(result.series)
   if (!series.some(item => item.points.length > 0))
-    return null
+    return { availableKeys, history: null }
 
   return {
-    records: metricSeriesToChartRecords(result.series, {
-      uuid: props.uuid,
-      memoryTotal: nodeInfo.value?.mem_total,
-      swapTotal: nodeInfo.value?.swap_total,
-      diskTotal: nodeInfo.value?.disk_total,
-    }),
-    series,
+    availableKeys,
+    history: {
+      records: metricSeriesToChartRecords(result.series, {
+        uuid,
+        memoryTotal: nodesStore.nodesByUuid.get(uuid)?.mem_total,
+        swapTotal: nodesStore.nodesByUuid.get(uuid)?.swap_total,
+        diskTotal: nodesStore.nodesByUuid.get(uuid)?.disk_total,
+      }),
+      series,
+    },
   }
 }
 
 async function refreshRealtimeMetricSeries(force = false): Promise<void> {
   const cards = appStore.chartDashboardTemplate.cards
   if (!cards.includes('ping') && !cards.includes('pingLoss')) {
+    realtimeMetricRequests.invalidate()
     rawMetricSeries.value = []
     return
   }
@@ -249,40 +272,46 @@ async function refreshRealtimeMetricSeries(force = false): Promise<void> {
     return
   lastRealtimeMetricFetchAt = now
   const requestedUuid = props.uuid
+  const generation = realtimeMetricRequests.begin()
 
   try {
-    if (!availableMetricKeys.value.size)
-      await loadMetricCatalog()
+    let metricKeysCatalog = availableMetricKeys.value
+    if (!metricKeysCatalog.size) {
+      const catalog = await loadMetricCatalog()
+      if (!realtimeMetricRequests.isCurrent(generation))
+        return
+      availableMetricKeys.value = catalog.availableKeys
+      pingTasks.value = catalog.tasks
+      metricKeysCatalog = catalog.availableKeys
+    }
 
-    const metricKeys = PING_METRIC_KEYS.filter(key => availableMetricKeys.value.has(key))
+    const metricKeys = PING_METRIC_KEYS.filter(key => metricKeysCatalog.has(key))
     if (!metricKeys.length) {
-      rawMetricSeries.value = []
+      if (realtimeMetricRequests.isCurrent(generation))
+        rawMetricSeries.value = []
       return
     }
 
     const result = await queryMetrics({
       metric_keys: [...metricKeys],
-      entity_id: props.uuid,
+      entity_id: requestedUuid,
       hours: 1,
       downsample: true,
       fill_empty: true,
       max_points: 150,
       aggregation: 'avg',
     })
-    if (!isRealtime.value || props.uuid !== requestedUuid)
+    if (!realtimeMetricRequests.isCurrent(generation) || !isRealtime.value || props.uuid !== requestedUuid)
       return
     rawMetricSeries.value = normalizeMetricSeriesList(result.series)
   }
   catch {
-    if (isRealtime.value && props.uuid === requestedUuid)
+    if (realtimeMetricRequests.isCurrent(generation) && isRealtime.value && props.uuid === requestedUuid)
       rawMetricSeries.value = []
   }
 }
 
-async function fetchRecentData() {
-  if (!props.uuid)
-    return
-
+async function fetchRecentData(request: LoadChartRequest): Promise<void> {
   metricData.value = null
   void refreshRealtimeMetricSeries()
 
@@ -293,26 +322,31 @@ async function fetchRecentData() {
   error.value = null
 
   try {
-    remoteData.value = await loadRecentNodeStatus(props.uuid, 150)
+    const records = await loadRecentNodeStatus(request.uuid, 150)
+    if (dataRequests.isCurrent(request.generation))
+      remoteData.value = records
   }
   catch (err) {
-    error.value = err instanceof Error ? err.message : '获取数据失败'
-    remoteData.value = []
+    if (dataRequests.isCurrent(request.generation)) {
+      error.value = err instanceof Error ? err.message : '获取数据失败'
+      remoteData.value = []
+    }
   }
   finally {
-    loading.value = false
-    isInitialLoad.value = false
+    if (dataRequests.isCurrent(request.generation)) {
+      loading.value = false
+      isInitialLoad.value = false
+    }
   }
 }
 
-async function fetchHistoryData() {
-  if (!props.uuid)
-    return
-
+async function fetchHistoryData(request: LoadChartRequest): Promise<void> {
   if (isCustomRange.value && !customRange.value) {
+    realtimeMetricRequests.invalidate()
     metricData.value = null
     rawMetricSeries.value = []
     remoteData.value = []
+    loading.value = false
     error.value = customRangeError.value || '请选择有效的自定义时间范围'
     return
   }
@@ -327,7 +361,25 @@ async function fetchHistoryData() {
   error.value = null
 
   try {
-    const metricHistory = await loadMetricHistoryRecords(metricParams).catch(() => null)
+    let metricResult: MetricHistoryResult | null = null
+    try {
+      metricResult = await loadMetricHistoryRecords(request.uuid, metricParams)
+    }
+    catch (metricError) {
+      // Metric Store is optional on older Komari versions. Only use the
+      // legacy load-record route for compatibility failures; never conceal an
+      // expired session or a cancelled request by starting a second request.
+      const compatibilityFailure = metricError instanceof RpcError
+        && (metricError.code === -32601 || metricError.code === 404 || metricError.code === 405)
+      if (!compatibilityFailure || isRpcPermissionError(metricError))
+        throw metricError
+    }
+    if (!dataRequests.isCurrent(request.generation))
+      return
+
+    if (metricResult)
+      availableMetricKeys.value = metricResult.availableKeys
+    const metricHistory = metricResult?.history ?? null
     const hasCpuHistory = metricHistory?.records.some(record => record.cpu !== null && Number.isFinite(record.cpu)) ?? false
     if (metricHistory && hasCpuHistory) {
       metricData.value = metricHistory.records
@@ -335,28 +387,48 @@ async function fetchHistoryData() {
       remoteData.value = []
     }
     else {
+      const records = await loadNodeLoadRecords(request.uuid, hours, LOAD_RECORD_MAX_COUNT)
+      if (!dataRequests.isCurrent(request.generation))
+        return
       metricData.value = null
       rawMetricSeries.value = metricHistory?.series ?? []
-      remoteData.value = await loadNodeLoadRecords(props.uuid, hours, LOAD_RECORD_MAX_COUNT)
+      remoteData.value = records
     }
   }
   catch (err) {
-    error.value = err instanceof Error ? err.message : '获取数据失败'
-    remoteData.value = []
-    metricData.value = null
-    rawMetricSeries.value = []
+    if (dataRequests.isCurrent(request.generation)) {
+      error.value = err instanceof Error ? err.message : '获取数据失败'
+      remoteData.value = []
+      metricData.value = null
+      rawMetricSeries.value = []
+    }
   }
   finally {
-    loading.value = false
+    if (dataRequests.isCurrent(request.generation))
+      loading.value = false
   }
 }
 
-async function fetchData() {
+async function fetchData(): Promise<void> {
+  const request: LoadChartRequest = {
+    generation: dataRequests.begin(),
+    uuid: props.uuid,
+  }
+  if (!request.uuid) {
+    realtimeMetricRequests.invalidate()
+    remoteData.value = []
+    metricData.value = null
+    rawMetricSeries.value = []
+    loading.value = false
+    return
+  }
+
   if (isRealtime.value) {
-    await fetchRecentData()
+    await fetchRecentData(request)
   }
   else {
-    await fetchHistoryData()
+    realtimeMetricRequests.invalidate()
+    await fetchHistoryData(request)
   }
 }
 
@@ -1193,8 +1265,7 @@ watch(isRealtime, (realtime) => {
 
 watch(selectedView, () => {
   isInitialLoad.value = true // 切换视图时重置首次加载状态
-  if (!isCustomRange.value || customRange.value)
-    fetchData()
+  void fetchData()
 })
 
 watch(() => props.uuid, () => {
@@ -1203,7 +1274,7 @@ watch(() => props.uuid, () => {
   rawMetricSeries.value = []
   lastRealtimeMetricFetchAt = 0
   isInitialLoad.value = true // 切换节点时重置首次加载状态
-  fetchData()
+  void fetchData()
 })
 
 watch(chartDashboardCards, () => {
@@ -1214,8 +1285,21 @@ watch(chartDashboardCards, () => {
 })
 
 onMounted(() => {
-  void loadMetricCatalog()
-  fetchData()
+  const catalogGeneration = metricCatalogRequests.begin()
+  void loadMetricCatalog().then((catalog) => {
+    if (!metricCatalogRequests.isCurrent(catalogGeneration))
+      return
+    availableMetricKeys.value = catalog.availableKeys
+    pingTasks.value = catalog.tasks
+  })
+  void fetchData()
+})
+
+onBeforeUnmount(() => {
+  pauseRealtimeUpdate()
+  dataRequests.dispose()
+  realtimeMetricRequests.dispose()
+  metricCatalogRequests.dispose()
 })
 </script>
 

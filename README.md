@@ -241,7 +241,7 @@ Transit 将两类可选行为默认关闭：
 
 ## 官方管理后台与授权边界
 
-Transit 不再内嵌或再分发 `komari-web` 构建物。登录后的服务器列表由 Transit 自有代码展示主题已经接收的实时节点数据，并提供排序、首页顺序保存、详情和维护入口；顺序通过 Komari 官方 `admin:orderClients` RPC 保存。新增/删除 Agent、密钥、Ping 任务、通知、主题、插件、数据库、终端、账号和权限等其余配置能力继续使用 Komari 安装包自带的官方后台。主题顶部和服务器列表中的后台入口都直接进入 `/admin/client`。
+Transit 不再内嵌或再分发 `komari-web` 构建物。登录后的服务器列表由 Transit 自有代码展示主题已经接收的实时节点数据，并提供排序、首页顺序保存、详情和维护入口；顺序通过 Komari 官方 `admin:orderClients` RPC 保存。新增/删除 Agent、密钥、Ping 任务、通知、主题、插件、数据库、终端、账号和权限等其余配置能力继续使用 Komari 安装包自带的官方后台。主题顶部和服务器列表中的后台入口都直接进入 Komari 1.4.x 的服务器管理路由 `/admin/servers`。
 
 截至本版本发布时，[komari-monitor/komari-web](https://github.com/komari-monitor/komari-web) 没有声明可供第三方修改和再分发的许可证。因此 Transit 的源码仓库和 Release 都不包含它的源码、补丁、构建文件或派生管理端截图。若上游未来提供明确许可，可在符合其条款的前提下重新评估集成。
 

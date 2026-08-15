@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { partitionMetricEntityIds } from '../../src/services/metrics.service'
+import { getQueryMetricsRequestKey, partitionMetricEntityIds } from '../../src/services/metrics.service'
 
 describe('partitionMetricEntityIds', () => {
   test('deduplicates entity ids and caps each request batch', () => {
@@ -18,5 +18,26 @@ describe('partitionMetricEntityIds', () => {
       ['node-1'],
       ['node-2'],
     ])
+  })
+})
+
+describe('getQueryMetricsRequestKey', () => {
+  test('includes every per-metric downsampling result dimension', () => {
+    const baseline = { entity_id: 'node-1', metric_keys: ['cpu.usage'] }
+    const keys = [
+      getQueryMetricsRequestKey({ ...baseline, max_points_by_metric: { 'cpu.usage': 60 } }),
+      getQueryMetricsRequestKey({ ...baseline, points_by_metric: { 'cpu.usage': 60 } }),
+      getQueryMetricsRequestKey({ ...baseline, aggregation_by_metric: { 'cpu.usage': 'avg' } }),
+      getQueryMetricsRequestKey({ ...baseline, algorithm_by_metric: { 'cpu.usage': 'lttb' } }),
+    ]
+
+    expect(new Set(keys).size).toBe(keys.length)
+    expect(keys).not.toContain(getQueryMetricsRequestKey(baseline))
+  })
+
+  test('serializes nested maps independently of object insertion order', () => {
+    const left = getQueryMetricsRequestKey({ tags: { region: 'US', device: { index: 0, name: 'GPU' } } })
+    const right = getQueryMetricsRequestKey({ tags: { device: { name: 'GPU', index: 0 }, region: 'US' } })
+    expect(left).toBe(right)
   })
 })

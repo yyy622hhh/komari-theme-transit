@@ -6,6 +6,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { useVisitorAudit } from '@/composables/useVisitorAudit'
+import { KOMARI_ADMIN_SERVERS_PATH } from '@/constants'
 import { useAppStore } from '@/stores/app'
 
 const VisitorInfo = defineAsyncComponent(() => import('@/components/VisitorInfo.vue'))
@@ -63,7 +64,7 @@ const actionButtons = computed(() => {
       title: '后台管理',
       icon: 'icon-park-outline:setting',
       action: 'jumpToSetting',
-      href: '/admin/client',
+      href: KOMARI_ADMIN_SERVERS_PATH,
     })
   }
   return buttons
@@ -105,7 +106,7 @@ const sitename = computed(() => appStore.publicSettings?.sitename || 'Komari Mon
   <WallpaperManagerDialog v-if="wallpaperDialogOpen" v-model:open="wallpaperDialogOpen" />
 
   <header
-    class="transition-all duration-200 top-0 sticky z-10 border-b border-transparent"
+    class="site-header transition-all duration-200 top-0 sticky z-10 border-b border-transparent"
     :class="isScrolled ? '!border-slate-500/10 backdrop-blur-lg' : 'bg-transparent'"
   >
     <div class="px-4 flex-between h-14 max-w-[1280px] mx-auto">

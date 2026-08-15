@@ -2,7 +2,7 @@
 import type { ServerListSortKey, ServerListStatusFilter } from '@/services/server-list.service'
 import type { NodeData } from '@/stores/nodes'
 import { Icon } from '@iconify/vue'
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Empty } from '@/components/ui/empty'
@@ -11,6 +11,7 @@ import { ProgressThin } from '@/components/ui/progress-thin'
 import { useOrderMoveFeedback } from '@/composables/useOrderMoveFeedback'
 import { useServerList } from '@/composables/useServerList'
 import { useSortableOrder } from '@/composables/useSortableOrder'
+import { KOMARI_ADMIN_SERVERS_PATH } from '@/constants'
 import { useAppStore } from '@/stores/app'
 import {
   formatBytesPerSecondWithConfig,
@@ -33,7 +34,7 @@ const emit = defineEmits<{
 const appStore = useAppStore()
 const {
   beginOrderEdit,
-  cancelOrderEdit,
+  cancelOrderEdit: cancelOrderEditDraft,
   editingOrder,
   moveOrderToIndex,
   orderDirty,
@@ -53,6 +54,7 @@ const {
 
 const desktopOrderContainer = ref<HTMLElement | null>(null)
 const mobileOrderContainer = ref<HTMLElement | null>(null)
+const panel = ref<HTMLElement | null>(null)
 const {
   announcement: orderAnnouncement,
   handleKeydown: handleOrderKeydown,
@@ -147,6 +149,16 @@ function startOrderEdit(): void {
   beginOrderEdit()
 }
 
+async function focusOrderEditTrigger(): Promise<void> {
+  await nextTick()
+  panel.value?.querySelector<HTMLElement>('[data-server-order-edit-trigger]')?.focus({ preventScroll: true })
+}
+
+function cancelOrderEdit(): void {
+  cancelOrderEditDraft()
+  void focusOrderEditTrigger()
+}
+
 async function saveOrder(): Promise<void> {
   const granted = await appStore.requireLoginPermission('serverList', { force: true })
   if (!granted) {
@@ -157,6 +169,7 @@ async function saveOrder(): Promise<void> {
   try {
     await persistOrder()
     window.$message?.success('首页服务器顺序已保存。')
+    await focusOrderEditTrigger()
   }
   catch (error) {
     window.$message?.error(`保存服务器顺序失败：${error instanceof Error ? error.message : String(error)}`)
@@ -165,7 +178,7 @@ async function saveOrder(): Promise<void> {
 </script>
 
 <template>
-  <section data-server-list-panel class="space-y-3" aria-labelledby="server-list-title">
+  <section ref="panel" data-server-list-panel class="space-y-3" aria-labelledby="server-list-title">
     <div class="flex flex-col gap-3 border-b border-border/60 pb-3 sm:flex-row sm:items-center sm:justify-between">
       <div class="min-w-0">
         <h2 id="server-list-title" class="text-base font-semibold">
@@ -176,18 +189,18 @@ async function saveOrder(): Promise<void> {
         </p>
       </div>
       <div class="flex shrink-0 flex-wrap gap-2 self-start sm:self-auto">
-        <Button v-if="!editingOrder" variant="outline" size="sm" :title="canEditOrder ? '编辑首页顺序' : '请先切换到全部节点'" :aria-disabled="!canEditOrder" @click="startOrderEdit">
+        <Button v-if="!editingOrder" data-server-order-edit-trigger variant="outline" size="sm" :title="canEditOrder ? '编辑首页顺序' : '请先切换到全部节点'" :aria-disabled="!canEditOrder" @click="startOrderEdit">
           <Icon icon="tabler:arrows-move-vertical" />
           编辑首页顺序
         </Button>
-        <Button as="a" href="/admin/client" target="_blank" rel="noopener" variant="outline" size="sm">
+        <Button as="a" :href="KOMARI_ADMIN_SERVERS_PATH" target="_blank" rel="noopener" variant="outline" size="sm">
           <Icon icon="tabler:settings" />
           官方后台
         </Button>
       </div>
     </div>
 
-    <div v-if="editingOrder" class="flex flex-col gap-2 border-b border-border/60 pb-3 sm:flex-row sm:items-center sm:justify-between">
+    <div v-if="editingOrder" class="flex flex-col gap-2 border-b border-border/60 pb-3 sm:flex-row sm:items-center sm:justify-between" :aria-busy="savingOrder">
       <p class="text-xs text-muted-foreground">
         首页与官方后台共用此全局顺序。
       </p>
@@ -197,7 +210,7 @@ async function saveOrder(): Promise<void> {
         </Button>
         <Button size="sm" :disabled="savingOrder || !orderDirty" @click="saveOrder">
           <Icon :icon="savingOrder ? 'tabler:loader-2' : 'tabler:device-floppy'" :class="savingOrder && 'animate-spin'" />
-          保存顺序
+          {{ savingOrder ? '保存中' : '保存顺序' }}
         </Button>
       </div>
       <p id="server-order-instructions" class="sr-only">

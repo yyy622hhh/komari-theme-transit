@@ -96,6 +96,21 @@ describe('RpcClient WebSocket lifecycle', () => {
     expect(client.getWebSocket()).toBeNull()
   })
 
+  test('aborting one call while connecting does not close the shared WebSocket', async () => {
+    const controller = new AbortController()
+    const client = new RpcClient({ baseUrl: 'http://example.test/api/rpc2', timeout: 100, useWebSocket: true })
+    const call = client.call('rpc.ping', undefined, controller.signal)
+    const socket = FakeWebSocket.instances[0]!
+
+    controller.abort()
+    await expect(call).rejects.toMatchObject({ code: -32000, message: 'Request aborted' })
+
+    socket.open()
+    await expect(client.ensureWebSocketConnected()).resolves.toBeUndefined()
+    expect(client.getWebSocket()).toBe(socket)
+    client.close()
+  })
+
   test('switching to HTTP rejects requests pending on the old WebSocket', async () => {
     let requestSent!: () => void
     const sent = new Promise<void>((resolve) => {
