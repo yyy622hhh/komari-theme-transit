@@ -194,7 +194,10 @@ export async function loadPingTaskNamesForNode(nodeUuid: string): Promise<string
   const stats = statsResult.status === 'fulfilled' ? statsResult.value : null
   const taskById = new Map(tasks.map(task => [String(task.id), task.name]))
   const configuredTaskNames = tasks
-    .filter(task => task.all_clients || task.default_on || !task.clients?.length || task.clients.includes(nodeUuid))
+    // Komari 1.4 stores `default_on` (legacy JSON name `all_clients`) only as
+    // the default for newly registered nodes. Runtime scheduling uses the
+    // explicit clients array, so an empty/default-on task is not global.
+    .filter(task => task.clients?.includes(nodeUuid))
     .map(task => task.name.trim())
     .filter(Boolean)
   const observedTaskNames = (stats?.stats ?? [])

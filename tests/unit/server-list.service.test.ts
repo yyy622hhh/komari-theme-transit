@@ -1,4 +1,5 @@
 import type { NodeData } from '../../src/stores/nodes'
+import type { Client } from '../../src/utils/rpc'
 import { describe, expect, test } from 'bun:test'
 import { reconcileServerOrder, saveServerOrder } from '../../src/services/server-list.service'
 
@@ -31,5 +32,31 @@ describe('reconcileServerOrder', () => {
   test('rejects empty and duplicate orders before contacting the backend', async () => {
     await expect(saveServerOrder([])).rejects.toThrow('服务器顺序无效')
     await expect(saveServerOrder(['a', 'a'])).rejects.toThrow('服务器顺序无效')
+  })
+
+  test('reads Komari metadata back and accepts only the persisted order', async () => {
+    const clients = {
+      a: { uuid: 'a', weight: 1 },
+      b: { uuid: 'b', weight: 0 },
+    } as Record<string, Client>
+    let savedOrder: Record<string, number> | undefined
+
+    await expect(saveServerOrder(['b', 'a'], {
+      orderClients: async (order) => {
+        savedOrder = order
+      },
+      getNodesOverHttp: async () => clients,
+    })).resolves.toBe(clients)
+    expect(savedOrder).toEqual({ b: 0, a: 1 })
+  })
+
+  test('keeps the edit flow in an error state when persistence is incomplete', async () => {
+    await expect(saveServerOrder(['b', 'a'], {
+      orderClients: async () => {},
+      getNodesOverHttp: async () => ({
+        a: { uuid: 'a', weight: 0 },
+        b: { uuid: 'b', weight: 1 },
+      } as Record<string, Client>),
+    })).rejects.toThrow('服务器顺序未完整保存')
   })
 })

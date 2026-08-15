@@ -1,4 +1,5 @@
 import type { NodeData } from '@/stores/nodes'
+import type { Client, KomariRpc } from '@/utils/rpc'
 import { getRealtimeTotalSpeed } from '@/utils/nodeMetricsHelper'
 import { isNodeMatchSearch } from '@/utils/nodeSearch'
 import { getSharedRpc } from '@/utils/rpc'
@@ -112,13 +113,27 @@ function compareNodeValue(
   return getStatusRank(left, maintenanceIds) - getStatusRank(right, maintenanceIds)
 }
 
-export async function saveServerOrder(orderedUuids: string[]): Promise<Record<string, number>> {
+interface ServerOrderRpc extends Pick<KomariRpc, 'getNodesOverHttp' | 'orderClients'> {}
+
+export async function saveServerOrder(
+  orderedUuids: string[],
+  rpc: ServerOrderRpc = getSharedRpc(),
+): Promise<Record<string, Client>> {
   if (!orderedUuids.length || new Set(orderedUuids).size !== orderedUuids.length)
     throw new Error('服务器顺序无效，请刷新后重试')
 
   const order = Object.fromEntries(orderedUuids.map((uuid, index) => [uuid, index]))
-  await getSharedRpc().orderClients(order)
-  return order
+  await rpc.orderClients(order)
+
+  // Komari's mutation returns nil, so a syntactically successful RPC response
+  // alone cannot prove that every database update was persisted. Read the
+  // authoritative metadata back before updating the local order.
+  const clients = await rpc.getNodesOverHttp()
+  const mismatched = orderedUuids.find(uuid => clients[uuid]?.weight !== order[uuid])
+  if (mismatched)
+    throw new Error('服务器顺序未完整保存，请重试')
+
+  return clients
 }
 
 export function summarizeServerList(

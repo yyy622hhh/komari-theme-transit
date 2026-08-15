@@ -150,8 +150,8 @@ export function useServerList(nodes: MaybeRefOrGetter<NodeData[]>) {
     savingOrder.value = true
     try {
       const order = reconciledOrderDraft.value
-      await saveServerOrder(order)
-      nodesStore.applyNodeOrder(order)
+      const confirmedClients = await saveServerOrder(order)
+      nodesStore.updateNodeClients(confirmedClients)
       completeOrderEdit()
     }
     finally {

@@ -4,19 +4,17 @@ import { serializePandaOpsNodeControls } from '@/utils/pandaOpsNodeControl'
 
 interface SavePandaOpsNodeControlsOptions {
   theme: string
-  themeSettings: Record<string, unknown>
   controls: PandaOpsNodeControls
 }
 
 export async function savePandaOpsNodeControls(options: SavePandaOpsNodeControlsOptions): Promise<Record<string, unknown>> {
-  const payload = {
-    ...options.themeSettings,
+  const patch = {
     pandaOpsNodeControls: serializePandaOpsNodeControls(options.controls),
   }
 
   return saveManagedThemeSettings({
     theme: options.theme,
-    settings: payload,
+    patch,
     permission: 'nodeTopology',
     requestKey: `panda-ops:node-controls:${options.theme}`,
   })

@@ -282,7 +282,7 @@ export function getStatus(percentage: number): 'success' | 'warning' | 'error' {
  * @param timestamp 时间戳字符串或 Date 对象
  * @returns 格式化后的字符串，如 "2024-01-15 14:30:00"
  */
-export function formatDateTime(timestamp: string | Date | undefined, format = 'YYYY-MM-DD HH:mm:ss'): string {
+export function formatDateTime(timestamp: string | Date | null | undefined, format = 'YYYY-MM-DD HH:mm:ss'): string {
   if (!timestamp)
     return '-'
 

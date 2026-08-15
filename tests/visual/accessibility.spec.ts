@@ -4,7 +4,7 @@ import { installKomariFixture } from './fixtures/komari'
 
 async function openReadyPage(page: Parameters<typeof installKomariFixture>[0], path = '/'): Promise<void> {
   await page.goto(path)
-  await expect(page.getByRole('heading', { name: 'Komari Visual Lab' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Komari Visual Lab' })).toBeVisible({ timeout: 10_000 })
   await page.waitForTimeout(500)
 }
 

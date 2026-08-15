@@ -399,8 +399,8 @@ export class KomariApi {
    * 获取当前用户信息
    * 注意：此接口返回的是直接的 MeInfo 对象，不是包裹在 { status, message, data } 中
    */
-  async getMe(): Promise<MeInfo> {
-    return this.getRaw<MeInfo>('/me')
+  async getMe(signal?: AbortSignal): Promise<MeInfo> {
+    return this.getRaw<MeInfo>('/me', signal)
   }
 
   // ===== 服务端公开属性 =====
@@ -408,8 +408,8 @@ export class KomariApi {
   /**
    * 获取站点的公开设置属性
    */
-  async getPublicSettings(): Promise<PublicSettings> {
-    return this.get<PublicSettings>('/public')
+  async getPublicSettings(signal?: AbortSignal): Promise<PublicSettings> {
+    return this.get<PublicSettings>('/public', undefined, signal)
   }
 
   /**

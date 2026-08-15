@@ -48,4 +48,20 @@ describe('collectAuditLogPages', () => {
     expect(result.reportedTotal).toBe(MAX_AUDIT_EXPORT_RECORDS + 100)
     expect(result.truncated).toBe(true)
   })
+
+  test('stops requesting pages when the export is cancelled', async () => {
+    const controller = new AbortController()
+    const requestedPages: number[] = []
+    const result = collectAuditLogPages(async (page, limit) => {
+      requestedPages.push(page)
+      controller.abort()
+      return {
+        logs: Array.from({ length: limit }, (_, index) => auditLog(index + 1)),
+        total: limit * 3,
+      }
+    }, { pageSize: 2, signal: controller.signal })
+
+    await expect(result).rejects.toMatchObject({ name: 'AbortError' })
+    expect(requestedPages).toEqual([1])
+  })
 })

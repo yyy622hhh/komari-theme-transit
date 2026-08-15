@@ -3,7 +3,7 @@ import type { SnapshotCsvColumn } from '@/services/snapshot.service'
 import type { AuditLogEntry } from '@/utils/rpc'
 import type { ParsedVisitorAuditMessage, VisitorEventMeta } from '@/utils/visitorAudit'
 import { Icon } from '@iconify/vue'
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { CardX } from '@/components/ui/card-x'
@@ -48,6 +48,9 @@ const updatingVisitorAudit = ref(false)
 const error = ref<string | null>(null)
 let requestId = 0
 let activeLogRequest: { page: number, limit: number, msgType?: string } | null = null
+let componentActive = true
+let exportGeneration = 0
+let exportController: AbortController | null = null
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / limit.value)))
 const pageStart = computed(() => total.value === 0 ? 0 : (page.value - 1) * limit.value + 1)
@@ -134,8 +137,14 @@ function yieldToBrowser(): Promise<void> {
   })
 }
 
-async function verifyAuditExportPermission(view: AuditView): Promise<boolean> {
+function isCurrentExport(generation: number): boolean {
+  return componentActive && generation === exportGeneration
+}
+
+async function verifyAuditExportPermission(view: AuditView, generation: number): Promise<boolean> {
   const granted = await appStore.requireLoginPermission('auditLog', { force: true })
+  if (!isCurrentExport(generation))
+    return false
   if (!granted) {
     window.$message?.warning('登录状态已过期，请重新登录后导出审计日志。')
     return false
@@ -173,20 +182,26 @@ function buildAuditJsonRecord(row: AuditLogRow): Record<string, unknown> {
 }
 
 async function exportAudit(format: 'json' | 'csv'): Promise<void> {
-  if (exporting.value)
+  if (exporting.value || !componentActive)
     return
 
   const exportView = logView.value
-  if (!await verifyAuditExportPermission(exportView) || exporting.value)
-    return
-
+  const generation = ++exportGeneration
+  exportController?.abort()
+  const controller = new AbortController()
+  exportController = controller
   exporting.value = format
   try {
+    if (!await verifyAuditExportPermission(exportView, generation))
+      return
     const exportResult = await loadAuditLogExport({
       maxRecords: MAX_AUDIT_EXPORT_RECORDS,
       msgType: exportView === 'visitor' ? 'visitor' : undefined,
       yieldBetweenPages: yieldToBrowser,
+      signal: controller.signal,
     })
+    if (!isCurrentExport(generation))
+      return
     const exportRows = exportResult.logs.map(buildAuditLogRow)
     const timestamp = Date.now()
     const filterName = exportView === 'visitor' ? 'visitor' : 'all'
@@ -204,7 +219,9 @@ async function exportAudit(format: 'json' | 'csv'): Promise<void> {
       downloadText(`komari-audit-${filterName}-${timestamp}.json`, content, 'application/json;charset=utf-8')
     }
     else {
-      const content = await buildSnapshotCsvAsync(auditCsvColumns, exportRows, yieldToBrowser)
+      const content = await buildSnapshotCsvAsync(auditCsvColumns, exportRows, yieldToBrowser, 250, controller.signal)
+      if (!isCurrentExport(generation))
+        return
       downloadText(`komari-audit-${filterName}-${timestamp}.csv`, content, 'text/csv;charset=utf-8', { bom: true })
     }
 
@@ -221,10 +238,14 @@ async function exportAudit(format: 'json' | 'csv'): Promise<void> {
       window.$message?.success(`已导出 ${exportRows.length} 条审计日志。`)
   }
   catch (err) {
-    window.$message?.error(err instanceof Error ? err.message : '导出审计日志失败')
+    if (isCurrentExport(generation))
+      window.$message?.error(err instanceof Error ? err.message : '导出审计日志失败')
   }
   finally {
-    exporting.value = null
+    if (exportController === controller)
+      exportController = null
+    if (isCurrentExport(generation))
+      exporting.value = null
   }
 }
 
@@ -351,7 +372,12 @@ onMounted(() => {
   void fetchLogs()
 })
 
-onUnmounted(() => {
+onBeforeUnmount(() => {
+  componentActive = false
+  exportGeneration++
+  exportController?.abort()
+  exportController = null
+  exporting.value = null
   requestId++
   if (activeLogRequest)
     abortAuditLogs(activeLogRequest.page, activeLogRequest.limit, activeLogRequest.msgType)

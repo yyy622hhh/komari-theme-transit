@@ -36,7 +36,6 @@ async function updateControl(key: keyof PandaOpsNodeControl, durationMinutes?: n
   try {
     const payload = await savePandaOpsNodeControls({
       theme: publicSettings.theme,
-      themeSettings: publicSettings.theme_settings ?? {},
       controls: nextControls,
     })
     appStore.publicSettings = { ...publicSettings, theme_settings: payload }

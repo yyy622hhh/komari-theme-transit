@@ -15,15 +15,18 @@ export function buildSnapshotCsv<T>(columns: Array<SnapshotCsvColumn<T>>, rows: 
   ])
 }
 
-export async function buildSnapshotCsvAsync<T>(columns: Array<SnapshotCsvColumn<T>>, rows: T[], yieldToBrowser: () => Promise<void>, chunkSize = 250): Promise<string> {
+export async function buildSnapshotCsvAsync<T>(columns: Array<SnapshotCsvColumn<T>>, rows: T[], yieldToBrowser: () => Promise<void>, chunkSize = 250, signal?: AbortSignal): Promise<string> {
   const csvRows: string[] = [columns.map(column => escapeCsvCell(column.label)).join(',')]
   for (let index = 0; index < rows.length; index++) {
+    signal?.throwIfAborted()
     const row = rows[index]
     if (!row)
       continue
     csvRows.push(columns.map(column => escapeCsvCell(column.value(row))).join(','))
-    if ((index + 1) % chunkSize === 0)
+    if ((index + 1) % chunkSize === 0) {
       await yieldToBrowser()
+      signal?.throwIfAborted()
+    }
   }
   return csvRows.join('\r\n')
 }
@@ -37,17 +40,20 @@ function indentJson(json: string, spaces: number): string {
   return json.replace(JSON_NEWLINE_REGEX, `\n${padding}`)
 }
 
-export async function buildSnapshotJsonAsync<T>(metadata: Record<string, unknown>, rows: T[], buildNode: (row: T) => unknown, yieldToBrowser: () => Promise<void>, chunkSize = 250): Promise<string> {
+export async function buildSnapshotJsonAsync<T>(metadata: Record<string, unknown>, rows: T[], buildNode: (row: T) => unknown, yieldToBrowser: () => Promise<void>, chunkSize = 250, signal?: AbortSignal): Promise<string> {
   const parts = Object.entries(metadata).map(([key, value]) => `  ${JSON.stringify(key)}: ${indentJson(stringifyPretty(value), 2)}`)
   const nodeParts: string[] = []
 
   for (let index = 0; index < rows.length; index++) {
+    signal?.throwIfAborted()
     const row = rows[index]
     if (!row)
       continue
     nodeParts.push(`    ${indentJson(stringifyPretty(buildNode(row)), 4)}`)
-    if ((index + 1) % chunkSize === 0)
+    if ((index + 1) % chunkSize === 0) {
       await yieldToBrowser()
+      signal?.throwIfAborted()
+    }
   }
 
   return [

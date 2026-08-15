@@ -6,7 +6,6 @@ import { Button } from '@/components/ui/button'
 import { Toaster } from '@/components/ui/sonner'
 import { useVisitorPageAudit } from '@/composables/useVisitorAudit'
 import { useAppStore } from '@/stores/app'
-import { destroyInitManager, initApp, retryInitApp } from '@/utils/init'
 import Background from './components/Background.vue'
 import Footer from './components/Footer.vue'
 import Header from './components/Header.vue'
@@ -18,6 +17,22 @@ useVisitorPageAudit()
 
 const isReady = ref(false)
 const isRetryingConnection = ref(false)
+type InitModule = typeof import('@/utils/init')
+let initModule: InitModule | null = null
+let initModulePromise: Promise<InitModule> | null = null
+let componentActive = true
+
+async function loadInitModule(): Promise<InitModule> {
+  if (initModule)
+    return initModule
+  if (!initModulePromise) {
+    initModulePromise = import('@/utils/init').then((module) => {
+      initModule = module
+      return module
+    })
+  }
+  return initModulePromise
+}
 
 async function retryConnection(): Promise<void> {
   if (isRetryingConnection.value)
@@ -25,35 +40,55 @@ async function retryConnection(): Promise<void> {
 
   isRetryingConnection.value = true
   try {
+    const { retryInitApp } = await loadInitModule()
+    if (!componentActive)
+      return
     const recovered = await retryInitApp()
+    if (!componentActive)
+      return
     if (recovered)
       window.$message?.success('连接已恢复。')
     else
       window.$message?.error('仍无法连接服务器，请稍后再试。')
   }
   catch (error) {
+    if (!componentActive)
+      return
     console.error('[App] Connection retry failed:', error)
     window.$message?.error('重试失败，请稍后再试。')
   }
   finally {
-    isRetryingConnection.value = false
+    if (componentActive)
+      isRetryingConnection.value = false
   }
 }
 
 onMounted(async () => {
   try {
+    const { initApp } = await loadInitModule()
+    if (!componentActive)
+      return
     await initApp()
+    if (!componentActive) {
+      initModule?.destroyInitManager()
+      return
+    }
     await nextTick()
+    if (!componentActive)
+      return
     isReady.value = true
   }
   catch (error) {
+    if (!componentActive)
+      return
     console.error('[App] Initialization failed:', error)
     isReady.value = true
   }
 })
 
 onUnmounted(() => {
-  destroyInitManager()
+  componentActive = false
+  initModule?.destroyInitManager()
 })
 </script>
 

@@ -17,6 +17,11 @@ interface CollectAuditLogPagesOptions {
   msgType?: string
   pageSize?: number
   yieldBetweenPages?: () => Promise<void>
+  signal?: AbortSignal
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  signal?.throwIfAborted()
 }
 
 function normalizePositiveInteger(value: string | number | null | undefined, fallback: number): number {
@@ -65,7 +70,9 @@ export async function collectAuditLogPages(
   let mayHaveMore = false
 
   while (collected.length < maxRecords) {
+    throwIfAborted(options.signal)
     const result = await loadPage(page, pageSize, msgType)
+    throwIfAborted(options.signal)
     const pageLogs = result.logs ?? []
     if (Number.isFinite(result.total) && result.total > reportedTotal)
       reportedTotal = result.total
@@ -88,6 +95,7 @@ export async function collectAuditLogPages(
 
     page++
     await options.yieldBetweenPages?.()
+    throwIfAborted(options.signal)
   }
 
   return {
@@ -99,7 +107,12 @@ export async function collectAuditLogPages(
 
 export async function loadAuditLogExport(options: CollectAuditLogPagesOptions = {}): Promise<AuditLogExportResult> {
   return collectAuditLogPages(
-    (page, limit, msgType) => loadAuditLogs({ page, limit, msgType }),
+    (page, limit, msgType) => getSharedRpc().getAuditLogs(
+      String(limit),
+      String(page),
+      msgType,
+      options.signal,
+    ),
     options,
   )
 }

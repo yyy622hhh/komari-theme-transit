@@ -86,6 +86,10 @@ async function removeWallpaper(): Promise<void> {
     window.$message?.error(error instanceof Error ? error.message : '壁纸移除失败。')
   }
 }
+
+async function retryWallpaperLoad(): Promise<void> {
+  await wallpaper.initialize()
+}
 </script>
 
 <template>
@@ -187,9 +191,20 @@ async function removeWallpaper(): Promise<void> {
         </div>
       </fieldset>
 
-      <p v-if="wallpaper.errorMessage.value" role="alert" aria-live="assertive" class="rounded-lg border border-destructive/35 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-        {{ wallpaper.errorMessage.value }}
-      </p>
+      <div v-if="wallpaper.errorMessage.value" role="alert" aria-live="assertive" class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-destructive/35 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+        <span>{{ wallpaper.errorMessage.value }}</span>
+        <Button
+          v-if="wallpaper.status.value === 'error'"
+          type="button"
+          variant="outline"
+          size="sm"
+          :disabled="wallpaper.busy.value"
+          @click="retryWallpaperLoad"
+        >
+          <Icon icon="tabler:refresh" />
+          重试读取
+        </Button>
+      </div>
     </div>
   </AppDialog>
 </template>

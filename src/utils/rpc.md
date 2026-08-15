@@ -230,7 +230,7 @@ interface Client {
   billing_cycle: number
   auto_renewal: boolean
   currency: string
-  expired_at: string
+  expired_at: string | null
   group: string
   tags: string
   hidden: boolean
@@ -307,6 +307,7 @@ catch (error) {
 | ------ | -------------------- |
 | -32000 | 网络错误/HTTP 错误   |
 | -32001 | 请求超时             |
+| -32800 | 调用方取消请求       |
 | 其他   | 服务端返回的业务错误 |
 
 ## WebSocket 模式

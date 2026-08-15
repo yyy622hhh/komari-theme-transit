@@ -3,6 +3,7 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { parseNodeGroups } from '@/utils/groupHelper'
+import { normalizeLatestConnections } from '@/utils/nodeMetricsHelper'
 
 /** 流量限制类型 */
 export type TrafficLimitType = 'up' | 'down' | 'min' | 'max' | 'sum'
@@ -34,7 +35,7 @@ export interface NodeData {
   billing_cycle: number
   auto_renewal: boolean
   currency: string
-  expired_at: string
+  expired_at: string | null
   group: string
   groups: string[]
   tags: string
@@ -267,10 +268,14 @@ const useNodesStore = defineStore('nodes', () => {
       node.traffic_down = status.traffic_down
     if (node.process !== status.process)
       node.process = status.process
-    if (node.connections !== status.connections)
-      node.connections = status.connections
-    if (node.connections_udp !== status.connections_udp)
-      node.connections_udp = status.connections_udp
+    const { tcp: tcpConnections, udp: udpConnections } = normalizeLatestConnections(
+      status.connections,
+      status.connections_udp,
+    )
+    if (node.connections !== tcpConnections)
+      node.connections = tcpConnections
+    if (node.connections_udp !== udpConnections)
+      node.connections_udp = udpConnections
     if (node.uptime !== status.uptime)
       node.uptime = status.uptime
     if (node.message !== status.message)

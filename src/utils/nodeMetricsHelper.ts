@@ -52,6 +52,15 @@ export function getConnectionCount(node: Pick<NodeData, 'connections' | 'connect
   return (node.connections || 0) + (node.connections_udp || 0)
 }
 
+/** Normalize Komari 1.4 latest status, where connections is TCP + UDP. */
+export function normalizeLatestConnections(connections: number, connectionsUdp: number): { tcp: number, udp: number } {
+  const udp = Math.max(0, connectionsUdp || 0)
+  return {
+    tcp: Math.max(0, (connections || 0) - udp),
+    udp,
+  }
+}
+
 export function getMemoryPercentage(node: Pick<NodeData, 'ram' | 'mem_total'>): number {
   return clampPercentage((node.ram || 0) / (node.mem_total || 1) * 100)
 }

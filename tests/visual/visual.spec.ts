@@ -38,7 +38,10 @@ const STABLE_STYLE = `
 
 async function openStablePage(page: Page, path = '/'): Promise<void> {
   await page.goto(path)
-  await expect(page.getByRole('heading', { name: 'Komari Visual Lab' })).toBeVisible()
+  // Full visual runs can briefly saturate Chromium while lazy chunks and test
+  // fonts are decoded. Keep the product assertions strict, but give the shared
+  // page-ready marker enough time to appear before taking deterministic shots.
+  await expect(page.getByRole('heading', { name: 'Komari Visual Lab' })).toBeVisible({ timeout: 10_000 })
   await page.addStyleTag({ content: STABLE_STYLE })
   await page.evaluate(async () => {
     await document.fonts.load('400 16px "Transit Visual Fixture"', '线路 Transit')
@@ -245,6 +248,36 @@ test('personal wallpaper keeps the previous image when local storage replacement
   await expect(page.getByRole('heading', { name: 'Komari Visual Lab' })).toBeVisible()
   await page.getByRole('button', { name: '壁纸与背景效果' }).click()
   await expect(page.getByRole('dialog', { name: '壁纸与背景效果' }).getByText('preview.png', { exact: true })).toBeVisible()
+})
+
+test('personal wallpaper can retry after the initial local database read fails', async ({ page }) => {
+  await page.addInitScript(() => {
+    const originalOpen = IDBFactory.prototype.open
+    const state = { fail: true }
+    Object.defineProperty(window, '__transitWallpaperDbTest', { value: state })
+    IDBFactory.prototype.open = function (...args: Parameters<IDBFactory['open']>) {
+      if (state.fail && args[0] === 'transit-personalization') {
+        const request = {} as IDBOpenDBRequest
+        queueMicrotask(() => request.onerror?.(new Event('error')))
+        return request
+      }
+      return originalOpen.apply(this, args)
+    }
+  })
+  await installKomariFixture(page)
+  await openStablePage(page)
+
+  await page.getByRole('button', { name: '壁纸与背景效果' }).click()
+  const dialog = page.getByRole('dialog', { name: '壁纸与背景效果' })
+  await expect(dialog.getByRole('alert')).toContainText('无法打开本地壁纸存储')
+  await page.evaluate(() => {
+    const state = (window as unknown as { __transitWallpaperDbTest: { fail: boolean } }).__transitWallpaperDbTest
+    state.fail = false
+  })
+  await dialog.getByRole('button', { name: '重试读取' }).click()
+
+  await expect(dialog.getByRole('alert')).toHaveCount(0)
+  await expect(dialog.getByText('尚未上传本机壁纸')).toBeVisible()
 })
 
 test.describe('personal wallpaper mobile', () => {
@@ -704,6 +737,8 @@ test('homepage cards can be reordered directly and saved to the official global 
   const list = page.locator('[data-server-order-item]')
   const listHandle = page.getByRole('button', { name: /^拖动 主控-洛杉矶，/ })
   await expect(list).toHaveCount(12)
+  await expect(page.getByRole('button', { name: /收藏 主控-洛杉矶/ })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '打开延迟和丢包监测' })).toHaveCount(0)
   await listHandle.press('ArrowDown')
   await expect(list.first()).toContainText('香港边缘节点-超长名称布局测试')
   await listHandle.press('ArrowUp')
@@ -972,6 +1007,46 @@ test('health range reloads the selected period and snapshot export downloads rea
   await expect(page.getByText(/已导出 12 台节点的 JSON 快照/)).toBeVisible()
 })
 
+test('snapshot export does not download or notify after its tool is closed', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, { pandaOps: true, authenticated: true })
+  await openStablePage(page)
+  await page.getByRole('button', { name: '显示首页工具' }).click()
+  await page.getByRole('button', { name: /导出：/ }).click()
+
+  let releasePermission!: () => void
+  const permissionReleased = new Promise<void>((resolve) => {
+    releasePermission = resolve
+  })
+  let permissionRequested!: () => void
+  const permissionRequestStarted = new Promise<void>((resolve) => {
+    permissionRequested = resolve
+  })
+  await page.route('**/api/me', async (route) => {
+    permissionRequested()
+    await permissionReleased
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ logged_in: true, username: 'visual-admin' }),
+    })
+  })
+
+  let downloads = 0
+  page.on('download', () => downloads++)
+  await page.getByRole('button', { name: '导出 JSON' }).click()
+  await permissionRequestStarted
+  await page.getByRole('button', { name: /对比：/ }).click()
+  await expect(page.getByText('选择 2 至 4 台节点进行横向对比')).toBeVisible()
+
+  const permissionResponse = page.waitForResponse(response => response.url().endsWith('/api/me'))
+  releasePermission()
+  await permissionResponse
+  await page.waitForTimeout(500)
+
+  expect(downloads).toBe(0)
+  await expect(page.getByText(/已导出 .* JSON 快照|导出 JSON 失败/)).toHaveCount(0)
+})
+
 test('audit tool shows real core logs without unsupported visitor controls', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await installKomariFixture(page, { pandaOps: true, authenticated: true })
@@ -983,6 +1058,60 @@ test('audit tool shows real core logs without unsupported visitor controls', asy
   await expect(page.getByText('管理员登录')).toBeVisible()
   await expect(page.getByRole('tab', { name: '访客安全' })).toHaveCount(0)
   await expect(page.getByText(/等待核心发布访客审计能力/)).toHaveCount(0)
+})
+
+test('audit export does not download or notify after its tool is closed', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, { pandaOps: true, authenticated: true })
+  await openStablePage(page)
+  await page.getByRole('button', { name: '显示首页工具' }).click()
+  await page.getByRole('button', { name: /日志：/ }).click()
+  await expect(page.getByText('更新主题配置')).toBeVisible()
+
+  let releaseAuditExport!: () => void
+  const auditExportReleased = new Promise<void>((resolve) => {
+    releaseAuditExport = resolve
+  })
+  let auditExportRequested!: () => void
+  const auditExportRequestStarted = new Promise<void>((resolve) => {
+    auditExportRequested = resolve
+  })
+  await page.route('**/api/rpc2', async (route) => {
+    const payload = route.request().postDataJSON() as { id: number, method: string }
+    if (payload.method !== 'admin:getLogs') {
+      await route.fallback()
+      return
+    }
+    auditExportRequested()
+    await auditExportReleased
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: payload.id,
+        result: {
+          total: 2,
+          logs: [
+            { id: 2, ip: '198.51.100.22', uuid: 'visual-admin', message: '更新主题配置', msg_type: 'update', time: '2026-07-25T12:00:00.000Z' },
+            { id: 1, ip: '198.51.100.10', uuid: 'visual-admin', message: '管理员登录', msg_type: 'login', time: '2026-07-25T11:50:00.000Z' },
+          ],
+        },
+      }),
+    })
+  })
+
+  let downloads = 0
+  page.on('download', () => downloads++)
+  await page.getByRole('button', { name: 'JSON', exact: true }).click()
+  await auditExportRequestStarted
+  await page.getByRole('button', { name: /对比：/ }).click()
+  await expect(page.getByText('选择 2 至 4 台节点进行横向对比')).toBeVisible()
+
+  releaseAuditExport()
+  await page.waitForTimeout(500)
+
+  expect(downloads).toBe(0)
+  await expect(page.getByText(/已导出 .* 条审计日志|导出审计日志失败/)).toHaveCount(0)
 })
 
 test('provider value sorting changes the ranked node order', async ({ page }) => {

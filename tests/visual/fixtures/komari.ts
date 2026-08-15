@@ -291,6 +291,7 @@ async function handleRpc(route: Route, clientFixtures = clients, options: Visual
       loss: 0,
       weight: 99,
       all_clients: true,
+      clients: [uuidFor(2)],
     })
   }
   const metricPingTasks = options.pingTaskOrdering

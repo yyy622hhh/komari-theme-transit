@@ -23,16 +23,21 @@ function toSize(v: number | string) {
 </script>
 
 <template>
-  <div :class="cn('relative', props.class)">
-    <slot />
+  <div :class="cn('relative', props.class)" :aria-busy="show">
+    <div class="contents" :inert="show || undefined">
+      <slot />
+    </div>
     <div
       v-if="show"
+      role="status"
+      aria-live="polite"
       :class="cn(
         'absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-card/60 backdrop-blur-sm',
         props.contentClass,
       )"
     >
       <span
+        aria-hidden="true"
         class="inline-block animate-spin rounded-full border-solid"
         :style="{
           width: toSize(size),
@@ -45,6 +50,7 @@ function toSize(v: number | string) {
       <span v-if="description || $slots.description" class="text-sm text-muted-foreground">
         <slot name="description">{{ description }}</slot>
       </span>
+      <span v-else class="sr-only">加载中</span>
     </div>
   </div>
 </template>

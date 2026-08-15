@@ -493,6 +493,7 @@ function buildNodeMetadataItems(node: NodeData): NodeMetadataItem[] {
                     >
                     <span class="truncate">{{ node.name }}</span>
                     <button
+                      v-if="!props.orderEditing"
                       type="button"
                       class="inline-flex size-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-slate-500/10 hover:text-amber-500"
                       :class="appStore.isFavoriteNode(node.uuid) && 'text-amber-500'"
@@ -552,7 +553,7 @@ function buildNodeMetadataItems(node: NodeData): NodeMetadataItem[] {
                   <span class="text-[11px] font-medium text-foreground/70 truncate">
                     {{ formatUptime(node.uptime ?? 0) }}
                   </span>
-                  <NodePingListCell :uuid="node.uuid" :online="node.online" :enabled="props.pingEnabled" @click="emit('pingClick', node)" />
+                  <NodePingListCell v-if="!props.orderEditing" :uuid="node.uuid" :online="node.online" :enabled="props.pingEnabled" @click="emit('pingClick', node)" />
                 </div>
 
                 <!-- 操作系统 -->

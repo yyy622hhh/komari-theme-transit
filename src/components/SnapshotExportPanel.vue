@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { NodeData } from '@/stores/nodes'
 import { Icon } from '@iconify/vue'
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { Button } from '@/components/ui/button'
 import { CardX } from '@/components/ui/card-x'
 import { useNodeProviderMetadata } from '@/composables/useNodeProviderMetadata'
@@ -44,7 +44,7 @@ interface SnapshotRow {
   currency: string
   billingCycleDays: number
   monthlyCostCNY: number
-  expiredAt: string
+  expiredAt: string | null
   tags: string
 }
 
@@ -61,6 +61,9 @@ const appStore = useAppStore()
 const { record: recordVisitorEvent } = useVisitorAudit()
 const exchangeRates = ref(financeHelper.DEFAULT_EXCHANGE_RATES)
 const exporting = ref<null | 'json' | 'csv'>(null)
+let componentActive = true
+let exportGeneration = 0
+let exportController: AbortController | null = null
 
 const { getNodeProviderMetadata } = useNodeProviderMetadata({
   nodes: () => props.nodes,
@@ -72,8 +75,21 @@ const { getNodeProviderMetadata } = useNodeProviderMetadata({
 
 onMounted(async () => {
   const { rates } = await financeHelper.getDailyExchangeRates()
-  exchangeRates.value = rates
+  if (componentActive)
+    exchangeRates.value = rates
 })
+
+onBeforeUnmount(() => {
+  componentActive = false
+  exportGeneration++
+  exportController?.abort()
+  exportController = null
+  exporting.value = null
+})
+
+function isCurrentExport(generation: number): boolean {
+  return componentActive && generation === exportGeneration
+}
 
 function formatBytes(bytes: number): string {
   return formatBytesWithConfig(bytes, appStore.byteDecimals)
@@ -105,7 +121,7 @@ function formatLimit(bytes: number): string {
   return bytes > 0 ? formatBytes(bytes) : '无限制'
 }
 
-function formatDate(value: string): string {
+function formatDate(value: string | null): string {
   return formatDateTime(value)
 }
 
@@ -252,14 +268,17 @@ function yieldToBrowser(): Promise<void> {
   })
 }
 
-async function buildRowsAsync(chunkSize = 250): Promise<SnapshotRow[]> {
+async function buildRowsAsync(signal: AbortSignal, chunkSize = 250): Promise<SnapshotRow[]> {
   const result: SnapshotRow[] = []
   for (let index = 0; index < props.nodes.length; index++) {
+    signal.throwIfAborted()
     const node = props.nodes[index]
     if (node)
       result.push(buildRow(node))
-    if ((index + 1) % chunkSize === 0)
+    if ((index + 1) % chunkSize === 0) {
       await yieldToBrowser()
+      signal.throwIfAborted()
+    }
   }
   return result
 }
@@ -326,8 +345,10 @@ function buildJsonNode(row: SnapshotRow) {
   }
 }
 
-async function verifySnapshotExportPermission(): Promise<boolean> {
+async function verifySnapshotExportPermission(generation: number): Promise<boolean> {
   const granted = await appStore.requireLoginPermission('snapshotExport', { force: true })
+  if (!isCurrentExport(generation))
+    return false
   if (!granted) {
     window.$message?.warning('登录状态已过期，请重新登录后导出快照。')
     return false
@@ -337,15 +358,23 @@ async function verifySnapshotExportPermission(): Promise<boolean> {
 }
 
 async function exportJson(): Promise<void> {
-  if (exporting.value)
-    return
-  if (!await verifySnapshotExportPermission())
+  if (exporting.value || !componentActive)
     return
 
+  const generation = ++exportGeneration
+  exportController?.abort()
+  const controller = new AbortController()
+  exportController = controller
   exporting.value = 'json'
   try {
+    if (!await verifySnapshotExportPermission(generation))
+      return
     await yieldToBrowser()
-    const exportRows = await buildRowsAsync()
+    if (!isCurrentExport(generation))
+      return
+    const exportRows = await buildRowsAsync(controller.signal)
+    if (!isCurrentExport(generation))
+      return
     const exportedAt = new Date()
     const content = await buildSnapshotJsonAsync(
       {
@@ -364,7 +393,11 @@ async function exportJson(): Promise<void> {
       exportRows,
       buildJsonNode,
       yieldToBrowser,
+      250,
+      controller.signal,
     )
+    if (!isCurrentExport(generation))
+      return
     downloadText(
       `komari-snapshot-${Date.now()}.json`,
       content,
@@ -380,26 +413,41 @@ async function exportJson(): Promise<void> {
     window.$message?.success(`已导出 ${exportRows.length} 台节点的 JSON 快照。`)
   }
   catch (error) {
-    window.$message?.error(error instanceof Error ? error.message : '导出 JSON 失败')
+    if (isCurrentExport(generation))
+      window.$message?.error(error instanceof Error ? error.message : '导出 JSON 失败')
   }
   finally {
-    exporting.value = null
+    if (exportController === controller)
+      exportController = null
+    if (isCurrentExport(generation))
+      exporting.value = null
   }
 }
 
 async function exportCsv(): Promise<void> {
-  if (exporting.value)
-    return
-  if (!await verifySnapshotExportPermission())
+  if (exporting.value || !componentActive)
     return
 
+  const generation = ++exportGeneration
+  exportController?.abort()
+  const controller = new AbortController()
+  exportController = controller
   exporting.value = 'csv'
   try {
+    if (!await verifySnapshotExportPermission(generation))
+      return
     await yieldToBrowser()
-    const exportRows = await buildRowsAsync()
+    if (!isCurrentExport(generation))
+      return
+    const exportRows = await buildRowsAsync(controller.signal)
+    if (!isCurrentExport(generation))
+      return
+    const content = await buildSnapshotCsvAsync(csvColumns, exportRows, yieldToBrowser, 250, controller.signal)
+    if (!isCurrentExport(generation))
+      return
     downloadText(
       `komari-snapshot-${Date.now()}.csv`,
-      await buildSnapshotCsvAsync(csvColumns, exportRows, yieldToBrowser),
+      content,
       'text/csv;charset=utf-8',
       { bom: true },
     )
@@ -413,10 +461,14 @@ async function exportCsv(): Promise<void> {
     window.$message?.success(`已导出 ${exportRows.length} 台节点的 CSV 快照。`)
   }
   catch (error) {
-    window.$message?.error(error instanceof Error ? error.message : '导出 CSV 失败')
+    if (isCurrentExport(generation))
+      window.$message?.error(error instanceof Error ? error.message : '导出 CSV 失败')
   }
   finally {
-    exporting.value = null
+    if (exportController === controller)
+      exportController = null
+    if (isCurrentExport(generation))
+      exporting.value = null
   }
 }
 </script>

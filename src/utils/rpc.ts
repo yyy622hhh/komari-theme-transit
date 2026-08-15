@@ -18,8 +18,7 @@ interface JsonRpcRequest {
 /** JSON-RPC 2.0 成功响应 */
 interface JsonRpcSuccessResponse<T = unknown> {
   jsonrpc: '2.0'
-  /** Komari omits this field when a handler returns a nil result. */
-  result?: T
+  result: T
   id: number | string
 }
 
@@ -41,6 +40,11 @@ const HTTP_PROTOCOL_PREFIX = 'http://'
 const HTTPS_PROTOCOL_PREFIX = 'https://'
 const WS_PROTOCOL_PREFIX = 'ws://'
 const WSS_PROTOCOL_PREFIX = 'wss://'
+const RPC_REQUEST_ABORTED = -32800
+const RPC_METHODS_ALLOWING_MISSING_RESULT = new Set([
+  'admin:editSettings',
+  'admin:orderClients',
+])
 
 function linkAbortSignal(controller: AbortController, signal?: AbortSignal): () => void {
   if (!signal)
@@ -99,7 +103,7 @@ export interface Client {
   billing_cycle: number
   auto_renewal: boolean
   currency: string
-  expired_at: string
+  expired_at: string | null
   group: string
   tags: string
   hidden: boolean
@@ -445,6 +449,7 @@ export class RpcClient {
     resolve: (value: unknown) => void
     reject: (reason: unknown) => void
     timer: ReturnType<typeof setTimeout>
+    allowMissingResult: boolean
   }> = new Map()
 
   private requestId = 0
@@ -480,7 +485,7 @@ export class RpcClient {
     })
   }
 
-  private parseJsonRpcResponse(raw: unknown): JsonRpcResponse | null {
+  private parseJsonRpcResponse(raw: unknown, allowMissingResult = false): JsonRpcResponse | null {
     if (!raw || typeof raw !== 'object')
       return null
     const record = raw as Record<string, unknown>
@@ -498,7 +503,11 @@ export class RpcClient {
       return null
 
     // Komari's Go response uses `omitempty` for result. Mutations that return
-    // nil therefore produce a valid success object with only jsonrpc and id.
+    // nil therefore produce a success object with only jsonrpc and id. Only
+    // the explicit void mutations above may use that compatibility path;
+    // accepting it for reads would turn a truncated response into undefined.
+    if (!Object.hasOwn(record, 'result') && !allowMissingResult)
+      return null
     return record as unknown as JsonRpcResponse
   }
 
@@ -520,7 +529,11 @@ export class RpcClient {
 
     const controller = new AbortController()
     const unlinkAbortSignal = linkAbortSignal(controller, signal)
-    const timeoutId = setTimeout(() => controller.abort(), this.timeout)
+    let timedOut = false
+    const timeoutId = setTimeout(() => {
+      timedOut = true
+      controller.abort()
+    }, this.timeout)
 
     try {
       const response = await fetch(this.baseUrl, {
@@ -542,7 +555,10 @@ export class RpcClient {
       catch {
         throw new RpcError(-32700, 'Invalid JSON-RPC JSON response')
       }
-      const data = this.parseJsonRpcResponse(rawResponse) as JsonRpcResponse<T> | null
+      const data = this.parseJsonRpcResponse(
+        rawResponse,
+        RPC_METHODS_ALLOWING_MISSING_RESULT.has(method),
+      ) as JsonRpcResponse<T> | null
       if (!data)
         throw new RpcError(-32603, 'Invalid JSON-RPC response')
       if (data.id !== id)
@@ -552,6 +568,10 @@ export class RpcClient {
     catch (error) {
       if (error instanceof RpcError)
         throw error
+      if (signal?.aborted)
+        throw new RpcError(RPC_REQUEST_ABORTED, 'Request aborted')
+      if (timedOut)
+        throw new RpcError(-32001, 'Request timeout')
       throw new RpcError(-32000, `Network error: ${error instanceof Error ? error.message : String(error)}`)
     }
     finally {
@@ -658,24 +678,39 @@ export class RpcClient {
       }
 
       socket.onmessage = (event) => {
+        let rawResponse: unknown
         try {
-          const data = this.parseJsonRpcResponse(JSON.parse(event.data))
-          if (!data || data.id === null)
-            return
-          const pending = this.pendingRequests.get(data.id)
-          if (pending) {
-            clearTimeout(pending.timer)
-            this.pendingRequests.delete(data.id)
-            try {
-              pending.resolve(this.handleResponse(data))
-            }
-            catch (error) {
-              pending.reject(error)
-            }
-          }
+          rawResponse = JSON.parse(event.data)
         }
         catch {
-          // Ignore parse errors
+          this.rejectPendingRequests(new RpcError(-32700, 'Invalid JSON-RPC JSON response'))
+          return
+        }
+
+        const rawId = rawResponse && typeof rawResponse === 'object'
+          ? (rawResponse as Record<string, unknown>).id
+          : undefined
+        const matchingPending = typeof rawId === 'number' || typeof rawId === 'string'
+          ? this.pendingRequests.get(rawId)
+          : undefined
+        const data = this.parseJsonRpcResponse(rawResponse, matchingPending?.allowMissingResult)
+        if (!data) {
+          if (matchingPending)
+            matchingPending.reject(new RpcError(-32603, 'Invalid JSON-RPC response'))
+          else
+            this.rejectPendingRequests(new RpcError(-32603, 'Invalid JSON-RPC response'))
+          return
+        }
+        if (data.id === null)
+          return
+        const pending = this.pendingRequests.get(data.id)
+        if (pending) {
+          try {
+            pending.resolve(this.handleResponse(data))
+          }
+          catch (error) {
+            pending.reject(error)
+          }
         }
       }
 
@@ -697,12 +732,12 @@ export class RpcClient {
    */
   private async callWebSocket<T>(method: string, params?: Record<string, unknown> | unknown[], signal?: AbortSignal): Promise<T> {
     if (signal?.aborted)
-      throw new RpcError(-32000, 'Request aborted')
+      throw new RpcError(RPC_REQUEST_ABORTED, 'Request aborted')
 
     if (signal) {
       let abortConnectionWait = () => {}
       const aborted = new Promise<never>((_, reject) => {
-        abortConnectionWait = () => reject(new RpcError(-32000, 'Request aborted'))
+        abortConnectionWait = () => reject(new RpcError(RPC_REQUEST_ABORTED, 'Request aborted'))
         signal.addEventListener('abort', abortConnectionWait, { once: true })
       })
       try {
@@ -718,7 +753,7 @@ export class RpcClient {
 
     return new Promise((resolve, reject) => {
       if (signal?.aborted) {
-        reject(new RpcError(-32000, 'Request aborted'))
+        reject(new RpcError(RPC_REQUEST_ABORTED, 'Request aborted'))
         return
       }
 
@@ -747,7 +782,7 @@ export class RpcClient {
 
       abort = () => {
         if (cleanup())
-          reject(new RpcError(-32000, 'Request aborted'))
+          reject(new RpcError(RPC_REQUEST_ABORTED, 'Request aborted'))
       }
 
       timer = setTimeout(() => {
@@ -768,6 +803,7 @@ export class RpcClient {
             reject(reason)
         },
         timer,
+        allowMissingResult: RPC_METHODS_ALLOWING_MISSING_RESULT.has(method),
       })
 
       if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
@@ -803,6 +839,15 @@ export class RpcClient {
     if (this.useWebSocket) {
       return this.callWebSocket<T>(method, params, signal)
     }
+    return this.callHttp<T>(method, params, signal)
+  }
+
+  /**
+   * Execute a call over HTTP even when realtime reads use WebSocket.
+   * Komari 1.4 binds a WebSocket principal at handshake time, so privileged
+   * mutations must use HTTP to re-evaluate the current session cookie.
+   */
+  async callOverHttp<T>(method: string, params?: Record<string, unknown> | unknown[], signal?: AbortSignal): Promise<T> {
     return this.callHttp<T>(method, params, signal)
   }
 
@@ -955,6 +1000,10 @@ export class KomariRpc {
     return this.client.call<Record<string, Client>>('common:getNodes')
   }
 
+  async getNodesOverHttp(signal?: AbortSignal): Promise<Record<string, Client>> {
+    return this.client.callOverHttp<Record<string, Client>>('common:getNodes', undefined, signal)
+  }
+
   /**
    * 获取所有节点最新状态
    */
@@ -1031,15 +1080,15 @@ export class KomariRpc {
   // ==================== Admin 方法（需登录权限） ====================
 
   async getAuditLogs(limit?: string, page?: string, msgType?: string, signal?: AbortSignal): Promise<AuditLogsResponse> {
-    return this.client.call<AuditLogsResponse>('admin:getLogs', { limit, page, msg_type: msgType }, signal)
+    return this.client.callOverHttp<AuditLogsResponse>('admin:getLogs', { limit, page, msg_type: msgType }, signal)
   }
 
   async updateAdminSettings(settings: Record<string, unknown>, signal?: AbortSignal): Promise<void> {
-    await this.client.call('admin:editSettings', settings, signal)
+    await this.client.callOverHttp('admin:editSettings', settings, signal)
   }
 
   async orderClients(order: Record<string, number>, signal?: AbortSignal): Promise<void> {
-    await this.client.call('admin:orderClients', order, signal)
+    await this.client.callOverHttp('admin:orderClients', order, signal)
   }
 
   // ==================== Public 方法（主题/公开页优先使用） ====================
@@ -1069,11 +1118,18 @@ export class KomariRpc {
   }
 
   async getPublicRecordsByUUID(params: { uuid: string, load_type?: string, hours?: number | string }, signal?: AbortSignal): Promise<{ count: number, records: Array<Partial<StatusRecord>>, load_type?: string, has_gpu_data?: boolean, gpu_devices?: Record<string, unknown> }> {
-    return this.client.call<{ count: number, records: Array<Partial<StatusRecord>>, load_type?: string, has_gpu_data?: boolean, gpu_devices?: Record<string, unknown> }>('public:getRecordsByUUID', params, signal)
+    return this.client.call<{ count: number, records: Array<Partial<StatusRecord>>, load_type?: string, has_gpu_data?: boolean, gpu_devices?: Record<string, unknown> }>('public:getRecordsByUUID', {
+      ...params,
+      hours: params.hours === undefined ? undefined : String(params.hours),
+    }, signal)
   }
 
   async getPublicPingRecords(params: { uuid?: string, task_id?: string | number, hours?: number | string }, signal?: AbortSignal): Promise<{ count: number, records: PingRecord[], tasks?: PingTaskInfo[], basic_info?: Array<{ client: string, loss: number, min: number, max: number }> }> {
-    return this.client.call<{ count: number, records: PingRecord[], tasks?: PingTaskInfo[], basic_info?: Array<{ client: string, loss: number, min: number, max: number }> }>('public:getPingRecords', params, signal)
+    return this.client.call<{ count: number, records: PingRecord[], tasks?: PingTaskInfo[], basic_info?: Array<{ client: string, loss: number, min: number, max: number }> }>('public:getPingRecords', {
+      ...params,
+      task_id: params.task_id === undefined ? undefined : String(params.task_id),
+      hours: params.hours === undefined ? undefined : String(params.hours),
+    }, signal)
   }
 
   async getPublicPingTasks(): Promise<PingTaskInfo[]> {

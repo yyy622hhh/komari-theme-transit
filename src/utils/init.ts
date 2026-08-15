@@ -38,8 +38,67 @@ const DEFAULT_CONFIG: Required<InitConfig> = {
 
 const CLIENTS_REFRESH_INTERVAL_MS = REALTIME_CONFIG.polling.clientsRefreshInterval
 
+function createAbortError(): Error {
+  const error = new Error('Operation aborted')
+  error.name = 'AbortError'
+  return error
+}
+
+function raceWithAbort<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted)
+    return Promise.reject(createAbortError())
+
+  let abort = () => {}
+  const aborted = new Promise<never>((_, reject) => {
+    abort = () => reject(createAbortError())
+    signal.addEventListener('abort', abort, { once: true })
+  })
+
+  return Promise.race([promise, aborted])
+    .finally(() => signal.removeEventListener('abort', abort))
+}
+
+function waitWithAbort(milliseconds: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted)
+    return Promise.reject(createAbortError())
+
+  return new Promise((resolve, reject) => {
+    let timeoutId: ReturnType<typeof setTimeout>
+    const abort = () => {
+      clearTimeout(timeoutId)
+      reject(createAbortError())
+    }
+    timeoutId = setTimeout(() => {
+      signal.removeEventListener('abort', abort)
+      resolve()
+    }, milliseconds)
+    signal.addEventListener('abort', abort, { once: true })
+  })
+}
+
+function linkAbortSignal(controller: AbortController, signal: AbortSignal): () => void {
+  const abort = () => controller.abort()
+  if (signal.aborted) {
+    abort()
+    return () => {}
+  }
+
+  signal.addEventListener('abort', abort, { once: true })
+  return () => signal.removeEventListener('abort', abort)
+}
+
+interface InitManagerDependencies {
+  appStore?: ReturnType<typeof useAppStore>
+  nodesStore?: ReturnType<typeof useNodesStore>
+  rpc?: KomariRpc
+  api?: ReturnType<typeof getSharedApi>
+  navigate?: (path: string) => void
+}
+
+type CommitGuard = () => boolean
+
 /** 初始化状态管理 */
-class InitManager {
+export class InitManager {
   private config: Required<InitConfig>
   private rpc: KomariRpc
   private appStore: ReturnType<typeof useAppStore>
@@ -47,7 +106,7 @@ class InitManager {
   private pollTimer: ReturnType<typeof setTimeout> | null = null
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private unsubscribeWsClose: (() => void) | null = null
-  private isPolling = false
+  private pollingGeneration: number | null = null
   private refreshAfterCurrentPoll = false
   private destroyed = false
   private postFailureCount = 0
@@ -57,31 +116,51 @@ class InitManager {
   private metadataRefreshListenersAttached = false
   private redirectingToAdmin = false
   private useWebSocket: boolean | null = null // 根据主题配置决定
+  private readonly api: ReturnType<typeof getSharedApi>
+  private readonly navigate: (path: string) => void
+  private lifecycleController = new AbortController()
+  private transportController = new AbortController()
+  private lifecycleGeneration = 0
+  private transportGeneration = 0
+  private sessionRecoveryPromise: Promise<void> | null = null
   private readonly handleWindowFocus = (): void => {
     if (typeof document !== 'undefined' && document.visibilityState === 'hidden')
       return
-    void Promise.all([
-      this.refreshNodeClients(),
-      this.poll(true),
-    ]).catch(error => console.warn('[InitManager] Failed to refresh data on focus:', error))
+    void this.revalidateSessionAndTransport()
+      .catch(error => console.warn('[InitManager] Failed to revalidate session on focus:', error))
   }
 
   private readonly handleVisibilityChange = (): void => {
     if (document.visibilityState === 'visible') {
       this.handleWindowFocus()
-      if (!this.pollTimer && !this.destroyed)
-        this.startPolling()
     }
     else {
       this.stopPolling()
     }
   }
 
-  constructor(config: InitConfig = {}) {
+  constructor(config: InitConfig = {}, dependencies: InitManagerDependencies = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config }
-    this.rpc = getSharedRpc()
-    this.appStore = useAppStore()
-    this.nodesStore = useNodesStore()
+    this.rpc = dependencies.rpc ?? getSharedRpc()
+    this.appStore = dependencies.appStore ?? useAppStore()
+    this.nodesStore = dependencies.nodesStore ?? useNodesStore()
+    this.api = dependencies.api ?? getSharedApi()
+    this.navigate = dependencies.navigate ?? ((path: string) => {
+      location.href = path
+    })
+  }
+
+  private isLifecycleCurrent(generation: number): boolean {
+    return !this.destroyed
+      && !this.lifecycleController.signal.aborted
+      && generation === this.lifecycleGeneration
+  }
+
+  private isTransportCurrent(generation: number): boolean {
+    return !this.destroyed
+      && !this.lifecycleController.signal.aborted
+      && !this.transportController.signal.aborted
+      && generation === this.transportGeneration
   }
 
   /**
@@ -96,47 +175,53 @@ class InitManager {
    * 执行初始化流程
    */
   async init(): Promise<void> {
-    this.destroyed = false
-
+    if (this.destroyed || this.lifecycleController.signal.aborted)
+      return
     if (this.isInitialized) {
       console.warn('[InitManager] Already initialized')
       return
     }
 
+    const generation = ++this.lifecycleGeneration
+    const signal = this.lifecycleController.signal
+    const canCommit = () => this.isLifecycleCurrent(generation) && !this.redirectingToAdmin
     try {
-      await this.runStartupRequests()
+      await this.runStartupRequests(signal, canCommit)
 
-      if (this.destroyed || this.redirectingToAdmin)
+      if (!canCommit())
         return
 
       // 首次数据请求即使失败，也启动实时连接和轮询以便自动恢复。
-      this.startWebSocketAndPolling()
+      this.startWebSocketAndPolling(++this.transportGeneration)
       this.attachMetadataRefreshListeners()
       this.isInitialized = true
     }
     catch (error) {
+      if (!this.isLifecycleCurrent(generation))
+        return
       console.error('[InitManager] Initialization failed:', error)
       this.appStore.connectionError = true
       throw error
     }
     finally {
       // 即使部分请求失败也解除加载状态，让全局错误提示和公共页面可见。
-      this.appStore.loading = false
+      if (this.isLifecycleCurrent(generation))
+        this.appStore.loading = false
     }
   }
 
   /**
    * 独立执行启动请求，避免任一请求失败阻断其他初始化任务。
    */
-  private async runStartupRequests(): Promise<boolean> {
+  private async runStartupRequests(signal: AbortSignal, canCommit: CommitGuard): Promise<boolean> {
     const [healthResult, , , nodesResult] = await Promise.allSettled([
-      this.healthCheck(),
-      this.fetchPublicSettings(),
-      this.fetchUserInfo(),
-      this.fetchNodesData(),
+      this.healthCheck(signal, canCommit),
+      this.fetchPublicSettings(signal, canCommit),
+      this.fetchUserInfo(signal, canCommit),
+      this.fetchNodesData(signal, canCommit),
     ])
 
-    if (this.destroyed || this.redirectingToAdmin)
+    if (!canCommit())
       return false
 
     const nodesAvailable = nodesResult.status === 'fulfilled'
@@ -158,10 +243,16 @@ class InitManager {
   async retry(): Promise<boolean> {
     if (this.destroyed || this.redirectingToAdmin)
       return false
+    if (this.isInitialized) {
+      await this.revalidateSessionAndTransport()
+      return !this.appStore.connectionError
+    }
 
-    const recovered = await this.runStartupRequests()
-    if (!this.isInitialized && !this.destroyed && !this.redirectingToAdmin) {
-      this.startWebSocketAndPolling()
+    const generation = this.lifecycleGeneration
+    const canCommit = () => this.isLifecycleCurrent(generation) && !this.redirectingToAdmin
+    const recovered = await this.runStartupRequests(this.lifecycleController.signal, canCommit)
+    if (!this.isInitialized && this.isLifecycleCurrent(generation) && !this.redirectingToAdmin) {
+      this.startWebSocketAndPolling(++this.transportGeneration)
       this.attachMetadataRefreshListeners()
       this.isInitialized = true
     }
@@ -171,42 +262,50 @@ class InitManager {
   /**
    * 健康检查 - 测试后端服务是否正常
    */
-  private async healthCheck(): Promise<void> {
+  private async healthCheck(signal: AbortSignal, canCommit: CommitGuard): Promise<void> {
     let lastError: unknown
 
     for (let attempt = 1; attempt <= this.config.healthCheckAttempts; attempt++) {
       const controller = new AbortController()
+      const unlinkLifecycleSignal = linkAbortSignal(controller, signal)
       const timeoutId = setTimeout(() => controller.abort(), this.config.healthCheckTimeout)
 
       try {
         const result = await this.rpc.ping(controller.signal)
+        if (!canCommit())
+          throw createAbortError()
         if (result !== 'pong') {
           throw new RpcError(-32000, 'Unexpected health check response')
         }
         return
       }
       catch (error) {
+        if (!canCommit())
+          throw createAbortError()
         if (isRpcPermissionError(error)) {
           console.warn(`[InitManager] Private site detected, redirecting to ${KOMARI_ADMIN_SERVERS_PATH}`)
           this.redirectingToAdmin = true
           this.appStore.updateLoginState(false)
           this.appStore.loading = false
-          location.href = KOMARI_ADMIN_SERVERS_PATH
+          this.navigate(KOMARI_ADMIN_SERVERS_PATH)
           return
         }
 
         lastError = error
-        if (attempt < this.config.healthCheckAttempts && !this.destroyed) {
+        if (attempt < this.config.healthCheckAttempts) {
           const retryDelay = this.config.healthCheckRetryInterval * 2 ** (attempt - 1)
           console.warn(`[InitManager] Health check attempt ${attempt} failed, retrying in ${retryDelay}ms`, error)
-          await new Promise(resolve => setTimeout(resolve, retryDelay))
+          await waitWithAbort(retryDelay, signal)
         }
       }
       finally {
         clearTimeout(timeoutId)
+        unlinkLifecycleSignal()
       }
     }
 
+    if (!canCommit())
+      throw createAbortError()
     console.error('[InitManager] Health check failed after retries:', lastError)
     throw new Error('Backend service unavailable')
   }
@@ -214,13 +313,16 @@ class InitManager {
   /**
    * 获取服务端公开属性
    */
-  private async fetchPublicSettings(): Promise<void> {
+  private async fetchPublicSettings(signal: AbortSignal, canCommit: CommitGuard): Promise<void> {
     try {
-      const api = getSharedApi()
-      const publicSettings = await api.getPublicSettings()
+      const publicSettings = await this.api.getPublicSettings(signal)
+      if (!canCommit())
+        return
       this.appStore.publicSettings = publicSettings
     }
     catch (error) {
+      if (signal.aborted || !canCommit())
+        return
       console.error('[InitManager] Failed to fetch public settings:', error)
       // 非关键错误，继续初始化
     }
@@ -229,11 +331,16 @@ class InitManager {
   /**
    * 获取用户信息
    */
-  private async fetchUserInfo(): Promise<void> {
+  private async fetchUserInfo(signal: AbortSignal, canCommit: CommitGuard): Promise<void> {
     try {
-      await this.appStore.verifyLoginState({ force: true })
+      const user = await this.api.getMe(signal)
+      if (!canCommit())
+        return
+      this.appStore.updateLoginState(user?.logged_in === true, user)
     }
     catch (error) {
+      if (signal.aborted || !canCommit())
+        return
       this.appStore.updateLoginState(false)
       console.error('[InitManager] Failed to fetch user info:', error)
       // 非关键错误，继续初始化
@@ -243,44 +350,106 @@ class InitManager {
   /**
    * 获取节点数据和最新状态
    */
-  private async fetchNodesData(): Promise<void> {
+  private async fetchNodesData(signal: AbortSignal, canCommit: CommitGuard): Promise<void> {
     try {
       // 并行获取节点信息和最新状态
       const [clientsResult, statusesResult] = await Promise.all([
-        this.fetchClientsSnapshot(),
-        this.rpc.getNodesLatestStatus() as Promise<Record<string, NodeStatus>>,
+        this.fetchClientsSnapshot(signal),
+        this.rpc.getClient().call<Record<string, NodeStatus>>('common:getNodesLatestStatus', undefined, signal),
       ])
 
+      if (!canCommit())
+        return
       // 初始化节点数据
       this.nodesStore.initNodes(clientsResult, statusesResult)
       this.lastClientsFetchedAt = Date.now()
     }
     catch (error) {
+      if (signal.aborted || !canCommit())
+        return
       console.error('[InitManager] Failed to fetch nodes data:', error)
       throw error
     }
   }
 
-  private fetchClientsSnapshot(): Promise<Record<string, Client>> {
+  private fetchClientsSnapshot(signal = this.lifecycleController.signal): Promise<Record<string, Client>> {
     if (this.clientsRefreshPromise)
       return this.clientsRefreshPromise
 
-    const request = this.rpc.getNodes() as Promise<Record<string, Client>>
-    this.clientsRefreshPromise = request.finally(() => {
-      this.clientsRefreshPromise = null
+    const request = this.rpc.getClient().call<Record<string, Client>>('common:getNodes', undefined, signal)
+    const trackedRequest = request.finally(() => {
+      if (this.clientsRefreshPromise === trackedRequest)
+        this.clientsRefreshPromise = null
     })
-    return this.clientsRefreshPromise
+    this.clientsRefreshPromise = trackedRequest
+    return trackedRequest
   }
 
   async refreshNodeClients(): Promise<void> {
     if (this.destroyed || this.redirectingToAdmin)
       return
 
-    const clients = await this.fetchClientsSnapshot()
-    if (this.destroyed)
+    const generation = this.transportGeneration
+    const clients = await this.fetchClientsSnapshot(this.transportController.signal)
+    if (!this.isTransportCurrent(generation))
       return
     this.nodesStore.updateNodeClients(clients)
     this.lastClientsFetchedAt = Date.now()
+  }
+
+  /**
+   * A browser can keep an authenticated WebSocket alive while the HTTP session
+   * expires or is revoked. Always tear down that transport before accepting
+   * data after focus/visibility resume, then rebuild it only after fresh HTTP
+   * settings, session and node responses have committed.
+   */
+  private revalidateSessionAndTransport(): Promise<void> {
+    if (this.destroyed || this.redirectingToAdmin)
+      return Promise.resolve()
+    if (this.sessionRecoveryPromise)
+      return this.sessionRecoveryPromise
+
+    const recovery = this.runSessionRecovery().finally(() => {
+      if (this.sessionRecoveryPromise === recovery)
+        this.sessionRecoveryPromise = null
+    })
+    this.sessionRecoveryPromise = recovery
+    return recovery
+  }
+
+  private async runSessionRecovery(): Promise<void> {
+    const generation = ++this.transportGeneration
+    this.transportController.abort()
+    this.transportController = new AbortController()
+    const signal = this.transportController.signal
+
+    this.stopPolling()
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
+    this.unsubscribeWsClose?.()
+    this.unsubscribeWsClose = null
+    this.useWebSocket = false
+    this.clientsRefreshPromise = null
+    this.refreshAfterCurrentPoll = false
+
+    const client = this.rpc.getClient()
+    client.setTransport(false)
+    client.close()
+    this.nodesStore.updateWsState('disconnected', 0)
+
+    const lifecycleGeneration = this.lifecycleGeneration
+    const canCommit = () => this.isLifecycleCurrent(lifecycleGeneration)
+      && this.isTransportCurrent(generation)
+      && !signal.aborted
+      && !this.redirectingToAdmin
+    const recovered = await this.runStartupRequests(signal, canCommit)
+    if (!canCommit())
+      return
+
+    this.appStore.connectionError = !recovered
+    this.startWebSocketAndPolling(generation)
   }
 
   private attachMetadataRefreshListeners(): void {
@@ -302,14 +471,16 @@ class InitManager {
   /**
    * 启动 WebSocket 连接和轮询
    */
-  private startWebSocketAndPolling(): void {
+  private startWebSocketAndPolling(generation = this.transportGeneration): void {
+    if (!this.isTransportCurrent(generation))
+      return
     // 根据主题配置决定初始连接模式
     const configuredMode = this.appStore.rpcTransportMode
     this.useWebSocket = configuredMode === 'websocket'
 
     if (this.useWebSocket) {
       // 尝试建立 WebSocket 连接
-      this.connectWebSocket()
+      void this.connectWebSocket(generation)
     }
     else {
       // HTTP 模式：直接设置 RPC 客户端为 HTTP 模式
@@ -319,15 +490,15 @@ class InitManager {
     }
 
     // 开始轮询（作为 WebSocket 的补充或备选方案）
-    this.startPolling()
+    this.startPolling(generation)
   }
 
   /**
    * 建立 WebSocket 连接
    */
-  private async connectWebSocket(): Promise<void> {
+  private async connectWebSocket(generation = this.transportGeneration): Promise<void> {
     // 如果已回落到 POST 模式或配置为 HTTP 模式，不再尝试 WebSocket
-    if (this.useWebSocket === false) {
+    if (!this.isTransportCurrent(generation) || this.useWebSocket === false) {
       return
     }
 
@@ -339,8 +510,8 @@ class InitManager {
 
     try {
       // 使用 ping 验证连接，10 秒超时
-      await client.ensureWebSocketConnectedWithPing(10000)
-      if (this.destroyed || !this.useWebSocket) {
+      await raceWithAbort(client.ensureWebSocketConnectedWithPing(10000), this.transportController.signal)
+      if (!this.isTransportCurrent(generation) || !this.useWebSocket) {
         client.close()
         return
       }
@@ -350,30 +521,30 @@ class InitManager {
       this.appStore.connectionError = false
 
       // 监听连接状态变化
-      this.monitorWebSocketConnection()
+      this.monitorWebSocketConnection(generation)
     }
     catch (error) {
-      if (this.destroyed || !this.useWebSocket)
+      if (!this.isTransportCurrent(generation) || !this.useWebSocket)
         return
       console.error('[InitManager] WebSocket connection failed:', error)
       this.nodesStore.updateWsState('disconnected')
-      this.scheduleReconnect()
+      this.scheduleReconnect(generation)
     }
   }
 
   /**
    * 监控 WebSocket 连接状态
    */
-  private monitorWebSocketConnection(): void {
+  private monitorWebSocketConnection(generation: number): void {
     this.unsubscribeWsClose?.()
     const client = this.rpc.getClient()
     this.unsubscribeWsClose = client.onWebSocketClose(() => {
-      if (this.destroyed)
+      if (!this.isTransportCurrent(generation))
         return
       // 如果当前是已连接状态且还在使用 WebSocket 模式，触发重连
       if (this.useWebSocket === true && this.nodesStore.wsConnectionState === 'connected') {
         this.nodesStore.updateWsState('disconnected')
-        this.scheduleReconnect()
+        this.scheduleReconnect(generation)
       }
     })
   }
@@ -381,8 +552,8 @@ class InitManager {
   /**
    * 安排重连
    */
-  private scheduleReconnect(): void {
-    if (this.destroyed || this.useWebSocket === false || this.reconnectTimer)
+  private scheduleReconnect(generation = this.transportGeneration): void {
+    if (!this.isTransportCurrent(generation) || this.useWebSocket === false || this.reconnectTimer)
       return
 
     const attempts = this.nodesStore.wsReconnectAttempts
@@ -390,7 +561,7 @@ class InitManager {
     // 达到最大重连次数，回落到 POST 模式
     if (attempts >= this.config.wsMaxReconnectAttempts) {
       console.error('[InitManager] Max reconnect attempts reached, falling back to POST mode')
-      this.fallbackToPostMode()
+      this.fallbackToPostMode(generation)
       return
     }
 
@@ -408,11 +579,13 @@ class InitManager {
       try {
         const client = this.rpc.getClient()
         client.close()
-        await this.connectWebSocket()
+        await this.connectWebSocket(generation)
       }
       catch (error) {
+        if (!this.isTransportCurrent(generation))
+          return
         console.error('[InitManager] Reconnect failed:', error)
-        this.scheduleReconnect()
+        this.scheduleReconnect(generation)
       }
     }, backoff)
   }
@@ -420,7 +593,9 @@ class InitManager {
   /**
    * 回落到 POST 模式
    */
-  private fallbackToPostMode(): void {
+  private fallbackToPostMode(generation = this.transportGeneration): void {
+    if (!this.isTransportCurrent(generation))
+      return
     this.useWebSocket = false
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer)
@@ -442,25 +617,25 @@ class InitManager {
   /**
    * 开始轮询
    */
-  private startPolling(): void {
+  private startPolling(generation = this.transportGeneration): void {
     if (this.pollTimer) {
       clearTimeout(this.pollTimer)
     }
 
-    if (this.destroyed || (typeof document !== 'undefined' && document.visibilityState === 'hidden')) {
+    if (!this.isTransportCurrent(generation) || (typeof document !== 'undefined' && document.visibilityState === 'hidden')) {
       this.pollTimer = null
       return
     }
 
     const schedulePoll = () => {
-      if (this.destroyed || (typeof document !== 'undefined' && document.visibilityState === 'hidden')) {
+      if (!this.isTransportCurrent(generation) || (typeof document !== 'undefined' && document.visibilityState === 'hidden')) {
         this.pollTimer = null
         return
       }
       this.pollTimer = setTimeout(async () => {
         this.pollTimer = null
-        await this.poll()
-        if (!this.destroyed)
+        await this.poll(false, generation)
+        if (this.isTransportCurrent(generation))
           schedulePoll()
       }, this.getPollInterval())
     }
@@ -471,27 +646,29 @@ class InitManager {
   /**
    * 执行轮询任务
    */
-  private async poll(refreshAfterCurrent = false): Promise<void> {
-    if (this.isPolling) {
+  private async poll(refreshAfterCurrent = false, generation = this.transportGeneration): Promise<void> {
+    if (!this.isTransportCurrent(generation))
+      return
+    if (this.pollingGeneration !== null) {
       if (refreshAfterCurrent)
         this.refreshAfterCurrentPoll = true
       return
     }
 
-    this.isPolling = true
+    this.pollingGeneration = generation
 
     try {
       const now = Date.now()
       const shouldRefreshClients = now - this.lastClientsFetchedAt >= CLIENTS_REFRESH_INTERVAL_MS
 
       const [statusesResult, clientsResult] = await Promise.all([
-        this.rpc.getNodesLatestStatus() as Promise<Record<string, NodeStatus>>,
+        this.rpc.getClient().call<Record<string, NodeStatus>>('common:getNodesLatestStatus', undefined, this.transportController.signal),
         shouldRefreshClients
-          ? this.fetchClientsSnapshot()
+          ? this.fetchClientsSnapshot(this.transportController.signal)
           : Promise.resolve(null),
       ])
 
-      if (this.destroyed)
+      if (!this.isTransportCurrent(generation))
         return
 
       if (clientsResult) {
@@ -506,7 +683,7 @@ class InitManager {
       this.appStore.connectionError = false
     }
     catch (error) {
-      if (this.destroyed)
+      if (!this.isTransportCurrent(generation))
         return
 
       if (error instanceof RpcError) {
@@ -520,10 +697,11 @@ class InitManager {
       this.appStore.connectionError = this.postFailureCount >= this.config.postFailureThreshold
     }
     finally {
-      this.isPolling = false
-      if (this.refreshAfterCurrentPoll && !this.destroyed) {
+      if (this.pollingGeneration === generation)
+        this.pollingGeneration = null
+      if (this.refreshAfterCurrentPoll && this.isTransportCurrent(generation)) {
         this.refreshAfterCurrentPoll = false
-        void this.poll()
+        void this.poll(false, generation)
       }
     }
   }
@@ -542,7 +720,13 @@ class InitManager {
    * 销毁管理器
    */
   destroy(): void {
+    if (this.destroyed)
+      return
     this.destroyed = true
+    this.lifecycleGeneration += 1
+    this.transportGeneration += 1
+    this.lifecycleController.abort()
+    this.transportController.abort()
     this.stopPolling()
     this.detachMetadataRefreshListeners()
     if (this.reconnectTimer) {
@@ -552,6 +736,10 @@ class InitManager {
     this.unsubscribeWsClose?.()
     this.unsubscribeWsClose = null
     this.rpc.close()
+    this.clientsRefreshPromise = null
+    this.sessionRecoveryPromise = null
+    this.pollingGeneration = null
+    this.refreshAfterCurrentPoll = false
     this.nodesStore.clearNodes()
     this.isInitialized = false
   }

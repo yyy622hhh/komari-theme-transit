@@ -22,7 +22,7 @@ class FakeWebSocket {
     this.readyState = FakeWebSocket.CLOSING
   }
 
-  send(): void {}
+  send(_data?: string): void {}
 
   open(): void {
     this.readyState = FakeWebSocket.OPEN
@@ -103,7 +103,7 @@ describe('RpcClient WebSocket lifecycle', () => {
     const socket = FakeWebSocket.instances[0]!
 
     controller.abort()
-    await expect(call).rejects.toMatchObject({ code: -32000, message: 'Request aborted' })
+    await expect(call).rejects.toMatchObject({ code: -32800, message: 'Request aborted' })
 
     socket.open()
     await expect(client.ensureWebSocketConnected()).resolves.toBeUndefined()
@@ -144,13 +144,16 @@ describe('RpcClient WebSocket lifecycle', () => {
     client.close()
   })
 
-  test('accepts Komari success responses that omit a nil result', async () => {
+  test('rejects a read response that omits both result and error', async () => {
     globalThis.fetch = (async () => new Response(JSON.stringify({ jsonrpc: '2.0', id: 1 }), {
       headers: { 'Content-Type': 'application/json' },
     })) as typeof fetch
     const client = new RpcClient({ baseUrl: 'http://example.test/api/rpc2', timeout: 100 })
 
-    await expect(client.call<void>('admin:orderClients', {})).resolves.toBeUndefined()
+    await expect(client.call('rpc.ping')).rejects.toMatchObject({
+      code: -32603,
+      message: 'Invalid JSON-RPC response',
+    })
   })
 
   test('rejects malformed HTTP responses with a typed RPC error', async () => {
@@ -208,7 +211,7 @@ describe('RpcClient WebSocket lifecycle', () => {
     })
   })
 
-  test('times out an HTTP request and aborts the underlying fetch', async () => {
+  test('times out an HTTP request and distinguishes it from a network failure', async () => {
     let aborted = false
     globalThis.fetch = ((_input, init) => new Promise<Response>((_resolve, reject) => {
       init?.signal?.addEventListener('abort', () => {
@@ -218,8 +221,67 @@ describe('RpcClient WebSocket lifecycle', () => {
     })) as typeof fetch
     const client = new RpcClient({ baseUrl: 'http://example.test/api/rpc2', timeout: 5 })
 
-    await expect(client.call('rpc.ping')).rejects.toMatchObject({ code: -32000 })
+    await expect(client.call('rpc.ping')).rejects.toMatchObject({ code: -32001, message: 'Request timeout' })
     expect(aborted).toBe(true)
+  })
+
+  test('reports caller cancellation distinctly from timeout and network errors', async () => {
+    globalThis.fetch = ((_input, init) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => {
+        reject(new DOMException('aborted', 'AbortError'))
+      }, { once: true })
+    })) as typeof fetch
+    const controller = new AbortController()
+    const client = new RpcClient({ baseUrl: 'http://example.test/api/rpc2', timeout: 100 })
+    const call = client.call('rpc.ping', undefined, controller.signal)
+
+    controller.abort()
+    await expect(call).rejects.toMatchObject({ code: -32800, message: 'Request aborted' })
+  })
+
+  test('rejects a pending WebSocket call immediately on malformed JSON-RPC', async () => {
+    let requestId = 0
+    let requestSent!: () => void
+    const sent = new Promise<void>((resolve) => {
+      requestSent = resolve
+    })
+    const client = new RpcClient({ baseUrl: 'http://example.test/api/rpc2', timeout: 1_000, useWebSocket: true })
+    const call = client.call('rpc.ping')
+    const socket = FakeWebSocket.instances[0]!
+    socket.send = (payload?: string) => {
+      requestId = (JSON.parse(String(payload)) as { id: number }).id
+      requestSent()
+    }
+    socket.open()
+    await sent
+    socket.onmessage?.({
+      data: JSON.stringify({ jsonrpc: '2.0', id: requestId, error: { code: 'bad', message: 'bad' } }),
+    } as MessageEvent)
+    await expect(call).rejects.toMatchObject({ code: -32603, message: 'Invalid JSON-RPC response' })
+    client.close()
+  })
+
+  test('rejects a WebSocket read response that omits both result and error', async () => {
+    let requestId = 0
+    let requestSent!: () => void
+    const sent = new Promise<void>((resolve) => {
+      requestSent = resolve
+    })
+    const client = new RpcClient({ baseUrl: 'http://example.test/api/rpc2', timeout: 1_000, useWebSocket: true })
+    const call = client.call('rpc.ping')
+    const socket = FakeWebSocket.instances[0]!
+    socket.send = (payload?: string) => {
+      requestId = (JSON.parse(String(payload)) as { id: number }).id
+      requestSent()
+    }
+    socket.open()
+    await sent
+    socket.onmessage?.({
+      data: JSON.stringify({ jsonrpc: '2.0', id: requestId }),
+    } as MessageEvent)
+
+    await expect(call).rejects.toMatchObject({ code: -32603, message: 'Invalid JSON-RPC response' })
+    client.close()
   })
 
   test('can fall back to HTTP after a WebSocket connection failure', async () => {
@@ -234,6 +296,24 @@ describe('RpcClient WebSocket lifecycle', () => {
     client.setTransport(false)
     await expect(client.call('rpc.ping')).resolves.toBe('pong')
     client.close()
+  })
+
+  test('runs privileged void calls over HTTP and accepts Komari omitted nil results', async () => {
+    const methods: string[] = []
+    globalThis.fetch = (async (_input, init) => {
+      const request = JSON.parse(String(init?.body)) as { id: number, method: string }
+      methods.push(request.method)
+      return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id }), {
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }) as typeof fetch
+    const rpc = new KomariRpc({ baseUrl: 'http://example.test/api/rpc2', timeout: 100, useWebSocket: true })
+
+    await rpc.orderClients({ a: 0 })
+    await rpc.updateAdminSettings({ visitor_audit_enabled: true })
+
+    expect(methods).toEqual(['admin:orderClients', 'admin:editSettings'])
+    expect(FakeWebSocket.instances).toHaveLength(0)
   })
 })
 
@@ -266,6 +346,26 @@ describe('Komari 1.4 RPC method compatibility', () => {
       { method: 'rpc.help', params: { method: 'common:getNodes' } },
       { method: 'rpc.version', params: undefined },
       { method: 'common:getVersion', params: undefined },
+    ])
+  })
+
+  test('normalizes numeric public history parameters to the Komari string contract', async () => {
+    const calls: Array<{ method: string, params?: Record<string, unknown> }> = []
+    globalThis.fetch = (async (_input, init) => {
+      const request = JSON.parse(String(init?.body)) as { id: number, method: string, params?: Record<string, unknown> }
+      calls.push(request)
+      return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: { records: [], count: 0 } }), {
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }) as typeof fetch
+    const rpc = new KomariRpc({ baseUrl: 'http://example.test/api/rpc2', timeout: 100 })
+
+    await rpc.getPublicRecordsByUUID({ uuid: 'node-1', hours: 24 })
+    await rpc.getPublicPingRecords({ uuid: 'node-1', task_id: 2, hours: 6 })
+
+    expect(calls.map(call => ({ method: call.method, params: call.params }))).toEqual([
+      { method: 'public:getRecordsByUUID', params: { uuid: 'node-1', hours: '24' } },
+      { method: 'public:getPingRecords', params: { uuid: 'node-1', task_id: '2', hours: '6' } },
     ])
   })
 

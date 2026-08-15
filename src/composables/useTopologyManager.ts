@@ -92,7 +92,6 @@ export function useTopologyManager(nodes: MaybeRefOrGetter<NodeData[]>) {
     try {
       const payload = await saveTopologyConfiguration({
         theme: publicSettings.theme,
-        themeSettings: publicSettings.theme_settings ?? {},
         routes: routes.value,
       })
       appStore.publicSettings = { ...publicSettings, theme_settings: payload }

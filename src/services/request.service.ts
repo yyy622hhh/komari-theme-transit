@@ -3,6 +3,8 @@ import { REQUEST_CONFIG } from '@/constants/request'
 interface PendingRequest<T> {
   promise: Promise<T>
   controller: AbortController
+  consumers: number
+  settled: boolean
 }
 
 interface QueuedRequest<T> {
@@ -26,6 +28,7 @@ export interface RequestManagerOptions {
   retryMaxDelay?: number
   retryJitterRatio?: number
   shouldRetry?: (error: unknown) => boolean
+  signal?: AbortSignal
 }
 
 function createAbortError(message = 'Request aborted'): Error {
@@ -34,14 +37,18 @@ function createAbortError(message = 'Request aborted'): Error {
   return error
 }
 
-function waitForAbort(signal: AbortSignal): Promise<never> {
+function raceWithAbort<T>(task: Promise<T>, signal: AbortSignal): Promise<T> {
   if (signal.aborted)
     return Promise.reject(createAbortError())
 
-  return new Promise((_, reject) => {
-    const abort = () => reject(createAbortError())
+  let abort = () => {}
+  const aborted = new Promise<never>((_, reject) => {
+    abort = () => reject(createAbortError())
     signal.addEventListener('abort', abort, { once: true })
   })
+
+  return Promise.race([task, aborted])
+    .finally(() => signal.removeEventListener('abort', abort))
 }
 
 function waitForRetry(milliseconds: number, signal: AbortSignal): Promise<void> {
@@ -70,7 +77,7 @@ export class RequestManager {
   run<T>(key: string, task: (signal: AbortSignal) => Promise<T>, options: RequestManagerOptions = {}): Promise<T> {
     const existing = this.pending.get(key) as PendingRequest<T> | undefined
     if (existing)
-      return existing.promise
+      return this.consume(existing, options.signal)
 
     const controller = new AbortController()
     const timeout = options.timeout ?? REQUEST_CONFIG.timeout.default
@@ -96,14 +103,21 @@ export class RequestManager {
       } as QueuedRequest<unknown>)
       this.drainQueue()
     })
-    const promise = queuedPromise.finally(() => {
+    const pending: PendingRequest<T> = {
+      promise: queuedPromise,
+      controller,
+      consumers: 0,
+      settled: false,
+    }
+    pending.promise = queuedPromise.finally(() => {
+      pending.settled = true
       const current = this.pending.get(key)
       if (current?.controller === controller)
         this.pending.delete(key)
     })
 
-    this.pending.set(key, { promise, controller })
-    return promise
+    this.pending.set(key, pending)
+    return this.consume(pending, options.signal)
   }
 
   abort(key: string): void {
@@ -111,10 +125,37 @@ export class RequestManager {
     if (!pending)
       return
 
-    pending.controller.abort()
-    this.pending.delete(key)
+    this.cancelPending(key, pending)
+  }
 
-    const index = this.queue.findIndex(request => request.key === key)
+  private consume<T>(pending: PendingRequest<T>, signal?: AbortSignal): Promise<T> {
+    pending.consumers += 1
+    let released = false
+    const release = () => {
+      if (released)
+        return
+      released = true
+      pending.consumers = Math.max(0, pending.consumers - 1)
+      if (pending.consumers === 0 && !pending.settled) {
+        const entry = [...this.pending.entries()].find(([, current]) => current === pending)
+        if (entry)
+          this.cancelPending(entry[0], pending)
+      }
+    }
+
+    const consumerPromise = signal
+      ? raceWithAbort(pending.promise, signal)
+      : pending.promise
+    return consumerPromise.finally(release)
+  }
+
+  private cancelPending(key: string, pending: PendingRequest<unknown>): void {
+    if (!pending.controller.signal.aborted)
+      pending.controller.abort()
+    if (this.pending.get(key) === pending)
+      this.pending.delete(key)
+
+    const index = this.queue.findIndex(request => request.controller === pending.controller)
     if (index < 0)
       return
 
@@ -184,10 +225,7 @@ export class RequestManager {
       request.controller.signal.addEventListener('abort', abortAttempt, { once: true })
 
       try {
-        return await Promise.race([
-          request.task(attemptController.signal),
-          waitForAbort(attemptController.signal),
-        ])
+        return await raceWithAbort(request.task(attemptController.signal), attemptController.signal)
       }
       catch (error) {
         lastError = error

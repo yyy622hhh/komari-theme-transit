@@ -4,7 +4,6 @@ import { serializeTopologyRoutes } from '@/utils/topologyHelper'
 
 interface SaveTopologyOptions {
   theme: string
-  themeSettings: Record<string, unknown>
   routes: TopologyRouteConfig[]
 }
 
@@ -17,15 +16,14 @@ export async function saveTopologyConfiguration(options: SaveTopologyOptions): P
   if (!serialized.topologyRoute)
     throw new Error('至少保留一条包含入口和目标节点的线路。')
 
-  const payload = {
-    ...options.themeSettings,
+  const patch = {
     topologyEnabled: true,
     ...serialized,
   }
 
   return saveManagedThemeSettings({
     theme: options.theme,
-    settings: payload,
+    patch,
     permission: 'nodeTopology',
     requestKey: getSaveKey(options.theme),
   })
