@@ -3,14 +3,20 @@ import type { SnapshotCsvColumn } from '@/services/snapshot.service'
 import type { AuditLogEntry } from '@/utils/rpc'
 import type { ParsedVisitorAuditMessage, VisitorEventMeta } from '@/utils/visitorAudit'
 import { Icon } from '@iconify/vue'
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { CardX } from '@/components/ui/card-x'
 import { Spinner } from '@/components/ui/spinner'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useVisitorAudit } from '@/composables/useVisitorAudit'
-import { loadAuditLogs, updateVisitorAuditEnabled } from '@/services/audit.service'
+import {
+  abortAuditLogs,
+  loadAuditLogExport,
+  loadAuditLogs,
+  MAX_AUDIT_EXPORT_RECORDS,
+  updateVisitorAuditEnabled,
+} from '@/services/audit.service'
 import { buildSnapshotCsvAsync, downloadText } from '@/services/snapshot.service'
 import { useAppStore } from '@/stores/app'
 import { formatDateTime } from '@/utils/helper'
@@ -41,6 +47,7 @@ const exporting = ref<'json' | 'csv' | null>(null)
 const updatingVisitorAudit = ref(false)
 const error = ref<string | null>(null)
 let requestId = 0
+let activeLogRequest: { page: number, limit: number, msgType?: string } | null = null
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / limit.value)))
 const pageStart = computed(() => total.value === 0 ? 0 : (page.value - 1) * limit.value + 1)
@@ -140,39 +147,6 @@ async function verifyAuditExportPermission(view: AuditView): Promise<boolean> {
   return true
 }
 
-async function loadAllFilteredLogs(view: AuditView): Promise<AuditLogEntry[]> {
-  const exportLimit = 200
-  const collected: AuditLogEntry[] = []
-  const seenIds = new Set<number>()
-  let exportPage = 1
-
-  while (true) {
-    const result = await loadAuditLogs({
-      page: exportPage,
-      limit: exportLimit,
-      msgType: view === 'visitor' ? 'visitor' : undefined,
-    })
-    const pageLogs = result.logs ?? []
-    let added = 0
-    for (const log of pageLogs) {
-      if (seenIds.has(log.id))
-        continue
-      seenIds.add(log.id)
-      collected.push(log)
-      added++
-    }
-
-    const resultTotal = Number.isFinite(result.total) ? result.total : 0
-    if (!pageLogs.length || !added || (resultTotal > 0 && collected.length >= resultTotal) || pageLogs.length < exportLimit)
-      break
-
-    exportPage++
-    await yieldToBrowser()
-  }
-
-  return collected
-}
-
 function buildAuditJsonRecord(row: AuditLogRow): Record<string, unknown> {
   return {
     id: row.log.id,
@@ -208,8 +182,12 @@ async function exportAudit(format: 'json' | 'csv'): Promise<void> {
 
   exporting.value = format
   try {
-    const exportLogs = await loadAllFilteredLogs(exportView)
-    const exportRows = exportLogs.map(buildAuditLogRow)
+    const exportResult = await loadAuditLogExport({
+      maxRecords: MAX_AUDIT_EXPORT_RECORDS,
+      msgType: exportView === 'visitor' ? 'visitor' : undefined,
+      yieldBetweenPages: yieldToBrowser,
+    })
+    const exportRows = exportResult.logs.map(buildAuditLogRow)
     const timestamp = Date.now()
     const filterName = exportView === 'visitor' ? 'visitor' : 'all'
 
@@ -218,6 +196,9 @@ async function exportAudit(format: 'json' | 'csv'): Promise<void> {
         generated_at: new Date().toISOString(),
         filter: filterName,
         total: exportRows.length,
+        available_total: exportResult.reportedTotal || exportRows.length,
+        truncated: exportResult.truncated,
+        export_limit: MAX_AUDIT_EXPORT_RECORDS,
         logs: exportRows.map(buildAuditJsonRecord),
       }, null, 2)
       downloadText(`komari-audit-${filterName}-${timestamp}.json`, content, 'application/json;charset=utf-8')
@@ -232,9 +213,12 @@ async function exportAudit(format: 'json' | 'csv'): Promise<void> {
       path: '/',
       route: 'home',
       target: exportView,
-      detail: { record_count: exportRows.length, filter: filterName },
+      detail: { record_count: exportRows.length, filter: filterName, truncated: exportResult.truncated },
     })
-    window.$message?.success(`已导出 ${exportRows.length} 条审计日志。`)
+    if (exportResult.truncated)
+      window.$message?.warning(`已导出前 ${exportRows.length} 条审计日志，达到浏览器安全上限。`)
+    else
+      window.$message?.success(`已导出 ${exportRows.length} 条审计日志。`)
   }
   catch (err) {
     window.$message?.error(err instanceof Error ? err.message : '导出审计日志失败')
@@ -260,16 +244,23 @@ async function fetchLogs(): Promise<void> {
     return
   }
 
+  if (activeLogRequest) {
+    abortAuditLogs(activeLogRequest.page, activeLogRequest.limit, activeLogRequest.msgType)
+    activeLogRequest = null
+  }
+
   const currentRequestId = ++requestId
+  const request = {
+    page: page.value,
+    limit: limit.value,
+    msgType: logView.value === 'visitor' ? 'visitor' : undefined,
+  }
+  activeLogRequest = request
   loading.value = true
   error.value = null
 
   try {
-    const result = await loadAuditLogs({
-      page: page.value,
-      limit: limit.value,
-      msgType: logView.value === 'visitor' ? 'visitor' : undefined,
-    })
+    const result = await loadAuditLogs(request)
     if (currentRequestId !== requestId)
       return
     logs.value = result.logs ?? []
@@ -285,6 +276,8 @@ async function fetchLogs(): Promise<void> {
     total.value = 0
   }
   finally {
+    if (activeLogRequest === request)
+      activeLogRequest = null
     if (currentRequestId === requestId)
       loading.value = false
   }
@@ -356,6 +349,13 @@ watch(logView, () => {
 
 onMounted(() => {
   void fetchLogs()
+})
+
+onUnmounted(() => {
+  requestId++
+  if (activeLogRequest)
+    abortAuditLogs(activeLogRequest.page, activeLogRequest.limit, activeLogRequest.msgType)
+  activeLogRequest = null
 })
 </script>
 

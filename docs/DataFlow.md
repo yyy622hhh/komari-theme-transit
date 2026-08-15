@@ -54,6 +54,18 @@ SnapshotExportPanel
   -> CSV helper / JSON download
 ```
 
+## Audit logs
+
+```text
+AuditLogPanel
+  -> AuthService permission check
+  -> AuditService
+  -> RequestManager
+  -> Komari audit RPC
+```
+
+Changing pages or filters and unmounting the panel aborts the superseded request. Full export is paginated at 200 records per request, deduplicates overlapping IDs, yields between pages, and keeps at most 5,000 records in browser memory. Truncated JSON exports include the reported total and export limit in their metadata.
+
 ## Request lifecycle
 
 History requests are keyed by record type, node UUID or batch scope, time range, and `maxCount`. The shared request manager deduplicates identical in-flight requests, enforces the global concurrency cap, applies timeout and exponential retry backoff with jitter, and exposes abort hooks used when shared load-history subscribers are released. Backoff waits are abortable, so navigation or cache release does not leave retries sleeping in the background.

@@ -2,7 +2,43 @@
 
 所有面向用户的重要变化记录在此。项目遵循 [Semantic Versioning](https://semver.org/)。
 
-## [Unreleased]
+## [1.0.12] - 2026-08-15
+
+### Fixed
+
+- 审计日志翻页、筛选或离开面板时会取消不再需要的旧请求，避免快速操作继续占用请求池。
+- 审计日志导出按 ID 去重，并将单次浏览器内存导出限制为 5,000 条；达到上限时会明确提示并在 JSON 元数据中标记截断。
+- 关闭访客信息或卸载组件时立即中止仍在进行的公网信息查询，并清理延迟显示定时器。
+
+### Testing
+
+- 新增审计分页去重、导出上限以及 CSV 公式注入防护单元回归测试。
+
+## [1.0.11] - 2026-08-15
+
+### Performance and privacy
+
+- Metric Store Ping 请求会去重节点 UUID，并将每批 `entity_ids` 限制为 50，避免大规模安装生成无界 RPC 请求体。
+- 同一轮响应式更新中的 Ping 本地缓存索引写入会合并执行，同时继续保持最多 200 项的边界。
+- 汇率改为只在当前页面实际展示金额时按需加载；未登录隐藏价格或当前布局没有财务卡片时不会请求第三方汇率服务。
+
+### Testing
+
+- 新增 Metric Store 请求分批单元测试，以及首页和详情页隐藏价格时不访问汇率服务的浏览器回归。
+
+## [1.0.10] - 2026-08-15
+
+### Performance and privacy
+
+- 负载历史、Ping 历史和公开 Ping 任务缓存增加容量与过期边界；相同窗口的节点 Ping 改为共享定时器和批量 Metric Store 请求。
+- 历史请求的重试退避支持立即取消，避免导航后仍有后台重试占用请求池。
+- 公开地球仅使用 Komari 已提供的国家/地区代码与主题内置坐标，不读取节点 IP，也不调用第三方地理服务。
+- 详情负载图的 Metric Store 归一化从大型 Vue 组件移入纯工具层，降低组件复杂度并覆盖 GPU 数据兼容。
+- 新增首屏 gzip 预算审计并加入 Quality 与 Release 工作流。
+
+### Testing
+
+- 新增共享缓存容量、可取消退避、负载指标归一化和公开地球隐私回归测试。
 
 ## [1.0.9] - 2026-08-15
 
@@ -137,7 +173,10 @@
 - 亮暗主题、桌面/移动布局和 Transit 风格内嵌 Komari 管理端。
 - Playwright 视觉与交互回归、自动构建和 GitHub Release 发布流程。
 
-[Unreleased]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.9...HEAD
+[Unreleased]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.12...HEAD
+[1.0.12]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.11...v1.0.12
+[1.0.11]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.10...v1.0.11
+[1.0.10]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.9...v1.0.10
 [1.0.9]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.8...v1.0.9
 [1.0.8]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.7...v1.0.8
 [1.0.7]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.6...v1.0.7

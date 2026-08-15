@@ -80,6 +80,9 @@ const macOsPattern = /Mac OS X/i
 const linuxPattern = /Linux/i
 let mobileViewport: MediaQueryList | null = null
 let scrollIdleTimer: number | undefined
+let revealTimer: number | undefined
+let activeFetchController: AbortController | null = null
+let lookupCancelled = false
 
 function handleScroll(): void {
   if (!mobileViewport?.matches)
@@ -95,15 +98,19 @@ function handleScroll(): void {
 }
 
 onMounted(async () => {
+  lookupCancelled = false
   mobileViewport = window.matchMedia(mobileViewportQuery)
   window.addEventListener('scroll', handleScroll, { passive: true })
 
-  window.setTimeout(() => {
+  revealTimer = window.setTimeout(() => {
     show.value = true
+    revealTimer = undefined
   }, 600)
 
   try {
     const data = await fetchVisitorData()
+    if (lookupCancelled)
+      return
     if (data) {
       visitor.value = data
       return
@@ -112,22 +119,35 @@ onMounted(async () => {
     visitorFailed.value = true
   }
   finally {
-    visitorLoading.value = false
+    if (!lookupCancelled)
+      visitorLoading.value = false
   }
 })
 
 onUnmounted(() => {
+  cancelVisitorLookup()
   window.removeEventListener('scroll', handleScroll)
   if (scrollIdleTimer !== undefined)
     window.clearTimeout(scrollIdleTimer)
+  if (revealTimer !== undefined)
+    window.clearTimeout(revealTimer)
 })
 
 function dismiss() {
   dismissed.value = true
+  cancelVisitorLookup()
+}
+
+function cancelVisitorLookup(): void {
+  lookupCancelled = true
+  activeFetchController?.abort()
+  activeFetchController = null
 }
 
 async function fetchVisitorData(): Promise<VisitorData | null> {
   for (const provider of visitorProviders) {
+    if (lookupCancelled)
+      return null
     const data = await fetchProviderData(provider)
     if (data)
       return data
@@ -148,6 +168,7 @@ async function fetchProviderData(provider: VisitorProvider): Promise<VisitorData
 
 async function fetchJsonWithTimeout(url: string): Promise<unknown> {
   const controller = new AbortController()
+  activeFetchController = controller
   const timeoutId = window.setTimeout(() => controller.abort(), visitorFetchTimeout)
 
   try {
@@ -165,6 +186,8 @@ async function fetchJsonWithTimeout(url: string): Promise<unknown> {
   }
   finally {
     window.clearTimeout(timeoutId)
+    if (activeFetchController === controller)
+      activeFetchController = null
   }
 }
 
