@@ -2,6 +2,17 @@
 
 所有面向用户的重要变化记录在此。项目遵循 [Semantic Versioning](https://semver.org/)。
 
+## [1.0.17] - 2026-08-16
+
+### Fixed
+
+- 兼容 Komari 1.4.2 在管理类 JSON-RPC 成功响应中省略空 `result` 字段的行为，修复首页和服务器列表保存全局顺序时报 `Invalid JSON-RPC response` 的问题。
+- 将服务器列表的“官方后台”入口修正为 Komari 实际使用的 `/admin/client`，避免打开不存在的后台路由后显示 404。
+
+### Testing
+
+- JSON-RPC 回归新增省略空结果、缺失响应 ID 和畸形错误对象覆盖；浏览器夹具同步模拟 Komari 的真实空响应序列化行为。
+
 ## [1.0.16] - 2026-08-16
 
 ### Performance and privacy

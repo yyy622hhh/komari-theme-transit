@@ -180,7 +180,7 @@ async function saveOrder(): Promise<void> {
           <Icon icon="tabler:arrows-move-vertical" />
           编辑首页顺序
         </Button>
-        <Button as="a" href="/admin/servers" target="_blank" rel="noopener" variant="outline" size="sm">
+        <Button as="a" href="/admin/client" target="_blank" rel="noopener" variant="outline" size="sm">
           <Icon icon="tabler:settings" />
           官方后台
         </Button>

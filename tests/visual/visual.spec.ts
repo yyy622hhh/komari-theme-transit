@@ -678,7 +678,7 @@ test('Transit server list filters and sorts reactive nodes without the blocked a
   await expect(panel.locator('tbody tr')).toHaveCount(12)
   await expect(panel.getByRole('combobox', { name: '排序方式' })).toHaveValue('official')
   await expect(panel.locator('tbody tr').first()).toContainText('主控-洛杉矶')
-  await expect(panel.getByRole('link', { name: '官方后台' })).toHaveAttribute('href', '/admin/servers')
+  await expect(panel.getByRole('link', { name: '官方后台' })).toHaveAttribute('href', '/admin/client')
   await page.locator('.sticky').first().evaluate((element) => {
     element.setAttribute('style', 'display: none !important')
   })

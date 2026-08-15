@@ -401,7 +401,8 @@ async function handleRpc(route: Route, clientFixtures = clients, options: Visual
         if (client && typeof weight === 'number')
           client.weight = weight
       }
-      result = null
+      // Komari's Go JSON response omits a nil result via `omitempty`.
+      result = undefined
       break
     case 'public:getMe':
       result = { logged_in: false }

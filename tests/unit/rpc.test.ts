@@ -76,8 +76,17 @@ describe('RpcClient WebSocket lifecycle', () => {
     client.close()
   })
 
-  test('rejects malformed HTTP responses with a typed RPC error', async () => {
+  test('accepts Komari success responses that omit a nil result', async () => {
     globalThis.fetch = (async () => new Response(JSON.stringify({ jsonrpc: '2.0', id: 1 }), {
+      headers: { 'Content-Type': 'application/json' },
+    })) as typeof fetch
+    const client = new RpcClient({ baseUrl: 'http://example.test/api/rpc2', timeout: 100 })
+
+    await expect(client.call<void>('admin:orderClients', {})).resolves.toBeUndefined()
+  })
+
+  test('rejects malformed HTTP responses with a typed RPC error', async () => {
+    globalThis.fetch = (async () => new Response(JSON.stringify({ jsonrpc: '2.0', result: 'pong' }), {
       headers: { 'Content-Type': 'application/json' },
     })) as typeof fetch
     const client = new RpcClient({ baseUrl: 'http://example.test/api/rpc2', timeout: 100 })
@@ -85,6 +94,22 @@ describe('RpcClient WebSocket lifecycle', () => {
     const call = client.call('rpc.ping')
     await expect(call).rejects.toBeInstanceOf(RpcError)
     await expect(call).rejects.toMatchObject({ code: -32603, message: 'Invalid JSON-RPC response' })
+  })
+
+  test('rejects malformed JSON-RPC errors even when no result is present', async () => {
+    globalThis.fetch = (async () => new Response(JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      error: { code: '-32000', message: 'invalid error code' },
+    }), {
+      headers: { 'Content-Type': 'application/json' },
+    })) as typeof fetch
+    const client = new RpcClient({ baseUrl: 'http://example.test/api/rpc2', timeout: 100 })
+
+    await expect(client.call('rpc.ping')).rejects.toMatchObject({
+      code: -32603,
+      message: 'Invalid JSON-RPC response',
+    })
   })
 
   test('times out an HTTP request and aborts the underlying fetch', async () => {

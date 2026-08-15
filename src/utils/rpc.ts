@@ -18,7 +18,8 @@ interface JsonRpcRequest {
 /** JSON-RPC 2.0 成功响应 */
 interface JsonRpcSuccessResponse<T = unknown> {
   jsonrpc: '2.0'
-  result: T
+  /** Komari omits this field when a handler returns a nil result. */
+  result?: T
   id: number | string
 }
 
@@ -478,17 +479,20 @@ export class RpcClient {
     const record = raw as Record<string, unknown>
     if (record.jsonrpc !== '2.0')
       return null
-    if (typeof record.id !== 'number' && typeof record.id !== 'string' && record.id !== null)
-      return null
     if ('error' in record) {
+      if (typeof record.id !== 'number' && typeof record.id !== 'string' && record.id !== null)
+        return null
       const error = record.error as Record<string, unknown> | null
       if (!error || typeof error.code !== 'number' || typeof error.message !== 'string')
         return null
       return record as unknown as JsonRpcResponse
     }
-    if ('result' in record)
-      return record as unknown as JsonRpcResponse
-    return null
+    if (typeof record.id !== 'number' && typeof record.id !== 'string')
+      return null
+
+    // Komari's Go response uses `omitempty` for result. Mutations that return
+    // nil therefore produce a valid success object with only jsonrpc and id.
+    return record as unknown as JsonRpcResponse
   }
 
   private emitWebSocketClose(): void {
@@ -726,7 +730,7 @@ export class RpcClient {
     if ('error' in response) {
       throw new RpcError(response.error.code, response.error.message, response.error.data)
     }
-    return response.result
+    return response.result as T
   }
 
   /**
