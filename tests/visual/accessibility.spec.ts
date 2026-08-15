@@ -39,6 +39,14 @@ test('authenticated server list has no serious accessibility violations', async 
   await expectNoSeriousAccessibilityViolations(page)
 })
 
+test('personal wallpaper manager has no serious accessibility violations', async ({ page }) => {
+  await installKomariFixture(page)
+  await openReadyPage(page)
+  await page.getByRole('button', { name: '壁纸与背景效果' }).click()
+  await expect(page.getByRole('dialog', { name: '壁纸与背景效果' })).toBeVisible()
+  await expectNoSeriousAccessibilityViolations(page)
+})
+
 test('high-contrast public home has no serious accessibility violations', async ({ page }) => {
   const session = await page.context().newCDPSession(page)
   await session.send('Emulation.setEmulatedMedia', {

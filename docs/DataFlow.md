@@ -55,6 +55,31 @@ useVisitorPageAudit -- both audit switches enabled --> async visitorFingerprint 
 
 The visitor information component is not loaded while its theme setting is disabled. The security fingerprint module is imported only after both Komari's core visitor-audit setting and the Transit client setting allow an event; public routes with either switch disabled do not initialize WebRTC/WebGL fingerprint collection.
 
+## Personal wallpaper
+
+```text
+Header -> async WallpaperManagerDialog -> usePersonalWallpaper()
+  -> wallpaper.service.ts -> decode + validate -> IndexedDB
+Background.vue <- shared reactive wallpaper state <- object URL
+```
+
+The selected image never enters a Komari API/RPC request. It is stored under the current origin in IndexedDB; the glass/blur/HD selection is stored in localStorage. Uploads are limited to supported raster MIME types, 15 MiB and 50 million decoded pixels. A replacement updates the visible object URL only after the new record commits, so decode, quota and transaction failures preserve the previous wallpaper. Object URLs are revoked after state replacement, image decoders are closed, and IndexedDB connections close after each transaction or a version-change request.
+
+Managed URL and `local:` backgrounds remain the site-wide administrator path. A personal wallpaper takes visual precedence only in the browser that selected it and does not alter `publicSettings.theme_settings`.
+
+## Managed theme writes
+
+```text
+TopologyManager / node maintenance
+  -> saveManagedThemeSettings()
+  -> AuthService forced verification
+  -> RequestManager
+  -> POST /api/admin/theme/settings?theme=Transit
+  -> PUT /api/admin/theme/config?short=Transit (legacy 404/405 fallback only)
+```
+
+Komari 1.4 uses the `/settings` endpoint. Permission, validation and server errors are surfaced directly and never trigger the legacy fallback.
+
 ## Snapshot export
 
 ```text

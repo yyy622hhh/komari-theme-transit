@@ -338,6 +338,16 @@ html.color-vision-friendly.dark {
   }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  [data-wallpaper-manager] *,
+  [data-wallpaper-manager] *::before,
+  [data-wallpaper-manager] *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
 html.color-vision-friendly .ping-signal-pattern-2 {
   background-image: repeating-linear-gradient(135deg, transparent 0 2px, rgb(255 255 255 / 0.45) 2px 3px);
 }
@@ -421,6 +431,32 @@ html.legacy-webkit [data-slot='card'] {
 .dark .bg-card:hover,
 .dark [data-slot='card']:hover {
   background-color: var(--glass-dark-card-hover, rgb(10 14 22 / 0.9)) !important;
+}
+
+/* Personal wallpaper "glass" mode strengthens foreground separation without
+   modifying the original image. Firefox/high-contrast fallbacks remain opaque. */
+html.personal-wallpaper-glass:not(.legacy-webkit) .node-card,
+html.personal-wallpaper-glass:not(.legacy-webkit) .bg-card,
+html.personal-wallpaper-glass:not(.legacy-webkit) [data-slot='card'] {
+  background-color: color-mix(in srgb, var(--glass-light-card, rgb(241 245 249 / 0.74)) 80%, transparent) !important;
+  backdrop-filter: blur(20px) saturate(160%) !important;
+  -webkit-backdrop-filter: blur(20px) saturate(160%) !important;
+}
+
+html.personal-wallpaper-glass.dark:not(.legacy-webkit) .node-card,
+html.personal-wallpaper-glass.dark:not(.legacy-webkit) .bg-card,
+html.personal-wallpaper-glass.dark:not(.legacy-webkit) [data-slot='card'] {
+  background-color: color-mix(in srgb, var(--glass-dark-card, rgb(10 14 22 / 0.82)) 86%, transparent) !important;
+}
+
+html.personal-wallpaper-glass:not(.legacy-webkit) .bg-background {
+  background-color: color-mix(in srgb, var(--glass-light-control, rgb(241 245 249 / 0.76)) 82%, transparent) !important;
+  backdrop-filter: blur(18px) saturate(155%) !important;
+  -webkit-backdrop-filter: blur(18px) saturate(155%) !important;
+}
+
+html.personal-wallpaper-glass.dark:not(.legacy-webkit) .bg-background {
+  background-color: color-mix(in srgb, var(--glass-dark-control, rgb(10 14 22 / 0.76)) 88%, transparent) !important;
 }
 
 .node-card,
@@ -584,5 +620,24 @@ header {
 
   .dark .bg-background {
     background-color: rgb(20 20 35 / 0.86) !important;
+  }
+
+  html.personal-wallpaper-glass .node-card,
+  html.personal-wallpaper-glass .bg-card,
+  html.personal-wallpaper-glass [data-slot='card'],
+  html.personal-wallpaper-glass .bg-background {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+}
+
+@media (prefers-contrast: more) {
+  html.personal-wallpaper-glass .node-card,
+  html.personal-wallpaper-glass .bg-card,
+  html.personal-wallpaper-glass [data-slot='card'],
+  html.personal-wallpaper-glass .bg-background {
+    background-color: var(--card) !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
   }
 }

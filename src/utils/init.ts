@@ -174,11 +174,11 @@ class InitManager {
       }
       catch (error) {
         if (error instanceof RpcError && error.code === 401) {
-          console.warn('[InitManager] Private site detected, redirecting to /admin')
+          console.warn('[InitManager] Private site detected, redirecting to /admin/client')
           this.redirectingToAdmin = true
           this.appStore.updateLoginState(false)
           this.appStore.loading = false
-          location.href = '/admin'
+          location.href = '/admin/client'
           return
         }
 

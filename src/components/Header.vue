@@ -9,6 +9,7 @@ import { useVisitorAudit } from '@/composables/useVisitorAudit'
 import { useAppStore } from '@/stores/app'
 
 const VisitorInfo = defineAsyncComponent(() => import('@/components/VisitorInfo.vue'))
+const WallpaperManagerDialog = defineAsyncComponent(() => import('@/components/WallpaperManagerDialog.vue'))
 
 const router = useRouter()
 const appStore = useAppStore()
@@ -17,6 +18,7 @@ const { record: recordVisitorEvent } = useVisitorAudit()
 const isScrolled = inject<ReturnType<typeof ref<boolean>>>('isScrolled', ref(false))
 
 const siteFavicon = ref('/favicon.ico')
+const wallpaperDialogOpen = ref(false)
 
 const actionButtons = computed(() => {
   const themeTitleMap = {
@@ -33,7 +35,7 @@ const actionButtons = computed(() => {
     dark: 'icon-park-outline:moon',
   } as const
 
-  const buttons: Array<{ title: string, icon: string, action: string, pressed?: boolean }> = []
+  const buttons: Array<{ title: string, icon: string, action: string, href?: string, pressed?: boolean }> = []
 
   if (router.currentRoute.value.name === 'home' && appStore.homeToolsEnabled) {
     buttons.push({
@@ -43,6 +45,12 @@ const actionButtons = computed(() => {
       pressed: appStore.homeAdvancedToolsVisible,
     })
   }
+
+  buttons.push({
+    title: '壁纸与背景效果',
+    icon: 'tabler:photo-cog',
+    action: 'openWallpaper',
+  })
 
   buttons.push({
     title: `${themeTitleMap[appStore.themeMode]}（点击切换）`,
@@ -55,6 +63,7 @@ const actionButtons = computed(() => {
       title: '后台管理',
       icon: 'icon-park-outline:setting',
       action: 'jumpToSetting',
+      href: '/admin/client',
     })
   }
   return buttons
@@ -71,6 +80,9 @@ function handleButtonClick(action: string) {
         target: appStore.themeMode,
       })
       break
+    case 'openWallpaper':
+      wallpaperDialogOpen.value = true
+      break
     case 'toggleHomeTools':
       appStore.homeAdvancedToolsVisible = !appStore.homeAdvancedToolsVisible
       break
@@ -80,7 +92,6 @@ function handleButtonClick(action: string) {
         path: router.currentRoute.value.path,
         route: String(router.currentRoute.value.name ?? ''),
       })
-      location.href = '/admin'
       break
   }
 }
@@ -91,13 +102,14 @@ const sitename = computed(() => appStore.publicSettings?.sitename || 'Komari Mon
 <template>
   <!-- 访客 IP 组件，全局悬浮 -->
   <VisitorInfo v-if="!appStore.loading && appStore.visitorInfoEnabled" />
+  <WallpaperManagerDialog v-if="wallpaperDialogOpen" v-model:open="wallpaperDialogOpen" />
 
   <div
     class="transition-all duration-200 top-0 sticky z-10 border-b border-transparent"
     :class="isScrolled ? '!border-slate-500/10 backdrop-blur-lg' : 'bg-transparent'"
   >
     <div class="px-4 flex-between h-14 max-w-[1280px] mx-auto">
-      <div class="flex items-center gap-3 cursor-pointer" @click="router.push('/')">
+      <RouterLink to="/" class="flex items-center gap-3" aria-label="返回首页">
         <Avatar class="size-8">
           <AvatarImage :src="siteFavicon" :alt="sitename" />
           <AvatarFallback>{{ sitename.slice(0, 1) }}</AvatarFallback>
@@ -105,12 +117,14 @@ const sitename = computed(() => appStore.publicSettings?.sitename || 'Komari Mon
         <h3 class="m-0 text-lg font-semibold">
           {{ sitename }}
         </h3>
-      </div>
+      </RouterLink>
       <TooltipProvider :delay-duration="200">
         <div class="flex items-center gap-2">
           <Tooltip v-for="button in actionButtons" :key="button.action">
             <TooltipTrigger as-child>
               <Button
+                :as="button.href ? 'a' : 'button'"
+                :href="button.href"
                 variant="ghost"
                 size="icon-sm"
                 :aria-label="button.title"

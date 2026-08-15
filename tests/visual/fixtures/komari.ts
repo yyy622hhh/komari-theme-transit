@@ -541,9 +541,13 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
     contentType: 'application/json',
     body: JSON.stringify({ status: 'success', data: { main: { size: 12 * 1024 ** 2 }, monitoring: { size: 486 * 1024 ** 2 } } }),
   }))
-  await page.route('**/api/admin/theme/config?short=*', route => route.fulfill({
+  await page.route('**/api/admin/theme/settings?theme=*', route => route.fulfill({
     contentType: 'application/json',
     body: JSON.stringify({ status: 'success', message: 'ok' }),
+  }))
+  await page.route('**/api/admin/theme/config?short=*', route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({ status: 'success', message: 'legacy ok' }),
   }))
   await page.route('**/api/version', route => route.fulfill({
     contentType: 'application/json',

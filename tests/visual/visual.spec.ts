@@ -1,8 +1,12 @@
 import type { Locator, Page } from '@playwright/test'
+import { Buffer } from 'node:buffer'
+import { readFile } from 'node:fs/promises'
+import { fileURLToPath } from 'node:url'
 import { expect, test } from '@playwright/test'
 import { installKomariFixture } from './fixtures/komari'
 
 const LIGHT_NODE_SURFACE = /^(?:rgba\(248, 250, 252, 0\.9\)|oklch\(0\.965 0\.008 252\))$/
+const WALLPAPER_FIXTURE = fileURLToPath(new URL('../../docs/preview.png', import.meta.url))
 
 const STABLE_STYLE = `
   @font-face {
@@ -169,6 +173,100 @@ test('home dark mobile', async ({ page }) => {
   await openStablePage(page)
   await expectNodeMetricIcons(page)
   await expect(page).toHaveScreenshot('home-dark-mobile.png', { fullPage: false })
+})
+
+test('personal wallpaper upload persists with glass, blur and HD effects', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await installKomariFixture(page, { pandaOps: true })
+  await openStablePage(page)
+
+  await expect(page.getByRole('link', { name: '后台管理' })).toHaveAttribute('href', '/admin/client')
+  await page.getByRole('button', { name: '壁纸与背景效果' }).click()
+  const dialog = page.getByRole('dialog', { name: '壁纸与背景效果' })
+  await expect(dialog).toBeVisible()
+  await dialog.getByLabel('选择本机壁纸').setInputFiles(WALLPAPER_FIXTURE)
+
+  const background = page.locator('.background-container')
+  await expect(page.getByText('本机壁纸已保存。')).toBeVisible()
+  await expect(background).toHaveAttribute('data-personal-wallpaper', 'true')
+  await expect(background).toHaveAttribute('data-wallpaper-effect', 'glass')
+  await expect(page.locator('html')).toHaveClass(/personal-wallpaper-glass/)
+  await expect(dialog.locator('[data-wallpaper-preview]')).toBeVisible()
+
+  await dialog.getByRole('button', { name: /^模糊 / }).click()
+  await expect(background).toHaveAttribute('data-wallpaper-effect', 'blur')
+  await expect(page.locator('.background-media')).toHaveCSS('filter', 'blur(16px)')
+
+  await dialog.getByRole('button', { name: /^玻璃化 / }).click()
+  await expect(dialog).toHaveScreenshot('wallpaper-manager-desktop.png')
+  await dialog.getByRole('button', { name: '关闭' }).click()
+
+  await page.reload()
+  await expect(page.getByRole('heading', { name: 'Komari Visual Lab' })).toBeVisible()
+  await expect(background).toHaveAttribute('data-personal-wallpaper', 'true')
+  await expect(background).toHaveAttribute('data-wallpaper-effect', 'glass')
+
+  await page.getByRole('button', { name: '壁纸与背景效果' }).click()
+  await page.getByRole('dialog', { name: '壁纸与背景效果' }).getByRole('button', { name: /^高清 / }).click()
+  await expect(background).toHaveAttribute('data-wallpaper-effect', 'hd')
+  await expect(page.locator('.background-media')).toHaveCSS('filter', 'none')
+  await page.getByRole('dialog', { name: '壁纸与背景效果' }).getByRole('button', { name: '移除壁纸' }).click()
+  await expect(page.getByText('本机壁纸已移除。')).toBeVisible()
+  await expect(background).not.toHaveAttribute('data-personal-wallpaper', 'true')
+})
+
+test('personal wallpaper keeps the previous image when local storage replacement fails', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await installKomariFixture(page)
+  await openStablePage(page)
+
+  await page.getByRole('button', { name: '壁纸与背景效果' }).click()
+  const dialog = page.getByRole('dialog', { name: '壁纸与背景效果' })
+  const fileInput = dialog.getByLabel('选择本机壁纸')
+  await fileInput.setInputFiles(WALLPAPER_FIXTURE)
+  await expect(dialog.getByText('preview.png', { exact: true })).toBeVisible()
+
+  await page.evaluate(() => {
+    IDBObjectStore.prototype.put = function () {
+      throw new DOMException('Visual quota failure', 'QuotaExceededError')
+    } as IDBObjectStore['put']
+  })
+  await fileInput.setInputFiles({
+    name: 'replacement.png',
+    mimeType: 'image/png',
+    buffer: await readFile(WALLPAPER_FIXTURE),
+  })
+
+  await expect(dialog.getByRole('alert')).toContainText('本地壁纸存储操作失败')
+  await expect(dialog.getByText('preview.png', { exact: true })).toBeVisible()
+  await expect(page.locator('.background-container')).toHaveAttribute('data-personal-wallpaper', 'true')
+
+  await page.reload()
+  await expect(page.getByRole('heading', { name: 'Komari Visual Lab' })).toBeVisible()
+  await page.getByRole('button', { name: '壁纸与背景效果' }).click()
+  await expect(page.getByRole('dialog', { name: '壁纸与背景效果' }).getByText('preview.png', { exact: true })).toBeVisible()
+})
+
+test.describe('personal wallpaper mobile', () => {
+  test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } })
+
+  test('manager stays in the viewport and rejects unsupported files', async ({ page }) => {
+    await installKomariFixture(page, { dark: true })
+    await openStablePage(page)
+
+    await page.getByRole('button', { name: '壁纸与背景效果' }).click()
+    const dialog = page.getByRole('dialog', { name: '壁纸与背景效果' })
+    await expect(dialog).toBeVisible()
+    await expect.poll(() => dialog.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
+    await dialog.getByLabel('选择本机壁纸').setInputFiles({
+      name: 'unsafe.svg',
+      mimeType: 'image/svg+xml',
+      buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>'),
+    })
+    await expect(dialog.getByRole('alert')).toContainText('仅支持 JPG、PNG、WebP 或 AVIF')
+    await expect(page.locator('.background-container')).not.toHaveAttribute('data-personal-wallpaper', 'true')
+    await expect(dialog).toHaveScreenshot('wallpaper-manager-mobile.png')
+  })
 })
 
 test('announcement renders literal symbols without double escaping', async ({ page }) => {
@@ -452,7 +550,7 @@ test('Transit topology manager saves through managed theme API', async ({ page }
   await page.setViewportSize({ width: 1440, height: 900 })
   await installKomariFixture(page, { pandaOps: true, dark: true, authenticated: true })
   page.on('request', (request) => {
-    if (request.method() === 'PUT' && request.url().includes('/api/admin/theme/config?short=Transit'))
+    if (request.method() === 'POST' && request.url().includes('/api/admin/theme/settings?theme=Transit'))
       saves.push(request.postDataJSON())
   })
   await openStablePage(page)
@@ -489,7 +587,7 @@ test('Transit node maintenance saves globally and updates alerts immediately', a
   await page.setViewportSize({ width: 1440, height: 900 })
   await installKomariFixture(page, { pandaOps: true, dark: true, authenticated: true })
   page.on('request', (request) => {
-    if (request.method() === 'PUT' && request.url().includes('/api/admin/theme/config?short=Transit'))
+    if (request.method() === 'POST' && request.url().includes('/api/admin/theme/settings?theme=Transit'))
       saves.push(request.postDataJSON() as Record<string, unknown>)
   })
   await openStablePage(page)

@@ -1,28 +1,44 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref, watch } from 'vue'
+import { usePersonalWallpaper } from '@/composables/usePersonalWallpaper'
 import { useAppStore } from '@/stores/app'
 
 const appStore = useAppStore()
+const personalWallpaper = usePersonalWallpaper()
+void personalWallpaper.initialize()
 
 const isLoaded = ref(false)
 const hasError = ref(false)
 
-const showBackground = computed(() => appStore.backgroundEnabled)
-const currentUrl = computed(() => showBackground.value ? appStore.currentBackgroundUrl : '')
-const backgroundType = computed(() => appStore.backgroundType)
+const usesPersonalWallpaper = computed(() => personalWallpaper.hasWallpaper.value)
+const showBackground = computed(() => usesPersonalWallpaper.value || appStore.backgroundEnabled)
+const currentUrl = computed(() => usesPersonalWallpaper.value
+  ? personalWallpaper.source.value
+  : showBackground.value ? appStore.currentBackgroundUrl : '')
+const backgroundType = computed(() => usesPersonalWallpaper.value ? 'image' : appStore.backgroundType)
 const hasCustomBackground = computed(() => showBackground.value && !!currentUrl.value)
-const showBackgroundOverlay = computed(() => appStore.backgroundOverlay > 0)
+const effectiveOverlay = computed(() => usesPersonalWallpaper.value
+  ? personalWallpaper.effect.value === 'glass' ? (appStore.isDark ? 12 : 5) : 0
+  : appStore.backgroundOverlay)
+const showBackgroundOverlay = computed(() => effectiveOverlay.value > 0)
+
+const effectiveBlur = computed(() => {
+  if (!usesPersonalWallpaper.value)
+    return appStore.backgroundBlur
+  return personalWallpaper.effect.value === 'blur' ? 16 : 0
+})
 
 const backgroundStyle = computed(() => {
-  const blur = appStore.backgroundBlur
+  const blur = effectiveBlur.value
   return {
     filter: blur > 0 ? `blur(${blur}px)` : 'none',
-    opacity: appStore.backgroundType === 'video' && !isLoaded.value ? 0 : 1,
+    transform: blur > 0 ? 'scale(1.05)' : 'none',
+    opacity: backgroundType.value === 'video' && !isLoaded.value ? 0 : 1,
   }
 })
 
 const backgroundContainerStyle = computed(() => {
-  const overlay = appStore.backgroundOverlay
+  const overlay = effectiveOverlay.value
   if (overlay >= 0)
     return {}
 
@@ -30,7 +46,7 @@ const backgroundContainerStyle = computed(() => {
 })
 
 const overlayStyle = computed(() => {
-  const overlay = appStore.backgroundOverlay
+  const overlay = effectiveOverlay.value
   if (overlay <= 0)
     return {}
 
@@ -125,13 +141,23 @@ watch([showBackground, currentUrl, backgroundType], ([enabled, url, type]) => {
   }
 }, { immediate: true })
 
+watch([usesPersonalWallpaper, () => personalWallpaper.effect.value], ([enabled, effect]) => {
+  document.documentElement.classList.toggle('personal-wallpaper-glass', enabled && effect === 'glass')
+}, { immediate: true })
+
 onUnmounted(() => {
   resetBackgroundState()
+  document.documentElement.classList.remove('personal-wallpaper-glass')
 })
 </script>
 
 <template>
-  <div class="background-container" :style="backgroundContainerStyle">
+  <div
+    class="background-container"
+    :style="backgroundContainerStyle"
+    :data-personal-wallpaper="usesPersonalWallpaper || undefined"
+    :data-wallpaper-effect="usesPersonalWallpaper ? personalWallpaper.effect.value : undefined"
+  >
     <Transition name="fade">
       <div v-if="showDefaultBackground" class="default-background" />
     </Transition>
@@ -246,5 +272,13 @@ onUnmounted(() => {
 .fade-enter-from,
 .fade-leave-to {
   opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .background-media,
+  .fade-enter-active,
+  .fade-leave-active {
+    transition: none;
+  }
 }
 </style>
