@@ -46,6 +46,15 @@ LoadChart and PingChart share the same pure time-range validation/labeling layer
 
 Exchange rates are loaded through `useDailyExchangeRates()` only when the active public surface can display a monetary value. Hidden logged-out prices and layouts without finance cards stay on local defaults without contacting exchange-rate providers; the finance helper still provides one shared in-flight request and a daily browser cache when rates are needed.
 
+## Optional visitor data
+
+```text
+Header -- visitorInfoEnabled --> async VisitorInfo --> public IP providers
+useVisitorPageAudit -- both audit switches enabled --> async visitorFingerprint --> visitor audit RPC
+```
+
+The visitor information component is not loaded while its theme setting is disabled. The security fingerprint module is imported only after both Komari's core visitor-audit setting and the Transit client setting allow an event; public routes with either switch disabled do not initialize WebRTC/WebGL fingerprint collection.
+
 ## Snapshot export
 
 ```text

@@ -3,7 +3,6 @@ import { computed, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { submitVisitorAuditEvent } from '@/services/visitor-audit.service'
 import { useAppStore } from '@/stores/app'
-import { getVisitorSecurityProfile } from '@/utils/visitorFingerprint'
 
 export function useVisitorAudit() {
   const appStore = useAppStore()
@@ -15,7 +14,9 @@ export function useVisitorAudit() {
       return
 
     const securityProfile = includeSecurityProfile
-      ? await getVisitorSecurityProfile().catch(() => null)
+      ? await import('@/utils/visitorFingerprint')
+          .then(module => module.getVisitorSecurityProfile())
+          .catch(() => null)
       : null
     await submitVisitorAuditEvent({
       ...event,

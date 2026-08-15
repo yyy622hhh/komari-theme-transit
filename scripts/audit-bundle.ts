@@ -6,7 +6,11 @@ import { gzipSync } from 'node:zlib'
 const DIST_DIR = resolve(process.cwd(), 'dist')
 const INITIAL_GZIP_TARGET = 145 * 1024
 const INITIAL_GZIP_HARD_LIMIT = 165 * 1024
-const FORBIDDEN_PRELOADS = ['v3-history', 'echarts', 'globe']
+const FORBIDDEN_PRELOADS = ['v3-history', 'echarts', 'globe', 'VisitorInfo', 'visitorFingerprint']
+const FORBIDDEN_INITIAL_SNIPPETS = [
+  { label: 'visitor IP provider', value: 'https://ipwho.is/' },
+  { label: 'visitor fingerprint collector', value: 'WEBGL_debug_renderer_info' },
+]
 const MODULE_PRELOAD_TAG_PATTERN = /<link\s[^>]*rel=["']modulepreload["'][^>]*>/gi
 const INITIAL_TAG_PATTERN = /<(?:script|link)\s[^>]*>/gi
 const HREF_ATTRIBUTE_PATTERN = /href=["']([^"']+)["']/i
@@ -31,10 +35,18 @@ const initialUrls = [...new Set(initialTags.flatMap((tag) => {
 
 const assets = initialUrls.map((url) => {
   const relativePath = url.split(URL_SUFFIX_PATTERN, 1)[0]!.replace(LEADING_SLASH_PATTERN, '')
-  const gzipBytes = gzipSync(readFileSync(resolve(DIST_DIR, relativePath))).byteLength
-  return { url, gzipBytes }
+  const content = readFileSync(resolve(DIST_DIR, relativePath))
+  const gzipBytes = gzipSync(content).byteLength
+  return { url, gzipBytes, content: content.toString('utf8') }
 })
 const totalGzipBytes = assets.reduce((total, asset) => total + asset.gzipBytes, 0)
+const forbiddenInitialCode = FORBIDDEN_INITIAL_SNIPPETS.flatMap(snippet => assets
+  .filter(asset => asset.content.includes(snippet.value))
+  .map(asset => `${snippet.label} in ${asset.url}`))
+
+if (forbiddenInitialCode.length) {
+  throw new Error(`Bundle audit failed: optional visitor code is present in initial assets: ${forbiddenInitialCode.join(', ')}`)
+}
 
 if (totalGzipBytes > INITIAL_GZIP_HARD_LIMIT) {
   throw new Error([

@@ -46,7 +46,7 @@ Vue Component
 - `composables/useOrderMoveFeedback.ts` — 首页、列表与服务器清单共用的键盘移动、拖动反馈和读屏公告逻辑。
 - `components/AsyncDataState.vue` — 负载图和延迟图共用的空状态、错误状态与重试入口。
 
-Heavy Globe、ECharts、地图与详情图表继续通过路由或异步组件按需加载。首屏审计同时禁止 `echarts`、`globe` 和详情历史图表进入 module preload，并以 145 KiB gzip 为优化目标、165 KiB 为硬上限。
+Heavy Globe、ECharts、地图与详情图表继续通过路由或异步组件按需加载。访客公网信息组件仅在配置启用后加载，访客安全指纹采集器仅在审计事件确实需要安全资料时加载。首屏审计禁止 `echarts`、`globe`、详情历史图表、访客信息和访客指纹进入 module preload，并检查入口资源不含访客 IP 服务或指纹采集代码；预算以 145 KiB gzip 为优化目标、165 KiB 为硬上限。
 
 ## Current M2-M6 scope
 
