@@ -41,5 +41,8 @@ jobs:
       - name: Build application
         run: bun run build-only
 
+      - name: Audit initial bundle
+        run: bun run audit:bundle
+
       - name: Audit release package
         run: bun run audit:release

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { PromiseCache } from '../../src/services/cache.service'
+import { PromiseCache, SharedCache } from '../../src/services/cache.service'
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -32,5 +32,21 @@ describe('PromiseCache', () => {
     expect(duplicateFactoryCalls).toBe(0)
     replacement.resolve('new')
     expect(await deduplicated).toBe('new')
+  })
+})
+
+describe('SharedCache', () => {
+  test('bounds idle entries while preserving retained values', () => {
+    const cache = new SharedCache<string>({ maxSize: 2, ttl: 60_000 })
+    cache.set('retained', 'a')
+    const release = cache.retain('retained')
+    cache.set('idle-1', 'b')
+    cache.set('idle-2', 'c')
+
+    expect(cache.get('retained')).toBe('a')
+    expect(cache.size).toBe(2)
+    release()
+    cache.set('idle-3', 'd')
+    expect(cache.size).toBe(2)
   })
 })

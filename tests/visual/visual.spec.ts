@@ -164,9 +164,21 @@ test('Transit dark asset summary keeps a readable text hierarchy', async ({ page
 })
 
 test('Transit desktop topology and cards remain contained', async ({ page }) => {
+  const reliabilityRequests: Array<{ method?: string, params?: Record<string, unknown> }> = []
+  page.on('request', (request) => {
+    if (!request.url().endsWith('/api/rpc2'))
+      return
+    const payload = request.postDataJSON() as { method?: string, params?: Record<string, unknown> } | null
+    if ((payload?.method === 'public:queryMetrics' || payload?.method === 'public:getPingMetricStats') && payload.params?.max_points === 240)
+      reliabilityRequests.push(payload)
+  })
   await page.setViewportSize({ width: 1440, height: 900 })
   await installKomariFixture(page, { pandaOps: true, dark: true })
   await openStablePage(page)
+
+  await expect.poll(() => reliabilityRequests.length).toBe(4)
+  expect(reliabilityRequests.every(request => Array.isArray(request.params?.entity_ids) && request.params.entity_ids.length === 2)).toBe(true)
+  expect(reliabilityRequests.some(request => request.params?.entity_id !== undefined)).toBe(false)
 
   await expect(page.getByRole('heading', { name: '线路状态' })).toBeVisible()
   await expect(page.locator('[data-panda-alert-strip]')).toBeVisible()
@@ -661,7 +673,7 @@ test('supported visitor audit toggle writes the core setting', async ({ page }) 
   await expect(page.getByRole('button', { name: '暂停采集' })).toBeVisible()
 })
 
-test('disabled visitor info does not call public IP lookup providers', async ({ page }) => {
+test('logged-out public home does not call visitor or node IP lookup providers', async ({ page }) => {
   const visitorLookupUrls = new Set([
     'https://ipwho.is/',
     'https://ipapi.co/json/',
@@ -669,7 +681,9 @@ test('disabled visitor info does not call public IP lookup providers', async ({ 
   ])
   const requests: string[] = []
   page.on('request', (request) => {
-    if (visitorLookupUrls.has(request.url()))
+    const url = request.url()
+    const nodeGeoLookup = /^https:\/\/(?:api\.ip\.sb\/geoip\/|ipinfo\.io\/|ipwho\.is\/|ipapi\.co\/)/.test(url)
+    if (visitorLookupUrls.has(url) || nodeGeoLookup)
       requests.push(request.url())
   })
 

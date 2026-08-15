@@ -13,12 +13,18 @@ interface QueuedRequest<T> {
   reject: (reason?: unknown) => void
   timeout: number
   retryAttempts: number
+  retryBaseDelay: number
+  retryMaxDelay: number
+  retryJitterRatio: number
   shouldRetry: (error: unknown) => boolean
 }
 
 export interface RequestManagerOptions {
   timeout?: number
   retryAttempts?: number
+  retryBaseDelay?: number
+  retryMaxDelay?: number
+  retryJitterRatio?: number
   shouldRetry?: (error: unknown) => boolean
 }
 
@@ -38,6 +44,24 @@ function waitForAbort(signal: AbortSignal): Promise<never> {
   })
 }
 
+function waitForRetry(milliseconds: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted)
+    return Promise.reject(createAbortError())
+
+  return new Promise((resolve, reject) => {
+    let timeoutId: ReturnType<typeof setTimeout>
+    const abort = () => {
+      clearTimeout(timeoutId)
+      reject(createAbortError())
+    }
+    timeoutId = setTimeout(() => {
+      signal.removeEventListener('abort', abort)
+      resolve()
+    }, milliseconds)
+    signal.addEventListener('abort', abort, { once: true })
+  })
+}
+
 export class RequestManager {
   private readonly pending = new Map<string, PendingRequest<unknown>>()
   private readonly queue: Array<QueuedRequest<unknown>> = []
@@ -51,6 +75,9 @@ export class RequestManager {
     const controller = new AbortController()
     const timeout = options.timeout ?? REQUEST_CONFIG.timeout.default
     const retryAttempts = options.retryAttempts ?? REQUEST_CONFIG.retry.attempts
+    const retryBaseDelay = options.retryBaseDelay ?? REQUEST_CONFIG.retry.baseDelay
+    const retryMaxDelay = options.retryMaxDelay ?? REQUEST_CONFIG.retry.maxDelay
+    const retryJitterRatio = options.retryJitterRatio ?? REQUEST_CONFIG.retry.jitterRatio
     const shouldRetry = options.shouldRetry ?? (() => true)
 
     const queuedPromise = new Promise<T>((resolve, reject) => {
@@ -62,6 +89,9 @@ export class RequestManager {
         reject,
         timeout,
         retryAttempts,
+        retryBaseDelay,
+        retryMaxDelay,
+        retryJitterRatio,
         shouldRetry,
       } as QueuedRequest<unknown>)
       this.drainQueue()
@@ -165,6 +195,9 @@ export class RequestManager {
           throw error
         if (attempt >= request.retryAttempts || !request.shouldRetry(error))
           throw error
+        const exponentialDelay = Math.min(request.retryBaseDelay * 2 ** attempt, request.retryMaxDelay)
+        const jitter = exponentialDelay * request.retryJitterRatio * (Math.random() * 2 - 1)
+        await waitForRetry(Math.max(0, Math.round(exponentialDelay + jitter)), request.controller.signal)
       }
       finally {
         clearTimeout(timeoutId)

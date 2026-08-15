@@ -2,7 +2,7 @@
 import type { ChartDashboardCardKey } from '@/stores/app'
 import type { NormalizedMetricSeries } from '@/utils/metricSeries'
 import type { RecordFormat } from '@/utils/recordHelper'
-import type { MetricQueryParams, MetricSeries, PingTaskInfo, StatusRecord } from '@/utils/rpc'
+import type { MetricQueryParams, PingTaskInfo, StatusRecord } from '@/utils/rpc'
 import { Icon } from '@iconify/vue'
 import { useIntervalFn } from '@vueuse/core'
 import dayjs from 'dayjs'
@@ -18,14 +18,15 @@ import { Spinner } from '@/components/ui/spinner'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { loadNodeLoadRecords, useNodeLoadStats } from '@/composables/useNodeLoadStats'
 import { LOAD_RECORD_MAX_COUNT } from '@/constants/load'
+import { loadRecentNodeStatus } from '@/services/history.service'
 import { loadMetricDefinitions, loadPublicPingTasks, queryMetrics } from '@/services/metrics.service'
 import { useAppStore } from '@/stores/app'
 import { useNodesStore } from '@/stores/nodes'
 import { getChartSeriesPalette, getLoadChartPalette } from '@/utils/chartPalette'
 import { formatBytes, formatBytesSplit } from '@/utils/helper'
+import { getGpuDeviceNames as formatGpuDeviceNames, LOAD_METRIC_KEYS, metricSeriesToChartRecords, metricValue, statusRecordsToChartRecords } from '@/utils/loadMetricRecords'
 import { comparePingTaskOrder, createPingTaskOrderMap, metricTags, normalizeMetricSeriesList } from '@/utils/metricSeries'
 import { fillMissingTimePoints } from '@/utils/recordHelper'
-import { getSharedRpc } from '@/utils/rpc'
 import '@/utils/echarts' // 共享 ECharts 配置
 
 const props = defineProps<{
@@ -50,34 +51,6 @@ watchEffect(() => {
   Object.assign(chartColors, getLoadChartPalette(appStore.colorVisionFriendly))
 })
 
-const LOAD_METRIC_KEYS = [
-  'cpu.usage',
-  'load.average',
-  'memory.used',
-  'memory.total',
-  'swap.used',
-  'swap.total',
-  'temperature',
-  'disk.used',
-  'disk.total',
-  'net.in.rate',
-  'net.out.rate',
-  'net.total.down',
-  'net.total.up',
-  'traffic.down',
-  'traffic.up',
-  'process.count',
-  'connections.tcp',
-  'connections.udp',
-  'gpu.usage',
-  'gpu.device.usage',
-  'gpu.memory.used',
-  'gpu.memory.total',
-  'gpu.temperature',
-  'ping.latency_ms',
-  'ping.loss',
-] as const
-
 const CUSTOM_VIEW_LABEL = '自定义'
 const PING_METRIC_KEYS = ['ping.latency_ms', 'ping.loss'] as const
 const METRIC_HISTORY_MAX_POINTS = 700
@@ -90,8 +63,6 @@ interface MetricChartSeriesData {
   data: Array<[string, number | null]>
   dashed?: boolean
 }
-
-type LoadMetricKey = typeof LOAD_METRIC_KEYS[number]
 
 interface CustomRange {
   start: dayjs.Dayjs
@@ -261,276 +232,15 @@ const diskPredictionSummary = computed(() => {
   return ''
 })
 
-// RPC 客户端
-const rpc = getSharedRpc()
-
 // ==================== 数据获取 ====================
-
-function gpuDetailsFromStatus(record: StatusRecord): RecordFormat['gpu_detailed'] {
-  if (!record.gpu_detailed_info?.length)
-    return undefined
-
-  const details: NonNullable<RecordFormat['gpu_detailed']> = {}
-  record.gpu_detailed_info.forEach((item, index) => {
-    const deviceIndex = item.device_index ?? index
-    const memUsed = metricValue(item.memory_used)
-    const memTotal = metricValue(item.memory_total)
-    details[deviceIndex] = {
-      usage: metricValue(item.utilization ?? item.usage),
-      memory: memUsed != null && memTotal && memTotal > 0 ? memUsed / memTotal * 100 : null,
-      temperature: metricValue(item.temperature),
-      device_index: deviceIndex,
-      device_name: item.device_name || item.name,
-      mem_total: memTotal ?? undefined,
-      mem_used: memUsed ?? undefined,
-    }
-  })
-  return details
-}
-
-function statusToRecordFormat(records: StatusRecord[]): RecordFormat[] {
-  return records.map((r) => {
-    const gpuDetailed = gpuDetailsFromStatus(r)
-    return {
-      client: r.client,
-      time: r.time,
-      cpu: metricValue(r.cpu),
-      gpu: metricValue(r.gpu_average_usage ?? r.gpu),
-      gpu_usage: metricValue(r.gpu_average_usage ?? r.gpu),
-      gpu_memory: null,
-      gpu_detailed: gpuDetailed,
-      ram: metricValue(r.ram),
-      ram_total: metricValue(r.ram_total),
-      swap: metricValue(r.swap),
-      swap_total: metricValue(r.swap_total),
-      load: metricValue(r.load),
-      temp: metricValue(r.temp),
-      disk: metricValue(r.disk),
-      disk_total: metricValue(r.disk_total),
-      net_in: metricValue(r.net_in),
-      net_out: metricValue(r.net_out),
-      net_total_up: metricValue(r.net_total_up),
-      net_total_down: metricValue(r.net_total_down),
-      traffic_up: metricValue(r.traffic_up),
-      traffic_down: metricValue(r.traffic_down),
-      process: metricValue(r.process),
-      connections: metricValue(r.connections),
-      connections_udp: metricValue(r.connections_udp),
-    }
-  })
-}
-
-function metricValue(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null
-}
-
-function getMetricDeviceKey(series: MetricSeries): string {
-  const tags = metricTags(series)
-  const index = tags.device_index ?? tags.gpu_index ?? tags.index
-  const name = tags.device_name ?? tags.gpu_name ?? tags.name
-  return String(index ?? name ?? '0')
-}
-
-function getMetricDeviceIndex(series: MetricSeries): number {
-  const tags = metricTags(series)
-  const rawIndex = tags.device_index ?? tags.gpu_index ?? tags.index
-  const numericIndex = Number(rawIndex)
-  return Number.isFinite(numericIndex) ? numericIndex : Math.abs(getMetricDeviceKey(series).split('').reduce((sum, char) => sum + char.charCodeAt(0), 0))
-}
-
-function getMetricDeviceName(series: MetricSeries): string | undefined {
-  const tags = metricTags(series)
-  const name = tags.device_name ?? tags.gpu_name ?? tags.name
-  return typeof name === 'string' && name.trim() ? name.trim() : undefined
-}
-
-function ensureMetricRow(rows: Map<string, RecordFormat>, time: string): RecordFormat {
-  const existing = rows.get(time)
-  if (existing)
-    return existing
-
-  const node = nodeInfo.value
-  const row: RecordFormat = {
-    client: props.uuid,
-    time,
-    cpu: null,
-    gpu: null,
-    gpu_usage: null,
-    gpu_memory: null,
-    ram: null,
-    ram_total: node?.mem_total ?? null,
-    swap: null,
-    swap_total: node?.swap_total ?? null,
-    load: null,
-    temp: null,
-    disk: null,
-    disk_total: node?.disk_total ?? null,
-    net_in: null,
-    net_out: null,
-    net_total_up: null,
-    net_total_down: null,
-    traffic_up: null,
-    traffic_down: null,
-    process: null,
-    connections: null,
-    connections_udp: null,
-  }
-  rows.set(time, row)
-  return row
-}
-
-function applyMetricPoint(row: RecordFormat, key: LoadMetricKey, value: number | null, series: MetricSeries): void {
-  switch (key) {
-    case 'cpu.usage':
-      row.cpu = value
-      break
-    case 'load.average':
-      row.load = value
-      break
-    case 'memory.used':
-      row.ram = value
-      break
-    case 'memory.total':
-      row.ram_total = value
-      break
-    case 'swap.used':
-      row.swap = value
-      break
-    case 'swap.total':
-      row.swap_total = value
-      break
-    case 'temperature':
-      row.temp = value
-      break
-    case 'disk.used':
-      row.disk = value
-      break
-    case 'disk.total':
-      row.disk_total = value
-      break
-    case 'net.in.rate':
-      row.net_in = value
-      break
-    case 'net.out.rate':
-      row.net_out = value
-      break
-    case 'net.total.down':
-      row.net_total_down = value
-      break
-    case 'net.total.up':
-      row.net_total_up = value
-      break
-    case 'traffic.down':
-      row.traffic_down = value
-      break
-    case 'traffic.up':
-      row.traffic_up = value
-      break
-    case 'process.count':
-      row.process = value
-      break
-    case 'connections.tcp':
-      row.connections = value
-      break
-    case 'connections.udp':
-      row.connections_udp = value
-      break
-    case 'gpu.usage':
-      row.gpu = value
-      row.gpu_usage = value
-      break
-    case 'gpu.device.usage': {
-      const deviceIndex = getMetricDeviceIndex(series)
-      row.gpu_detailed ??= {}
-      row.gpu_detailed[deviceIndex] ??= { usage: null, memory: null, temperature: null, device_index: deviceIndex, device_name: getMetricDeviceName(series) }
-      row.gpu_detailed[deviceIndex].usage = value
-      row.gpu_usage = row.gpu_usage ?? value
-      row.gpu = row.gpu ?? value
-      break
-    }
-    case 'gpu.memory.used': {
-      const deviceIndex = getMetricDeviceIndex(series)
-      row.gpu_detailed ??= {}
-      row.gpu_detailed[deviceIndex] ??= { usage: null, memory: null, temperature: null, device_index: deviceIndex, device_name: getMetricDeviceName(series) }
-      row.gpu_detailed[deviceIndex].mem_used = value ?? undefined
-      row.gpu_memory = row.gpu_memory ?? value
-      break
-    }
-    case 'gpu.memory.total': {
-      const deviceIndex = getMetricDeviceIndex(series)
-      row.gpu_detailed ??= {}
-      row.gpu_detailed[deviceIndex] ??= { usage: null, memory: null, temperature: null, device_index: deviceIndex, device_name: getMetricDeviceName(series) }
-      row.gpu_detailed[deviceIndex].mem_total = value ?? undefined
-      break
-    }
-    case 'gpu.temperature': {
-      const deviceIndex = getMetricDeviceIndex(series)
-      row.gpu_detailed ??= {}
-      row.gpu_detailed[deviceIndex] ??= { usage: null, memory: null, temperature: null, device_index: deviceIndex, device_name: getMetricDeviceName(series) }
-      row.gpu_detailed[deviceIndex].temperature = value
-      break
-    }
-  }
-}
-
-function finalizeGpuRows(rows: RecordFormat[]): RecordFormat[] {
-  for (const row of rows) {
-    if (!row.gpu_detailed)
-      continue
-
-    const usages: number[] = []
-    const memories: number[] = []
-    for (const detail of Object.values(row.gpu_detailed)) {
-      if (detail.mem_used != null && detail.mem_total && detail.mem_total > 0)
-        detail.memory = detail.mem_used / detail.mem_total * 100
-      if (typeof detail.usage === 'number' && Number.isFinite(detail.usage))
-        usages.push(detail.usage)
-      if (typeof detail.memory === 'number' && Number.isFinite(detail.memory))
-        memories.push(detail.memory)
-    }
-
-    if (row.gpu_usage == null && usages.length)
-      row.gpu_usage = usages.reduce((sum, value) => sum + value, 0) / usages.length
-    row.gpu ??= row.gpu_usage
-    if (row.gpu_memory == null && memories.length)
-      row.gpu_memory = memories.reduce((sum, value) => sum + value, 0) / memories.length
-  }
-  return rows
-}
-
-function getGpuDeviceNames(record: RecordFormat | null): string {
-  if (!record?.gpu_detailed)
-    return nodeInfo.value?.gpu_name || ''
-  return Object.values(record.gpu_detailed)
-    .map(detail => detail.device_name || (detail.device_index === undefined ? '' : `GPU ${detail.device_index}`))
-    .filter(Boolean)
-    .join(' / ')
-}
-
-function metricSeriesToRecordFormat(seriesList: MetricSeries[]): RecordFormat[] {
-  const rows = new Map<string, RecordFormat>()
-  const normalizedSeriesList = normalizeMetricSeriesList(seriesList)
-
-  for (const series of normalizedSeriesList) {
-    if (!LOAD_METRIC_KEYS.includes(series.metric_key as LoadMetricKey))
-      continue
-
-    const key = series.metric_key as LoadMetricKey
-    if (key === 'ping.latency_ms' || key === 'ping.loss')
-      continue
-
-    for (const point of series.points) {
-      const row = ensureMetricRow(rows, point.time)
-      applyMetricPoint(row, key, metricValue(point.value), series)
-    }
-  }
-
-  return finalizeGpuRows([...rows.values()].sort((a, b) => dayjs(a.time).valueOf() - dayjs(b.time).valueOf()))
-}
 
 interface MetricHistoryData {
   records: RecordFormat[]
   series: NormalizedMetricSeries[]
+}
+
+function getGpuDeviceNames(record: RecordFormat | null): string {
+  return formatGpuDeviceNames(record, nodeInfo.value?.gpu_name || '')
 }
 
 async function loadMetricCatalog(): Promise<void> {
@@ -565,7 +275,12 @@ async function loadMetricHistoryRecords(params: Pick<MetricQueryParams, 'hours' 
     return null
 
   return {
-    records: metricSeriesToRecordFormat(result.series),
+    records: metricSeriesToChartRecords(result.series, {
+      uuid: props.uuid,
+      memoryTotal: nodeInfo.value?.mem_total,
+      swapTotal: nodeInfo.value?.swap_total,
+      diskTotal: nodeInfo.value?.disk_total,
+    }),
     series,
   }
 }
@@ -626,11 +341,7 @@ async function fetchRecentData() {
   error.value = null
 
   try {
-    const result = await rpc.getNodeRecentStatus(props.uuid)
-    const records = result?.records || []
-    records.sort((a, b) => dayjs(a.time).valueOf() - dayjs(b.time).valueOf())
-    const maxLength = 150
-    remoteData.value = records.slice(-maxLength)
+    remoteData.value = await loadRecentNodeStatus(props.uuid, 150)
   }
   catch (err) {
     error.value = err instanceof Error ? err.message : '获取数据失败'
@@ -700,7 +411,7 @@ async function fetchData() {
 // ==================== 数据处理 ====================
 
 const chartData = computed(() => {
-  const data = metricData.value ?? statusToRecordFormat(remoteData.value)
+  const data = metricData.value ?? statusRecordsToChartRecords(remoteData.value)
   if (!data.length)
     return []
 

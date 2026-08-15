@@ -221,6 +221,8 @@ Transit 将两类可选行为默认关闭：
 - **访客公网信息**：开启 `visitorInfoEnabled` 后，访客浏览器会依次请求 `ipwho.is`、`ipapi.co`、`api.ip.sb`，直到一家返回成功。相应服务会看到访客 IP，并返回 IP、地区和运营商信息。
 - **访客审计**：只有 `visitorAuditClientEnabled` 与 Komari 核心的 `visitor_audit_enabled` 同时开启时，Transit 才会上报页面事件、设备特征和哈希指纹到站点自己的 Komari。
 
+公开首页的地球节点只按 Komari 已提供的国家/地区代码定位，不读取节点 IP，也不会为地图向第三方地理服务发送节点 IP。只有已登录用户主动打开需要地理增强的工具时，才可能在权限校验后查询节点 IP。
+
 部署者在启用前应向访客说明用途、第三方接收方、保留期限和退出方式。完整字段、数据流与运营者检查清单见 [PRIVACY.md](PRIVACY.md)。
 
 ## 官方管理后台与授权边界

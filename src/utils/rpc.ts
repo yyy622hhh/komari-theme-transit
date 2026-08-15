@@ -885,8 +885,8 @@ export class KomariRpc {
   /**
    * 获取节点最近状态记录
    */
-  async getNodeRecentStatus(uuid: string, limit?: number): Promise<{ count: number, records: StatusRecord[] }> {
-    return this.client.call<{ count: number, records: StatusRecord[] }>('common:getNodeRecentStatus', { uuid, limit })
+  async getNodeRecentStatus(uuid: string, limit?: number, signal?: AbortSignal): Promise<{ count: number, records: StatusRecord[] }> {
+    return this.client.call<{ count: number, records: StatusRecord[] }>('common:getNodeRecentStatus', { uuid, limit }, signal)
   }
 
   /**

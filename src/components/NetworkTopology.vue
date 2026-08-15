@@ -590,7 +590,7 @@ function routeRankingLabel(route: RouteRow): string {
       </div>
 
       <div class="hidden" aria-hidden="true">
-        <template v-for="route in routes" :key="`${route.key}-reliability`">
+        <template v-for="route in visibleRoutes" :key="`${route.key}-reliability`">
           <TopologySegmentReliabilityObserver
             v-for="(metric, segmentIndex) in route.metrics.slice(0, Math.max(1, route.nodes.length - 1))"
             :key="`${route.key}-${segmentIndex}-reliability`"

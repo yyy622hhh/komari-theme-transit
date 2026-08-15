@@ -220,7 +220,9 @@ function buildMetricResponse(
   pingTasks: Array<{ id: number, name: string }>,
 ) {
   const requested = Array.isArray(payload.metric_keys) ? payload.metric_keys.map(String) : METRIC_KEYS
-  const uuid = typeof payload.entity_id === 'string' ? payload.entity_id : uuidFor(0)
+  const entityIds = Array.isArray(payload.entity_ids)
+    ? payload.entity_ids.map(String)
+    : [typeof payload.entity_id === 'string' ? payload.entity_id : uuidFor(0)]
   const points = Array.from({ length: 48 }, (_, index) => ({
     time: new Date(Date.parse(FIXED_NOW) - (47 - index) * 75_000).toISOString(),
     index,
@@ -228,7 +230,7 @@ function buildMetricResponse(
   const metricPingTasks = options.pingTaskOrdering
     ? [pingTasks[2]!, pingTasks[0]!, pingTasks[1]!]
     : pingTasks
-  const series = requested
+  const series = entityIds.flatMap(uuid => requested
     .filter(key => !options.missingCpuMetricHistory || key !== 'cpu.usage')
     .flatMap((key) => {
       const taskList = key.startsWith('ping.') ? metricPingTasks : [null]
@@ -248,7 +250,7 @@ function buildMetricResponse(
                 : metricValue(key, point.index) + (task?.id ?? 0),
         })),
       }))
-    })
+    }))
   return { start: points[0].time, end: points.at(-1)?.time, series, count: series.length }
 }
 
@@ -518,6 +520,18 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
     body: JSON.stringify({ status: 'success', message: 'ok', data: { version: '1.2.6-visual', hash: 'visual' } }),
   }))
   await page.route('**/rpc2', route => handleRpc(route, clientFixtures, options))
+  for (const pattern of [
+    'https://api.ip.sb/geoip/**',
+    'https://ipinfo.io/**/json',
+    'https://ipwho.is/**',
+    'https://ipapi.co/**/json/',
+  ]) {
+    await page.route(pattern, route => route.fulfill({
+      status: 404,
+      contentType: 'application/json',
+      body: '{}',
+    }))
+  }
   await page.route('https://ipwho.is/', route => route.fulfill({
     contentType: 'application/json',
     body: JSON.stringify({ success: true, ip: '2001:db8::25', city: 'Tokyo', region: 'Tokyo', country: 'Japan', connection: { org: 'Example Networks' } }),

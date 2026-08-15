@@ -16,6 +16,7 @@
     "build": "run-p type-check \"build-only {@}\" --",
     "preview": "vite preview",
     "build-only": "vite build",
+    "audit:bundle": "bun scripts/audit-bundle.ts",
     "audit:release": "bun scripts/audit-release.ts",
     "type-check": "vue-tsc --build",
     "publish": "bun scripts/publish.ts",

@@ -28,6 +28,10 @@ The cache key includes whether geo lookup is allowed, so public metadata-only re
 
 Shared load-history entries keep subscriber counts. When the last subscriber releases an entry, refresh timers are stopped and related in-flight history requests are aborted through `RequestManager`.
 
+Load-history memory entries are capped at 32 with a 30-minute TTL. Ping-history memory entries are capped at 500 with the same TTL; their browser persistence keeps at most 200 recently used entries through a small LRU index. This prevents long-running dashboards and frequently changed filters from growing either cache without a bound.
+
+Ping composables sharing the same `hours` and `maxCount` window are refreshed by one timer and one batched Metric Store request using `entity_ids`. Returned series are partitioned by `entity_id` before per-node state is cached. Public Ping task metadata has a one-minute TTL to avoid repeating identical task-list requests.
+
 ## Request deduplication
 
 `history.service.ts` routes load/ping history through `requestManager` with keys that include:

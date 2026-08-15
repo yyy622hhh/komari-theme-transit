@@ -40,6 +40,7 @@ bun run dev
 bun run lint:check
 bun run type-check
 bun run build-only
+bun run audit:bundle
 ```
 
 涉及页面、样式、响应式或交互时还需运行：
@@ -58,7 +59,7 @@ preview.png
 dist/
 ```
 
-然后执行 `bun run audit:release`，确认发布物没有额外顶层文件或内嵌管理端。
+然后执行 `bun run audit:bundle` 和 `bun run audit:release`，确认首屏资源预算、发布物顶层结构和内嵌管理端检查均通过。
 
 Release 不得包含 `public/admin-app/`、`dist/admin-app/`、第三方管理端补丁或其他没有明确再分发许可的内容。加入第三方代码或资产时，PR 必须说明来源、固定版本、许可证与 NOTICE 要求。
 

@@ -32,4 +32,25 @@ describe('RequestManager', () => {
     await aborted
     expect(taskRuns).toBe(1)
   })
+
+  test('aborts while waiting for retry backoff', async () => {
+    const manager = new RequestManager()
+    let taskRuns = 0
+    const request = manager.run('retry-backoff', async () => {
+      taskRuns++
+      throw new Error('temporary failure')
+    }, {
+      retryAttempts: 2,
+      retryBaseDelay: 10_000,
+      retryMaxDelay: 10_000,
+      retryJitterRatio: 0,
+    })
+
+    await wait(0)
+    manager.abort('retry-backoff')
+
+    await expect(request).rejects.toMatchObject({ name: 'AbortError' })
+    await request.catch(() => undefined)
+    expect(taskRuns).toBe(1)
+  })
 })

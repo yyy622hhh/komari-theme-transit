@@ -2,7 +2,9 @@ import type { MaybeRefOrGetter } from 'vue'
 import type { PermissionKey } from '@/services/auth.service'
 import type { StatusRecord } from '@/utils/rpc'
 import { computed, onScopeDispose, ref, shallowRef, toValue, watch } from 'vue'
+import { CACHE_CONFIG } from '@/constants/cache'
 import { LOAD_CONFIG, LOAD_RECORD_MAX_COUNT } from '@/constants/load'
+import { SharedCache } from '@/services/cache.service'
 import { abortLoadRecords, abortNodeLoadRecords, buildRecordsByClient, loadLoadRecords, loadNodeLoadRecords } from '@/services/history.service'
 import { analyzeDiskPrediction, buildDiskPrediction } from '@/services/prediction.service'
 import { useAppStore } from '@/stores/app'
@@ -29,7 +31,12 @@ interface SharedLoadRecordsEntry {
 }
 
 const LOAD_RECORD_REFRESH_INTERVAL_MS = LOAD_CONFIG.records.refreshInterval
-const sharedLoadRecordsCache = new Map<string, SharedLoadRecordsEntry>()
+const sharedLoadRecordsCache = new SharedCache<SharedLoadRecordsEntry>({
+  maxSize: CACHE_CONFIG.loadRecords.maxSize,
+  ttl: CACHE_CONFIG.loadRecords.ttl,
+  cleanupInterval: CACHE_CONFIG.cleanup.interval,
+  canEvict: entry => entry.subscribers === 0 && entry.promise === null && entry.nodePromises.size === 0,
+})
 const zeroSampleWarningKeys = new Set<string>()
 
 function normalizeMaxCount(maxCount: number | null | undefined): number | undefined {
@@ -68,8 +75,7 @@ function getSharedLoadRecordsEntry(key: string): SharedLoadRecordsEntry {
     return cachedEntry
 
   const nextEntry = createSharedLoadRecordsEntry()
-  sharedLoadRecordsCache.set(key, nextEntry)
-  return nextEntry
+  return sharedLoadRecordsCache.set(key, nextEntry)
 }
 
 function setNodeRecords(entry: SharedLoadRecordsEntry, uuid: string, records: StatusRecord[]): void {
@@ -153,6 +159,7 @@ async function loadSharedLoadRecords(entry: SharedLoadRecordsEntry, hours: numbe
       entry.loading.value = false
       if (entry.promise === promise)
         entry.promise = null
+      sharedLoadRecordsCache.sweep()
     }
   })()
 
@@ -200,6 +207,7 @@ function retainSharedLoadRecordsEntry(hours: number, maxCount?: number): () => v
     if (entry.subscribers === 0) {
       stopSharedLoadRecordsRefresh(entry)
       abortSharedLoadRecordsEntry(entry, hours, maxCount)
+      sharedLoadRecordsCache.sweep()
     }
   }
 }

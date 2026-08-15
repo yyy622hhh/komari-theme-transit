@@ -159,14 +159,9 @@ export default defineConfig({
           'globe': ['globe.gl', 'three'],
           'reka-ui': ['reka-ui'],
           'vueuse': ['@vueuse/core'],
-          'v3-services': [
-            './src/services/history.service.ts',
-            './src/services/metrics.service.ts',
+          'v3-core': [
             './src/services/request.service.ts',
             './src/services/cache.service.ts',
-            './src/utils/osImageHelper.ts',
-            './src/utils/metricSeries.ts',
-            './src/composables/useNodePingDisplay.ts',
           ],
         },
       },

@@ -60,6 +60,10 @@ export function getPingRecordsRequestKey(hours: number, maxCount?: number, uuid?
   return `history:ping:${cachePart(uuid)}:${normalizeHours(hours)}:${cachePart(normalizeMaxCount(maxCount))}`
 }
 
+export function getRecentNodeStatusRequestKey(uuid: string, limit: number): string {
+  return `history:recent:${uuid}:${Math.max(1, Math.floor(limit))}`
+}
+
 export function abortLoadRecords(uuid: string | undefined, hours: number, maxCount?: number): void {
   requestManager.abort(getLoadRecordsRequestKey(uuid, hours, maxCount))
 }
@@ -128,6 +132,21 @@ export async function loadLoadRecords(uuid: string | undefined, hours: number, m
     async (signal) => {
       const result = await getSharedRpc().getLoadRecords(uuid, safeHours, undefined, safeMaxCount, signal)
       return normalizeStatusRecordsPayload(result.records)
+    },
+    { shouldRetry: shouldRetryHistoryRequest },
+  )
+}
+
+export async function loadRecentNodeStatus(uuid: string, limit = 150): Promise<StatusRecord[]> {
+  const safeLimit = Math.max(1, Math.floor(limit))
+  return requestManager.run(
+    getRecentNodeStatusRequestKey(uuid, safeLimit),
+    async (signal) => {
+      const result = await getSharedRpc().getNodeRecentStatus(uuid, safeLimit, signal)
+      return (result.records ?? [])
+        .filter(record => Boolean(record.client && record.time))
+        .sort((left, right) => new Date(left.time).getTime() - new Date(right.time).getTime())
+        .slice(-safeLimit)
     },
     { shouldRetry: shouldRetryHistoryRequest },
   )
