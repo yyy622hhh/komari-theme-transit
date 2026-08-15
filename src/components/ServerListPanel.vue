@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Empty } from '@/components/ui/empty'
 import { Input } from '@/components/ui/input'
 import { ProgressThin } from '@/components/ui/progress-thin'
+import { useOrderMoveFeedback } from '@/composables/useOrderMoveFeedback'
 import { useServerList } from '@/composables/useServerList'
 import { useSortableOrder } from '@/composables/useSortableOrder'
 import { useAppStore } from '@/stores/app'
@@ -52,7 +53,17 @@ const {
 
 const desktopOrderContainer = ref<HTMLElement | null>(null)
 const mobileOrderContainer = ref<HTMLElement | null>(null)
-const orderAnnouncement = ref('')
+const {
+  announcement: orderAnnouncement,
+  handleKeydown: handleOrderKeydown,
+  moveWithFeedback: moveOrderWithFeedback,
+  resetAnnouncement,
+} = useOrderMoveFeedback({
+  items: () => rows.value,
+  getId: node => node.uuid,
+  getLabel: node => node.name,
+  move: moveOrderToIndex,
+})
 useSortableOrder(
   [desktopOrderContainer, mobileOrderContainer],
   () => editingOrder.value && rows.value.length > 1,
@@ -132,44 +143,8 @@ function startOrderEdit(): void {
     window.$message?.warning('请先切换到“全部节点”再编辑首页顺序。')
     return
   }
-  orderAnnouncement.value = ''
+  resetAnnouncement()
   beginOrderEdit()
-}
-
-function announceOrderMove(node: NodeData, toIndex: number): void {
-  orderAnnouncement.value = `${node.name} 已移动到第 ${toIndex + 1} 位，共 ${rows.value.length} 位。`
-}
-
-function moveOrderWithFeedback(fromIndex: number, toIndex: number): void {
-  const node = rows.value[fromIndex]
-  if (!node || fromIndex === toIndex)
-    return
-  moveOrderToIndex(fromIndex, toIndex)
-  announceOrderMove(node, toIndex)
-}
-
-function handleOrderKeydown(event: KeyboardEvent, node: NodeData): void {
-  const fromIndex = rows.value.findIndex(row => row.uuid === node.uuid)
-  if (fromIndex < 0)
-    return
-
-  let toIndex = fromIndex
-  if (event.key === 'ArrowUp')
-    toIndex = fromIndex - 1
-  else if (event.key === 'ArrowDown')
-    toIndex = fromIndex + 1
-  else if (event.key === 'Home')
-    toIndex = 0
-  else if (event.key === 'End')
-    toIndex = rows.value.length - 1
-  else
-    return
-
-  event.preventDefault()
-  if (toIndex < 0 || toIndex >= rows.value.length || toIndex === fromIndex)
-    return
-  moveOrderToIndex(fromIndex, toIndex)
-  announceOrderMove(node, toIndex)
 }
 
 async function saveOrder(): Promise<void> {

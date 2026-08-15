@@ -1,11 +1,12 @@
 <script setup lang="ts">
+import type { MetricCustomRange } from '@/utils/metricRange'
 import type { MetricSeries, PingMetricTaskStats, PingRecord, PingTaskInfo } from '@/utils/rpc'
 import { Icon } from '@iconify/vue'
 import dayjs from 'dayjs'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, shallowRef, watch, watchEffect } from 'vue'
 import VChart from 'vue-echarts'
+import AsyncDataState from '@/components/AsyncDataState.vue'
 import { Button } from '@/components/ui/button'
-import { Empty } from '@/components/ui/empty'
 import { Input } from '@/components/ui/input'
 import { Spinner } from '@/components/ui/spinner'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -15,6 +16,7 @@ import { loadPingRecordsWithTasks } from '@/services/history.service'
 import { loadPingMetricStats, loadPublicPingTasks, queryMetrics } from '@/services/metrics.service'
 import { useAppStore } from '@/stores/app'
 import { ACCESSIBLE_LINE_TYPES, getChartSeriesPalette } from '@/utils/chartPalette'
+import { buildAvailableMetricViews, CUSTOM_METRIC_VIEW_LABEL, formatMetricAxisTime, formatMetricTooltipTime, getMetricCustomRangeError, parseMetricCustomRange } from '@/utils/metricRange'
 import { isPingMetric, normalizeMetricSeriesList, orderPingTasksByBackend, PING_LATENCY_METRIC, pingTaskId, pingTaskName } from '@/utils/metricSeries'
 import { cutPeakValues, interpolateNullsLinear } from '@/utils/recordHelper'
 import '@/utils/echarts' // 共享 ECharts 配置
@@ -25,12 +27,6 @@ const props = defineProps<{
 
 const appStore = useAppStore()
 const isDark = computed(() => appStore.isDark)
-
-interface CustomRange {
-  start: dayjs.Dayjs
-  end: dayjs.Dayjs
-  hours: number
-}
 
 // 图表主题相关颜色
 const chartThemeColors = computed(() => ({
@@ -60,65 +56,22 @@ const presetViews = [
   { label: '12 小时', hours: 12 },
   { label: '1 天', hours: 24 },
 ]
-const CUSTOM_VIEW_LABEL = '自定义'
 const DEFAULT_CUSTOM_RANGE_HOURS = 24
 
 // 可用视图列表
 const availableViews = computed(() => {
-  const views: { label: string, hours?: number }[] = []
-  const maxHours = maxPingRecordPreserveTime.value
-
-  for (const v of presetViews) {
-    if (maxHours >= v.hours) {
-      views.push(v)
-    }
-  }
-
-  const maxPreset = presetViews.at(-1)
-  if (maxPreset && maxHours > maxPreset.hours) {
-    const label = maxHours % 24 === 0
-      ? `${Math.floor(maxHours / 24)} 天`
-      : `${maxHours} 小时`
-    views.push({ label, hours: maxHours })
-  }
-  else if (maxHours > 1 && !presetViews.some(v => v.hours === maxHours)) {
-    const label = maxHours % 24 === 0
-      ? `${Math.floor(maxHours / 24)} 天`
-      : `${maxHours} 小时`
-    views.push({ label, hours: maxHours })
-  }
-
-  views.push({ label: CUSTOM_VIEW_LABEL })
-  return views
+  return buildAvailableMetricViews(maxPingRecordPreserveTime.value, presetViews)
 })
 
 // 当前选中的视图
 const selectedView = ref<string>('')
 const customStartInput = ref('')
 const customEndInput = ref('')
-const appliedCustomRange = shallowRef<CustomRange | null>(null)
-const isCustomRange = computed(() => selectedView.value === CUSTOM_VIEW_LABEL)
-const customRange = computed<CustomRange | null>(() => {
-  if (!customStartInput.value || !customEndInput.value)
-    return null
-
-  const start = dayjs(customStartInput.value)
-  const end = dayjs(customEndInput.value)
-  if (!start.isValid() || !end.isValid() || !end.isAfter(start))
-    return null
-
-  return {
-    start,
-    end,
-    hours: Math.max(1, Math.ceil(end.diff(start, 'hour', true))),
-  }
-})
+const appliedCustomRange = shallowRef<MetricCustomRange | null>(null)
+const isCustomRange = computed(() => selectedView.value === CUSTOM_METRIC_VIEW_LABEL)
+const customRange = computed<MetricCustomRange | null>(() => parseMetricCustomRange(customStartInput.value, customEndInput.value))
 const customRangeError = computed(() => {
-  if (!isCustomRange.value || (!customStartInput.value && !customEndInput.value))
-    return ''
-  if (!customStartInput.value || !customEndInput.value)
-    return '请选择开始和结束时间'
-  return customRange.value ? '' : '结束时间必须晚于开始时间'
+  return getMetricCustomRangeError(isCustomRange.value, customStartInput.value, customEndInput.value, customRange.value)
 })
 const selectedHours = computed(() => {
   if (isCustomRange.value)
@@ -493,22 +446,6 @@ const chartData = computed(() => {
 
 // ==================== 工具函数 ====================
 
-function formatTime(time: string, showDate: boolean): string {
-  const date = dayjs(time)
-  if (showDate) {
-    return date.format('M/D HH:mm')
-  }
-  return date.format('HH:mm')
-}
-
-function formatTimeForTooltip(time: string, hours: number): string {
-  const date = dayjs(time)
-  if (hours < 24) {
-    return date.format('HH:mm:ss')
-  }
-  return date.format('MM/DD HH:mm')
-}
-
 const showDateInAxis = computed(() => selectedHours.value >= 24)
 
 // ==================== 任务选择 ====================
@@ -651,7 +588,7 @@ const pingChartOption = computed(() => {
           return ''
 
         const time = rowData.time as string
-        const timeStr = formatTimeForTooltip(time, hours)
+        const timeStr = formatMetricTooltipTime(time, hours)
         let html = `<div style="font-weight:600;margin-bottom:6px;color:${chartThemeColors.value.textSecondary}">${timeStr}</div>`
         html += '<div style="display:flex;flex-direction:column;gap:4px">'
 
@@ -684,7 +621,7 @@ const pingChartOption = computed(() => {
     grid: chartMargin,
     xAxis: {
       type: 'category',
-      data: data.map(d => formatTime(d.time as string, showDateInAxis.value)),
+      data: data.map(d => formatMetricAxisTime(d.time as string, showDateInAxis.value)),
       axisLabel: {
         fontSize: 11,
         color: chartThemeColors.value.textSecondary,
@@ -820,14 +757,9 @@ onBeforeUnmount(() => {
 
     <!-- 内容区域 -->
     <Spinner :show="loading" content-class="flex flex-col gap-4">
-      <div v-if="error" class="text-red-500 py-8 text-center">
-        {{ error }}
-      </div>
-      <div v-else-if="tasks.length === 0 && !loading" class="py-8">
-        <Empty description="暂无延迟数据" />
-      </div>
+      <AsyncDataState :error="error" :empty="tasks.length === 0 && !loading" empty-description="暂无延迟数据" @retry="fetchRecords" />
 
-      <template v-else>
+      <template v-if="!error && (tasks.length > 0 || loading)">
         <!-- 最新值统计卡片（可点击切换选中状态） -->
         <div
           v-if="latestValues.length > 0" class="gap-3 grid"
@@ -853,7 +785,14 @@ onBeforeUnmount(() => {
                     @update:open="(open) => setTaskTooltipOpen(task.id, open)"
                   >
                     <TooltipTrigger as-child>
-                      <Button variant="ghost" size="icon-xs" class="text-slate-500" @click.stop="toggleTaskTooltip(task.id)">
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        class="text-slate-500"
+                        :aria-label="`查看 ${task.name} 延迟统计`"
+                        :title="`查看 ${task.name} 延迟统计`"
+                        @click.stop="toggleTaskTooltip(task.id)"
+                      >
                         <Icon icon="carbon:information" :width="14" :height="14" />
                       </Button>
                     </TooltipTrigger>
@@ -942,7 +881,14 @@ onBeforeUnmount(() => {
                 @update:open="(open) => smoothInfoTooltipOpen = open"
               >
                 <TooltipTrigger as-child>
-                  <Button variant="ghost" size="icon-xs" class="text-slate-500" @click.stop="toggleSmoothInfoTooltip">
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    class="text-slate-500"
+                    aria-label="查看平滑峰值说明"
+                    title="查看平滑峰值说明"
+                    @click.stop="toggleSmoothInfoTooltip"
+                  >
                     <Icon icon="carbon:information" :width="14" :height="14" />
                   </Button>
                 </TooltipTrigger>

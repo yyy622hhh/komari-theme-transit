@@ -63,6 +63,68 @@ async function dragOrderHandle(page: Page, handle: Locator, target: Locator, tar
   await page.waitForTimeout(200)
 }
 
+async function dragOrderHandleByTouch(page: Page, handle: Locator, target: Locator): Promise<void> {
+  await target.scrollIntoViewIfNeeded()
+  // Keep the source handle in view last. On a vertical mobile grid this also
+  // leaves the next compact card visible below it, avoiding a stale source box.
+  await handle.scrollIntoViewIfNeeded()
+  const sourceBox = await handle.boundingBox()
+  const targetBox = await target.boundingBox()
+  if (!sourceBox || !targetBox)
+    throw new Error('Touch drag source or target is not visible')
+
+  const start = { x: sourceBox.x + sourceBox.width / 2, y: sourceBox.y + sourceBox.height / 2 }
+  const end = { x: targetBox.x + targetBox.width / 2, y: targetBox.y + Math.min(140, targetBox.height * 0.55) }
+  const viewport = page.viewportSize()
+  if (!viewport || start.y < 0 || start.y > viewport.height || end.y < 0 || end.y > viewport.height)
+    throw new Error(`Touch drag coordinates outside viewport: start=${JSON.stringify(start)}, end=${JSON.stringify(end)}, viewport=${JSON.stringify(viewport)}`)
+  await handle.evaluate((element, point) => {
+    element.dispatchEvent(new PointerEvent('pointerdown', {
+      bubbles: true,
+      button: 0,
+      buttons: 1,
+      cancelable: true,
+      clientX: point.x,
+      clientY: point.y,
+      isPrimary: true,
+      pointerId: 1,
+      pointerType: 'touch',
+    }))
+  }, start)
+  await page.waitForTimeout(240)
+  for (let step = 1; step <= 16; step++) {
+    const ratio = step / 16
+    const x = start.x + (end.x - start.x) * ratio
+    const y = start.y + (end.y - start.y) * ratio
+    await page.evaluate(({ x: nextX, y: nextY }) => {
+      document.dispatchEvent(new PointerEvent('pointermove', {
+        bubbles: true,
+        button: 0,
+        buttons: 1,
+        cancelable: true,
+        clientX: nextX,
+        clientY: nextY,
+        isPrimary: true,
+        pointerId: 1,
+        pointerType: 'touch',
+      }))
+    }, { x, y })
+    await page.waitForTimeout(20)
+  }
+  await page.evaluate(() => {
+    document.dispatchEvent(new PointerEvent('pointerup', {
+      bubbles: true,
+      button: 0,
+      buttons: 0,
+      cancelable: true,
+      isPrimary: true,
+      pointerId: 1,
+      pointerType: 'touch',
+    }))
+  })
+  await page.waitForTimeout(250)
+}
+
 async function expectNodeMetricIcons(page: Page): Promise<void> {
   for (const metric of ['cpu', 'memory', 'disk', 'traffic'])
     await expect(page.locator(`[data-node-metric-icon="${metric}"]`).first()).toBeVisible()
@@ -524,6 +586,67 @@ test('homepage cards can be reordered directly and saved to the official global 
   expect(savedOrders[0]?.['00000000-0000-4000-8000-000000000002']).toBe(0)
   await expect(search).toHaveValue('东京')
   await expect(grid.locator('> div')).toHaveCount(2)
+
+  await page.reload()
+  await expect(page.getByRole('heading', { name: 'Komari Visual Lab' })).toBeVisible()
+  await expect(grid.locator('> div').first()).toContainText('香港边缘节点-超长名称布局测试')
+})
+
+test('homepage order save failure keeps the draft available for retry', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, { authenticated: true, orderSaveFailure: true, pandaOps: true })
+  await openStablePage(page)
+
+  await page.getByRole('button', { name: '编辑首页顺序' }).click()
+  const grid = page.locator('[data-node-card-grid]')
+  const firstHandle = page.getByRole('button', { name: /^拖动 主控-洛杉矶，/ })
+  await firstHandle.press('ArrowDown')
+  await expect(grid.locator('[data-server-order-item]').first()).toContainText('香港边缘节点-超长名称布局测试')
+  await page.getByRole('button', { name: '保存顺序' }).click()
+
+  await expect(page.getByText('保存服务器顺序失败：visual order save failed')).toBeVisible()
+  await expect(page.locator('[data-home-order-toolbar]')).toBeVisible()
+  await expect(page.getByRole('button', { name: '保存顺序' })).toBeEnabled()
+  await expect(grid.locator('[data-server-order-item]').first()).toContainText('香港边缘节点-超长名称布局测试')
+})
+
+test('expired login blocks homepage order editing before a private RPC call', async ({ page }) => {
+  const privateRequests: string[] = []
+  page.on('request', (request) => {
+    if (!request.url().endsWith('/api/rpc2'))
+      return
+    const payload = request.postDataJSON() as { method?: string } | null
+    if (payload?.method?.startsWith('admin:'))
+      privateRequests.push(payload.method)
+  })
+
+  await installKomariFixture(page, { authenticated: true, authenticationExpires: true, pandaOps: true })
+  await openStablePage(page)
+  await page.getByRole('button', { name: '编辑首页顺序' }).click()
+
+  await expect(page.getByText('登录状态已过期，请重新登录后编辑首页顺序。')).toBeVisible()
+  await expect(page.locator('[data-home-order-toolbar]')).toHaveCount(0)
+  expect(privateRequests).toEqual([])
+})
+
+test.describe('mobile touch sorting', () => {
+  test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } })
+
+  test('homepage order supports mobile touch dragging', async ({ page }) => {
+    await installKomariFixture(page, { authenticated: true, nodeCardSize: 'mini', pandaOps: true })
+    await openStablePage(page)
+
+    await page.getByRole('button', { name: '编辑首页顺序' }).click()
+    const grid = page.locator('[data-node-card-grid]')
+    await expect(grid.locator('[data-server-order-item]')).toHaveCount(12)
+    await page.waitForTimeout(300)
+    await dragOrderHandleByTouch(
+      page,
+      page.getByRole('button', { name: /^拖动 主控-洛杉矶，/ }),
+      grid.locator('[data-server-order-item]').nth(1),
+    )
+    await expect(grid.locator('[data-server-order-item]').first()).toContainText('香港边缘节点-超长名称布局测试')
+  })
 })
 
 test('Transit server list filters and sorts reactive nodes without the blocked admin endpoint', async ({ page }) => {
@@ -747,6 +870,31 @@ test('logged-out public home does not call visitor or node IP lookup providers',
   await page.waitForTimeout(250)
 
   expect(requests).toEqual([])
+})
+
+test('logged-out public routes do not call private HTTP or RPC endpoints', async ({ page }) => {
+  const privateRequests: string[] = []
+  page.on('request', (request) => {
+    const url = request.url()
+    if (url.includes('/api/admin/')) {
+      privateRequests.push(url)
+      return
+    }
+    if (!url.endsWith('/api/rpc2'))
+      return
+    const payload = request.postDataJSON() as { method?: string } | null
+    if (payload?.method?.startsWith('admin:'))
+      privateRequests.push(payload.method)
+  })
+
+  await installKomariFixture(page, { hidePriceWhenLoggedOut: true, pandaOps: true, visitorInfoEnabled: false })
+  await openStablePage(page)
+  await page.getByRole('button', { name: '查看节点 主控-洛杉矶 详情' }).click()
+  await expect(page).toHaveURL('/instance/00000000-0000-4000-8000-000000000001')
+  await expect(page.getByText('硬件信息')).toBeVisible()
+  await page.waitForTimeout(250)
+
+  expect(privateRequests).toEqual([])
 })
 
 test('hidden public prices do not trigger exchange-rate providers', async ({ page }) => {

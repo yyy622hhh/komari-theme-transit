@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { getAuthSession, setAuthSessionFromLogin, verifyLogin } from '../../src/services/auth.service'
+import { getAuthSession, requirePermission, setAuthSessionFromLogin, verifyLogin } from '../../src/services/auth.service'
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -46,5 +46,30 @@ describe('auth session verification', () => {
     expect((await staleVerification).authenticated).toBe(true)
     expect(getAuthSession().authenticated).toBe(true)
     expect(fetchCalls).toBe(2)
+  })
+
+  test('denies private permissions when a forced verification reports an expired session', async () => {
+    globalThis.fetch = (async () => meResponse(false)) as typeof fetch
+    setAuthSessionFromLogin(true, { logged_in: true, username: 'admin' })
+
+    const permission = await requirePermission('serverList', { force: true })
+
+    expect(permission.granted).toBe(false)
+    expect(permission.session.status).toBe('guest')
+    expect(permission.session.authenticated).toBe(false)
+    expect(permission.reason).toContain('serverList')
+  })
+
+  test('treats verification failures as unauthenticated instead of preserving stale access', async () => {
+    globalThis.fetch = (async () => {
+      throw new Error('verification unavailable')
+    }) as typeof fetch
+    setAuthSessionFromLogin(true, { logged_in: true, username: 'admin' })
+
+    const permission = await requirePermission('snapshotExport', { force: true })
+
+    expect(permission.granted).toBe(false)
+    expect(permission.session.status).toBe('error')
+    expect(permission.session.errorMessage).toContain('verification unavailable')
   })
 })

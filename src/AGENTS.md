@@ -28,7 +28,7 @@ Do not bypass this chain unless you are editing bootstrap/transport glue that al
 
 ## Stores
 
-- [stores/app.ts](stores/app.ts) owns public settings, normalized theme settings, login/auth state, layout flags, formatting preferences, theme mode, persisted UI state, and permission helpers.
+- [stores/app.ts](stores/app.ts) owns public settings, normalized theme settings, login/auth state, layout flags, formatting preferences, theme mode, persisted UI state, and permission helpers. Its public type-only contract lives in `stores/app.types.ts`.
 - [stores/nodes.ts](stores/nodes.ts) owns normalized nodes, visible nodes, groups, WebSocket state, and live updates.
 
 Rules:

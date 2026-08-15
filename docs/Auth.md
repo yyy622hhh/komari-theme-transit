@@ -23,6 +23,8 @@ Sensitive actions call `requirePermission()` / `appStore.requireLoginPermission(
 - `healthSummary` — health summary generation.
 - `providerValue` — provider value panel metadata.
 - `nodeTopology` — topology panel metadata.
+- `serverList` — server list access and global node-order writes.
+- `auditLog` — Komari administrator audit log reads.
 - `diskPrediction` — disk-prediction history loading.
 - `providerGeoLookup` — detail/list provider geo metadata lookups.
 
@@ -33,7 +35,11 @@ Sensitive actions call `requirePermission()` / `appStore.requireLoginPermission(
 - Health summary generation.
 - Disk prediction history loading.
 - Provider geo lookup for sensitive metadata.
+- Server-list tools and `admin:orderClients` writes.
+- Administrator audit log reads.
 
 ## Public behavior
 
 The home page and instance detail route stay public. Public node monitoring includes load charts, mini Ping bars, and detail Ping latency/loss history. When auth is missing or expired, the theme hides only advanced/private surfaces and continues rendering public node data.
+
+Regression tests verify that logged-out home/detail routes never request `/api/admin/*`, `admin:*` RPC methods, node IP geo providers, or hidden-price exchange-rate providers. User-triggered private actions force a fresh `/api/me` verification so an expired session is denied before the private request starts.

@@ -2,6 +2,39 @@
 
 所有面向用户的重要变化记录在此。项目遵循 [Semantic Versioning](https://semver.org/)。
 
+## [1.0.15] - 2026-08-15
+
+### Changed
+
+- 首页与服务器列表共用统一的排序移动逻辑，保留拖动、方向键、Home/End、读屏公告和保存失败后的草稿重试。
+- 调整 Vite 分包与预加载策略，Bun 审计口径的首屏 gzip 从约 153.8 KiB 降至不超过 145 KiB；ECharts、Globe 和详情历史图表继续按需加载。
+- 收紧记录插值和 CardX slot 的宽泛类型，不改变公开 API、主题设置或页面文案。
+- 将 app store 类型契约、图表时间范围与 Ping 统计纯计算从超大文件拆出，并让负载图和延迟图共用空状态、错误状态与重试交互。
+
+### Security and accessibility
+
+- 增加基于 `bun.lock` 的 OSV 依赖扫描，并在本地审计、Quality 和 Release 工作流阻止 HIGH/CRITICAL 漏洞。
+- 增加首页、详情页和登录服务器列表的 axe 结构与交互扫描，阻止 serious/critical 级违规。
+- 增加登录过期和公网权限边界回归，确保私有 HTTP/RPC、IP 地理和隐藏价格汇率请求不会从公开页面启动。
+
+### Testing
+
+- 增加 RPC 非法响应/超时/HTTP 回退、认证拒绝、请求取消/重试、过期缓存和非法服务器顺序单元测试。
+- 增加图表时间范围与 Ping 聚合纯函数单元测试；当前单元测试共 32 项。
+- 增加首页排序保存失败、刷新持久化、卡片/列表键盘操作和移动端真实触摸拖动浏览器回归。
+
+## [1.0.14] - 2026-08-15
+
+### Fixed
+
+- 修复首页卡片排序容器没有通过 Vue 组件引用绑定到真实 DOM，导致部分环境无法开始拖动的问题。
+
+## [1.0.13] - 2026-08-15
+
+### Added
+
+- 首页节点卡片和列表可以直接进入全局顺序编辑，拖动或使用键盘调整后同步 Komari 官方后台权重。
+
 ## [1.0.12] - 2026-08-15
 
 ### Fixed
@@ -173,7 +206,10 @@
 - 亮暗主题、桌面/移动布局和 Transit 风格内嵌 Komari 管理端。
 - Playwright 视觉与交互回归、自动构建和 GitHub Release 发布流程。
 
-[Unreleased]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.12...HEAD
+[Unreleased]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.15...HEAD
+[1.0.15]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.14...v1.0.15
+[1.0.14]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.13...v1.0.14
+[1.0.13]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.12...v1.0.13
 [1.0.12]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.11...v1.0.12
 [1.0.11]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.10...v1.0.11
 [1.0.10]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.9...v1.0.10

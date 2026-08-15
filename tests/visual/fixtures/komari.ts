@@ -43,6 +43,8 @@ export interface VisualFixtureOptions {
   visitorAuditSupported?: boolean
   announcementEscaping?: boolean
   hidePriceWhenLoggedOut?: boolean
+  orderSaveFailure?: boolean
+  authenticationExpires?: boolean
 }
 
 function uuidFor(index: number): string {
@@ -259,6 +261,10 @@ function jsonRpcResult(id: unknown, result: unknown) {
   return { jsonrpc: '2.0', id, result }
 }
 
+function jsonRpcError(id: unknown, code: number, message: string) {
+  return { jsonrpc: '2.0', id, error: { code, message } }
+}
+
 async function handleRpc(route: Route, clientFixtures = clients, options: VisualFixtureOptions = {}): Promise<void> {
   const payload = route.request().postDataJSON() as { id: unknown, method: string, params?: Record<string, unknown> }
   const uuid = typeof payload.params?.uuid === 'string' ? payload.params.uuid : uuidFor(0)
@@ -301,6 +307,14 @@ async function handleRpc(route: Route, clientFixtures = clients, options: Visual
         : 76 + index + task.id,
   })))
   let result: unknown
+
+  if (payload.method === 'admin:orderClients' && options.orderSaveFailure) {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(jsonRpcError(payload.id, -32000, 'visual order save failed')),
+    })
+    return
+  }
 
   switch (payload.method) {
     case 'rpc.ping':
@@ -381,6 +395,14 @@ async function handleRpc(route: Route, clientFixtures = clients, options: Visual
         ],
       }
       break
+    case 'admin:orderClients':
+      for (const [uuid, weight] of Object.entries(payload.params ?? {})) {
+        const client = clientFixtures[uuid]
+        if (client && typeof weight === 'number')
+          client.weight = weight
+      }
+      result = null
+      break
     case 'public:getMe':
       result = { logged_in: false }
       break
@@ -409,9 +431,10 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
     contentType: 'font/woff2',
   }))
 
-  const clientFixtures = options.freePriceNode || options.expiryThresholds
+  const sourceClients = options.freePriceNode || options.expiryThresholds
     ? buildClients(options.freePriceNode, options.expiryThresholds)
     : clients
+  const clientFixtures = structuredClone(sourceClients)
   const settings = {
     alertEnabled: options.announcementEscaping ?? false,
     alertTitle: options.announcementEscaping ? '状态公告' : '',
@@ -488,10 +511,15 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
       },
     }),
   }))
-  await page.route('**/api/me', route => route.fulfill({
-    contentType: 'application/json',
-    body: JSON.stringify({ logged_in: options.authenticated ?? false, username: options.authenticated ? 'visual-admin' : 'visual-guest' }),
-  }))
+  let meRequestCount = 0
+  await page.route('**/api/me', (route) => {
+    meRequestCount += 1
+    const authenticated = Boolean(options.authenticated && !(options.authenticationExpires && meRequestCount > 1))
+    return route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ logged_in: authenticated, username: authenticated ? 'visual-admin' : 'visual-guest' }),
+    })
+  })
   await page.route('**/api/admin/settings', route => route.fulfill({
     contentType: 'application/json',
     body: JSON.stringify({

@@ -34,6 +34,8 @@ Ping composables sharing the same `hours` and `maxCount` window are refreshed by
 
 Per-node Ping summaries still persist independently, but cache-index touches from the same reactive flush are merged into one localStorage update. The 200-entry bound is therefore maintained without rewriting and sorting the index once per node.
 
+Ping summary calculation is isolated in `utils/pingStats.ts`; it is pure and does not create timers, requests, Vue watchers, or cache entries. `useNodePingStats()` remains responsible for subscriptions and releases the shared refresh group, request and cache retention when its last subscriber leaves. Repeated filters therefore reuse bounded state instead of accumulating per-view timers.
+
 ## Request deduplication
 
 `history.service.ts` routes load/ping history through `requestManager` with keys that include:

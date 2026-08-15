@@ -157,12 +157,6 @@ export default defineConfig({
           'vue-vendor': ['vue', 'vue-router', 'pinia'],
           'echarts': ['echarts', 'vue-echarts'],
           'globe': ['globe.gl', 'three'],
-          'reka-ui': ['reka-ui'],
-          'vueuse': ['@vueuse/core'],
-          'v3-core': [
-            './src/services/request.service.ts',
-            './src/services/cache.service.ts',
-          ],
         },
       },
     },

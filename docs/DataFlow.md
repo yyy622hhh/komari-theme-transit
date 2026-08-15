@@ -31,7 +31,8 @@ The public globe is a separate country-only path: it groups nodes from the Komar
 
 ```text
 Component
-  -> useNodeLoadStats() / useNodePingStats() / PingChart
+  -> useNodeLoadStats() / useNodePingStats() / PingChart / LoadChart
+  -> metricRange / pingStats pure transforms
   -> optional AuthService permission check
   -> HistoryService
   -> RequestManager
@@ -40,6 +41,8 @@ Component
 ```
 
 Disk prediction uses `LOAD_RECORD_MAX_COUNT` by default, verifies the `diskPrediction` permission before loading private history, and does not run for logged-out public cards. Ping history is public and shares capped request-manager-backed loads keyed by node, time range, and `maxCount`. Nodes requesting the same Ping window are combined into Metric Store calls with at most 50 deduplicated `entity_ids` each, then every response is partitioned by node before caching.
+
+LoadChart and PingChart share the same pure time-range validation/labeling layer and the same empty/error/retry UI contract. Ping percentile, volatility, loss and availability aggregation is framework-independent in `utils/pingStats.ts`; the composable only owns reactive subscriptions, cache persistence and lifecycle cleanup.
 
 Exchange rates are loaded through `useDailyExchangeRates()` only when the active public surface can display a monetary value. Hidden logged-out prices and layouts without finance cards stay on local defaults without contacting exchange-rate providers; the finance helper still provides one shared in-flight request and a daily browser cache when rates are needed.
 
@@ -69,3 +72,16 @@ Changing pages or filters and unmounting the panel aborts the superseded request
 ## Request lifecycle
 
 History requests are keyed by record type, node UUID or batch scope, time range, and `maxCount`. The shared request manager deduplicates identical in-flight requests, enforces the global concurrency cap, applies timeout and exponential retry backoff with jitter, and exposes abort hooks used when shared load-history subscribers are released. Backoff waits are abortable, so navigation or cache release does not leave retries sleeping in the background.
+
+## Server ordering
+
+```text
+HomeView / ServerListPanel / NodeList
+  -> useOrderMoveFeedback() + useSortableOrder()
+  -> useServerList()
+  -> server-list.service.ts
+  -> admin:orderClients
+  -> nodesStore.applyNodeOrder()
+```
+
+Editing always expands to the complete official node order. Cancel restores the prior search/filter/sort context. Failed saves leave the draft intact for retry; successful saves update the reactive node weights immediately, and a later metadata refresh or page reload reads the same order back from Komari.

@@ -46,3 +46,6 @@ jobs:
 
       - name: Audit release package
         run: bun run audit:release
+
+      - name: Audit dependencies with OSV
+        run: bun run audit:dependencies

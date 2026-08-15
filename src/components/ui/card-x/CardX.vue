@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { HTMLAttributes } from 'vue'
+import type { HTMLAttributes, VNode } from 'vue'
 import { computed, useAttrs } from 'vue'
 import { cn } from '@/lib/utils'
 
@@ -21,10 +21,10 @@ const props = withDefaults(defineProps<Props>(), {
 })
 
 const hasHeaderSlot = defineSlots<{
-  'header'?: () => any
-  'header-extra'?: () => any
-  'default'?: () => any
-  'footer'?: () => any
+  'header'?: () => VNode[]
+  'header-extra'?: () => VNode[]
+  'default'?: () => VNode[]
+  'footer'?: () => VNode[]
 }>()
 
 const attrs = useAttrs()

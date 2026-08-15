@@ -38,6 +38,16 @@ Vue Component
 - `provider.service.ts` — provider and geo metadata composition.
 - `snapshot.service.ts` — JSON/CSV export composition and download boundary.
 
+## Focused source modules
+
+- `stores/app.types.ts` — app store 的公开类型契约；运行时配置归一化仍由 `stores/app.ts` 统一负责。
+- `utils/metricRange.ts` — 负载图和延迟图共用的时间范围生成、校验与格式化纯函数。
+- `utils/pingStats.ts` — Ping 历史分桶、百分位、丢包、可用性与 Metric Store 聚合纯计算。
+- `composables/useOrderMoveFeedback.ts` — 首页、列表与服务器清单共用的键盘移动、拖动反馈和读屏公告逻辑。
+- `components/AsyncDataState.vue` — 负载图和延迟图共用的空状态、错误状态与重试入口。
+
+Heavy Globe、ECharts、地图与详情图表继续通过路由或异步组件按需加载。首屏审计同时禁止 `echarts`、`globe` 和详情历史图表进入 module preload，并以 145 KiB gzip 为优化目标、165 KiB 为硬上限。
+
 ## Current M2-M6 scope
 
 Future work builds on this foundation without changing the public route contract:

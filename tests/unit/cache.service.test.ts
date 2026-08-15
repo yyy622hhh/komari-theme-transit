@@ -49,4 +49,27 @@ describe('SharedCache', () => {
     cache.set('idle-3', 'd')
     expect(cache.size).toBe(2)
   })
+
+  test('evicts expired idle entries and invokes the eviction hook once', () => {
+    const originalNow = Date.now
+    let now = 1_000
+    Date.now = () => now
+    const evicted: string[] = []
+    try {
+      const cache = new SharedCache<string>({
+        maxSize: 4,
+        ttl: 50,
+        onEvict: (_value, key) => evicted.push(key),
+      })
+      cache.set('expired', 'value')
+      now += 51
+
+      expect(cache.get('expired')).toBeUndefined()
+      expect(cache.size).toBe(0)
+      expect(evicted).toEqual(['expired'])
+    }
+    finally {
+      Date.now = originalNow
+    }
+  })
 })

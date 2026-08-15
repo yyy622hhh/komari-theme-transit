@@ -39,8 +39,10 @@ bun run dev
 ```bash
 bun run lint:check
 bun run type-check
+bun run test:unit
 bun run build-only
 bun run audit:bundle
+bun run audit:dependencies
 ```
 
 涉及页面、样式、响应式或交互时还需运行：
@@ -48,6 +50,14 @@ bun run audit:bundle
 ```bash
 bun run test:visual
 ```
+
+无障碍相关改动也可先单独运行：
+
+```bash
+bun run test:accessibility
+```
+
+该命令在开发测试环境对首页、节点详情和登录后的服务器列表执行 axe 结构与交互扫描，并阻止 serious/critical 级违规。毛玻璃主题的动态透明色由高对比度样式和视觉回归共同覆盖。`audit:dependencies` 会按提交的 `bun.lock` 查询 OSV，并阻止 HIGH/CRITICAL 依赖漏洞。
 
 截图差异只有在人工确认设计变化后，才可以通过 `bun run test:visual:update` 更新。不要仅为让 CI 通过而扩大阈值或删除断言。
 

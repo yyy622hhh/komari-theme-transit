@@ -1,18 +1,18 @@
 <script setup lang="ts">
 import type { ChartDashboardCardKey } from '@/stores/app'
+import type { MetricCustomRange } from '@/utils/metricRange'
 import type { NormalizedMetricSeries } from '@/utils/metricSeries'
 import type { RecordFormat } from '@/utils/recordHelper'
 import type { MetricQueryParams, PingTaskInfo, StatusRecord } from '@/utils/rpc'
 import { Icon } from '@iconify/vue'
 import { useIntervalFn } from '@vueuse/core'
-import dayjs from 'dayjs'
 import { computed, onMounted, reactive, ref, shallowRef, watch, watchEffect } from 'vue'
 import VChart from 'vue-echarts'
+import AsyncDataState from '@/components/AsyncDataState.vue'
 import MetricChartHeader from '@/components/MetricChartHeader.vue'
 import MetricSeriesChartCard from '@/components/MetricSeriesChartCard.vue'
 import { Button } from '@/components/ui/button'
 import { CardX } from '@/components/ui/card-x'
-import { Empty } from '@/components/ui/empty'
 import { Input } from '@/components/ui/input'
 import { Spinner } from '@/components/ui/spinner'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -25,6 +25,7 @@ import { useNodesStore } from '@/stores/nodes'
 import { getChartSeriesPalette, getLoadChartPalette } from '@/utils/chartPalette'
 import { formatBytes, formatBytesSplit } from '@/utils/helper'
 import { getGpuDeviceNames as formatGpuDeviceNames, LOAD_METRIC_KEYS, metricSeriesToChartRecords, metricValue, statusRecordsToChartRecords } from '@/utils/loadMetricRecords'
+import { buildAvailableMetricViews, CUSTOM_METRIC_VIEW_LABEL, formatMetricAxisTime, formatMetricTooltipTime, getMetricCustomRangeError, parseMetricCustomRange } from '@/utils/metricRange'
 import { comparePingTaskOrder, createPingTaskOrderMap, metricTags, normalizeMetricSeriesList } from '@/utils/metricSeries'
 import { fillMissingTimePoints } from '@/utils/recordHelper'
 import '@/utils/echarts' // 共享 ECharts 配置
@@ -51,7 +52,6 @@ watchEffect(() => {
   Object.assign(chartColors, getLoadChartPalette(appStore.colorVisionFriendly))
 })
 
-const CUSTOM_VIEW_LABEL = '自定义'
 const PING_METRIC_KEYS = ['ping.latency_ms', 'ping.loss'] as const
 const METRIC_HISTORY_MAX_POINTS = 700
 const REALTIME_METRIC_REFRESH_MS = 30_000
@@ -62,12 +62,6 @@ interface MetricChartSeriesData {
   kind: 'bytes' | 'bytesPerSecond' | 'count' | 'milliseconds' | 'percent' | 'temperature'
   data: Array<[string, number | null]>
   dashed?: boolean
-}
-
-interface CustomRange {
-  start: dayjs.Dayjs
-  end: dayjs.Dayjs
-  hours: number
 }
 
 // 图表主题相关颜色
@@ -126,31 +120,7 @@ const presetViews = [
 
 // 可用视图列表
 const availableViews = computed(() => {
-  const views: { label: string, hours?: number }[] = [{ label: '实时' }]
-  const maxHours = maxRecordPreserveTime.value
-
-  for (const v of presetViews) {
-    if (maxHours >= v.hours) {
-      views.push({ label: v.label, hours: v.hours })
-    }
-  }
-
-  const maxPreset = presetViews.at(-1)
-  if (maxPreset && maxHours > maxPreset.hours) {
-    const label = maxHours % 24 === 0
-      ? `${Math.floor(maxHours / 24)} 天`
-      : `${maxHours} 小时`
-    views.push({ label, hours: maxHours })
-  }
-  else if (maxHours > 4 && !presetViews.some(v => v.hours === maxHours)) {
-    const label = maxHours % 24 === 0
-      ? `${Math.floor(maxHours / 24)} 天`
-      : `${maxHours} 小时`
-    views.push({ label, hours: maxHours })
-  }
-
-  views.push({ label: CUSTOM_VIEW_LABEL })
-  return views
+  return buildAvailableMetricViews(maxRecordPreserveTime.value, presetViews, { includeRealtime: true })
 })
 
 // 当前选中的视图
@@ -162,28 +132,10 @@ const selectedHours = computed(() => {
   return view?.hours
 })
 const isRealtime = computed(() => selectedView.value === '实时')
-const isCustomRange = computed(() => selectedView.value === CUSTOM_VIEW_LABEL)
-const customRange = computed<CustomRange | null>(() => {
-  if (!customStartInput.value || !customEndInput.value)
-    return null
-
-  const start = dayjs(customStartInput.value)
-  const end = dayjs(customEndInput.value)
-  if (!start.isValid() || !end.isValid() || !end.isAfter(start))
-    return null
-
-  return {
-    start,
-    end,
-    hours: Math.max(1, Math.ceil(end.diff(start, 'hour', true))),
-  }
-})
+const isCustomRange = computed(() => selectedView.value === CUSTOM_METRIC_VIEW_LABEL)
+const customRange = computed<MetricCustomRange | null>(() => parseMetricCustomRange(customStartInput.value, customEndInput.value))
 const customRangeError = computed(() => {
-  if (!isCustomRange.value || (!customStartInput.value && !customEndInput.value))
-    return ''
-  if (!customStartInput.value || !customEndInput.value)
-    return '请选择开始和结束时间'
-  return customRange.value ? '' : '结束时间必须晚于开始时间'
+  return getMetricCustomRangeError(isCustomRange.value, customStartInput.value, customEndInput.value, customRange.value)
 })
 const effectiveHistoryHours = computed(() => isCustomRange.value ? customRange.value?.hours ?? 4 : selectedHours.value ?? 4)
 
@@ -564,28 +516,12 @@ const hasPingLossData = computed(() => pingLossChartSeries.value.length > 0)
 
 // ==================== 工具函数 ====================
 
-function formatTime(time: string, showDate: boolean): string {
-  const date = dayjs(time)
-  if (showDate) {
-    return date.format('M/D HH:mm')
-  }
-  return date.format('HH:mm')
-}
-
-function formatTimeForTooltip(time: string, hours: number): string {
-  const date = dayjs(time)
-  if (hours < 24) {
-    return date.format('HH:mm:ss')
-  }
-  return date.format('MM/DD HH:mm')
-}
-
 const showDateInAxis = computed(() => (effectiveHistoryHours.value) >= 24)
 
 // 通用 X 轴配置
 const baseXAxisConfig = computed(() => ({
   type: 'category' as const,
-  data: chartData.value.map(r => formatTime(r.time, showDateInAxis.value)),
+  data: chartData.value.map(r => formatMetricAxisTime(r.time, showDateInAxis.value)),
   axisLabel: {
     fontSize: 11,
     color: chartThemeColors.value.textSecondary,
@@ -636,7 +572,7 @@ const cpuChartOption = computed(() => ({
       if (!record)
         return ''
 
-      const timeStr = formatTimeForTooltip(record.time, effectiveHistoryHours.value)
+      const timeStr = formatMetricTooltipTime(record.time, effectiveHistoryHours.value)
       let html = `<div style="font-weight:600;margin-bottom:6px;color:${chartThemeColors.value.textSecondary}">${timeStr}</div>`
       html += '<div style="display:flex;flex-direction:column;gap:4px">'
 
@@ -731,7 +667,7 @@ const memoryChartOption = computed(() => ({
       const ramPercent = ramTotal > 0 ? ((ramUsed / ramTotal) * 100).toFixed(1) : '0'
       const swapPercent = swapTotal > 0 ? ((swapUsed / swapTotal) * 100).toFixed(1) : '0'
 
-      const timeStr = formatTimeForTooltip(record.time, effectiveHistoryHours.value)
+      const timeStr = formatMetricTooltipTime(record.time, effectiveHistoryHours.value)
       let html = `<div style="font-weight:600;margin-bottom:6px;color:${chartThemeColors.value.textSecondary}">${timeStr}</div>`
       html += '<div style="display:flex;flex-direction:column;gap:4px">'
 
@@ -840,7 +776,7 @@ const diskChartOption = computed(() => ({
       const diskTotal = record.disk_total ?? nodeInfo.value?.disk_total ?? 0
       const diskPercent = diskTotal > 0 ? ((diskUsed / diskTotal) * 100).toFixed(1) : '0'
 
-      const timeStr = formatTimeForTooltip(record.time, effectiveHistoryHours.value)
+      const timeStr = formatMetricTooltipTime(record.time, effectiveHistoryHours.value)
       let html = `<div style="font-weight:600;margin-bottom:6px;color:${chartThemeColors.value.textSecondary}">${timeStr}</div>`
       html += '<div style="display:flex;flex-direction:column;gap:4px">'
       for (const item of p) {
@@ -919,7 +855,7 @@ const networkChartOption = computed(() => ({
       if (!record)
         return ''
 
-      const timeStr = formatTimeForTooltip(record.time, effectiveHistoryHours.value)
+      const timeStr = formatMetricTooltipTime(record.time, effectiveHistoryHours.value)
       let html = `<div style="font-weight:600;margin-bottom:6px;color:${chartThemeColors.value.textSecondary}">${timeStr}</div>`
       html += '<div style="display:flex;flex-direction:column;gap:4px">'
 
@@ -1002,7 +938,7 @@ const gpuChartOption = computed(() => ({
       if (!record)
         return ''
 
-      const timeStr = formatTimeForTooltip(record.time, effectiveHistoryHours.value)
+      const timeStr = formatMetricTooltipTime(record.time, effectiveHistoryHours.value)
       let html = `<div style="font-weight:600;margin-bottom:6px;color:${chartThemeColors.value.textSecondary}">${timeStr}</div>`
       html += '<div style="display:flex;flex-direction:column;gap:4px">'
 
@@ -1115,7 +1051,7 @@ const connectionsChartOption = computed(() => ({
       if (!record)
         return ''
 
-      const timeStr = formatTimeForTooltip(record.time, effectiveHistoryHours.value)
+      const timeStr = formatMetricTooltipTime(record.time, effectiveHistoryHours.value)
       let html = `<div style="font-weight:600;margin-bottom:6px;color:${chartThemeColors.value.textSecondary}">${timeStr}</div>`
       html += '<div style="display:flex;flex-direction:column;gap:4px">'
 
@@ -1186,7 +1122,7 @@ const processChartOption = computed(() => ({
       if (!record)
         return ''
 
-      const timeStr = formatTimeForTooltip(record.time, effectiveHistoryHours.value)
+      const timeStr = formatMetricTooltipTime(record.time, effectiveHistoryHours.value)
       const colorDot = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${firstParam.color};margin-right:8px;flex-shrink:0"></span>`
       const displayValue = firstParam.value != null ? Math.round(firstParam.value) : '-'
 
@@ -1331,15 +1267,10 @@ onMounted(() => {
 
     <!-- 内容区域 -->
     <Spinner :show="loading">
-      <div v-if="error" class="text-red-500 py-8 text-center">
-        {{ error }}
-      </div>
-      <div v-else-if="chartData.length === 0 && !loading" class="py-8">
-        <Empty description="暂无负载数据" />
-      </div>
+      <AsyncDataState :error="error" :empty="chartData.length === 0 && !loading" empty-description="暂无负载数据" @retry="fetchData" />
 
       <!-- 图表网格 -->
-      <div v-else class="gap-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3">
+      <div v-if="!error && (chartData.length > 0 || loading)" class="gap-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3">
         <!-- CPU 卡片 -->
         <CardX v-if="isChartCardEnabled('cpu')" size="small" class="bg-background/50 border-none hover:bg-background transition-all rounded-md" data-load-chart-card="cpu" :style="getChartCardStyle('cpu')">
           <template #header>

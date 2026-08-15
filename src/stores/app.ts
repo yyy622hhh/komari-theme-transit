@@ -1,3 +1,21 @@
+import type {
+  ChartDashboardCardKey,
+  ChartDashboardTemplate,
+  ColorVisionMode,
+  DetailMetricCardKey,
+  EarthRenderer,
+  GeneralCardKey,
+  GlassColorPreset,
+  GlassCustomColors,
+  HomeQuickControlKey,
+  Lang,
+  ManagedThemeMode,
+  NodeCardSize,
+  NodeListMetadataField,
+  NodeViewMode,
+  RpcTransportMode,
+  ThemeMode,
+} from './app.types'
 import type { PermissionKey, VerifyLoginOptions } from '@/services/auth.service'
 import type { MeInfo, PublicSettings } from '@/utils/api'
 import type { ByteDecimalsConfig } from '@/utils/helper'
@@ -7,121 +25,10 @@ import { computed, ref, watch } from 'vue'
 import { getAuthSession, requirePermission, setAuthSessionFromLogin, verifyLogin } from '@/services/auth.service'
 import { parsePandaOpsNodeControls } from '@/utils/pandaOpsNodeControl'
 
-export type ThemeMode = 'auto' | 'light' | 'dark'
-export type ManagedThemeMode = 'beijing' | 'light' | 'dark'
-export type GeneralCardKey
-  = | 'currentTime'
-    | 'memory'
-    | 'disk'
-    | 'remainingValue'
-    | 'totalTraffic'
-    | 'uploadSpeed'
-    | 'downloadSpeed'
-    | 'onlineNodes'
-    | 'avgCpu'
-    | 'avgGpu'
-    | 'avgLoad'
-    | 'swap'
-    | 'processes'
-    | 'connections'
-    | 'cpuCores'
-    | 'gpuNodes'
-    | 'gpuPeakNode'
-    | 'trafficQuota'
-    | 'trafficPeak'
-    | 'uploadPeakNode'
-    | 'downloadPeakNode'
-    | 'offlineNodes'
-    | 'highLoadNodes'
-    | 'expiringNodes'
-    | 'trafficWarnings'
-    | 'connectionPeakNode'
-    | 'regionDistribution'
-    | 'systemDistribution'
-    | 'virtualizationDistribution'
-    | 'monthlyCost'
-    | 'yearlyCost'
-
-export type HomeQuickControlKey
-  = | 'favorite'
-    | 'monthlyCost'
-    | 'totalTraffic'
-    | 'upload'
-    | 'download'
-    | 'peak'
-    | 'offline'
-    | 'highLoad'
-    | 'expiring'
-
-export type DetailMetricCardKey
-  = | 'nodePrice'
-    | 'monthlyCost'
-    | 'remainingTime'
-    | 'remainingValue'
-    | 'cpuUsage'
-    | 'gpuUsage'
-    | 'memoryUsage'
-    | 'swapUsage'
-    | 'diskUsage'
-    | 'load'
-    | 'temperature'
-    | 'processes'
-    | 'connections'
-    | 'uptime'
-    | 'uploadSpeed'
-    | 'downloadSpeed'
-    | 'totalTraffic'
-    | 'trafficQuota'
-
-export type NodeListMetadataField
-  = | 'provider'
-    | 'region'
-    | 'city'
-    | 'asn'
-    | 'tags'
-    | 'group'
-
 type GeneralCardPreset = 'official' | 'basic' | 'ops' | 'resource' | 'finance' | 'traffic' | 'gpu' | 'asset' | 'full' | 'custom'
 type HomeQuickControlPreset = 'basic' | 'traffic' | 'ops' | 'full' | 'custom'
 type DetailMetricCardPreset = 'finance' | 'status' | 'resource' | 'network' | 'gpu' | 'full' | 'custom'
 type ChartDashboardPreset = 'all' | 'compact' | 'resource' | 'network' | 'gpu' | 'latency' | 'ops' | 'full' | 'custom' | 'advanced'
-type Lang = 'zh-CN' | 'en-US'
-type NodeViewMode = 'card' | 'list'
-type NodeCardSize = 'mini' | 'compact' | 'comfortable' | 'large'
-type RpcTransportMode = 'websocket' | 'http'
-type EarthRenderer = 'realistic' | 'cobe' | 'tiled'
-type GlassColorPreset = 'emerald' | 'soft' | 'contrast' | 'midnight' | 'custom'
-type ColorVisionMode = 'default' | 'accessible'
-export type ChartDashboardCardKey
-  = | 'cpu'
-    | 'memory'
-    | 'disk'
-    | 'network'
-    | 'traffic'
-    | 'gpu'
-    | 'gpuMemory'
-    | 'temperature'
-    | 'connections'
-    | 'process'
-    | 'ping'
-    | 'pingLoss'
-
-export interface GlassCustomColors {
-  lightCard: string
-  lightControl: string
-  lightText: string
-  lightMutedText: string
-  lightBorder: string
-  darkCard: string
-  darkControl: string
-  darkText: string
-  darkMutedText: string
-  darkBorder: string
-}
-
-export interface ChartDashboardTemplate {
-  cards: ChartDashboardCardKey[]
-}
 
 type ThemeSettings = Record<string, unknown>
 
@@ -923,12 +830,7 @@ const useAppStore = defineStore('app', () => {
   // 使用 null 表示未设置，等待主题配置加载后决定
   const storedViewMode = useStorageAsync<NodeViewMode | null>('nodeViewMode', null, localStorage)
 
-  const beijingTimeTick = ref(Date.now())
-  if (typeof window !== 'undefined') {
-    window.setInterval(() => {
-      beijingTimeTick.value = Date.now()
-    }, 60 * 1000)
-  }
+  const beijingTimeTick = useNow({ interval: 60_000 })
 
   // 计算属性：从主题配置获取默认视图模式
   const defaultViewMode = computed<NodeViewMode>(() => {
@@ -1244,7 +1146,7 @@ const useAppStore = defineStore('app', () => {
   })
 
   const isBeijingDaytime = computed<boolean>(() => {
-    const hour = getBeijingHour(beijingTimeTick.value)
+    const hour = getBeijingHour(beijingTimeTick.value.getTime())
     return hour >= 7 && hour < 19
   })
 
@@ -1395,3 +1297,14 @@ const useAppStore = defineStore('app', () => {
 })
 
 export { useAppStore }
+export type {
+  ChartDashboardCardKey,
+  ChartDashboardTemplate,
+  DetailMetricCardKey,
+  GeneralCardKey,
+  GlassCustomColors,
+  HomeQuickControlKey,
+  ManagedThemeMode,
+  NodeListMetadataField,
+  ThemeMode,
+} from './app.types'

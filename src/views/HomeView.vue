@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button'
 import { Empty } from '@/components/ui/empty'
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { useOrderMoveFeedback } from '@/composables/useOrderMoveFeedback'
 import { useServerList } from '@/composables/useServerList'
 import { useSortableOrder } from '@/composables/useSortableOrder'
 import { useVisitorAudit } from '@/composables/useVisitorAudit'
@@ -91,7 +92,6 @@ const activeQuickControl = ref<HomeQuickControlKey | null>(null)
 const pingDialogNode = ref<NodeData | null>(null)
 const nodeControlDialogNode = ref<NodeData | null>(null)
 const homeOrderContainer = ref<HTMLElement | null>(null)
-const homeOrderAnnouncement = ref('')
 const homeOrderViewBeforeEdit = ref<{
   group: string
   search: string
@@ -100,6 +100,17 @@ const homeOrderViewBeforeEdit = ref<{
 } | null>(null)
 
 const homeOrder = useServerList(() => nodesStore.visibleNodes)
+const {
+  announcement: homeOrderAnnouncement,
+  handleKeydown: handleHomeOrderKeydown,
+  moveWithFeedback: moveHomeOrderWithFeedback,
+  resetAnnouncement: resetHomeOrderAnnouncement,
+} = useOrderMoveFeedback({
+  items: () => homeOrder.rows.value,
+  getId: node => node.uuid,
+  getLabel: node => node.name,
+  move: homeOrder.moveOrderToIndex,
+})
 
 const homeToolPermissionMap: Record<PrivateHomeToolKey, PermissionKey> = {
   serverList: 'serverList',
@@ -299,41 +310,6 @@ const nodeListSortResetKey = computed(() => {
   return `${appStore.nodeSelectedGroup}|${debouncedSearchText.value.trim()}|${activeQuickControl.value ?? 'all'}`
 })
 
-function announceHomeOrderMove(node: NodeData, toIndex: number): void {
-  homeOrderAnnouncement.value = `${node.name} 已移动到第 ${toIndex + 1} 位，共 ${homeOrder.rows.value.length} 位。`
-}
-
-function moveHomeOrderWithFeedback(fromIndex: number, toIndex: number): void {
-  const node = homeOrder.rows.value[fromIndex]
-  if (!node || fromIndex === toIndex)
-    return
-  homeOrder.moveOrderToIndex(fromIndex, toIndex)
-  announceHomeOrderMove(node, toIndex)
-}
-
-function handleHomeOrderKeydown(event: KeyboardEvent, node: NodeData): void {
-  const fromIndex = homeOrder.rows.value.findIndex(row => row.uuid === node.uuid)
-  if (fromIndex < 0)
-    return
-
-  let toIndex = fromIndex
-  if (event.key === 'ArrowUp')
-    toIndex = fromIndex - 1
-  else if (event.key === 'ArrowDown')
-    toIndex = fromIndex + 1
-  else if (event.key === 'Home')
-    toIndex = 0
-  else if (event.key === 'End')
-    toIndex = homeOrder.rows.value.length - 1
-  else
-    return
-
-  event.preventDefault()
-  if (toIndex < 0 || toIndex >= homeOrder.rows.value.length || toIndex === fromIndex)
-    return
-  moveHomeOrderWithFeedback(fromIndex, toIndex)
-}
-
 function setHomeOrderContainer(value: unknown): void {
   if (typeof HTMLElement === 'undefined') {
     homeOrderContainer.value = null
@@ -374,7 +350,7 @@ async function startHomeOrderEdit(): Promise<void> {
     debouncedSearch: debouncedSearchText.value,
     quickControl: activeQuickControl.value,
   }
-  homeOrderAnnouncement.value = ''
+  resetHomeOrderAnnouncement()
   appStore.nodeSelectedGroup = 'all'
   clearSearch()
   activeQuickControl.value = null

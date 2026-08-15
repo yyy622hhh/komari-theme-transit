@@ -4,7 +4,8 @@ import process from 'node:process'
 import { gzipSync } from 'node:zlib'
 
 const DIST_DIR = resolve(process.cwd(), 'dist')
-const INITIAL_GZIP_BUDGET = 165 * 1024
+const INITIAL_GZIP_TARGET = 145 * 1024
+const INITIAL_GZIP_HARD_LIMIT = 165 * 1024
 const FORBIDDEN_PRELOADS = ['v3-history', 'echarts', 'globe']
 const MODULE_PRELOAD_TAG_PATTERN = /<link\s[^>]*rel=["']modulepreload["'][^>]*>/gi
 const INITIAL_TAG_PATTERN = /<(?:script|link)\s[^>]*>/gi
@@ -35,15 +36,23 @@ const assets = initialUrls.map((url) => {
 })
 const totalGzipBytes = assets.reduce((total, asset) => total + asset.gzipBytes, 0)
 
-if (totalGzipBytes > INITIAL_GZIP_BUDGET) {
+if (totalGzipBytes > INITIAL_GZIP_HARD_LIMIT) {
   throw new Error([
     `Bundle audit failed: initial assets are ${(totalGzipBytes / 1024).toFixed(1)} KiB gzip`,
-    `Budget: ${(INITIAL_GZIP_BUDGET / 1024).toFixed(0)} KiB gzip`,
+    `Hard limit: ${(INITIAL_GZIP_HARD_LIMIT / 1024).toFixed(0)} KiB gzip`,
+    ...assets.map(asset => `${(asset.gzipBytes / 1024).toFixed(1)} KiB ${asset.url}`),
+  ].join('\n'))
+}
+
+if (totalGzipBytes > INITIAL_GZIP_TARGET) {
+  throw new Error([
+    `Bundle audit failed: initial assets are ${(totalGzipBytes / 1024).toFixed(1)} KiB gzip`,
+    `Optimization target: ${(INITIAL_GZIP_TARGET / 1024).toFixed(0)} KiB gzip; hard limit: ${(INITIAL_GZIP_HARD_LIMIT / 1024).toFixed(0)} KiB gzip`,
     ...assets.map(asset => `${(asset.gzipBytes / 1024).toFixed(1)} KiB ${asset.url}`),
   ].join('\n'))
 }
 
 console.log([
-  `Bundle audit passed: ${(totalGzipBytes / 1024).toFixed(1)} KiB / ${(INITIAL_GZIP_BUDGET / 1024).toFixed(0)} KiB gzip`,
+  `Bundle audit passed: ${(totalGzipBytes / 1024).toFixed(1)} KiB / ${(INITIAL_GZIP_TARGET / 1024).toFixed(0)} KiB target (${(INITIAL_GZIP_HARD_LIMIT / 1024).toFixed(0)} KiB hard limit)`,
   `Initial assets: ${assets.length}; module preloads: ${preloadUrls.length}`,
 ].join('\n'))

@@ -35,7 +35,7 @@ jobs:
       - name: Install Chromium
         run: bunx playwright install chromium
 
-      - name: Run visual regression tests
+      - name: Run visual and accessibility regression tests
         run: bun run test:visual
 
       - name: Upload visual differences

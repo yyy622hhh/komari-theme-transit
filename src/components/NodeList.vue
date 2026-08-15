@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/badge'
 import { DataTooltip } from '@/components/ui/data-tooltip'
 import { ProgressThin } from '@/components/ui/progress-thin'
 import { useNodeProviderMetadata } from '@/composables/useNodeProviderMetadata'
+import { resolveOrderMoveTarget } from '@/composables/useOrderMoveFeedback'
 import { useSortableOrder } from '@/composables/useSortableOrder'
 import { UI_CONFIG } from '@/constants/ui'
 import { useAppStore } from '@/stores/app'
@@ -257,22 +258,13 @@ function handleOrderKeydown(event: KeyboardEvent, node: NodeData): void {
   if (fromIndex < 0)
     return
 
-  let toIndex = fromIndex
-  if (event.key === 'ArrowUp')
-    toIndex = fromIndex - 1
-  else if (event.key === 'ArrowDown')
-    toIndex = fromIndex + 1
-  else if (event.key === 'Home')
-    toIndex = 0
-  else if (event.key === 'End')
-    toIndex = sortedNodes.value.length - 1
-  else
+  const toIndex = resolveOrderMoveTarget(event.key, fromIndex, sortedNodes.value.length)
+  if (toIndex === null)
     return
 
   event.preventDefault()
   event.stopPropagation()
-  if (toIndex !== fromIndex && toIndex >= 0 && toIndex < sortedNodes.value.length)
-    emit('orderMove', fromIndex, toIndex)
+  emit('orderMove', fromIndex, toIndex)
 }
 
 function getRowTransitionKey(node: NodeData): string {

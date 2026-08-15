@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { RpcClient } from '../../src/utils/rpc'
+import { RpcClient, RpcError } from '../../src/utils/rpc'
 
 class FakeWebSocket {
   static readonly CONNECTING = 0
@@ -36,6 +36,7 @@ class FakeWebSocket {
 }
 
 const originalWebSocket = globalThis.WebSocket
+const originalFetch = globalThis.fetch
 
 beforeEach(() => {
   FakeWebSocket.instances = []
@@ -44,6 +45,7 @@ beforeEach(() => {
 
 afterEach(() => {
   globalThis.WebSocket = originalWebSocket
+  globalThis.fetch = originalFetch
 })
 
 describe('RpcClient WebSocket lifecycle', () => {
@@ -71,6 +73,45 @@ describe('RpcClient WebSocket lifecycle', () => {
 
     firstSocket.emitClose()
     expect(client.getWebSocket()).toBe(secondSocket)
+    client.close()
+  })
+
+  test('rejects malformed HTTP responses with a typed RPC error', async () => {
+    globalThis.fetch = (async () => new Response(JSON.stringify({ jsonrpc: '2.0', id: 1 }), {
+      headers: { 'Content-Type': 'application/json' },
+    })) as typeof fetch
+    const client = new RpcClient({ baseUrl: 'http://example.test/api/rpc2', timeout: 100 })
+
+    const call = client.call('rpc.ping')
+    await expect(call).rejects.toBeInstanceOf(RpcError)
+    await expect(call).rejects.toMatchObject({ code: -32603, message: 'Invalid JSON-RPC response' })
+  })
+
+  test('times out an HTTP request and aborts the underlying fetch', async () => {
+    let aborted = false
+    globalThis.fetch = ((_input, init) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => {
+        aborted = true
+        reject(new DOMException('aborted', 'AbortError'))
+      }, { once: true })
+    })) as typeof fetch
+    const client = new RpcClient({ baseUrl: 'http://example.test/api/rpc2', timeout: 5 })
+
+    await expect(client.call('rpc.ping')).rejects.toMatchObject({ code: -32000 })
+    expect(aborted).toBe(true)
+  })
+
+  test('can fall back to HTTP after a WebSocket connection failure', async () => {
+    globalThis.fetch = (async () => new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: 'pong' }), {
+      headers: { 'Content-Type': 'application/json' },
+    })) as typeof fetch
+    const client = new RpcClient({ baseUrl: 'http://example.test/api/rpc2', timeout: 100, useWebSocket: true })
+    const websocketCall = client.call('rpc.ping')
+    FakeWebSocket.instances[0]?.emitClose()
+    await expect(websocketCall).rejects.toMatchObject({ code: -32000 })
+
+    client.setTransport(false)
+    await expect(client.call('rpc.ping')).resolves.toBe('pong')
     client.close()
   })
 })

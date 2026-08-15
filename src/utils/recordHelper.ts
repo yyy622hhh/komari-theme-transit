@@ -43,7 +43,10 @@ export interface RecordFormat {
   connections_udp: number | null
 }
 
-type AnyRecord = Record<string, any>
+interface NumericSeriesRecord extends Record<string, unknown> {
+  time?: string
+  updated_at?: string
+}
 
 /**
  * 创建空值模板
@@ -163,7 +166,7 @@ export function fillMissingTimePoints<T extends { time?: string, updated_at?: st
  * - 可通过 maxGapMs 控制最大可插值的时间跨度
  */
 export function interpolateNullsLinear(
-  rows: AnyRecord[],
+  rows: NumericSeriesRecord[],
   keys: string[],
   options?:
     | number
@@ -176,14 +179,14 @@ export function interpolateNullsLinear(
       minCapMs?: number
       maxCapMs?: number
     },
-): AnyRecord[] {
+): NumericSeriesRecord[] {
   if (!rows || rows.length === 0 || !keys.length)
     return rows
 
   const times = rows.map(r =>
     dayjs(r.time ?? r.updated_at ?? '').valueOf(),
   )
-  const out: AnyRecord[] = rows.map(r => ({ ...r }))
+  const out: NumericSeriesRecord[] = rows.map(r => ({ ...r }))
 
   // 解析配置
   const opts
@@ -288,16 +291,16 @@ export function interpolateNullsLinear(
  * @param spikeThreshold 突变阈值
  */
 export function cutPeakValues(
-  data: AnyRecord[],
+  data: NumericSeriesRecord[],
   keys: string[],
   alpha: number = 0.3,
   windowSize: number = 15,
   spikeThreshold: number = 0.3,
-): AnyRecord[] {
+): NumericSeriesRecord[] {
   if (!data || data.length === 0)
     return data
 
-  const result: AnyRecord[] = [...data]
+  const result: NumericSeriesRecord[] = [...data]
   const halfWindow = Math.floor(windowSize / 2)
 
   for (const key of keys) {

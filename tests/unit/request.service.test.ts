@@ -53,4 +53,33 @@ describe('RequestManager', () => {
     await request.catch(() => undefined)
     expect(taskRuns).toBe(1)
   })
+
+  test('times out a stalled task without leaking it into later deduplication', async () => {
+    const manager = new RequestManager()
+    let timeoutSignalObserved = false
+    const timedOut = manager.run('timeout', signal => new Promise<never>((_resolve, reject) => {
+      signal.addEventListener('abort', () => {
+        timeoutSignalObserved = true
+        reject(new Error('timed out'))
+      }, { once: true })
+    }), { retryAttempts: 0, timeout: 5 })
+
+    await expect(timedOut).rejects.toThrow('timed out')
+    expect(timeoutSignalObserved).toBe(true)
+    await expect(manager.run('timeout', async () => 'fresh')).resolves.toBe('fresh')
+  })
+
+  test('does not retry failures rejected by the retry policy', async () => {
+    const manager = new RequestManager()
+    let taskRuns = 0
+
+    await expect(manager.run('permission-denied', async () => {
+      taskRuns += 1
+      throw new Error('permission denied')
+    }, {
+      retryAttempts: 3,
+      shouldRetry: () => false,
+    })).rejects.toThrow('permission denied')
+    expect(taskRuns).toBe(1)
+  })
 })
