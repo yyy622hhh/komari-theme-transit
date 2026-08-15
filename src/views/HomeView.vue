@@ -13,6 +13,8 @@ import { Button } from '@/components/ui/button'
 import { Empty } from '@/components/ui/empty'
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { useServerList } from '@/composables/useServerList'
+import { useSortableOrder } from '@/composables/useSortableOrder'
 import { useVisitorAudit } from '@/composables/useVisitorAudit'
 import { UI_CONFIG } from '@/constants/ui'
 import { useAppStore } from '@/stores/app'
@@ -88,6 +90,16 @@ const activeHomeTool = ref<HomeToolKey>('nodes')
 const activeQuickControl = ref<HomeQuickControlKey | null>(null)
 const pingDialogNode = ref<NodeData | null>(null)
 const nodeControlDialogNode = ref<NodeData | null>(null)
+const homeOrderContainer = ref<HTMLElement | null>(null)
+const homeOrderAnnouncement = ref('')
+const homeOrderViewBeforeEdit = ref<{
+  group: string
+  search: string
+  debouncedSearch: string
+  quickControl: HomeQuickControlKey | null
+} | null>(null)
+
+const homeOrder = useServerList(() => nodesStore.visibleNodes)
 
 const homeToolPermissionMap: Record<PrivateHomeToolKey, PermissionKey> = {
   serverList: 'serverList',
@@ -251,10 +263,12 @@ const nodeList = computed(() => {
   return getQuickControlNodes(filtered, activeQuickControl.value)
 })
 
-const isDenseNodeGrid = computed(() => appStore.nodeViewMode === 'card' && nodeList.value.length > denseNodeAppearThreshold)
+const displayedNodeList = computed(() => homeOrder.editingOrder.value ? homeOrder.rows.value : nodeList.value)
+
+const isDenseNodeGrid = computed(() => appStore.nodeViewMode === 'card' && displayedNodeList.value.length > denseNodeAppearThreshold)
 const enableNodeCardTransition = computed(() => !appStore.disablePageAnimation && !isDenseNodeGrid.value)
-const reduceDenseNodeEffects = computed(() => appStore.nodeViewMode === 'card' && nodeList.value.length > denseNodePingAnimationThreshold)
-const deferNodeCards = computed(() => appStore.nodeViewMode === 'card' && nodeList.value.length > UI_CONFIG.virtualList.nodeThreshold)
+const reduceDenseNodeEffects = computed(() => appStore.nodeViewMode === 'card' && displayedNodeList.value.length > denseNodePingAnimationThreshold)
+const deferNodeCards = computed(() => !homeOrder.editingOrder.value && appStore.nodeViewMode === 'card' && displayedNodeList.value.length > UI_CONFIG.virtualList.nodeThreshold)
 const deferredNodeCardHeight = computed(() => ({ mini: 220, compact: 270, comfortable: 310, large: 350 }[appStore.nodeCardSize]))
 
 const quickControlCounts = computed<Record<HomeQuickControlKey, number>>(() => {
@@ -284,6 +298,110 @@ function clearSearch() {
 const nodeListSortResetKey = computed(() => {
   return `${appStore.nodeSelectedGroup}|${debouncedSearchText.value.trim()}|${activeQuickControl.value ?? 'all'}`
 })
+
+function announceHomeOrderMove(node: NodeData, toIndex: number): void {
+  homeOrderAnnouncement.value = `${node.name} 已移动到第 ${toIndex + 1} 位，共 ${homeOrder.rows.value.length} 位。`
+}
+
+function moveHomeOrderWithFeedback(fromIndex: number, toIndex: number): void {
+  const node = homeOrder.rows.value[fromIndex]
+  if (!node || fromIndex === toIndex)
+    return
+  homeOrder.moveOrderToIndex(fromIndex, toIndex)
+  announceHomeOrderMove(node, toIndex)
+}
+
+function handleHomeOrderKeydown(event: KeyboardEvent, node: NodeData): void {
+  const fromIndex = homeOrder.rows.value.findIndex(row => row.uuid === node.uuid)
+  if (fromIndex < 0)
+    return
+
+  let toIndex = fromIndex
+  if (event.key === 'ArrowUp')
+    toIndex = fromIndex - 1
+  else if (event.key === 'ArrowDown')
+    toIndex = fromIndex + 1
+  else if (event.key === 'Home')
+    toIndex = 0
+  else if (event.key === 'End')
+    toIndex = homeOrder.rows.value.length - 1
+  else
+    return
+
+  event.preventDefault()
+  if (toIndex < 0 || toIndex >= homeOrder.rows.value.length || toIndex === fromIndex)
+    return
+  moveHomeOrderWithFeedback(fromIndex, toIndex)
+}
+
+watch(
+  () => [homeOrder.editingOrder.value, appStore.nodeViewMode] as const,
+  ([editing, viewMode]) => {
+    homeOrderContainer.value = editing && viewMode === 'card'
+      ? document.querySelector<HTMLElement>('.home-view [data-node-card-grid]')
+      : null
+  },
+  { flush: 'post' },
+)
+
+useSortableOrder(
+  [homeOrderContainer],
+  () => homeOrder.editingOrder.value && appStore.nodeViewMode === 'card' && displayedNodeList.value.length > 1,
+  moveHomeOrderWithFeedback,
+)
+
+async function startHomeOrderEdit(): Promise<void> {
+  if (homeOrder.editingOrder.value)
+    return
+  const granted = await appStore.requireLoginPermission('serverList', { force: true })
+  if (!granted) {
+    window.$message?.warning('登录状态已过期，请重新登录后编辑首页顺序。')
+    return
+  }
+  homeOrderViewBeforeEdit.value = {
+    group: appStore.nodeSelectedGroup,
+    search: searchText.value,
+    debouncedSearch: debouncedSearchText.value,
+    quickControl: activeQuickControl.value,
+  }
+  homeOrderAnnouncement.value = ''
+  appStore.nodeSelectedGroup = 'all'
+  clearSearch()
+  activeQuickControl.value = null
+  homeOrder.beginOrderEdit()
+}
+
+function restoreHomeOrderView(): void {
+  const previous = homeOrderViewBeforeEdit.value
+  homeOrderViewBeforeEdit.value = null
+  if (!previous)
+    return
+  appStore.nodeSelectedGroup = previous.group
+  searchText.value = previous.search
+  debouncedSearchText.value = previous.debouncedSearch
+  activeQuickControl.value = previous.quickControl
+}
+
+function cancelHomeOrderEdit(): void {
+  homeOrder.cancelOrderEdit()
+  restoreHomeOrderView()
+}
+
+async function saveHomeOrder(): Promise<void> {
+  const granted = await appStore.requireLoginPermission('serverList', { force: true })
+  if (!granted) {
+    window.$message?.warning('登录状态已过期，请重新登录后保存。')
+    return
+  }
+  try {
+    await homeOrder.persistOrder()
+    restoreHomeOrderView()
+    window.$message?.success('首页服务器顺序已保存。')
+  }
+  catch (error) {
+    window.$message?.error(`保存服务器顺序失败：${error instanceof Error ? error.message : String(error)}`)
+  }
+}
 
 function handleNodeClick(node: NodeData) {
   router.push({ name: 'instance-detail', params: { id: node.uuid } })
@@ -448,6 +566,7 @@ const nodeCardGridClass = computed(() => {
                 <TabsList class="w-max h-8 bg-background/50 backdrop-blur-xl rounded-md pointer-events-auto">
                   <TabsTrigger
                     v-for="g in groups" :key="g.name" :value="g.name"
+                    :disabled="homeOrder.editingOrder.value"
                     class="h-6.5 flex-none shrink-0 text-xs border-none data-[state=active]:text-selection shadow-none rounded-sm"
                   >
                     {{ g.tab }}
@@ -461,6 +580,7 @@ const nodeCardGridClass = computed(() => {
                   <button
                     v-for="control in quickControls" :key="control.key"
                     type="button"
+                    :disabled="homeOrder.editingOrder.value"
                     class="inline-flex h-6.5 flex-none shrink-0 items-center gap-1 rounded-sm px-2 text-xs text-muted-foreground transition-colors hover:text-foreground"
                     :class="activeQuickControl === control.key ? 'bg-background text-selection shadow-sm' : ''"
                     :aria-pressed="activeQuickControl === control.key"
@@ -480,6 +600,7 @@ const nodeCardGridClass = computed(() => {
               <div v-if="homeTools.length && appStore.homeAdvancedToolsVisible" class="flex h-8 items-center gap-1 rounded-md bg-background/50 p-0.5 backdrop-blur-xs">
                 <Button
                   v-for="tool in homeTools" :key="tool.key"
+                  :disabled="homeOrder.editingOrder.value"
                   variant="ghost" size="icon"
                   class="size-7 rounded-sm text-muted-foreground shadow-none hover:bg-background/60"
                   :class="[activeHomeTool === tool.key ? '!text-selection !bg-background' : '']"
@@ -491,6 +612,17 @@ const nodeCardGridClass = computed(() => {
                   <Icon :icon="tool.icon" :width="14" :height="14" />
                 </Button>
               </div>
+
+              <Button
+                v-if="activeHomeTool === 'nodes' && displayedNodeList.length > 1 && !homeOrder.editingOrder.value"
+                variant="outline" size="sm"
+                class="h-8 border-none bg-background/50 px-2.5 text-xs shadow-none backdrop-blur-xs hover:bg-background/60"
+                title="直接拖动首页节点并同步官方后台顺序"
+                @click="startHomeOrderEdit"
+              >
+                <Icon icon="tabler:arrows-move-vertical" :width="14" :height="14" />
+                编辑首页顺序
+              </Button>
 
               <Button
                 variant="outline" size="icon" aria-label="卡片视图"
@@ -512,6 +644,7 @@ const nodeCardGridClass = computed(() => {
                 <div class="absolute top-0 right-0 w-full">
                   <Input
                     v-model="searchText" placeholder="搜索名称、地区、IP、CPU"
+                    :disabled="homeOrder.editingOrder.value"
                     aria-label="搜索节点"
                     class="transition-all border-none shadow-none h-8 bg-background/50 backdrop-blur-xs rounded-md hover:!bg-background/60 focus:!pl-7.5 focus:placeholder:!text-muted-foreground focus:!bg-background/80 focus:!ring-slate-500/10"
                     :class="searchText ? '!w-full sm:!w-60 !pl-7.5 pr-7 placeholder:!text-muted-foreground' : 'w-8 placeholder:text-transparent focus:!w-52 sm:focus:!w-60'"
@@ -534,6 +667,36 @@ const nodeCardGridClass = computed(() => {
               </div>
             </div>
           </div>
+          <div
+            v-if="homeOrder.editingOrder.value"
+            data-home-order-toolbar
+            class="pointer-events-auto flex flex-col gap-2 rounded-lg border border-emerald-500/20 bg-emerald-500/[0.055] px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between"
+          >
+            <div class="min-w-0">
+              <p class="flex items-center gap-1.5 text-xs font-medium text-foreground">
+                <Icon icon="tabler:grip-vertical" :width="15" :height="15" class="text-emerald-600 dark:text-emerald-300" />
+                拖动每台服务器右上角的抓手调整首页顺序
+              </p>
+              <p class="mt-0.5 text-[11px] text-muted-foreground">
+                已自动显示全部节点；保存后会同步官方后台的全局顺序。
+              </p>
+            </div>
+            <div class="flex shrink-0 gap-2">
+              <Button variant="ghost" size="sm" :disabled="homeOrder.savingOrder.value" @click="cancelHomeOrderEdit">
+                取消
+              </Button>
+              <Button size="sm" :disabled="homeOrder.savingOrder.value || !homeOrder.orderDirty.value" @click="saveHomeOrder">
+                <Icon :icon="homeOrder.savingOrder.value ? 'tabler:loader-2' : 'tabler:device-floppy'" :class="homeOrder.savingOrder.value && 'animate-spin'" />
+                保存顺序
+              </Button>
+            </div>
+            <p id="home-order-instructions" class="sr-only">
+              使用拖动抓手调整顺序；键盘用户可用上下方向键逐项移动，或用 Home 和 End 移到首尾。
+            </p>
+            <p class="sr-only" aria-live="polite">
+              {{ homeOrderAnnouncement }}
+            </p>
+          </div>
           <TabsContent v-for="g in groups" :key="g.name" :value="g.name" class="pointer-events-auto">
             <div v-if="activeHomeTool !== 'nodes'" class="mb-4 rounded-lg bg-background/50 px-3 py-2 text-sm text-muted-foreground">
               {{ activeToolTitle }} · 当前分组：{{ g.tab }}（{{ groupNodeList.length }} 台）
@@ -552,53 +715,70 @@ const nodeCardGridClass = computed(() => {
             <SnapshotExportPanel v-else-if="activeHomeTool === 'snapshotExport'" :nodes="groupNodeList" />
             <AuditLogPanel v-else-if="activeHomeTool === 'auditLog'" />
             <TransitionGroup
-              v-else-if="nodeList.length !== 0 && appStore.nodeViewMode === 'card'"
+              v-else-if="displayedNodeList.length !== 0 && appStore.nodeViewMode === 'card'"
               data-node-card-grid
               :data-node-card-size="appStore.nodeCardSize"
-              :appear="enableNodeCardTransition"
-              :css="enableNodeCardTransition"
+              :appear="enableNodeCardTransition && !homeOrder.editingOrder.value"
+              :css="enableNodeCardTransition && !homeOrder.editingOrder.value"
               name="node-card-switch"
               tag="div"
               :class="nodeCardGridClass"
             >
               <div
-                v-for="(node, index) in nodeList"
+                v-for="(node, index) in displayedNodeList"
                 :key="`${getNodeItemTransitionKey(node)}:${deferNodeCards ? 'deferred' : 'full'}`"
-                class="min-w-0"
-                :class="appStore.opsDashboardEnabled && 'h-full'"
+                :data-server-order-item="homeOrder.editingOrder.value ? node.uuid : undefined"
+                class="relative min-w-0"
+                :class="[appStore.opsDashboardEnabled && 'h-full', homeOrder.editingOrder.value && 'select-none']"
                 :style="getNodeItemTransitionStyle(index)"
               >
-                <DeferredRender
-                  :enabled="deferNodeCards"
-                  :idle-delay="800 + index * 70"
-                  :min-height="deferredNodeCardHeight"
-                  :class="appStore.opsDashboardEnabled && 'h-full'"
+                <button
+                  v-if="homeOrder.editingOrder.value"
+                  type="button"
+                  data-order-drag-handle
+                  class="absolute right-2 top-2 z-30 inline-flex size-8 cursor-grab touch-none items-center justify-center rounded-md border border-border/60 bg-background/90 text-muted-foreground shadow-sm backdrop-blur transition-colors hover:border-emerald-500/30 hover:text-foreground active:cursor-grabbing"
+                  :aria-label="`拖动 ${node.name}，当前第 ${index + 1} 位，共 ${displayedNodeList.length} 位`"
+                  aria-describedby="home-order-instructions"
+                  :title="`拖动 ${node.name}`"
+                  @keydown="handleHomeOrderKeydown($event, node)"
                 >
-                  <PandaOpsNodeCard
-                    v-if="appStore.opsDashboardEnabled"
-                    :node="node"
-                    @click="handleNodeClick(node)"
-                    @manage="nodeControlDialogNode = node"
-                  />
-                  <NodeCard
-                    v-else
-                    :node="node"
-                    :reduce-motion="reduceDenseNodeEffects"
-                    :ping-enabled="isViewActive"
-                    @click="handleNodeClick(node)"
-                    @ping-click="openPingDialog(node)"
-                  />
-                </DeferredRender>
+                  <Icon icon="tabler:grip-vertical" :width="17" :height="17" />
+                </button>
+                <div :class="homeOrder.editingOrder.value && 'pointer-events-none'">
+                  <DeferredRender
+                    :enabled="deferNodeCards"
+                    :idle-delay="800 + index * 70"
+                    :min-height="deferredNodeCardHeight"
+                    :class="appStore.opsDashboardEnabled && 'h-full'"
+                  >
+                    <PandaOpsNodeCard
+                      v-if="appStore.opsDashboardEnabled"
+                      :node="node"
+                      @click="handleNodeClick(node)"
+                      @manage="nodeControlDialogNode = node"
+                    />
+                    <NodeCard
+                      v-else
+                      :node="node"
+                      :reduce-motion="reduceDenseNodeEffects"
+                      :ping-enabled="isViewActive"
+                      @click="handleNodeClick(node)"
+                      @ping-click="openPingDialog(node)"
+                    />
+                  </DeferredRender>
+                </div>
               </div>
             </TransitionGroup>
             <NodeList
-              v-else-if="nodeList.length !== 0 && appStore.nodeViewMode === 'list'"
-              :nodes="nodeList"
+              v-else-if="displayedNodeList.length !== 0 && appStore.nodeViewMode === 'list'"
+              :nodes="displayedNodeList"
               :transition-key="appStore.nodeSelectedGroup"
               :sort-reset-key="nodeListSortResetKey"
               :ping-enabled="isViewActive"
+              :order-editing="homeOrder.editingOrder.value"
               @click="handleNodeClick"
               @ping-click="openPingDialog"
+              @order-move="moveHomeOrderWithFeedback"
             />
             <div v-else class="text-muted-foreground text-center py-8">
               <Empty :description="emptyDescription" />

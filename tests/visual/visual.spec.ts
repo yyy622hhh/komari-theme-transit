@@ -471,6 +471,61 @@ test('home quick controls, node comparison and network data change visible resul
   await expect(page.getByText('ASN / BGP 拓扑')).toHaveCount(0)
 })
 
+test('homepage cards can be reordered directly and saved to the official global order', async ({ page }) => {
+  const savedOrders: Array<Record<string, number>> = []
+  page.on('request', (request) => {
+    if (!request.url().endsWith('/api/rpc2'))
+      return
+    const payload = request.postDataJSON() as { method?: string, params?: Record<string, number> } | null
+    if (payload?.method === 'admin:orderClients' && payload.params)
+      savedOrders.push(payload.params)
+  })
+
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, { pandaOps: true, authenticated: true })
+  await openStablePage(page)
+
+  const search = page.getByRole('textbox', { name: '搜索节点' })
+  await search.fill('东京')
+  await expect(page.locator('[data-node-card-grid] > div')).toHaveCount(2)
+  await page.getByRole('button', { name: '编辑首页顺序' }).click()
+  const toolbar = page.locator('[data-home-order-toolbar]')
+  const grid = page.locator('[data-node-card-grid]')
+  await expect(toolbar).toBeVisible()
+  await expect(search).toHaveValue('')
+  await expect(grid.locator('[data-server-order-item]')).toHaveCount(12)
+  await page.locator('.sticky').first().evaluate((element) => {
+    element.setAttribute('style', 'display: none !important')
+  })
+  await expect(toolbar).toHaveScreenshot('home-order-edit-toolbar-desktop.png')
+
+  await page.getByRole('button', { name: '列表视图' }).click()
+  const list = page.locator('[data-server-order-item]')
+  const listHandle = page.getByRole('button', { name: /^拖动 主控-洛杉矶，/ })
+  await expect(list).toHaveCount(12)
+  await listHandle.press('ArrowDown')
+  await expect(list.first()).toContainText('香港边缘节点-超长名称布局测试')
+  await listHandle.press('ArrowUp')
+  await expect(list.first()).toContainText('主控-洛杉矶')
+  await page.getByRole('button', { name: '卡片视图' }).click()
+
+  const firstHandle = page.getByRole('button', { name: /^拖动 主控-洛杉矶，/ })
+  await firstHandle.press('ArrowDown')
+  await expect(grid.locator('[data-server-order-item]').first()).toContainText('香港边缘节点-超长名称布局测试')
+  await firstHandle.press('ArrowUp')
+  await expect(grid.locator('[data-server-order-item]').first()).toContainText('主控-洛杉矶')
+  await dragOrderHandle(page, firstHandle, grid.locator('[data-server-order-item]').nth(1))
+  await expect(grid.locator('[data-server-order-item]').first()).toContainText('香港边缘节点-超长名称布局测试')
+  await expect(firstHandle).toHaveAccessibleName(/当前第 2 位/)
+  await page.getByRole('button', { name: '保存顺序' }).click()
+
+  await expect.poll(() => savedOrders.length).toBe(1)
+  expect(savedOrders[0]?.['00000000-0000-4000-8000-000000000001']).toBe(1)
+  expect(savedOrders[0]?.['00000000-0000-4000-8000-000000000002']).toBe(0)
+  await expect(search).toHaveValue('东京')
+  await expect(grid.locator('> div')).toHaveCount(2)
+})
+
 test('Transit server list filters and sorts reactive nodes without the blocked admin endpoint', async ({ page }) => {
   let blockedAdminListRequests = 0
   let nodeMetadataRequests = 0

@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/badge'
 import { DataTooltip } from '@/components/ui/data-tooltip'
 import { ProgressThin } from '@/components/ui/progress-thin'
 import { useNodeProviderMetadata } from '@/composables/useNodeProviderMetadata'
+import { useSortableOrder } from '@/composables/useSortableOrder'
 import { UI_CONFIG } from '@/constants/ui'
 import { useAppStore } from '@/stores/app'
 import { formatCityNameZh } from '@/utils/cityNameHelper'
@@ -37,16 +38,20 @@ interface NodeMetadataItem {
   style?: CSSProperties
 }
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   nodes: NodeData[]
   transitionKey?: string
   sortResetKey?: string
   pingEnabled: boolean
-}>()
+  orderEditing?: boolean
+}>(), {
+  orderEditing: false,
+})
 
 const emit = defineEmits<{
   click: [node: NodeData]
   pingClick: [node: NodeData]
+  orderMove: [fromIndex: number, toIndex: number]
 }>()
 
 const rowStaggerMs = UI_CONFIG.motion.staggerMs
@@ -100,7 +105,7 @@ watch(
 )
 
 function handleSort(col: ColumnConfig) {
-  if (!col.sortable)
+  if (!col.sortable || props.orderEditing)
     return
   if (sortKey.value === col.key) {
     sortDir.value = sortDir.value === 1 ? -1 : 1
@@ -113,6 +118,8 @@ function handleSort(col: ColumnConfig) {
 
 const sortedNodes = computed(() => {
   const nodes = [...props.nodes]
+  if (props.orderEditing)
+    return nodes
   const key = sortKey.value
   const dir = sortDir.value
   if (!key)
@@ -149,7 +156,7 @@ const sortedNodes = computed(() => {
 
 const VIRTUAL_LIST_THRESHOLD = UI_CONFIG.virtualList.nodeThreshold
 const VIRTUAL_ROW_HEIGHT = UI_CONFIG.virtualList.nodeRowHeight
-const shouldVirtualizeNodes = computed(() => sortedNodes.value.length > VIRTUAL_LIST_THRESHOLD)
+const shouldVirtualizeNodes = computed(() => !props.orderEditing && sortedNodes.value.length > VIRTUAL_LIST_THRESHOLD)
 const {
   list: virtualRows,
   containerProps: virtualContainerProps,
@@ -163,7 +170,7 @@ const renderedRows = computed(() => shouldVirtualizeNodes.value
   : sortedNodes.value.map((node, index) => ({ data: node, index })))
 const nodeRowsViewportBind = computed(() => shouldVirtualizeNodes.value ? virtualContainerProps : {})
 const nodeRowsViewportClass = computed(() => shouldVirtualizeNodes.value ? 'max-h-[min(72vh,54rem)] overflow-y-auto pr-1' : '')
-const nodeRowsContainerComponent = computed(() => shouldVirtualizeNodes.value ? 'div' : TransitionGroup)
+const nodeRowsContainerComponent = computed(() => shouldVirtualizeNodes.value || props.orderEditing ? 'div' : TransitionGroup)
 const nodeRowsContainerBind = computed(() => {
   if (shouldVirtualizeNodes.value) {
     return {
@@ -173,13 +180,20 @@ const nodeRowsContainerBind = computed(() => {
   }
 
   return {
-    appear: !appStore.disablePageAnimation,
-    css: !appStore.disablePageAnimation,
+    appear: !props.orderEditing && !appStore.disablePageAnimation,
+    css: !props.orderEditing && !appStore.disablePageAnimation,
     name: 'node-row-switch',
     tag: 'div',
     class: 'flex flex-col gap-1',
   }
 })
+
+const orderContainer = ref<HTMLElement | null>(null)
+useSortableOrder(
+  [orderContainer],
+  () => props.orderEditing && sortedNodes.value.length > 1,
+  (fromIndex, toIndex) => emit('orderMove', fromIndex, toIndex),
+)
 
 const formatBytes = (bytes: number) => formatBytesWithConfig(bytes, appStore.byteDecimals)
 const formatBytesPerSecond = (bytes: number) => formatBytesPerSecondWithConfig(bytes, appStore.byteDecimals)
@@ -224,6 +238,8 @@ function hasRegion(region: string | null | undefined): boolean {
 }
 
 function handleClick(node: NodeData) {
+  if (props.orderEditing)
+    return
   emit('click', node)
 }
 
@@ -232,6 +248,31 @@ function handleRowKeydown(event: KeyboardEvent, node: NodeData) {
     return
   event.preventDefault()
   handleClick(node)
+}
+
+function handleOrderKeydown(event: KeyboardEvent, node: NodeData): void {
+  if (!props.orderEditing)
+    return
+  const fromIndex = sortedNodes.value.findIndex(row => row.uuid === node.uuid)
+  if (fromIndex < 0)
+    return
+
+  let toIndex = fromIndex
+  if (event.key === 'ArrowUp')
+    toIndex = fromIndex - 1
+  else if (event.key === 'ArrowDown')
+    toIndex = fromIndex + 1
+  else if (event.key === 'Home')
+    toIndex = 0
+  else if (event.key === 'End')
+    toIndex = sortedNodes.value.length - 1
+  else
+    return
+
+  event.preventDefault()
+  event.stopPropagation()
+  if (toIndex !== fromIndex && toIndex >= 0 && toIndex < sortedNodes.value.length)
+    emit('orderMove', fromIndex, toIndex)
 }
 
 function getRowTransitionKey(node: NodeData): string {
@@ -405,19 +446,33 @@ function buildNodeMetadataItems(node: NodeData): NodeMetadataItem[] {
       </div>
 
       <div v-bind="nodeRowsViewportBind" :class="nodeRowsViewportClass">
-        <component :is="nodeRowsContainerComponent" v-bind="nodeRowsContainerBind">
+        <component :is="nodeRowsContainerComponent" ref="orderContainer" v-bind="nodeRowsContainerBind">
           <div
             v-for="({ data: node, index }) in renderedRows"
             :key="getRowTransitionKey(node)"
+            :data-server-order-item="props.orderEditing ? node.uuid : undefined"
             class="flex flex-col relative h-16 min-h-16 max-h-16 overflow-hidden justify-center px-2.5 cursor-pointer bg-background/40 rounded-lg backdrop-blur-sm shadow-[0_0_0_2px] shadow-transparent hover:shadow-slate-500/10 hover:bg-background/70 transition-all"
-            :class="[!node.online && '!shadow-red-600/10']"
+            :class="[!node.online && '!shadow-red-600/10', props.orderEditing && 'select-none !cursor-default !pl-10']"
             :style="getRowTransitionStyle(index)"
-            role="button"
-            tabindex="0"
-            :aria-label="`查看节点 ${node.name} 详情`"
+            :role="props.orderEditing ? undefined : 'button'"
+            :tabindex="props.orderEditing ? -1 : 0"
+            :aria-label="props.orderEditing ? undefined : `查看节点 ${node.name} 详情`"
             @click="handleClick(node)"
             @keydown="handleRowKeydown($event, node)"
           >
+            <button
+              v-if="props.orderEditing"
+              type="button"
+              data-order-drag-handle
+              class="absolute left-1 top-1/2 z-10 inline-flex size-7 -translate-y-1/2 cursor-grab touch-none items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-slate-500/10 hover:text-foreground active:cursor-grabbing"
+              :aria-label="`拖动 ${node.name}，当前第 ${index + 1} 位，共 ${sortedNodes.length} 位`"
+              aria-describedby="home-order-instructions"
+              title="拖动调整顺序"
+              @click.stop
+              @keydown="handleOrderKeydown($event, node)"
+            >
+              <Icon icon="tabler:grip-vertical" width="15" height="15" />
+            </button>
             <div class="grid gap-2 items-center overflow-hidden" :style="gridStyle">
               <template v-for="col in columns" :key="col.key">
                 <!-- 在线状态指示器 -->
