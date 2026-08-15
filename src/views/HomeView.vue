@@ -334,15 +334,25 @@ function handleHomeOrderKeydown(event: KeyboardEvent, node: NodeData): void {
   moveHomeOrderWithFeedback(fromIndex, toIndex)
 }
 
-watch(
-  () => [homeOrder.editingOrder.value, appStore.nodeViewMode] as const,
-  ([editing, viewMode]) => {
-    homeOrderContainer.value = editing && viewMode === 'card'
-      ? document.querySelector<HTMLElement>('.home-view [data-node-card-grid]')
-      : null
-  },
-  { flush: 'post' },
-)
+function setHomeOrderContainer(value: unknown): void {
+  if (typeof HTMLElement === 'undefined') {
+    homeOrderContainer.value = null
+    return
+  }
+
+  if (value instanceof HTMLElement) {
+    homeOrderContainer.value = value
+    return
+  }
+
+  if (value && typeof value === 'object' && '$el' in value) {
+    const element = (value as { $el?: unknown }).$el
+    homeOrderContainer.value = element instanceof HTMLElement ? element : null
+    return
+  }
+
+  homeOrderContainer.value = null
+}
 
 useSortableOrder(
   [homeOrderContainer],
@@ -716,6 +726,7 @@ const nodeCardGridClass = computed(() => {
             <AuditLogPanel v-else-if="activeHomeTool === 'auditLog'" />
             <TransitionGroup
               v-else-if="displayedNodeList.length !== 0 && appStore.nodeViewMode === 'card'"
+              :ref="setHomeOrderContainer"
               data-node-card-grid
               :data-node-card-size="appStore.nodeCardSize"
               :appear="enableNodeCardTransition && !homeOrder.editingOrder.value"
