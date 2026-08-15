@@ -11,6 +11,9 @@ const hasCustomBackground = computed(() => appStore.backgroundEnabled && Boolean
   <div
     class="loading-cover flex items-center inset-0 justify-center fixed z-20"
     :class="hasCustomBackground ? 'loading-cover--custom-background' : ''"
+    role="status"
+    aria-live="polite"
+    aria-label="正在加载监控数据"
   >
     <div
       class="loading-cover__indicator flex flex-col items-center gap-2"
@@ -18,10 +21,11 @@ const hasCustomBackground = computed(() => appStore.backgroundEnabled && Boolean
     >
       <span
         class="inline-block animate-spin rounded-full border-2"
+        aria-hidden="true"
         :class="hasCustomBackground ? 'size-5' : 'size-7'"
         style="border-color: color-mix(in srgb, currentColor 18%, transparent); border-top-color: currentColor;"
       />
-      <span v-if="!hasCustomBackground" class="text-sm text-muted-foreground">Loading...</span>
+      <span v-if="!hasCustomBackground" class="text-sm text-muted-foreground">正在加载…</span>
     </div>
   </div>
 </template>

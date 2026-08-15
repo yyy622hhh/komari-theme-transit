@@ -8,7 +8,7 @@ import { REALTIME_CONFIG } from '@/constants/realtime'
 import { useAppStore } from '@/stores/app'
 import { useNodesStore } from '@/stores/nodes'
 import { getSharedApi } from '@/utils/api'
-import { getSharedRpc, RpcError } from '@/utils/rpc'
+import { getSharedRpc, isRpcPermissionError, RpcError } from '@/utils/rpc'
 
 /** 初始化配置 */
 interface InitConfig {
@@ -47,6 +47,7 @@ class InitManager {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private unsubscribeWsClose: (() => void) | null = null
   private isPolling = false
+  private refreshAfterCurrentPoll = false
   private destroyed = false
   private postFailureCount = 0
   private lastClientsFetchedAt = 0
@@ -56,12 +57,23 @@ class InitManager {
   private redirectingToAdmin = false
   private useWebSocket: boolean | null = null // 根据主题配置决定
   private readonly handleWindowFocus = (): void => {
-    void this.refreshNodeClients().catch(error => console.warn('[InitManager] Failed to refresh node order on focus:', error))
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden')
+      return
+    void Promise.all([
+      this.refreshNodeClients(),
+      this.poll(true),
+    ]).catch(error => console.warn('[InitManager] Failed to refresh data on focus:', error))
   }
 
   private readonly handleVisibilityChange = (): void => {
-    if (document.visibilityState === 'visible')
+    if (document.visibilityState === 'visible') {
       this.handleWindowFocus()
+      if (!this.pollTimer && !this.destroyed)
+        this.startPolling()
+    }
+    else {
+      this.stopPolling()
+    }
   }
 
   constructor(config: InitConfig = {}) {
@@ -173,7 +185,7 @@ class InitManager {
         return
       }
       catch (error) {
-        if (error instanceof RpcError && error.code === 401) {
+        if (isRpcPermissionError(error)) {
           console.warn('[InitManager] Private site detected, redirecting to /admin/client')
           this.redirectingToAdmin = true
           this.appStore.updateLoginState(false)
@@ -327,6 +339,10 @@ class InitManager {
     try {
       // 使用 ping 验证连接，10 秒超时
       await client.ensureWebSocketConnectedWithPing(10000)
+      if (this.destroyed || !this.useWebSocket) {
+        client.close()
+        return
+      }
       this.nodesStore.updateWsState('connected', 0)
 
       // 连接成功，重置错误状态
@@ -336,6 +352,8 @@ class InitManager {
       this.monitorWebSocketConnection()
     }
     catch (error) {
+      if (this.destroyed || !this.useWebSocket)
+        return
       console.error('[InitManager] WebSocket connection failed:', error)
       this.nodesStore.updateWsState('disconnected')
       this.scheduleReconnect()
@@ -428,8 +446,18 @@ class InitManager {
       clearTimeout(this.pollTimer)
     }
 
+    if (this.destroyed || (typeof document !== 'undefined' && document.visibilityState === 'hidden')) {
+      this.pollTimer = null
+      return
+    }
+
     const schedulePoll = () => {
+      if (this.destroyed || (typeof document !== 'undefined' && document.visibilityState === 'hidden')) {
+        this.pollTimer = null
+        return
+      }
       this.pollTimer = setTimeout(async () => {
+        this.pollTimer = null
         await this.poll()
         if (!this.destroyed)
           schedulePoll()
@@ -442,8 +470,10 @@ class InitManager {
   /**
    * 执行轮询任务
    */
-  private async poll(): Promise<void> {
+  private async poll(refreshAfterCurrent = false): Promise<void> {
     if (this.isPolling) {
+      if (refreshAfterCurrent)
+        this.refreshAfterCurrentPoll = true
       return
     }
 
@@ -490,6 +520,10 @@ class InitManager {
     }
     finally {
       this.isPolling = false
+      if (this.refreshAfterCurrentPoll && !this.destroyed) {
+        this.refreshAfterCurrentPoll = false
+        void this.poll()
+      }
     }
   }
 

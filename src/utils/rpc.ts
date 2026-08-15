@@ -421,6 +421,12 @@ export class RpcError extends Error {
   }
 }
 
+/** Komari RPC2 authentication/authorization failures. */
+export function isRpcPermissionError(error: unknown): boolean {
+  return error instanceof RpcError
+    && (error.code === -32040 || error.code === -32041 || error.code === 401 || error.code === 403)
+}
+
 /** RpcClient 配置选项 */
 interface RpcClientOptions {
   baseUrl?: string
@@ -445,6 +451,7 @@ export class RpcClient {
   private wsCloseListeners = new Set<() => void>()
   /** WebSocket 连接 Promise（用于等待正在进行的连接） */
   private wsConnectPromise: Promise<void> | null = null
+  private wsConnectReject: ((error: RpcError) => void) | null = null
 
   constructor(options: RpcClientOptions = {}) {
     const apiBase = import.meta.env.VITE_API_BASE || '/api'
@@ -528,9 +535,18 @@ export class RpcClient {
         throw new RpcError(response.status, `HTTP error: ${response.status}`)
       }
 
-      const data = this.parseJsonRpcResponse(await response.json()) as JsonRpcResponse<T> | null
+      let rawResponse: unknown
+      try {
+        rawResponse = await response.json()
+      }
+      catch {
+        throw new RpcError(-32700, 'Invalid JSON-RPC JSON response')
+      }
+      const data = this.parseJsonRpcResponse(rawResponse) as JsonRpcResponse<T> | null
       if (!data)
         throw new RpcError(-32603, 'Invalid JSON-RPC response')
+      if (data.id !== id)
+        throw new RpcError(-32603, 'Mismatched JSON-RPC response id')
       return this.handleResponse(data)
     }
     catch (error) {
@@ -560,12 +576,14 @@ export class RpcClient {
     }
 
     // 创建新连接
-    this.wsConnectPromise = this.initWebSocket()
+    const connection = this.initWebSocket()
+    this.wsConnectPromise = connection
     try {
-      await this.wsConnectPromise
+      await connection
     }
     finally {
-      this.wsConnectPromise = null
+      if (this.wsConnectPromise === connection)
+        this.wsConnectPromise = null
     }
   }
 
@@ -576,12 +594,40 @@ export class RpcClient {
     return new Promise((resolve, reject) => {
       const wsUrl = this.getWebSocketUrl()
       let opened = false
+      let settled = false
       let socket: WebSocket
-      const connectTimeout = setTimeout(() => {
+      let connectTimeout: ReturnType<typeof setTimeout>
+      let cancelConnection: (error: RpcError) => void
+
+      const clearConnectAttempt = () => {
+        clearTimeout(connectTimeout)
+        if (this.wsConnectReject === cancelConnection)
+          this.wsConnectReject = null
+      }
+      const resolveConnection = () => {
+        if (settled)
+          return
+        settled = true
+        clearConnectAttempt()
+        resolve()
+      }
+      const rejectConnection = (error: RpcError) => {
+        if (settled)
+          return
+        settled = true
+        clearConnectAttempt()
+        reject(error)
+      }
+      connectTimeout = setTimeout(() => {
+        if (this.ws === socket)
+          this.ws = null
         if (socket.readyState === WebSocket.CONNECTING)
           socket.close()
-        reject(new RpcError(-32001, 'WebSocket connection timeout'))
+        rejectConnection(new RpcError(-32001, 'WebSocket connection timeout'))
       }, this.timeout)
+
+      cancelConnection = (error: RpcError) => rejectConnection(error)
+      this.wsConnectReject = cancelConnection
 
       // 关闭现有连接（如果有）
       if (this.ws) {
@@ -598,14 +644,17 @@ export class RpcClient {
       this.ws = socket
 
       socket.onopen = () => {
+        if (this.ws !== socket) {
+          socket.close()
+          rejectConnection(new RpcError(-32000, 'WebSocket connection superseded'))
+          return
+        }
         opened = true
-        clearTimeout(connectTimeout)
-        resolve()
+        resolveConnection()
       }
 
       socket.onerror = () => {
-        clearTimeout(connectTimeout)
-        reject(new RpcError(-32000, 'WebSocket connection error'))
+        rejectConnection(new RpcError(-32000, 'WebSocket connection error'))
       }
 
       socket.onmessage = (event) => {
@@ -631,9 +680,8 @@ export class RpcClient {
       }
 
       socket.onclose = () => {
-        clearTimeout(connectTimeout)
         if (!opened)
-          reject(new RpcError(-32000, 'WebSocket closed before connection opened'))
+          rejectConnection(new RpcError(-32000, 'WebSocket closed before connection opened'))
         if (this.ws !== socket)
           return
         this.ws = null
@@ -749,10 +797,8 @@ export class RpcClient {
   setTransport(useWebSocket: boolean): void {
     if (this.useWebSocket !== useWebSocket) {
       this.useWebSocket = useWebSocket
-      if (!useWebSocket && this.ws) {
-        this.ws.close()
-        this.ws = null
-      }
+      if (!useWebSocket)
+        this.closeWebSocket('WebSocket transport disabled')
     }
   }
 
@@ -792,12 +838,25 @@ export class RpcClient {
    * 关闭连接
    */
   close(): void {
-    if (this.ws) {
-      this.ws.close()
-      this.ws = null
-    }
+    this.closeWebSocket('WebSocket closed')
+  }
+
+  private closeWebSocket(message: string): void {
+    const socket = this.ws
+    this.ws = null
+    this.wsConnectReject?.(new RpcError(-32000, message))
+    this.wsConnectReject = null
     this.wsConnectPromise = null
-    this.rejectPendingRequests(new RpcError(-32000, 'WebSocket closed'))
+    this.rejectPendingRequests(new RpcError(-32000, message))
+
+    if (!socket)
+      return
+    socket.onopen = null
+    socket.onerror = null
+    socket.onmessage = null
+    socket.onclose = null
+    if (socket.readyState !== WebSocket.CLOSED)
+      socket.close()
   }
 
   onWebSocketClose(listener: () => void): () => void {
@@ -845,15 +904,17 @@ export class KomariRpc {
   /**
    * 获取所有可用方法
    */
-  async getMethods(): Promise<string[]> {
-    return this.client.call<string[]>('rpc.getMethods')
+  async getMethods(internal = false): Promise<string[]> {
+    return this.client.call<string[]>('rpc.methods', { internal })
   }
 
   /**
    * 获取帮助信息
    */
-  async getHelp(): Promise<MethodMeta[]> {
-    return this.client.call<MethodMeta[]>('rpc.getHelp')
+  async getHelp(): Promise<MethodMeta[]>
+  async getHelp(method: string): Promise<MethodMeta>
+  async getHelp(method?: string): Promise<MethodMeta[] | MethodMeta> {
+    return this.client.call<MethodMeta[] | MethodMeta>('rpc.help', method ? { method } : undefined)
   }
 
   /**
@@ -866,8 +927,8 @@ export class KomariRpc {
   /**
    * 获取版本信息
    */
-  async getVersion(): Promise<VersionInfo> {
-    return this.client.call<VersionInfo>('rpc.getVersion')
+  async getVersion(): Promise<string> {
+    return this.client.call<string>('rpc.version')
   }
 
   // ==================== 通用方法 ====================
@@ -904,7 +965,7 @@ export class KomariRpc {
    * 获取后端版本
    */
   async getBackendVersion(): Promise<VersionInfo> {
-    return this.client.call<VersionInfo>('common:getBackendVersion')
+    return this.client.call<VersionInfo>('common:getVersion')
   }
 
   // ==================== 历史记录方法 ====================

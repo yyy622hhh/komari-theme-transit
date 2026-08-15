@@ -18,16 +18,22 @@ async function expectNoSeriousAccessibilityViolations(page: Parameters<typeof in
   expect(seriousViolations, seriousViolations.map(violation => `${violation.id}: ${violation.help}`).join('\n')).toEqual([])
 }
 
+async function getAccessibilityViolations(page: Parameters<typeof installKomariFixture>[0]) {
+  return (await new AxeBuilder({ page }).disableRules(['color-contrast']).analyze()).violations
+}
+
 test('public home has no serious accessibility violations', async ({ page }) => {
   await installKomariFixture(page, { pandaOps: true })
   await openReadyPage(page)
   await expectNoSeriousAccessibilityViolations(page)
+  expect(await getAccessibilityViolations(page)).toEqual([])
 })
 
 test('authenticated detail view has no serious accessibility violations', async ({ page }) => {
   await installKomariFixture(page, { authenticated: true, pandaOps: true })
   await openReadyPage(page, '/instance/00000000-0000-4000-8000-000000000001')
   await expectNoSeriousAccessibilityViolations(page)
+  expect(await getAccessibilityViolations(page)).toEqual([])
 })
 
 test('authenticated server list has no serious accessibility violations', async ({ page }) => {
@@ -55,4 +61,60 @@ test('high-contrast public home has no serious accessibility violations', async 
   await installKomariFixture(page, { colorVisionFriendly: true, pandaOps: true, visitorInfoEnabled: false })
   await openReadyPage(page)
   await expectNoSeriousAccessibilityViolations(page)
+})
+
+test('authenticated mobile tools and dialogs have no accessibility violations', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await installKomariFixture(page, { authenticated: true, pandaOps: true })
+  await openReadyPage(page)
+
+  await page.getByRole('button', { name: '显示首页工具' }).click()
+  await page.getByRole('button', { name: /服务器：/ }).click()
+  await expect(page.getByRole('heading', { name: '服务器列表' })).toBeVisible()
+  expect(await getAccessibilityViolations(page)).toEqual([])
+
+  await page.getByRole('button', { name: /网络：/ }).click()
+  await page.getByRole('button', { name: '管理', exact: true }).click()
+  await expect(page.getByRole('dialog', { name: '拓扑管理' })).toBeVisible()
+  expect(await getAccessibilityViolations(page)).toEqual([])
+})
+
+test('keyboard sorting surfaces have no accessibility violations', async ({ page }) => {
+  await installKomariFixture(page, { authenticated: true, pandaOps: true })
+  await openReadyPage(page)
+  await page.getByRole('button', { name: '编辑首页顺序' }).click()
+  expect(await getAccessibilityViolations(page)).toEqual([])
+  await page.getByRole('button', { name: '列表视图' }).click()
+  expect(await getAccessibilityViolations(page)).toEqual([])
+})
+
+test('all interactive controls expose an accessible name', async ({ page }) => {
+  await installKomariFixture(page, { authenticated: true, pandaOps: true })
+  await openReadyPage(page)
+
+  async function expectNamedControls(scope = page.locator('body')): Promise<void> {
+    const unnamedControls = await scope.locator('button, a[href], input:not([type="hidden"]), select, textarea').evaluateAll((elements) => {
+      return elements.flatMap((element) => {
+        const name = (element.getAttribute('aria-label')
+          || (element.getAttribute('aria-labelledby') && element.getAttribute('aria-labelledby')?.split(/\s+/).map(id => document.getElementById(id)?.textContent ?? '').join(' '))
+          || element.getAttribute('title')
+          || (element as HTMLInputElement).labels?.[0]?.textContent
+          || element.textContent
+          || (element as HTMLInputElement).placeholder
+          || '').trim()
+        return name ? [] : [element.outerHTML.slice(0, 240)]
+      })
+    })
+    expect(unnamedControls).toEqual([])
+  }
+
+  await expectNamedControls()
+  await page.getByRole('button', { name: '显示首页工具' }).click()
+  for (const tool of [/对比：/, /服务器：/, /网络：/, /性价比：/, /健康：/, /导出：/, /日志：/]) {
+    await page.getByRole('button', { name: tool }).click()
+    await expectNamedControls()
+  }
+  await page.getByRole('button', { name: /网络：/ }).click()
+  await page.getByRole('button', { name: '管理', exact: true }).click()
+  await expectNamedControls(page.getByRole('dialog', { name: '拓扑管理' }))
 })

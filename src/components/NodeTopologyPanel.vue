@@ -199,11 +199,11 @@ function getNodeMetaLine(item: TopologyNodeView): string {
     </div>
 
     <div class="flex flex-wrap gap-2">
-      <Button size="sm" variant="ghost" class="bg-background/50" :class="activeMode === 'asn' && 'text-green-600 bg-background'" @click="activeMode = 'asn'">
+      <Button size="sm" variant="ghost" class="bg-background/50" :class="activeMode === 'asn' && 'text-green-600 bg-background'" :aria-pressed="activeMode === 'asn'" @click="activeMode = 'asn'">
         <Icon icon="tabler:world-share" width="14" height="14" />
         网络归属
       </Button>
-      <Button size="sm" variant="ghost" class="bg-background/50" :class="activeMode === 'offline' && 'text-green-600 bg-background'" @click="activeMode = 'offline'">
+      <Button size="sm" variant="ghost" class="bg-background/50" :class="activeMode === 'offline' && 'text-green-600 bg-background'" :aria-pressed="activeMode === 'offline'" @click="activeMode = 'offline'">
         <Icon icon="tabler:alert-triangle" width="14" height="14" />
         离线关联
       </Button>

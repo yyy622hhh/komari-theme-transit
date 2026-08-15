@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { sanitizeMarkdownUrl } from '@/utils/markdown'
 
 const props = defineProps<{
   content: string
@@ -86,28 +87,6 @@ function parseMarkdown(text: string): Token[] {
   }
 
   return tokens
-}
-
-function sanitizeMarkdownUrl(url: string | undefined, type: 'link' | 'image'): string | undefined {
-  if (!url)
-    return undefined
-
-  const normalized = url.trim()
-  if (!normalized)
-    return undefined
-
-  if (normalized.startsWith('/') || normalized.startsWith('./') || normalized.startsWith('../') || normalized.startsWith('#'))
-    return normalized
-
-  try {
-    const parsed = new URL(normalized, window.location.origin)
-    if (type === 'image')
-      return ['http:', 'https:', 'data:'].includes(parsed.protocol) ? normalized : undefined
-    return ['http:', 'https:', 'mailto:', 'tel:'].includes(parsed.protocol) ? normalized : undefined
-  }
-  catch {
-    return undefined
-  }
 }
 
 const tokens = computed(() => parseMarkdown(props.content))

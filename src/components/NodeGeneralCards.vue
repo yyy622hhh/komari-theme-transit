@@ -5,7 +5,7 @@ import type { CurrencyCode } from '@/utils/financeHelper'
 import type { TopNodeMetric } from '@/utils/nodeMetricsHelper'
 import { Icon } from '@iconify/vue'
 import { useNow } from '@vueuse/core'
-import { computed, defineAsyncComponent, onMounted, ref } from 'vue'
+import { computed, defineAsyncComponent, onMounted, ref, watch } from 'vue'
 import NodeEarthGlobe from '@/components/NodeEarthGlobe.vue'
 import { CardX } from '@/components/ui/card-x'
 import { DataTooltip } from '@/components/ui/data-tooltip'
@@ -59,11 +59,14 @@ interface OnlineStats {
   highLoadNodes: NodeData[]
 }
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   nodes?: NodeData[]
   globeNodes?: NodeData[]
   transitionKey?: string
-}>()
+  active?: boolean
+}>(), {
+  active: true,
+})
 const appStore = useAppStore()
 const nodesStore = useNodesStore()
 const FinanceDetailsDialog = defineAsyncComponent(() => import('@/components/FinanceDetailsDialog.vue'))
@@ -83,7 +86,22 @@ const {
 const financeCurrency = ref<CurrencyCode>('CNY')
 const excludeFreeNodes = ref(true)
 const financeDetailsOpen = ref(false)
-const currentTime = useNow({ interval: 1000 })
+const currentTimeControls = useNow({ interval: 1000, immediate: false, controls: true })
+const currentTime = currentTimeControls.now
+const clockEnabled = computed(() => props.active && (
+  appStore.generalCardOrder.includes('currentTime')
+  || financeDetailsOpen.value
+))
+
+watch(clockEnabled, (enabled) => {
+  if (enabled) {
+    currentTime.value = new Date()
+    currentTimeControls.resume()
+  }
+  else {
+    currentTimeControls.pause()
+  }
+}, { immediate: true })
 const summaryNodes = computed(() => props.nodes ?? nodesStore.visibleNodes)
 const summaryTransitionKey = computed(() => props.transitionKey ?? nodesStore.visibleNodes.length)
 const metricSwitchTransitionProps = computed(() => ({

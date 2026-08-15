@@ -326,9 +326,6 @@ async function handleRpc(route: Route, clientFixtures = clients, options: Visual
     case 'common:getNodesLatestStatus':
       result = statuses
       break
-    case 'common:getVersion':
-      result = { version: '1.2.6-visual', hash: 'visual' }
-      break
     case 'admin:listPlugins':
       result = []
       break
@@ -408,9 +405,11 @@ async function handleRpc(route: Route, clientFixtures = clients, options: Visual
       result = { logged_in: false }
       break
     case 'public:getVersion':
-    case 'common:getBackendVersion':
-    case 'rpc.getVersion':
+    case 'common:getVersion':
       result = { version: '1.2.6-visual', hash: 'visual' }
+      break
+    case 'rpc.version':
+      result = '2.0'
       break
     default:
       result = null

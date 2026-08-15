@@ -72,4 +72,16 @@ describe('auth session verification', () => {
     expect(permission.session.status).toBe('error')
     expect(permission.session.errorMessage).toContain('verification unavailable')
   })
+
+  test('does not grant access when a malformed response uses a truthy non-boolean login value', async () => {
+    globalThis.fetch = (async () => new Response(JSON.stringify({ logged_in: 'false', username: 'admin' }), {
+      headers: { 'Content-Type': 'application/json' },
+    })) as typeof fetch
+    setAuthSessionFromLogin(false)
+
+    const permission = await requirePermission('serverList', { force: true })
+
+    expect(permission.granted).toBe(false)
+    expect(permission.session.status).toBe('guest')
+  })
 })

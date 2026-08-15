@@ -104,22 +104,22 @@ const sitename = computed(() => appStore.publicSettings?.sitename || 'Komari Mon
   <VisitorInfo v-if="!appStore.loading && appStore.visitorInfoEnabled" />
   <WallpaperManagerDialog v-if="wallpaperDialogOpen" v-model:open="wallpaperDialogOpen" />
 
-  <div
+  <header
     class="transition-all duration-200 top-0 sticky z-10 border-b border-transparent"
     :class="isScrolled ? '!border-slate-500/10 backdrop-blur-lg' : 'bg-transparent'"
   >
     <div class="px-4 flex-between h-14 max-w-[1280px] mx-auto">
-      <RouterLink to="/" class="flex items-center gap-3" aria-label="返回首页">
-        <Avatar class="size-8">
+      <RouterLink to="/" class="flex min-w-0 flex-1 items-center gap-3" aria-label="返回首页">
+        <Avatar class="size-8 shrink-0">
           <AvatarImage :src="siteFavicon" :alt="sitename" />
           <AvatarFallback>{{ sitename.slice(0, 1) }}</AvatarFallback>
         </Avatar>
-        <h3 class="m-0 text-lg font-semibold">
+        <h3 class="m-0 truncate text-lg font-semibold">
           {{ sitename }}
         </h3>
       </RouterLink>
       <TooltipProvider :delay-duration="200">
-        <div class="flex items-center gap-2">
+        <div class="ml-2 flex shrink-0 items-center gap-1 sm:gap-2">
           <Tooltip v-for="button in actionButtons" :key="button.action">
             <TooltipTrigger as-child>
               <Button
@@ -140,5 +140,5 @@ const sitename = computed(() => appStore.publicSettings?.sitename || 'Komari Mon
         </div>
       </TooltipProvider>
     </div>
-  </div>
+  </header>
 </template>

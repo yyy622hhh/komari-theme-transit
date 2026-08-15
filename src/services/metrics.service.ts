@@ -3,7 +3,7 @@ import { CACHE_CONFIG } from '@/constants/cache'
 import { REQUEST_CONFIG } from '@/constants/request'
 import { SharedCache } from '@/services/cache.service'
 import { requestManager } from '@/services/request.service'
-import { getSharedRpc, RpcError } from '@/utils/rpc'
+import { getSharedRpc, isRpcPermissionError, RpcError } from '@/utils/rpc'
 
 function normalizeHours(hours: number | null | undefined): number | undefined {
   if (typeof hours !== 'number' || !Number.isFinite(hours) || hours <= 0)
@@ -35,7 +35,7 @@ function cachePart(value: unknown): string {
 
 function shouldRetryMetricRequest(error: unknown): boolean {
   if (error instanceof RpcError)
-    return error.code !== 401 && error.code !== 403 && error.code !== -32601
+    return !isRpcPermissionError(error) && error.code !== -32601
   return true
 }
 

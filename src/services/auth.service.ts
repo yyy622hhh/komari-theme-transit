@@ -46,7 +46,7 @@ function getErrorMessage(error: unknown): string {
 }
 
 function createSessionFromMe(user: MeInfo): AuthSession {
-  const authenticated = Boolean(user.logged_in)
+  const authenticated = user?.logged_in === true
   return {
     status: authenticated ? 'authenticated' : 'guest',
     authenticated,

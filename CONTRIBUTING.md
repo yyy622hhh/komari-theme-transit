@@ -71,6 +71,8 @@ dist/
 
 然后执行 `bun run audit:bundle` 和 `bun run audit:release`，确认首屏资源预算、发布物顶层结构和内嵌管理端检查均通过。
 
+主题 zip 的条目时间固定为当前 Git 提交时间（也可通过 `SOURCE_DATE_EPOCH` 显式指定），文件和目录权限固定为 `0644`/`0755`。相同提交和依赖锁应生成相同 SHA-256 的发布包；发布前可连续执行两次 `bun run build` 并比较摘要。
+
 Release 不得包含 `public/admin-app/`、`dist/admin-app/`、第三方管理端补丁或其他没有明确再分发许可的内容。加入第三方代码或资产时，PR 必须说明来源、固定版本、许可证与 NOTICE 要求。
 
 ## Pull Request

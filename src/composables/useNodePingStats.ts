@@ -6,7 +6,6 @@ import { computed, onScopeDispose, ref, shallowRef, toValue, watch } from 'vue'
 import { CACHE_CONFIG } from '@/constants/cache'
 import { PING_RECORD_MAX_COUNT } from '@/constants/load'
 import { PANDA_OPS_PING_STALE_AFTER_MS } from '@/constants/pandaOps'
-import { TIME_MS } from '@/constants/time'
 import { SharedCache } from '@/services/cache.service'
 import { abortPingRecords, loadPingRecords } from '@/services/history.service'
 import { loadPingMetricStats, loadPublicPingTasks, partitionMetricEntityIds, queryMetrics } from '@/services/metrics.service'
@@ -44,7 +43,6 @@ interface PingRefreshGroup {
   hours: number
   maxCount?: number
   entries: Map<string, { entry: SharedPingRecordsEntry, uuid?: string }>
-  timer: ReturnType<typeof setInterval>
 }
 
 interface PendingMetricBatch {
@@ -69,11 +67,47 @@ const pendingMetricBatches = new Map<string, PendingMetricBatch>()
 const pendingStatsCacheTouches = new Map<string, number>()
 let statsCacheIndexFlushQueued = false
 const pingFreshnessTick = ref(Date.now())
+let pingRefreshTimer: ReturnType<typeof setInterval> | null = null
+let pingVisibilityListenerAttached = false
 
-if (typeof window !== 'undefined') {
-  window.setInterval(() => {
-    pingFreshnessTick.value = Date.now()
-  }, TIME_MS.minute)
+function pageIsVisible(): boolean {
+  return typeof document === 'undefined' || document.visibilityState !== 'hidden'
+}
+
+function refreshAllPingGroups(): void {
+  if (!pageIsVisible())
+    return
+  pingFreshnessTick.value = Date.now()
+  for (const group of pingRefreshGroups.values())
+    refreshPingGroup(group)
+}
+
+function handlePingVisibilityChange(): void {
+  if (pageIsVisible())
+    refreshAllPingGroups()
+}
+
+function startPingRefreshScheduler(): void {
+  if (pingRefreshTimer || typeof window === 'undefined')
+    return
+  pingRefreshTimer = window.setInterval(refreshAllPingGroups, PING_RECORD_REFRESH_INTERVAL_MS)
+  if (!pingVisibilityListenerAttached && typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', handlePingVisibilityChange)
+    pingVisibilityListenerAttached = true
+  }
+}
+
+function stopPingRefreshScheduler(): void {
+  if (pingRefreshGroups.size > 0)
+    return
+  if (pingRefreshTimer) {
+    clearInterval(pingRefreshTimer)
+    pingRefreshTimer = null
+  }
+  if (pingVisibilityListenerAttached && typeof document !== 'undefined') {
+    document.removeEventListener('visibilitychange', handlePingVisibilityChange)
+    pingVisibilityListenerAttached = false
+  }
 }
 
 function getCacheKey(uuid: string, hours: number, maxCount?: number, taskNameFilter = ''): string {
@@ -498,12 +532,6 @@ function refreshPingGroup(group: PingRefreshGroup): void {
   }
 }
 
-function refreshPingGroupByKey(key: string): void {
-  const group = pingRefreshGroups.get(key)
-  if (group)
-    refreshPingGroup(group)
-}
-
 function getOrCreatePingRefreshGroup(hours: number, maxCount?: number): PingRefreshGroup {
   const key = getPingMetricBatchKey(hours, maxCount)
   const existing = pingRefreshGroups.get(key)
@@ -514,9 +542,9 @@ function getOrCreatePingRefreshGroup(hours: number, maxCount?: number): PingRefr
     hours,
     maxCount,
     entries: new Map(),
-    timer: setInterval(refreshPingGroupByKey, PING_RECORD_REFRESH_INTERVAL_MS, key),
   }
   pingRefreshGroups.set(key, group)
+  startPingRefreshScheduler()
   return group
 }
 
@@ -528,8 +556,8 @@ function releasePingRefreshGroupEntry(hours: number, maxCount: number | undefine
   group.entries.delete(entryKey)
   if (group.entries.size > 0)
     return
-  clearInterval(group.timer)
   pingRefreshGroups.delete(groupKey)
+  stopPingRefreshScheduler()
 }
 
 function retainSharedPingRecordsEntry(hours: number, maxCount?: number, uuid?: string): () => void {

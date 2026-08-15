@@ -1,3 +1,4 @@
+import type { Stats } from 'node:fs'
 import type { Plugin } from 'vite'
 import { execSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
@@ -18,6 +19,11 @@ const archiver = require('archiver')
 interface ThemeManifest {
   preview?: unknown
   version?: unknown
+}
+
+interface ArchiveEntryData {
+  [key: string]: unknown
+  stats?: Stats
 }
 
 const themeJsonPath = resolve(__dirname, 'komari-theme.json')
@@ -48,6 +54,27 @@ function getCommitHash(): string {
   }
 }
 
+function getArchiveDate(): Date {
+  const sourceDateEpoch = process.env.SOURCE_DATE_EPOCH
+  if (sourceDateEpoch) {
+    const epochSeconds = Number(sourceDateEpoch)
+    if (!Number.isSafeInteger(epochSeconds) || epochSeconds < 0)
+      throw new TypeError('SOURCE_DATE_EPOCH must be a non-negative integer')
+    return new Date(epochSeconds * 1000)
+  }
+
+  try {
+    const epochSeconds = Number(execSync('git log -1 --format=%ct', { encoding: 'utf-8' }).trim())
+    if (Number.isSafeInteger(epochSeconds) && epochSeconds >= 0)
+      return new Date(epochSeconds * 1000)
+  }
+  catch {
+    // Fall through to the ZIP epoch when building outside a Git checkout.
+  }
+
+  return new Date('1980-01-01T00:00:00.000Z')
+}
+
 /**
  * Vite 插件：构建后打包 Komari 主题 Zip
  * theme.zip
@@ -67,6 +94,7 @@ function komariThemeZip(): Plugin {
       const previewPath = resolve(__dirname, 'docs/preview.png')
       const outputPath = resolve(__dirname, zipFileName)
       const themeManifest = readThemeManifest()
+      const archiveDate = getArchiveDate()
       const manifestPreviewName = typeof themeManifest.preview === 'string' && themeManifest.preview.trim()
         ? themeManifest.preview.trim()
         : 'preview.png'
@@ -97,16 +125,20 @@ function komariThemeZip(): Plugin {
 
         archive.pipe(output)
 
-        archive.file(themeJsonPath, { name: 'komari-theme.json' })
+        archive.file(themeJsonPath, { name: 'komari-theme.json', date: archiveDate, mode: 0o644 })
 
         if (existsSync(previewPath)) {
-          archive.file(previewPath, { name: 'preview.png' })
+          archive.file(previewPath, { name: 'preview.png', date: archiveDate, mode: 0o644 })
           if (manifestPreviewName !== 'preview.png') {
-            archive.file(previewPath, { name: manifestPreviewName })
+            archive.file(previewPath, { name: manifestPreviewName, date: archiveDate, mode: 0o644 })
           }
         }
 
-        archive.directory(distDir, 'dist')
+        archive.directory(distDir, 'dist', (data: ArchiveEntryData) => ({
+          ...data,
+          date: archiveDate,
+          mode: data.stats?.isDirectory() ? 0o755 : 0o644,
+        }))
 
         archive.finalize()
       })

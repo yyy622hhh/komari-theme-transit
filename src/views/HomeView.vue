@@ -539,6 +539,7 @@ const nodeCardGridClass = computed(() => {
       :nodes="groupNodeList"
       :globe-nodes="groupNodeList"
       :transition-key="appStore.nodeSelectedGroup"
+      :active="isViewActive"
     />
 
     <PandaOpsDashboard v-if="appStore.opsDashboardEnabled" :nodes="nodesStore.visibleNodes" />
@@ -612,6 +613,7 @@ const nodeCardGridClass = computed(() => {
 
               <Button
                 variant="outline" size="icon" aria-label="卡片视图"
+                :aria-pressed="appStore.nodeViewMode === 'card'"
                 class="w-8 h-8 border-none bg-background/50 backdrop-blur-xs shadow-none hover:bg-background/60 rounded-md"
                 :class="[appStore.nodeViewMode === 'card' ? '!text-selection !bg-background' : '']"
                 @click="setNodeViewMode('card')"
@@ -620,6 +622,7 @@ const nodeCardGridClass = computed(() => {
               </Button>
               <Button
                 variant="outline" size="icon" aria-label="列表视图"
+                :aria-pressed="appStore.nodeViewMode === 'list'"
                 class="w-8 h-8 border-none bg-background/50 backdrop-blur-xs shadow-none hover:bg-background/60 rounded-md"
                 :class="[appStore.nodeViewMode === 'list' ? '!text-selection !bg-background' : '']"
                 @click="setNodeViewMode('list')"
@@ -679,7 +682,7 @@ const nodeCardGridClass = computed(() => {
             <p id="home-order-instructions" class="sr-only">
               使用拖动抓手调整顺序；键盘用户可用上下方向键逐项移动，或用 Home 和 End 移到首尾。
             </p>
-            <p class="sr-only" aria-live="polite">
+            <p class="sr-only" aria-live="polite" aria-atomic="true">
               {{ homeOrderAnnouncement }}
             </p>
           </div>

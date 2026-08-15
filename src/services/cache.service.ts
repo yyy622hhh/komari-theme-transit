@@ -16,13 +16,9 @@ interface SharedCacheRecord<T> {
 
 export class SharedCache<T> {
   private readonly entries = new Map<string, SharedCacheRecord<T>>()
-  private readonly cleanupTimer: ReturnType<typeof setInterval> | null
+  private cleanupTimer: ReturnType<typeof setInterval> | null = null
 
-  constructor(private readonly options: SharedCacheOptions<T>) {
-    this.cleanupTimer = typeof window !== 'undefined' && options.cleanupInterval && options.cleanupInterval > 0
-      ? window.setInterval(() => this.sweep(), options.cleanupInterval)
-      : null
-  }
+  constructor(private readonly options: SharedCacheOptions<T>) {}
 
   get size(): number {
     return this.entries.size
@@ -54,6 +50,7 @@ export class SharedCache<T> {
       references: previous?.references ?? 0,
     })
     this.sweep()
+    this.startCleanupTimer()
     return value
   }
 
@@ -102,8 +99,7 @@ export class SharedCache<T> {
   }
 
   dispose(): void {
-    if (this.cleanupTimer)
-      window.clearInterval(this.cleanupTimer)
+    this.stopCleanupTimer()
     this.clear()
   }
 
@@ -138,6 +134,29 @@ export class SharedCache<T> {
     if (!this.entries.delete(key))
       return
     this.options.onEvict?.(entry.value, key)
+    if (this.entries.size === 0)
+      this.stopCleanupTimer()
+  }
+
+  private startCleanupTimer(): void {
+    if (
+      this.cleanupTimer
+      || this.entries.size === 0
+      || typeof window === 'undefined'
+      || !this.options.cleanupInterval
+      || this.options.cleanupInterval <= 0
+    ) {
+      return
+    }
+
+    this.cleanupTimer = window.setInterval(() => this.sweep(), this.options.cleanupInterval)
+  }
+
+  private stopCleanupTimer(): void {
+    if (!this.cleanupTimer)
+      return
+    window.clearInterval(this.cleanupTimer)
+    this.cleanupTimer = null
   }
 }
 

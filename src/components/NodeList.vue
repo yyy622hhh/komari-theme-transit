@@ -428,12 +428,19 @@ function buildNodeMetadataItems(node: NodeData): NodeMetadataItem[] {
       <div class="grid px-2.5 py-2 bg-background/70 rounded-lg backdrop-blur-sm gap-2" :style="gridStyle">
         <div
           v-for="col in columns" :key="col.key"
-          :class="[col.sortable ? 'cursor-pointer select-none' : '', ['status', 'os'].includes(col.key) ? 'text-center' : 'text-left']"
-          @click="handleSort(col)"
+          :class="[['status', 'os'].includes(col.key) ? 'text-center' : 'text-left']"
         >
-          <span class="text-[11px] font-medium tracking-wide text-foreground/70">
+          <button
+            v-if="col.sortable"
+            type="button"
+            class="rounded-sm text-[11px] font-medium tracking-wide text-foreground/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            :disabled="props.orderEditing"
+            :aria-label="`${col.label}排序${sortKey === col.key ? (sortDir === 1 ? '，当前升序' : '，当前降序') : ''}`"
+            @click="handleSort(col)"
+          >
             {{ col.label }}{{ col.sortable && sortKey === col.key ? (sortDir === 1 ? ' ↑' : ' ↓') : '' }}
-          </span>
+          </button>
+          <span v-else class="text-[11px] font-medium tracking-wide text-foreground/70">{{ col.label }}</span>
         </div>
       </div>
 

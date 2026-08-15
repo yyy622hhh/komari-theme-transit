@@ -36,6 +36,39 @@ describe('PromiseCache', () => {
 })
 
 describe('SharedCache', () => {
+  test('runs periodic cleanup only while the cache contains entries', () => {
+    const originalWindow = globalThis.window
+    let nextTimer = 0
+    const activeTimers = new Set<number>()
+    globalThis.window = {
+      setInterval: () => {
+        const timer = ++nextTimer
+        activeTimers.add(timer)
+        return timer
+      },
+      clearInterval: (timer: number) => activeTimers.delete(timer),
+    } as unknown as Window & typeof globalThis
+
+    try {
+      const cache = new SharedCache<string>({ maxSize: 2, ttl: 60_000, cleanupInterval: 1_000 })
+      expect(activeTimers.size).toBe(0)
+
+      cache.set('entry', 'value')
+      expect(activeTimers.size).toBe(1)
+
+      cache.clear()
+      expect(activeTimers.size).toBe(0)
+
+      cache.set('replacement', 'value')
+      expect(activeTimers.size).toBe(1)
+      cache.dispose()
+      expect(activeTimers.size).toBe(0)
+    }
+    finally {
+      globalThis.window = originalWindow
+    }
+  })
+
   test('bounds idle entries while preserving retained values', () => {
     const cache = new SharedCache<string>({ maxSize: 2, ttl: 60_000 })
     cache.set('retained', 'a')

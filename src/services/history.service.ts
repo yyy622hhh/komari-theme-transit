@@ -1,7 +1,7 @@
 import type { PingRecord, PingTaskInfo, StatusRecord } from '@/utils/rpc'
 import { requestManager } from '@/services/request.service'
 import { ApiError, getSharedApi } from '@/utils/api'
-import { getSharedRpc, RpcError } from '@/utils/rpc'
+import { getSharedRpc, isRpcPermissionError, RpcError } from '@/utils/rpc'
 
 function numberOrZero(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0
@@ -23,7 +23,7 @@ function cachePart(value: string | number | undefined): string {
 
 function shouldRetryHistoryRequest(error: unknown): boolean {
   if (error instanceof RpcError)
-    return error.code !== 401 && error.code !== 403
+    return !isRpcPermissionError(error)
   if (error instanceof ApiError)
     return error.code !== 401 && error.code !== 403
   return true

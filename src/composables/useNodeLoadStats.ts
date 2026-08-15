@@ -23,7 +23,6 @@ interface SharedLoadRecordsEntry {
   promise: Promise<void> | null
   nodePromises: Map<string, Promise<StatusRecord[]>>
   nodeFetchedAt: Map<string, number>
-  refreshTimer: ReturnType<typeof setInterval> | null
   subscribers: number
   lastFetchedAt: number
   fullLoadUnavailable: boolean
@@ -38,6 +37,17 @@ const sharedLoadRecordsCache = new SharedCache<SharedLoadRecordsEntry>({
   canEvict: entry => entry.subscribers === 0 && entry.promise === null && entry.nodePromises.size === 0,
 })
 const zeroSampleWarningKeys = new Set<string>()
+const sharedLoadRefreshEntries = new Map<string, {
+  entry: SharedLoadRecordsEntry
+  hours: number
+  maxCount?: number
+}>()
+let sharedLoadRefreshTimer: ReturnType<typeof setInterval> | null = null
+let sharedLoadVisibilityListenerAttached = false
+
+function pageIsVisible(): boolean {
+  return typeof document === 'undefined' || document.visibilityState !== 'hidden'
+}
 
 function normalizeMaxCount(maxCount: number | null | undefined): number | undefined {
   if (typeof maxCount !== 'number' || !Number.isFinite(maxCount) || maxCount <= 0)
@@ -61,7 +71,6 @@ function createSharedLoadRecordsEntry(): SharedLoadRecordsEntry {
     promise: null,
     nodePromises: new Map<string, Promise<StatusRecord[]>>(),
     nodeFetchedAt: new Map<string, number>(),
-    refreshTimer: null,
     subscribers: 0,
     lastFetchedAt: 0,
     fullLoadUnavailable: false,
@@ -168,21 +177,41 @@ async function loadSharedLoadRecords(entry: SharedLoadRecordsEntry, hours: numbe
   return promise
 }
 
-function startSharedLoadRecordsRefresh(entry: SharedLoadRecordsEntry, hours: number, maxCount?: number): void {
-  if (entry.refreshTimer)
+function refreshSharedLoadRecords(): void {
+  if (!pageIsVisible())
     return
-
-  entry.refreshTimer = setInterval(() => {
+  for (const { entry, hours, maxCount } of sharedLoadRefreshEntries.values())
     void loadSharedLoadRecords(entry, hours, maxCount).catch(() => {})
-  }, LOAD_RECORD_REFRESH_INTERVAL_MS)
 }
 
-function stopSharedLoadRecordsRefresh(entry: SharedLoadRecordsEntry): void {
-  if (!entry.refreshTimer)
-    return
+function handleSharedLoadVisibilityChange(): void {
+  if (pageIsVisible())
+    refreshSharedLoadRecords()
+}
 
-  clearInterval(entry.refreshTimer)
-  entry.refreshTimer = null
+function startSharedLoadRecordsRefresh(key: string, entry: SharedLoadRecordsEntry, hours: number, maxCount?: number): void {
+  sharedLoadRefreshEntries.set(key, { entry, hours, maxCount })
+  if (sharedLoadRefreshTimer || typeof window === 'undefined')
+    return
+  sharedLoadRefreshTimer = window.setInterval(refreshSharedLoadRecords, LOAD_RECORD_REFRESH_INTERVAL_MS)
+  if (!sharedLoadVisibilityListenerAttached && typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', handleSharedLoadVisibilityChange)
+    sharedLoadVisibilityListenerAttached = true
+  }
+}
+
+function stopSharedLoadRecordsRefresh(key: string): void {
+  sharedLoadRefreshEntries.delete(key)
+  if (sharedLoadRefreshEntries.size > 0)
+    return
+  if (sharedLoadRefreshTimer) {
+    clearInterval(sharedLoadRefreshTimer)
+    sharedLoadRefreshTimer = null
+  }
+  if (sharedLoadVisibilityListenerAttached && typeof document !== 'undefined') {
+    document.removeEventListener('visibilitychange', handleSharedLoadVisibilityChange)
+    sharedLoadVisibilityListenerAttached = false
+  }
 }
 
 function abortSharedLoadRecordsEntry(entry: SharedLoadRecordsEntry, hours: number, maxCount?: number): void {
@@ -195,7 +224,7 @@ function retainSharedLoadRecordsEntry(hours: number, maxCount?: number): () => v
   const key = getSharedLoadRecordsKey(hours, maxCount)
   const entry = getSharedLoadRecordsEntry(key)
   entry.subscribers += 1
-  startSharedLoadRecordsRefresh(entry, hours, maxCount)
+  startSharedLoadRecordsRefresh(key, entry, hours, maxCount)
 
   let released = false
   return () => {
@@ -205,7 +234,7 @@ function retainSharedLoadRecordsEntry(hours: number, maxCount?: number): () => v
     released = true
     entry.subscribers = Math.max(0, entry.subscribers - 1)
     if (entry.subscribers === 0) {
-      stopSharedLoadRecordsRefresh(entry)
+      stopSharedLoadRecordsRefresh(key)
       abortSharedLoadRecordsEntry(entry, hours, maxCount)
       sharedLoadRecordsCache.sweep()
     }

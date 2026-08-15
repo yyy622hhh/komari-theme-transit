@@ -327,6 +327,8 @@ const siteName = computed(() => appStore.privateFeaturesAllowed ? '尊敬的管�
              backdrop-blur-md
              border border-white/40 dark:border-white/10
              shadow-lg text-[12px] md:text-[13px] select-none whitespace-nowrap"
+      role="status"
+      aria-label="访客网络信息"
     >
       <Icon icon="icon-park-outline:earth" :width="14" :height="14" class="text-blue-500 shrink-0" />
       <span class="hidden text-muted-foreground sm:inline">Your IP:</span>
@@ -347,6 +349,8 @@ const siteName = computed(() => appStore.privateFeaturesAllowed ? '尊敬的管�
              backdrop-blur-xl
              border border-white/40 dark:border-white/10
              shadow-2xl"
+      role="complementary"
+      aria-label="访客信息"
     >
       <!-- 顶部：头像 + 名字 + 关闭 -->
       <div class="flex items-center justify-between px-4 pt-4 pb-1">
@@ -427,5 +431,14 @@ const siteName = computed(() => appStore.privateFeaturesAllowed ? '尊敬的管�
 .slide-left-leave-to {
   opacity: 0;
   transform: translateX(-20px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .slide-up-enter-active,
+  .slide-up-leave-active,
+  .slide-left-enter-active,
+  .slide-left-leave-active {
+    transition-duration: 0.01ms;
+  }
 }
 </style>

@@ -99,6 +99,7 @@ async function removeWallpaper(): Promise<void> {
       <section
         class="overflow-hidden rounded-xl border border-border/70 bg-background/35"
         :aria-busy="wallpaper.busy.value"
+        aria-label="当前浏览器壁纸"
       >
         <div
           class="relative aspect-[16/7] min-h-40 overflow-hidden bg-slate-950/90"
@@ -113,6 +114,8 @@ async function removeWallpaper(): Promise<void> {
             class="absolute inset-0 bg-cover bg-center"
             :style="previewStyle"
             data-wallpaper-preview
+            role="img"
+            :aria-label="`当前壁纸预览：${wallpaper.record.value?.name || '本机壁纸'}`"
           />
           <div v-else class="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(16,185,129,.28),transparent_42%),linear-gradient(135deg,#0f172a,#334155)]" />
           <div class="absolute inset-0 bg-gradient-to-t from-black/70 via-black/15 to-transparent" />
@@ -184,7 +187,7 @@ async function removeWallpaper(): Promise<void> {
         </div>
       </fieldset>
 
-      <p v-if="wallpaper.errorMessage.value" role="alert" class="rounded-lg border border-destructive/35 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+      <p v-if="wallpaper.errorMessage.value" role="alert" aria-live="assertive" class="rounded-lg border border-destructive/35 bg-destructive/10 px-3 py-2 text-xs text-destructive">
         {{ wallpaper.errorMessage.value }}
       </p>
     </div>

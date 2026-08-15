@@ -176,7 +176,7 @@ async function saveOrder(): Promise<void> {
         </p>
       </div>
       <div class="flex shrink-0 flex-wrap gap-2 self-start sm:self-auto">
-        <Button v-if="!editingOrder" variant="outline" size="sm" :title="canEditOrder ? '编辑首页顺序' : '请先切换到全部节点'" @click="startOrderEdit">
+        <Button v-if="!editingOrder" variant="outline" size="sm" :title="canEditOrder ? '编辑首页顺序' : '请先切换到全部节点'" :aria-disabled="!canEditOrder" @click="startOrderEdit">
           <Icon icon="tabler:arrows-move-vertical" />
           编辑首页顺序
         </Button>
@@ -203,7 +203,7 @@ async function saveOrder(): Promise<void> {
       <p id="server-order-instructions" class="sr-only">
         使用拖动抓手调整顺序；键盘用户可用上下方向键逐项移动，或用 Home 和 End 移到首尾。
       </p>
-      <p class="sr-only" aria-live="polite">
+      <p class="sr-only" aria-live="polite" aria-atomic="true">
         {{ orderAnnouncement }}
       </p>
     </div>

@@ -525,6 +525,47 @@ test('Transit mobile keeps document width contained', async ({ page }) => {
   await expect(page.locator('html')).toHaveJSProperty('scrollWidth', await page.locator('html').evaluate(element => element.clientWidth))
 })
 
+test('Transit mobile topology manager remains contained and scrollable', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await installKomariFixture(page, { pandaOps: true, authenticated: true })
+  await openStablePage(page)
+
+  await page.getByRole('button', { name: '管理', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: '拓扑管理' })
+  await expect(dialog).toBeVisible()
+  await expect.poll(() => dialog.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
+  const scrollArea = dialog.locator('> div').last()
+  await expect.poll(() => scrollArea.evaluate(element => element.scrollHeight > element.clientHeight)).toBe(true)
+  await expect(dialog.getByRole('button', { name: '保存并应用' })).toBeVisible()
+  await expect(page.locator('html')).toHaveJSProperty('scrollWidth', await page.locator('html').evaluate(element => element.clientWidth))
+})
+
+test('reduced motion disables interface animations and smooth back-to-top scrolling', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await installKomariFixture(page, { pandaOps: true, visitorInfoEnabled: true })
+  await openStablePage(page)
+
+  await expect.poll(() => page.getByRole('button', { name: '壁纸与背景效果' }).evaluate((element) => {
+    const style = getComputedStyle(element)
+    return Math.max(...style.transitionDuration.split(',').map(value => Number.parseFloat(value) || 0))
+  })).toBeLessThanOrEqual(0.01)
+
+  await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
+  const backTop = page.getByRole('button', { name: '返回顶部' })
+  await expect(backTop).toBeVisible()
+  await page.evaluate(() => {
+    const original = window.scrollTo.bind(window)
+    window.scrollTo = ((...args: Parameters<typeof window.scrollTo>) => {
+      const first = args[0]
+      if (typeof first === 'object')
+        document.documentElement.dataset.backTopBehavior = first.behavior || ''
+      original(...args)
+    }) as typeof window.scrollTo
+  })
+  await backTop.click()
+  await expect(page.locator('html')).toHaveAttribute('data-back-top-behavior', 'instant')
+})
+
 test('Transit topology reports an unresolved configured node as an error', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await installKomariFixture(page, { pandaOps: true, dark: true, pandaOpsMissingNode: true })

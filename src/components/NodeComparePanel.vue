@@ -120,7 +120,7 @@ watch(() => props.nodes.map(node => node.uuid), (uuids) => {
   <div class="space-y-4">
     <div class="flex flex-wrap items-center gap-2">
       <div class="relative min-w-52 flex-1 sm:max-w-80">
-        <Input v-model="searchText" placeholder="搜索节点、IP 或 CPU" class="h-8 bg-background/55 pl-8" />
+        <Input v-model="searchText" aria-label="搜索对比节点" placeholder="搜索节点、IP 或 CPU" class="h-8 bg-background/55 pl-8" />
         <Icon icon="tabler:search" width="14" height="14" class="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
       </div>
       <span class="text-xs tabular-nums text-muted-foreground">已选 {{ selectedNodes.length }} / {{ MAX_COMPARE_NODES }}</span>

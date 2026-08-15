@@ -98,7 +98,7 @@ function updateFallback(metric: { fallbackLatency: number | null, fallbackLoss: 
         </Button>
       </div>
 
-      <div v-if="manager.validationErrors.length" class="rounded-lg border border-destructive/30 bg-destructive/8 px-3 py-2 text-xs text-destructive">
+      <div v-if="manager.validationErrors.length" role="alert" class="rounded-lg border border-destructive/30 bg-destructive/8 px-3 py-2 text-xs text-destructive">
         <div v-for="error in manager.validationErrors" :key="error">
           {{ error }}
         </div>
@@ -137,12 +137,14 @@ function updateFallback(metric: { fallbackLatency: number | null, fallbackLoss: 
             <Input
               v-if="nodeIndex === 0"
               v-model="node.name"
+              :aria-label="`第 ${routeIndex + 1} 条线路入口名称`"
               placeholder="北京电信"
             />
             <select
               v-else
               :value="node.name"
-              class="h-9 w-full rounded-md border border-input bg-background/70 px-2 text-sm outline-none focus:border-ring"
+              :aria-label="`第 ${routeIndex + 1} 条线路${nodeIndex === 1 ? '线路机' : '落地机'}节点`"
+              class="h-9 w-full rounded-md border border-input bg-background/70 px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring"
               @change="manager.selectNode(route, nodeIndex, ($event.target as HTMLSelectElement).value)"
             >
               <option value="">
@@ -152,7 +154,7 @@ function updateFallback(metric: { fallbackLatency: number | null, fallbackLoss: 
                 {{ option.name }}
               </option>
             </select>
-            <Input v-model="node.role" placeholder="角色" class="h-8 text-xs" />
+            <Input v-model="node.role" :aria-label="`第 ${routeIndex + 1} 条线路${nodeIndex === 0 ? '入口' : nodeIndex === 1 ? '线路机' : '落地机'}角色`" placeholder="角色" class="h-8 text-xs" />
           </div>
 
           <div
@@ -165,7 +167,8 @@ function updateFallback(metric: { fallbackLatency: number | null, fallbackLoss: 
               <span>第 {{ metricIndex + 1 }} 段指标</span>
               <select
                 :value="metric.live ? 'live' : 'baseline'"
-                class="rounded border border-input bg-background px-1.5 py-1 text-[11px]"
+                :aria-label="`第 ${routeIndex + 1} 条线路第 ${metricIndex + 1} 段指标模式`"
+                class="min-h-8 rounded border border-input bg-background px-1.5 py-1 text-[11px] focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring"
                 @change="manager.setMetricMode(metric, ($event.target as HTMLSelectElement).value === 'live')"
               >
                 <option value="live">
@@ -214,7 +217,7 @@ function updateFallback(metric: { fallbackLatency: number | null, fallbackLoss: 
                 placeholder="Ping 任务名称"
                 @focus="loadTasks(metric.nodeName)"
               >
-              <p class="text-[10px] text-muted-foreground">
+              <p class="text-[10px] text-muted-foreground" aria-live="polite">
                 <template v-if="nodeTaskState(metric.nodeName).loading">
                   正在读取任务…
                 </template>
@@ -262,7 +265,7 @@ function updateFallback(metric: { fallbackLatency: number | null, fallbackLoss: 
         还没有线路，点击“添加线路”开始配置。
       </div>
 
-      <footer class="sticky bottom-0 flex justify-end gap-2 border-t border-border/60 bg-card/95 pt-3 backdrop-blur-xl">
+      <footer class="sticky bottom-0 flex flex-wrap justify-end gap-2 border-t border-border/60 bg-card/95 pt-3 backdrop-blur-xl" :aria-busy="manager.saving">
         <Button variant="outline" :disabled="manager.saving" @click="manager.reset">
           恢复已保存配置
         </Button>

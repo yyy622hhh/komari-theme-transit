@@ -62,7 +62,7 @@ const result = await rpc.ping()
 获取 RPC 接口版本号。
 
 ```typescript
-const version = await rpc.getVersion()
+const version = await rpc.getVersion() // RPC2 协议版本，例如 "2.0"
 ```
 
 #### `getMethods(internal?: boolean): Promise<string[]>`
