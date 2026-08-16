@@ -10,6 +10,7 @@ import {
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useNodeGeoClusters } from '@/composables/useNodeGeoClusters'
 import { useAppStore } from '@/stores/app'
+import { logAppWarning } from '@/utils/safeError'
 
 const props = defineProps<{
   nodes?: NodeData[]
@@ -30,6 +31,7 @@ const { width: containerWidth, height: containerHeight } = useElementSize(contai
 const documentVisibility = useDocumentVisibility()
 const elementVisible = useElementVisibility(containerRef)
 const shouldRender = computed(() => documentVisibility.value === 'visible' && elementVisible.value)
+const webglUnavailable = ref(false)
 
 let globe: GlobeInstance | null = null
 let globeMaterial: MeshPhongMaterial | null = null
@@ -51,6 +53,18 @@ interface GlobeLabel {
   lat: number
   lng: number
   code: string
+}
+
+function supportsWebGL2(): boolean {
+  try {
+    const canvas = document.createElement('canvas')
+    const context = canvas.getContext('webgl2')
+    context?.getExtension('WEBGL_lose_context')?.loseContext()
+    return Boolean(context)
+  }
+  catch {
+    return false
+  }
 }
 
 const {
@@ -161,6 +175,11 @@ async function startGlobe() {
   if (globe || loadingGlobe || !globeHostRef.value)
     return
 
+  if (!supportsWebGL2()) {
+    webglUnavailable.value = true
+    return
+  }
+
   loadingGlobe = true
   await nextTick()
 
@@ -244,6 +263,13 @@ async function startGlobe() {
     if (!shouldRender.value)
       globe.pauseAnimation()
   }
+  catch (error) {
+    if (!destroyed) {
+      webglUnavailable.value = true
+      logAppWarning('Realistic globe unavailable; using static fallback', error)
+      stopGlobe()
+    }
+  }
   finally {
     loadingGlobe = false
   }
@@ -308,7 +334,17 @@ watch(shouldRender, (visible) => {
 
 <template>
   <div ref="containerRef" class="relative z-0 aspect-square w-full max-w-md mx-auto translate-y-2 md:-translate-y-1 overflow-visible pointer-events-none">
-    <div ref="globeHostRef" class="earth-globe-host absolute inset-0 z-0 w-full h-full scale-106 select-none touch-auto pointer-events-auto cursor-grab active:cursor-grabbing" />
+    <div
+      ref="globeHostRef"
+      class="earth-globe-host absolute inset-0 z-0 w-full h-full scale-106 select-none touch-auto pointer-events-auto cursor-grab active:cursor-grabbing"
+    />
+    <div
+      v-if="webglUnavailable"
+      data-earth-static-fallback
+      class="absolute inset-8 flex items-center justify-center rounded-full border border-border/60 bg-muted/20 px-8 text-center text-xs text-muted-foreground"
+    >
+      当前环境不支持 3D 地球，节点统计仍可正常使用
+    </div>
 
     <div
       v-if="totalServers > 0"

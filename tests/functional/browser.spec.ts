@@ -49,6 +49,20 @@ test('public home navigates to a node detail and returns without private API cal
   expect(forbiddenRequests).toEqual([])
 })
 
+test('public home degrades cleanly when WebGL2 is unavailable', async ({ page }) => {
+  await page.addInitScript(() => {
+    const nativeGetContext = HTMLCanvasElement.prototype.getContext
+    HTMLCanvasElement.prototype.getContext = function (type: string, ...args: unknown[]) {
+      if (type === 'webgl2')
+        return null
+      return Reflect.apply(nativeGetContext, this, [type, ...args])
+    } as typeof HTMLCanvasElement.prototype.getContext
+  })
+  await installKomariFixture(page)
+  await openHome(page)
+  await expect(page.locator('[data-earth-static-fallback]')).toBeVisible()
+})
+
 test('admin entry keeps the supported Komari server route contract', async ({ page }) => {
   await installKomariFixture(page, { authenticated: true, pandaOps: true })
   await openHome(page)
