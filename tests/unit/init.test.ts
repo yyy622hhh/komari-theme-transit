@@ -17,6 +17,7 @@ interface TestHarness {
     publicSettings: unknown
     rpcTransportMode: 'http' | 'websocket'
     updateLoginState: (loggedIn: boolean, user?: unknown) => void
+    verifyLoginState: (options?: { force?: boolean }) => Promise<boolean>
   }
   client: {
     call: <T>(method: string, params?: unknown, signal?: AbortSignal) => Promise<T>
@@ -61,6 +62,7 @@ function createHarness(call: TestHarness['client']['call']): TestHarness {
       events.push(`login:${loggedIn}`)
       logins.push(loggedIn)
     },
+    verifyLoginState: async () => true,
   }
   const nodesStore: TestHarness['nodesStore'] = {
     clearNodes: () => events.push('nodes:clear'),
@@ -90,13 +92,14 @@ function createManager(
   api: { getMe: (signal?: AbortSignal) => Promise<unknown>, getPublicSettings: (signal?: AbortSignal) => Promise<unknown> },
   ping: (signal?: AbortSignal) => Promise<string>,
   navigate: (path: string) => void = () => {},
+  config: { authVerifyInterval?: number } = {},
 ): InitManager {
   const rpc = {
     close: () => harness.client.close(),
     getClient: () => harness.client,
     ping,
   }
-  return new InitManager({ healthCheckAttempts: 1 }, {
+  return new InitManager({ healthCheckAttempts: 1, ...config }, {
     api,
     appStore: harness.appStore,
     navigate,
@@ -244,5 +247,29 @@ describe('InitManager lifecycle isolation', () => {
     expect(harness.events).toContain('nodes:init')
     expect(harness.events.filter(event => event === 'transport:ws')).toHaveLength(1)
     manager.destroy()
+  })
+
+  test('rechecks an authenticated foreground session on the security TTL', async () => {
+    installBrowserEvents()
+    const harness = createHarness(async () => ({}))
+    let verifications = 0
+    harness.appStore.verifyLoginState = async (options) => {
+      expect(options).toEqual({ force: true })
+      verifications += 1
+      return false
+    }
+    const manager = createManager(harness, {
+      getMe: async () => ({ logged_in: true }),
+      getPublicSettings: async () => ({}),
+    }, async () => 'pong', () => {}, { authVerifyInterval: 5 })
+
+    await manager.init()
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(verifications).toBeGreaterThan(0)
+
+    manager.destroy()
+    const stoppedAt = verifications
+    await new Promise(resolve => setTimeout(resolve, 10))
+    expect(verifications).toBe(stoppedAt)
   })
 })

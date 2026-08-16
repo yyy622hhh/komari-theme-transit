@@ -7,7 +7,6 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useTopologyManager } from '@/composables/useTopologyManager'
 import { loadPingTaskNamesForNode } from '@/services/metrics.service'
-import { topologyPingTaskName } from '@/services/topology-tasks.service'
 import { TOPOLOGY_PROBE_OPTIONS } from '@/utils/topologyHelper'
 
 const props = defineProps<{ nodes: NodeData[], open: boolean }>()
@@ -21,6 +20,7 @@ const quickSavingRouteIds = ref<Set<number>>(new Set())
 const taskRequests = new Map<string, Promise<boolean>>()
 const CUSTOM_ENTRY_VALUE = '__transit_custom_entry__'
 const entryOptions = TOPOLOGY_PROBE_OPTIONS.map(option => option.label)
+const formBusy = computed(() => quickSavingRouteIds.value.size > 0 || manager.saving)
 
 const isOpen = computed({
   get: () => props.open,
@@ -121,8 +121,11 @@ function quickSaving(routeId: number): boolean {
 }
 
 function setQuickNode(route: typeof manager.routes[number], index: 1 | 2, name: string): void {
+  const previousName = route.nodes[index]?.name ?? ''
   manager.selectNode(route, index, name)
   manager.prepareQuickRoute(route)
+  if (previousName !== name && route.metrics[1])
+    route.metrics[1].taskFilter = ''
   if (index === 1 && name)
     void loadTasks(name)
 }
@@ -142,17 +145,8 @@ function setQuickEntry(route: typeof manager.routes[number], value: string): voi
   route.nodes[0]!.name = value
 }
 
-function matchingQuickTask(sourceName: string, targetName: string): string {
-  const source = props.nodes.find(node => node.name === sourceName)
-  const target = props.nodes.find(node => node.name === targetName)
-  if (!source || !target)
-    return ''
-  const expected = topologyPingTaskName(source, target)
-  return nodeTasks(sourceName).find(task => task === expected) ?? ''
-}
-
 async function configureQuickRoute(route: typeof manager.routes[number]): Promise<void> {
-  if (quickSaving(route.id) || manager.saving)
+  if (formBusy.value)
     return
   manager.prepareQuickRoute(route)
   const entryName = route.nodes[0]?.name.trim()
@@ -162,42 +156,43 @@ async function configureQuickRoute(route: typeof manager.routes[number]): Promis
     window.$message?.warning('填写入口名称，选择线路机和落地机后即可一键完成。')
     return
   }
+  const currentMetricValidationError = `第 ${manager.routes.indexOf(route) + 1} 条线路第 2 段缺少实时任务来源`
+  if (manager.validationErrors.some(error => error !== currentMetricValidationError)) {
+    window.$message?.warning('请先完成或删除其他无效线路，再创建 Ping 任务。')
+    return
+  }
 
   const saving = new Set(quickSavingRouteIds.value)
   saving.add(route.id)
   quickSavingRouteIds.value = saving
+  let createdTask = false
   try {
-    if (!await loadTasks(relayName))
-      throw new Error('无法确认已有 Ping 任务，为避免重复创建，请稍后重试。')
-    const existing = matchingQuickTask(relayName, targetName)
-    const metric = route.metrics[1]
-    if (existing && metric) {
-      metric.live = true
-      metric.nodeName = relayName
-      metric.taskFilter = existing
-    }
-    else {
-      const created = await manager.createQuickRouteTask(route)
-      const source = props.nodes.find(node => node.name === relayName)
-      if (source) {
-        taskOptions.value = {
-          ...taskOptions.value,
-          [source.uuid]: [...new Set([...nodeTasks(relayName), created.name])],
-        }
+    const task = await manager.ensureQuickRouteTask(route)
+    createdTask = task.created
+    const source = props.nodes.find(node => node.name === relayName)
+    if (source) {
+      taskOptions.value = {
+        ...taskOptions.value,
+        [source.uuid]: [...new Set([...nodeTasks(relayName), task.name])],
       }
     }
 
     if (await manager.save()) {
-      window.$message?.success(existing
-        ? `已复用任务 ${existing}，线路已保存。`
-        : 'Ping 任务已创建、绑定并保存。')
+      window.$message?.success(task.created
+        ? 'Ping 任务已创建、绑定并保存。'
+        : `已复用任务 ${task.name}，线路已保存。`)
     }
     else {
-      window.$message?.warning('任务已绑定；请补全其他线路后，再点击底部保存。')
+      window.$message?.warning(task.created
+        ? 'Ping 任务已创建，但拓扑尚未保存。请不要关闭此窗口，完成配置后点击底部保存。'
+        : '任务已复用，但拓扑尚未保存。请完成配置后点击底部保存。')
     }
   }
   catch (error) {
-    window.$message?.error(error instanceof Error ? error.message : '一键配置失败，请稍后重试。')
+    const message = error instanceof Error ? error.message : '一键配置失败，请稍后重试。'
+    window.$message?.error(createdTask
+      ? `Ping 任务已创建，但拓扑尚未保存。${message}`
+      : message)
   }
   finally {
     const next = new Set(quickSavingRouteIds.value)
@@ -219,13 +214,14 @@ function updateFallback(metric: { fallbackLatency: number | null, fallbackLoss: 
     title="拓扑管理"
     description="填入口、选择线路机和落地机；系统会自动创建并绑定 Ping 任务。"
     content-class="max-w-6xl"
+    :prevent-close="formBusy"
   >
     <div class="space-y-4">
       <div class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/60 bg-background/45 px-3 py-2">
         <div class="text-xs text-muted-foreground">
           快速配置会创建「线路机 → 落地机」的 ICMP Ping 任务，并保存到 Komari 主题设置。
         </div>
-        <Button size="sm" variant="outline" @click="manager.addRoute">
+        <Button size="sm" variant="outline" :disabled="formBusy" @click="manager.addRoute">
           <Icon icon="tabler:plus" />添加线路
         </Button>
       </div>
@@ -247,13 +243,13 @@ function updateFallback(metric: { fallbackLatency: number | null, fallbackLoss: 
             <span class="rounded border border-emerald-500/25 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-300">快速配置</span>
           </div>
           <div class="flex items-center gap-1">
-            <Button size="icon-xs" variant="ghost" :disabled="routeIndex === 0" aria-label="上移线路" @click="manager.moveRoute(routeIndex, -1)">
+            <Button size="icon-xs" variant="ghost" :disabled="formBusy || routeIndex === 0" aria-label="上移线路" @click="manager.moveRoute(routeIndex, -1)">
               <Icon icon="tabler:arrow-up" />
             </Button>
-            <Button size="icon-xs" variant="ghost" :disabled="routeIndex === manager.routes.length - 1" aria-label="下移线路" @click="manager.moveRoute(routeIndex, 1)">
+            <Button size="icon-xs" variant="ghost" :disabled="formBusy || routeIndex === manager.routes.length - 1" aria-label="下移线路" @click="manager.moveRoute(routeIndex, 1)">
               <Icon icon="tabler:arrow-down" />
             </Button>
-            <Button size="icon-xs" variant="ghost" aria-label="删除线路" @click="manager.removeRoute(routeIndex)">
+            <Button size="icon-xs" variant="ghost" :disabled="formBusy" aria-label="删除线路" @click="manager.removeRoute(routeIndex)">
               <Icon icon="tabler:trash" />
             </Button>
           </div>
@@ -266,6 +262,7 @@ function updateFallback(metric: { fallbackLatency: number | null, fallbackLoss: 
               <select
                 :value="route.nodes[0]?.name ?? ''"
                 :aria-label="`第 ${routeIndex + 1} 条线路入口运营商`"
+                :disabled="formBusy"
                 class="h-9 w-full rounded-md border border-input bg-background/70 px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring"
                 @change="setQuickEntry(route, ($event.target as HTMLSelectElement).value)"
               >
@@ -280,6 +277,7 @@ function updateFallback(metric: { fallbackLatency: number | null, fallbackLoss: 
               <select
                 :value="route.nodes[1]?.name ?? ''"
                 :aria-label="`第 ${routeIndex + 1} 条线路快速线路机`"
+                :disabled="formBusy"
                 class="h-9 w-full rounded-md border border-input bg-background/70 px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring"
                 @change="setQuickNode(route, 1, ($event.target as HTMLSelectElement).value)"
               >
@@ -292,6 +290,7 @@ function updateFallback(metric: { fallbackLatency: number | null, fallbackLoss: 
               <select
                 :value="route.nodes[2]?.name ?? ''"
                 :aria-label="`第 ${routeIndex + 1} 条线路快速落地机`"
+                :disabled="formBusy"
                 class="h-9 w-full rounded-md border border-input bg-background/70 px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring"
                 @change="setQuickNode(route, 2, ($event.target as HTMLSelectElement).value)"
               >
@@ -301,12 +300,12 @@ function updateFallback(metric: { fallbackLatency: number | null, fallbackLoss: 
             </label>
           </div>
           <div class="mt-3 flex flex-wrap items-center gap-2">
-            <Button size="sm" :disabled="quickSaving(route.id) || manager.saving" @click="configureQuickRoute(route)">
+            <Button size="sm" :disabled="formBusy" @click="configureQuickRoute(route)">
               <Icon :icon="quickSaving(route.id) ? 'tabler:loader-2' : 'tabler:wand-stars'" :class="quickSaving(route.id) && 'animate-spin'" />
               {{ quickSaving(route.id) ? '正在配置…' : '一键创建任务并保存' }}
             </Button>
             <span class="text-[10px] text-muted-foreground">同名任务会自动复用；需要细调时再打开高级设置。</span>
-            <Button size="xs" variant="ghost" class="ml-auto" @click="toggleAdvanced(route.id)">
+            <Button size="xs" variant="ghost" class="ml-auto" :disabled="formBusy" @click="toggleAdvanced(route.id)">
               <Icon :icon="isAdvanced(route.id) ? 'tabler:chevron-up' : 'tabler:adjustments'" />
               {{ isAdvanced(route.id) ? '收起高级设置' : '高级设置' }}
             </Button>
@@ -325,12 +324,14 @@ function updateFallback(metric: { fallbackLatency: number | null, fallbackLoss: 
               v-if="nodeIndex === 0"
               v-model="node.name"
               :aria-label="`第 ${routeIndex + 1} 条线路入口名称`"
+              :disabled="formBusy"
               placeholder="北京电信"
             />
             <select
               v-else
               :value="node.name"
               :aria-label="`第 ${routeIndex + 1} 条线路${nodeIndex === 1 ? '线路机' : '落地机'}节点`"
+              :disabled="formBusy"
               class="h-9 w-full rounded-md border border-input bg-background/70 px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring"
               @change="manager.selectNode(route, nodeIndex, ($event.target as HTMLSelectElement).value)"
             >
@@ -341,7 +342,7 @@ function updateFallback(metric: { fallbackLatency: number | null, fallbackLoss: 
                 {{ option.name }}
               </option>
             </select>
-            <Input v-model="node.role" :aria-label="`第 ${routeIndex + 1} 条线路${nodeIndex === 0 ? '入口' : nodeIndex === 1 ? '线路机' : '落地机'}角色`" placeholder="角色" class="h-8 text-xs" />
+            <Input v-model="node.role" :aria-label="`第 ${routeIndex + 1} 条线路${nodeIndex === 0 ? '入口' : nodeIndex === 1 ? '线路机' : '落地机'}角色`" :disabled="formBusy" placeholder="角色" class="h-8 text-xs" />
           </div>
 
           <div
@@ -355,6 +356,7 @@ function updateFallback(metric: { fallbackLatency: number | null, fallbackLoss: 
               <select
                 :value="metric.live ? 'live' : 'baseline'"
                 :aria-label="`第 ${routeIndex + 1} 条线路第 ${metricIndex + 1} 段指标模式`"
+                :disabled="formBusy"
                 class="min-h-8 rounded border border-input bg-background px-1.5 py-1 text-[11px] focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring"
                 @change="manager.setMetricMode(metric, ($event.target as HTMLSelectElement).value === 'live')"
               >
@@ -370,6 +372,7 @@ function updateFallback(metric: { fallbackLatency: number | null, fallbackLoss: 
               <select
                 v-model="metric.nodeName"
                 :aria-label="`第 ${routeIndex + 1} 条线路第 ${metricIndex + 1} 段探测来源`"
+                :disabled="formBusy"
                 class="h-8 w-full rounded-md border border-input bg-background px-2 text-xs"
                 @change="loadTasks(metric.nodeName)"
               >
@@ -384,6 +387,7 @@ function updateFallback(metric: { fallbackLatency: number | null, fallbackLoss: 
                 v-if="nodeTasks(metric.nodeName).length"
                 v-model="metric.taskFilter"
                 :aria-label="`第 ${routeIndex + 1} 条线路第 ${metricIndex + 1} 段 Ping 任务`"
+                :disabled="formBusy"
                 class="h-8 w-full rounded-md border border-input bg-background px-2 text-xs"
               >
                 <option value="">
@@ -400,6 +404,7 @@ function updateFallback(metric: { fallbackLatency: number | null, fallbackLoss: 
                 v-else
                 v-model="metric.taskFilter"
                 :aria-label="`第 ${routeIndex + 1} 条线路第 ${metricIndex + 1} 段 Ping 任务`"
+                :disabled="formBusy"
                 class="h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none focus:border-ring"
                 placeholder="Ping 任务名称"
                 @focus="loadTasks(metric.nodeName)"
@@ -426,6 +431,7 @@ function updateFallback(metric: { fallbackLatency: number | null, fallbackLoss: 
                   min="0"
                   step="1"
                   :value="metric.fallbackLatency ?? ''"
+                  :disabled="formBusy"
                   placeholder="ms"
                   class="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none focus:border-ring"
                   @input="updateFallback(metric, 'fallbackLatency', $event)"
@@ -438,6 +444,7 @@ function updateFallback(metric: { fallbackLatency: number | null, fallbackLoss: 
                   max="100"
                   step="0.1"
                   :value="metric.fallbackLoss ?? ''"
+                  :disabled="formBusy"
                   placeholder="%"
                   class="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none focus:border-ring"
                   @input="updateFallback(metric, 'fallbackLoss', $event)"
@@ -453,10 +460,10 @@ function updateFallback(metric: { fallbackLatency: number | null, fallbackLoss: 
       </div>
 
       <footer class="sticky bottom-0 flex flex-wrap justify-end gap-2 border-t border-border/60 bg-card/95 pt-3 backdrop-blur-xl" :aria-busy="manager.saving">
-        <Button variant="outline" :disabled="manager.saving" @click="manager.reset">
+        <Button variant="outline" :disabled="formBusy" @click="manager.reset">
           恢复已保存配置
         </Button>
-        <Button :disabled="manager.saving || !manager.dirty || manager.validationErrors.length > 0" @click="save">
+        <Button :disabled="formBusy || !manager.dirty || manager.validationErrors.length > 0" @click="save">
           <Icon :icon="manager.saving ? 'tabler:loader-2' : 'tabler:device-floppy'" :class="manager.saving && 'animate-spin'" />
           {{ manager.saving ? '保存中' : '保存并应用' }}
         </Button>

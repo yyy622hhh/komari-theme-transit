@@ -6,6 +6,7 @@
 import type { Client, KomariRpc, NodeStatus } from '@/utils/rpc'
 import { KOMARI_ADMIN_SERVERS_PATH } from '@/constants/navigation'
 import { REALTIME_CONFIG } from '@/constants/realtime'
+import { SECURITY_CONFIG } from '@/constants/security'
 import { useAppStore } from '@/stores/app'
 import { useNodesStore } from '@/stores/nodes'
 import { getSharedApi } from '@/utils/api'
@@ -26,6 +27,8 @@ interface InitConfig {
   healthCheckRetryInterval?: number
   /** POST 模式连续失败次数阈值 */
   postFailureThreshold?: number
+  /** 前台会话校验间隔（毫秒） */
+  authVerifyInterval?: number
 }
 
 const DEFAULT_CONFIG: Required<InitConfig> = {
@@ -35,6 +38,7 @@ const DEFAULT_CONFIG: Required<InitConfig> = {
   healthCheckAttempts: REALTIME_CONFIG.websocket.healthCheckAttempts,
   healthCheckRetryInterval: REALTIME_CONFIG.websocket.healthCheckRetryInterval,
   postFailureThreshold: REALTIME_CONFIG.polling.postFailureThreshold,
+  authVerifyInterval: SECURITY_CONFIG.auth.verifyTtl,
 }
 
 const CLIENTS_REFRESH_INTERVAL_MS = REALTIME_CONFIG.polling.clientsRefreshInterval
@@ -106,6 +110,7 @@ export class InitManager {
   private nodesStore: ReturnType<typeof useNodesStore>
   private pollTimer: ReturnType<typeof setTimeout> | null = null
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  private authVerifyTimer: ReturnType<typeof setInterval> | null = null
   private unsubscribeWsClose: (() => void) | null = null
   private pollingGeneration: number | null = null
   private refreshAfterCurrentPoll = false
@@ -195,6 +200,7 @@ export class InitManager {
       // 首次数据请求即使失败，也启动实时连接和轮询以便自动恢复。
       this.startWebSocketAndPolling(++this.transportGeneration)
       this.attachMetadataRefreshListeners()
+      this.startAuthVerificationTimer()
       this.isInitialized = true
     }
     catch (error) {
@@ -255,6 +261,7 @@ export class InitManager {
     if (!this.isInitialized && this.isLifecycleCurrent(generation) && !this.redirectingToAdmin) {
       this.startWebSocketAndPolling(++this.transportGeneration)
       this.attachMetadataRefreshListeners()
+      this.startAuthVerificationTimer()
       this.isInitialized = true
     }
     return recovered
@@ -467,6 +474,29 @@ export class InitManager {
     window.removeEventListener('focus', this.handleWindowFocus)
     document.removeEventListener('visibilitychange', this.handleVisibilityChange)
     this.metadataRefreshListenersAttached = false
+  }
+
+  /**
+   * Focus events are not enough: a tab can remain visible while its HTTP
+   * session expires. Re-check it on the same TTL that auth.service uses so
+   * private tools disappear promptly instead of showing stale access.
+   */
+  private startAuthVerificationTimer(): void {
+    if (this.authVerifyTimer || typeof window === 'undefined')
+      return
+    this.authVerifyTimer = window.setInterval(() => {
+      if (this.destroyed || this.redirectingToAdmin || (typeof document !== 'undefined' && document.visibilityState === 'hidden'))
+        return
+      void this.appStore.verifyLoginState({ force: true })
+        .catch(error => logAppWarning('Failed to verify session on timer', error))
+    }, this.config.authVerifyInterval)
+  }
+
+  private stopAuthVerificationTimer(): void {
+    if (!this.authVerifyTimer)
+      return
+    clearInterval(this.authVerifyTimer)
+    this.authVerifyTimer = null
   }
 
   /**
@@ -729,6 +759,7 @@ export class InitManager {
     this.lifecycleController.abort()
     this.transportController.abort()
     this.stopPolling()
+    this.stopAuthVerificationTimer()
     this.detachMetadataRefreshListeners()
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer)

@@ -38,6 +38,8 @@ export interface VisualFixtureOptions {
   pandaOpsNoRecentTask?: boolean
   pandaOpsComparableRoutes?: boolean
   topologyQuickTaskExists?: boolean
+  topologyQuickTaskWrongTarget?: boolean
+  topologyCreateDelayMs?: number
   emptyTopology?: boolean
   visitorInfoEnabled?: boolean
   visitorAuditClientEnabled?: boolean
@@ -61,6 +63,8 @@ interface FixturePingTask {
   all_clients?: boolean
   default_on?: boolean
   clients?: string[]
+  target?: string
+  type?: string
 }
 
 function uuidFor(index: number): string {
@@ -315,6 +319,8 @@ async function handleRpc(
       weight: 100,
       default_on: false,
       clients: [uuidFor(0)],
+      target: options.topologyQuickTaskWrongTarget ? '192.0.2.99' : '192.0.2.11',
+      type: 'icmp',
     })
   }
   if (options.pandaOpsNoRecentTask) {
@@ -440,6 +446,8 @@ async function handleRpc(
       break
     case 'admin:addPingTask':
       {
+        if (options.topologyCreateDelayMs)
+          await new Promise(resolve => setTimeout(resolve, options.topologyCreateDelayMs))
         const taskClients = Array.isArray(payload.params?.clients)
           ? payload.params.clients.filter((client): client is string => typeof client === 'string')
           : []
@@ -451,10 +459,15 @@ async function handleRpc(
           weight: 1_000 + createdPingTasks.length,
           default_on: Boolean(payload.params?.default_on),
           clients: taskClients,
+          target: typeof payload.params?.target === 'string' ? payload.params.target : '',
+          type: typeof payload.params?.type === 'string' ? payload.params.type : '',
         }
         createdPingTasks.push(task)
         result = { task_id: task.id }
       }
+      break
+    case 'admin:getAllPingTasks':
+      result = pingTasks
       break
     case 'public:getMe':
       result = { logged_in: false }

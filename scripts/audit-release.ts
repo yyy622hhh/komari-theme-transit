@@ -6,6 +6,10 @@ import process from 'node:process'
 
 const WHITESPACE_PATTERN = /\s+/
 const TEST_ARTIFACT_PATTERN = /ComponentErrorBoundaryProbe|component-boundary-test/i
+const worktreeStatus = execFileSync('git', ['status', '--porcelain'], { encoding: 'utf8' }).trim()
+if (worktreeStatus) {
+  throw new Error('Release audit blocked: build from a clean Git worktree so the zip content matches its commit hash')
+}
 const commitHash = execFileSync('git', ['rev-parse', '--short', 'HEAD'], { encoding: 'utf8' }).trim()
 const zipName = `komari-theme-Transit-build-${commitHash}.zip`
 const zipPath = resolve(process.cwd(), zipName)

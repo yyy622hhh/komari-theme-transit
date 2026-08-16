@@ -263,6 +263,14 @@ export interface PingTaskInfo {
   type?: string
 }
 
+/** Complete Ping task record returned by Komari's administrator RPC. */
+export interface AdminPingTask extends PingTaskInfo {
+  target: string
+  type: string
+  default_on: boolean
+  clients: string[]
+}
+
 /** Parameters accepted by Komari's administrator-only Ping task creator. */
 export interface CreatePingTaskParams extends Record<string, unknown> {
   clients: string[]
@@ -1108,6 +1116,11 @@ export class KomariRpc {
   /** Create a Ping task through Komari's administrator RPC endpoint. */
   async createPingTask(params: CreatePingTaskParams, signal?: AbortSignal): Promise<CreatePingTaskResponse> {
     return this.client.callOverHttp<CreatePingTaskResponse>('admin:addPingTask', params, signal)
+  }
+
+  /** Read exact task targets before a quick topology route reuses a task. */
+  async getAllPingTasks(signal?: AbortSignal): Promise<AdminPingTask[]> {
+    return this.client.callOverHttp<AdminPingTask[]>('admin:getAllPingTasks', undefined, signal)
   }
 
   // ==================== Public 方法（主题/公开页优先使用） ====================

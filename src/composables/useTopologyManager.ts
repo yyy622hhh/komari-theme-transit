@@ -1,12 +1,15 @@
 import type { MaybeRefOrGetter } from 'vue'
-import type { TopologyTaskCreationResult } from '@/services/topology-tasks.service'
+import type { TopologyTaskEnsureResult } from '@/services/topology-tasks.service'
 import type { NodeData } from '@/stores/nodes'
 import type { TopologyMetricConfig, TopologyNodeConfig, TopologyRouteConfig } from '@/utils/topologyHelper'
 import { computed, ref, toValue } from 'vue'
-import { createTopologyPingTask } from '@/services/topology-tasks.service'
+import { ensureTopologyPingTask } from '@/services/topology-tasks.service'
 import { saveTopologyConfiguration } from '@/services/topology.service'
 import { useAppStore } from '@/stores/app'
 import { createTopologyRoute, parseTopologyRoutes } from '@/utils/topologyHelper'
+
+const TOPOLOGY_NODE_FIELD_SEPARATOR_PATTERN = /[;|]/
+const TOPOLOGY_METRIC_FIELD_SEPARATOR_PATTERN = /[@;|]/
 
 function defaultMetric(nodeName = '', taskFilter = ''): TopologyMetricConfig {
   return { live: Boolean(nodeName && taskFilter), nodeName, taskFilter, fallbackLatency: null, fallbackLoss: null }
@@ -41,9 +44,37 @@ export function useTopologyManager(nodes: MaybeRefOrGetter<NodeData[]>) {
       errors.push(`第 ${routeIndex + 1} 条线路至少需要两个节点`)
     if (new Set(names.map(name => name.toLowerCase())).size !== names.length)
       errors.push(`第 ${routeIndex + 1} 条线路存在重复节点`)
+    route.nodes.forEach((node, nodeIndex) => {
+      const fields: Array<[string, string]> = [
+        ['节点名称', node.name],
+        ['地区', node.region],
+        ['角色', node.role],
+      ]
+      for (const [label, value] of fields) {
+        if (TOPOLOGY_NODE_FIELD_SEPARATOR_PATTERN.test(value))
+          errors.push(`第 ${routeIndex + 1} 条线路第 ${nodeIndex + 1} 个节点${label}不能包含 ; 或 |`)
+      }
+    })
     route.metrics.slice(0, Math.max(1, route.nodes.length - 1)).forEach((metric, metricIndex) => {
       if (metric.live && (!metric.nodeName.trim() || !metric.taskFilter.trim()))
         errors.push(`第 ${routeIndex + 1} 条线路第 ${metricIndex + 1} 段缺少实时任务来源`)
+      if (metric.live && TOPOLOGY_METRIC_FIELD_SEPARATOR_PATTERN.test(metric.nodeName))
+        errors.push(`第 ${routeIndex + 1} 条线路第 ${metricIndex + 1} 段探测来源不能包含 @、; 或 |`)
+      if (metric.live && TOPOLOGY_METRIC_FIELD_SEPARATOR_PATTERN.test(metric.taskFilter))
+        errors.push(`第 ${routeIndex + 1} 条线路第 ${metricIndex + 1} 段 Ping 任务不能包含 @、; 或 |`)
+      if (metric.fallbackLatency !== null && metric.fallbackLatency < 0)
+        errors.push(`第 ${routeIndex + 1} 条线路第 ${metricIndex + 1} 段备用延迟不能小于 0`)
+      if (metric.fallbackLoss !== null && (metric.fallbackLoss < 0 || metric.fallbackLoss > 100))
+        errors.push(`第 ${routeIndex + 1} 条线路第 ${metricIndex + 1} 段备用丢包必须在 0 到 100 之间`)
+    })
+
+    route.nodes.slice(1).forEach((node, nodeIndex) => {
+      const normalizedName = node.name.trim().toLowerCase()
+      if (!normalizedName)
+        return
+      const matches = availableNodes.value.filter(candidate => candidate.name.trim().toLowerCase() === normalizedName)
+      if (matches.length > 1)
+        errors.push(`第 ${routeIndex + 1} 条线路第 ${nodeIndex + 2} 个节点“${node.name.trim()}”存在同名节点，请先在 Komari 中改为唯一名称`)
     })
     return errors
   }))
@@ -105,14 +136,18 @@ export function useTopologyManager(nodes: MaybeRefOrGetter<NodeData[]>) {
     }]
   }
 
-  async function createQuickRouteTask(route: TopologyRouteConfig): Promise<TopologyTaskCreationResult> {
+  async function ensureQuickRouteTask(route: TopologyRouteConfig): Promise<TopologyTaskEnsureResult> {
     prepareQuickRoute(route)
     const sourceName = route.nodes[1]?.name.trim() ?? ''
     const targetName = route.nodes[2]?.name.trim() ?? ''
-    const source = availableNodes.value.find(node => node.name === sourceName)
-    const target = availableNodes.value.find(node => node.name === targetName)
-    if (!source || !target)
+    const sources = availableNodes.value.filter(node => node.name === sourceName)
+    const targets = availableNodes.value.filter(node => node.name === targetName)
+    if (!sources.length || !targets.length)
       throw new Error('请先选择线路机和落地机。')
+    if (sources.length > 1 || targets.length > 1)
+      throw new Error('线路机或落地机存在同名节点，请先在 Komari 中改为唯一名称。')
+    const source = sources[0]!
+    const target = targets[0]!
     if (source.uuid === target.uuid)
       throw new Error('线路机和落地机不能是同一台节点。')
 
@@ -120,14 +155,14 @@ export function useTopologyManager(nodes: MaybeRefOrGetter<NodeData[]>) {
     if (!permitted)
       throw new Error('登录状态已过期，请重新登录后创建任务。')
 
-    const created = await createTopologyPingTask(source, target)
+    const task = await ensureTopologyPingTask(source, target)
     const metric = route.metrics[1]
     if (!metric)
       throw new Error('线路实时指标初始化失败，请重试。')
     metric.live = true
     metric.nodeName = source.name
-    metric.taskFilter = created.name
-    return created
+    metric.taskFilter = task.name
+    return task
   }
 
   async function save(): Promise<boolean> {
@@ -166,7 +201,7 @@ export function useTopologyManager(nodes: MaybeRefOrGetter<NodeData[]>) {
     selectNode,
     setMetricMode,
     prepareQuickRoute,
-    createQuickRouteTask,
+    ensureQuickRouteTask,
     save,
   }
 }

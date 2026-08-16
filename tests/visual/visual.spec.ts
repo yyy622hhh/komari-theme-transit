@@ -705,12 +705,13 @@ test('Transit topology quick setup creates and binds its relay task automaticall
     params: {
       clients: ['00000000-0000-4000-8000-000000000001'],
       default_on: false,
-      name: 'Transit-主控-洛杉矶-to-香港边缘节点-超长名称布局测试',
       target: '192.0.2.11',
       type: 'icmp',
       interval: 30,
     },
   })
+  const createdName = String((creates[0] as { params?: { name?: unknown } }).params?.name)
+  expect(createdName).toMatch(/^Transit-主控-洛杉矶-to-香港边缘节点-超长名称布局测试 \[00000001-00000002-[a-z0-9]+\]$/)
   await expect.poll(() => saves.length).toBe(1)
 
   await dialog.getByRole('button', { name: '关闭' }).click()
@@ -718,7 +719,7 @@ test('Transit topology quick setup creates and binds its relay task automaticall
   await page.getByRole('button', { name: '管理', exact: true }).click()
   const reopenedDialog = page.getByRole('dialog', { name: '拓扑管理' })
   await reopenedDialog.getByRole('button', { name: '一键创建任务并保存' }).first().click()
-  await expect(page.getByText('已复用任务 Transit-主控-洛杉矶-to-香港边缘节点-超长名称布局测试，线路已保存。')).toBeVisible()
+  await expect(page.getByText(`已复用任务 ${createdName}，线路已保存。`)).toBeVisible()
   expect(creates).toHaveLength(1)
 })
 
@@ -749,6 +750,71 @@ test('Transit topology quick setup reuses an existing task instead of creating a
   await expect(page.getByText('已复用任务 Transit-主控-洛杉矶-to-香港边缘节点-超长名称布局测试，线路已保存。')).toBeVisible()
   expect(creates).toHaveLength(0)
   await expect.poll(() => saves.length).toBe(1)
+})
+
+test('Transit topology quick setup creates a replacement when a same-named task targets another address', async ({ page }) => {
+  const creates: unknown[] = []
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, {
+    pandaOps: true,
+    dark: true,
+    authenticated: true,
+    topologyQuickTaskExists: true,
+    topologyQuickTaskWrongTarget: true,
+  })
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && request.url().includes('/api/rpc2') && request.postDataJSON()?.method === 'admin:addPingTask')
+      creates.push(request.postDataJSON())
+  })
+  await openStablePage(page)
+
+  await page.getByRole('button', { name: '管理', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: '拓扑管理' })
+  await dialog.getByRole('button', { name: '一键创建任务并保存' }).first().click()
+
+  await expect.poll(() => creates.length).toBe(1)
+  expect((creates[0] as { params?: { target?: unknown } }).params?.target).toBe('192.0.2.11')
+})
+
+test('Transit topology clears a stale Ping task binding when its quick route endpoint changes', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, { pandaOps: true, dark: true, authenticated: true })
+  await openStablePage(page)
+
+  await page.getByRole('button', { name: '管理', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: '拓扑管理' })
+  await dialog.getByLabel('第 1 条线路快速落地机').selectOption('东京-高负载')
+
+  await expect(dialog.getByText('第 1 条线路第 2 段缺少实时任务来源')).toBeVisible()
+  await expect(dialog.getByRole('button', { name: '保存并应用' })).toBeDisabled()
+})
+
+test('Transit topology keeps its dialog open while a quick task is being created', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, { pandaOps: true, dark: true, authenticated: true, topologyCreateDelayMs: 800 })
+  await openStablePage(page)
+
+  await page.getByRole('button', { name: '管理', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: '拓扑管理' })
+  await dialog.getByRole('button', { name: '一键创建任务并保存' }).first().click()
+  await expect(dialog.getByRole('button', { name: '正在保存，暂时不能关闭' })).toBeDisabled()
+  await page.keyboard.press('Escape')
+  await expect(dialog).toBeVisible()
+  await expect(dialog.getByLabel('第 1 条线路快速落地机')).toBeDisabled()
+})
+
+test('Transit topology rejects configuration values that break its serialized format', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, { pandaOps: true, dark: true, authenticated: true })
+  await openStablePage(page)
+
+  await page.getByRole('button', { name: '管理', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: '拓扑管理' })
+  await dialog.getByLabel('第 1 条线路入口运营商').selectOption('__transit_custom_entry__')
+  await dialog.getByLabel('第 1 条线路入口名称').fill('北京;电信')
+
+  await expect(dialog.getByText('第 1 条线路第 1 个节点节点名称不能包含 ; 或 |')).toBeVisible()
+  await expect(dialog.getByRole('button', { name: '保存并应用' })).toBeDisabled()
 })
 
 test('Transit topology quick setup rejects a relay that is also the destination', async ({ page }) => {
