@@ -13,7 +13,6 @@
 Transit 是一个面向多节点、多线路和跨境链路监控的 Komari 社区主题。它把“入口 → 线路机 → 落地机”的链路拓扑、北京/上海/广州三网 Ping、实时资源、异常告警和资产信息放进同一套紧凑界面，并提供可视化拓扑管理器。
 
 - 当前稳定版：[v1.0.26](https://github.com/yyy622hhh/komari-theme-transit/releases/tag/v1.0.26)
-- 在线演示：[status.pandakiko.com](https://status.pandakiko.com/)
 - 安装包：只从 [GitHub Releases](https://github.com/yyy622hhh/komari-theme-transit/releases) 下载 `komari-theme-Transit-build-*.zip`
 - 项目定位：社区主题，不修改 Komari 数据库、Agent、系统账户或公开 API
 
@@ -392,8 +391,8 @@ Transit 是社区二次开发项目，不是 Komari 官方主题。感谢以下�
 
 - [Komari](https://github.com/komari-monitor/komari) — 监控服务端与生态基础。
 - [komari-web](https://github.com/komari-monitor/komari-web) — Komari 官方管理界面；Transit 仅保持 API 与使用流程兼容，不打包或再分发其代码。
-- [komari-theme-Glassmorphism](https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism) — 原始主题、组件结构与 MIT 授权基础。
-- [komari-theme-Glassmorphism-three-network](https://github.com/vlongx/komari-theme-Glassmorphism-three-network) — 三网 Ping 展示与后续二开基础。
+- [komari-theme-Glassmorphism](https://github.com/sanrokamlan-prog/komari-theme-Glassmorphism) — 原始主题和组件结构基础；感谢原作者及 MIT 许可证中列明的 Tony Liu。
+- [komari-theme-Glassmorphism-three-network](https://github.com/vlongx/komari-theme-Glassmorphism-three-network) — 感谢 vlongx 提供的三网 Ping 展示与后续二次开发基础。
 
 在已获许可的主题基础上，Transit 重新设计了网络拓扑、可视化拓扑管理器、节点卡片、告警体系、采样交互和亮暗主题。感谢所有上游贡献者。
 

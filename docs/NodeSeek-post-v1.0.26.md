@@ -14,9 +14,7 @@ Release 下载：
 
 https://github.com/yyy622hhh/komari-theme-transit/releases/latest
 
-在线演示：
-
-https://status.pandakiko.com/
+![Transit 暗色总览](https://raw.githubusercontent.com/yyy622hhh/komari-theme-transit/main/docs/screenshots/transit-overview-dark.png)
 
 ## 主要功能
 
@@ -31,6 +29,8 @@ https://status.pandakiko.com/
 - 给每一段绑定真实 Komari Ping 任务；
 - 配置没有实时样本时使用的备用延迟/丢包；
 - 保存到 Komari 托管主题设置，多设备同步。
+
+![Transit 拓扑管理器](https://raw.githubusercontent.com/yyy622hhh/komari-theme-transit/main/docs/screenshots/transit-topology-manager.png)
 
 ### 2. 北京/上海/广东三网质量
 
@@ -57,6 +57,8 @@ v1.0.24 起重新做了容器响应式布局：
 - 未设置到期的卡片也会保留统一高度，同一排不会高低不一。
 
 自动回归覆盖 320、390、768、1280、1700px，以及 mini / compact / comfortable / large 四档密度。
+
+![Transit 亮色总览](https://raw.githubusercontent.com/yyy622hhh/komari-theme-transit/main/docs/screenshots/transit-overview-light.png)
 
 ### 4. 首页直接拖动服务器顺序
 
@@ -85,15 +87,17 @@ v1.0.24 起重新做了容器响应式布局：
 - 亮色、暗色和北京时间自动模式；
 - 当前浏览器专用的本机壁纸，支持玻璃化、模糊、高清。
 
-## 关于“线路方向”和真实数据
+## 关于拓扑中的线路方向和真实数据
 
-这里特别说明一下，避免把展示拓扑和真实探测方向混在一起：
+拓扑中的实时延迟、丢包和采样记录都来自实际绑定的 Komari Ping 任务，并不是前端生成的随机数据。
 
-**Komari Ping 数据由配置的“探测来源节点”发起。**
+实际探测方向始终是：
 
-如果来源节点在日本，Ping 任务叫“北京电信”，这仍然是日本节点发起的探测，不能当成“北京电信 → 日本”的正向路径。真正的北京电信到日本，需要在北京电信网络里部署探测节点。
+**探测来源节点 → Ping 任务配置的目标地址**
 
-Transit 会显示“探测来源节点 + Ping 任务”，不会把反向 Ping 伪装成正向线路。目前项目也没有伪造 traceroute 跳点。
+例如，我没有部署在北京电信网络内的服务器，只能让日本节点 Ping 北京电信测试目标。此时测到的真实方向是“日本节点 → 北京电信测试目标”，它可以作为反向线路质量参考，但不能等同于“北京电信用户 → 日本节点”，因为互联网往返路由可能不对称。
+
+要获得真正的北京电信正向数据，仍然需要北京电信网络内的探测节点。Transit 会明确显示“探测来源节点 + Ping 任务”，不会把反向 Ping 伪装成正向线路，也不会生成虚假的 traceroute 跳点。
 
 ## 隐私和授权边界
 
@@ -131,20 +135,6 @@ dist/
 - 首屏 gzip 预算和 Release zip 结构审计；
 - 同环境连续构建 SHA-256 可复现校验；
 - GitHub Release 必须等待 Quality、Visual Regression、Browser Functional、Komari Compatibility 全部通过。
-
-## 截图
-
-暗色总览：
-
-https://github.com/yyy622hhh/komari-theme-transit/blob/main/docs/screenshots/transit-overview-dark.png
-
-亮色总览：
-
-https://github.com/yyy622hhh/komari-theme-transit/blob/main/docs/screenshots/transit-overview-light.png
-
-拓扑管理器：
-
-https://github.com/yyy622hhh/komari-theme-transit/blob/main/docs/screenshots/transit-topology-manager.png
 
 ## 最后
 
