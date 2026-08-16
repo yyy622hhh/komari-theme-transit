@@ -81,8 +81,11 @@ async function dragOrderHandleByTouch(page: Page, handle: Locator, target: Locat
     throw new Error('Touch drag source or target is not visible')
 
   const start = { x: sourceBox.x + sourceBox.width / 2, y: sourceBox.y + sourceBox.height / 2 }
-  const end = { x: targetBox.x + targetBox.width / 2, y: targetBox.y + Math.min(140, targetBox.height * 0.55) }
   const viewport = page.viewportSize()
+  const end = {
+    x: targetBox.x + targetBox.width / 2,
+    y: Math.min(targetBox.y + Math.min(140, targetBox.height * 0.55), (viewport?.height ?? 0) - 16),
+  }
   if (!viewport || start.y < 0 || start.y > viewport.height || end.y < 0 || end.y > viewport.height)
     throw new Error(`Touch drag coordinates outside viewport: start=${JSON.stringify(start)}, end=${JSON.stringify(end)}, viewport=${JSON.stringify(viewport)}`)
   await handle.evaluate((element, point) => {
@@ -117,6 +120,25 @@ async function dragOrderHandleByTouch(page: Page, handle: Locator, target: Locat
       }))
     }, { x, y })
     await page.waitForTimeout(20)
+  }
+  // A taller responsive card can place the next item below the viewport.
+  // Keep the touch pointer near the lower edge long enough for Sortable's
+  // native fallback auto-scroll to bring that item under the pointer.
+  for (let step = 0; step < 24; step++) {
+    await page.evaluate(({ x: nextX, y: nextY }) => {
+      document.dispatchEvent(new PointerEvent('pointermove', {
+        bubbles: true,
+        button: 0,
+        buttons: 1,
+        cancelable: true,
+        clientX: nextX,
+        clientY: nextY,
+        isPrimary: true,
+        pointerId: 1,
+        pointerType: 'touch',
+      }))
+    }, { x: end.x, y: end.y })
+    await page.waitForTimeout(30)
   }
   await page.evaluate(() => {
     document.dispatchEvent(new PointerEvent('pointerup', {
@@ -1283,6 +1305,85 @@ test('Transit compact node card keeps expiry text and date fully visible', async
   await expect(expiryDate).toBeVisible()
   await expect.poll(() => expiryText.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
   await expect.poll(() => expiryDate.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
+})
+
+test('Transit worst-case node cards remain complete and responsive across densities', async ({ page }) => {
+  const cases = [
+    { width: 320, height: 900, size: 'mini', columns: 1 },
+    { width: 390, height: 900, size: 'compact', columns: 1 },
+    { width: 768, height: 1000, size: 'comfortable', columns: 3 },
+    { width: 1280, height: 900, size: 'compact', columns: 2 },
+    { width: 1700, height: 1000, size: 'large', columns: 3 },
+  ] as const
+
+  for (const testCase of cases) {
+    await page.setViewportSize({ width: testCase.width, height: testCase.height })
+    await installKomariFixture(page, {
+      pandaOps: true,
+      dark: true,
+      hideEarth: true,
+      nodeCardSize: testCase.size,
+      nodeCardWorstCase: true,
+    })
+    await openStablePage(page)
+
+    const card = page.getByRole('button', { name: /查看节点 北京联通精品线路/ }).locator('xpath=..')
+    const detailGrid = card.locator('[data-node-card-detail-grid]')
+    const expiryText = card.locator('[data-node-expiry-text]')
+    const expiryDate = card.locator('[data-node-expiry-date]')
+    const name = card.locator('[data-node-name]')
+
+    await expect(card).toHaveAttribute('data-panda-node-card-size', testCase.size)
+    await expect(name).toHaveAttribute('title', '北京联通精品线路-日本东京-A100-超长节点名称完整展示压力测试')
+    await expect.poll(() => name.evaluate(element => element.getBoundingClientRect().height <= Number.parseFloat(getComputedStyle(element).lineHeight) * 2 + 1)).toBe(true)
+    await expect(expiryText).toHaveText(/剩余 \d+ 天/)
+    await expect(expiryDate).toHaveText('2037-01-01')
+    await expect.poll(() => detailGrid.evaluate(element => getComputedStyle(element).gridTemplateColumns.split(' ').length)).toBe(testCase.columns)
+    await expect.poll(async () => {
+      const [textBox, dateBox] = await Promise.all([expiryText.boundingBox(), expiryDate.boundingBox()])
+      return textBox && dateBox ? Math.abs(textBox.x - dateBox.x) : Number.POSITIVE_INFINITY
+    }).toBeLessThan(1)
+
+    const completeTextSelectors = [
+      '[data-node-uptime]',
+      '[data-node-price]',
+      '[data-node-resource-value]',
+      '[data-node-speed-cell] > span',
+      '[data-node-traffic-value]',
+      '[data-node-expiry-text]',
+      '[data-node-expiry-date]',
+      '[data-node-carrier-row] > span',
+      '[data-node-carrier-row] > strong',
+    ]
+    for (const selector of completeTextSelectors) {
+      const elements = card.locator(selector)
+      await expect.poll(() => elements.evaluateAll(items => items.every(item => item.scrollWidth <= item.clientWidth + 1))).toBe(true)
+    }
+
+    await expect.poll(() => card.locator('[data-node-card-detail-grid] > .node-card-cell').evaluateAll((cells) => {
+      const boxes = cells.map(cell => cell.getBoundingClientRect())
+      return boxes.every((box, index) => boxes.every((other, otherIndex) => index === otherIndex
+        || box.right <= other.left + 0.5
+        || other.right <= box.left + 0.5
+        || box.bottom <= other.top + 0.5
+        || other.bottom <= box.top + 0.5))
+    })).toBe(true)
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
+    if (testCase.width >= 768) {
+      const items = page.locator('[data-node-card-grid] > [data-server-order-item], [data-node-card-grid] > div')
+      await expect.poll(() => items.evaluateAll((elements) => {
+        const rows = new Map<number, number[]>()
+        for (const item of elements) {
+          const box = item.getBoundingClientRect()
+          const rowKey = Math.round(box.top)
+          rows.set(rowKey, [...(rows.get(rowKey) ?? []), box.height])
+        }
+        return [...rows.values()].every(heights => heights.length < 2 || Math.max(...heights) - Math.min(...heights) < 1)
+      })).toBe(true)
+    }
+
+    await page.unrouteAll({ behavior: 'wait' })
+  }
 })
 
 test('node card expiry uses red through 5 days and yellow through 10 days', async ({ page }) => {

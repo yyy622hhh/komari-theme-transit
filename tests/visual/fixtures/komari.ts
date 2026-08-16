@@ -45,6 +45,7 @@ export interface VisualFixtureOptions {
   hidePriceWhenLoggedOut?: boolean
   orderSaveFailure?: boolean
   authenticationExpires?: boolean
+  nodeCardWorstCase?: boolean
   /** Generate a deterministic large node fleet for performance coverage. */
   nodeCount?: number
 }
@@ -310,9 +311,11 @@ async function handleRpc(
     time: new Date(Date.parse(FIXED_NOW) - (47 - index) * 75_000).toISOString(),
     value: uuid !== uuidFor(1) && index % 17 === 0
       ? -1
-      : task.name === 'PandaOps-Local-Hop'
-        ? 1.1 + Math.sin(index / 4) * 0.15
-        : 76 + index + task.id,
+      : options.nodeCardWorstCase
+        ? 9_876 + index * 13 + task.id
+        : task.name === 'PandaOps-Local-Hop'
+          ? 1.1 + Math.sin(index / 4) * 0.15
+          : 76 + index + task.id,
   })))
   let result: unknown
 
@@ -444,7 +447,31 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
     ? buildClients(options.freePriceNode, options.expiryThresholds, nodeCount)
     : clients
   const clientFixtures = structuredClone(sourceClients)
-  const statusFixtures = options.nodeCount ? buildStatuses(nodeCount) : statuses
+  const statusFixtures = options.nodeCount || options.nodeCardWorstCase
+    ? structuredClone(options.nodeCount ? buildStatuses(nodeCount) : statuses)
+    : statuses
+  if (options.nodeCardWorstCase) {
+    Object.assign(clientFixtures[uuidFor(0)]!, {
+      name: '北京联通精品线路-日本东京-A100-超长节点名称完整展示压力测试',
+      mem_total: 128 * TIB,
+      disk_total: 8 * 1024 * TIB,
+      price: 1_234_567.89,
+      billing_cycle: 3650,
+      expired_at: '2036-12-31T23:59:59.000Z',
+      traffic_limit: 8 * 1024 * TIB,
+    })
+    Object.assign(statusFixtures[uuidFor(0)]!, {
+      ram: 98.765 * TIB,
+      ram_total: 128 * TIB,
+      disk: 6.789 * 1024 * TIB,
+      disk_total: 8 * 1024 * TIB,
+      net_in: 987.654 * GIB,
+      net_out: 876.543 * GIB,
+      net_total_up: 3.456 * 1024 * TIB,
+      net_total_down: 2.345 * 1024 * TIB,
+      uptime: 3652 * 86_400,
+    })
+  }
   let settings: Record<string, unknown> = {
     alertEnabled: options.announcementEscaping ?? false,
     alertTitle: options.announcementEscaping ? '状态公告' : '',

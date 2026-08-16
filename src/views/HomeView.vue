@@ -280,7 +280,7 @@ const isDenseNodeGrid = computed(() => appStore.nodeViewMode === 'card' && displ
 const enableNodeCardTransition = computed(() => !appStore.disablePageAnimation && !isDenseNodeGrid.value)
 const reduceDenseNodeEffects = computed(() => appStore.nodeViewMode === 'card' && displayedNodeList.value.length > denseNodePingAnimationThreshold)
 const deferNodeCards = computed(() => !homeOrder.editingOrder.value && appStore.nodeViewMode === 'card' && displayedNodeList.value.length > UI_CONFIG.virtualList.nodeThreshold)
-const deferredNodeCardHeight = computed(() => ({ mini: 220, compact: 270, comfortable: 310, large: 350 }[appStore.nodeCardSize]))
+const deferredNodeCardHeight = computed(() => ({ mini: 300, compact: 320, comfortable: 330, large: 350 }[appStore.nodeCardSize]))
 
 const quickControlCounts = computed<Record<HomeQuickControlKey, number>>(() => {
   let base = groupNodeList.value

@@ -107,13 +107,18 @@ const statusEdgeTone = computed(() => {
     />
 
     <header class="panda-node-card__header pointer-events-none relative z-1 min-h-[2.65rem]">
-      <div class="flex min-w-0 items-center justify-between gap-3">
-        <div class="flex min-w-0 items-center gap-2">
+      <div class="flex min-w-0 items-start justify-between gap-3">
+        <div class="flex min-w-0 flex-1 items-start gap-2">
           <span class="size-2.5 shrink-0 rounded-full" :class="isMaintenance ? 'bg-amber-400' : node.online ? 'bg-emerald-400' : 'bg-rose-400'" />
-          <h3 class="truncate text-[15px] font-semibold tracking-[-0.01em] text-slate-900 dark:text-slate-100">
+          <h3
+            data-node-name
+            class="node-card-name min-w-0 text-[15px] font-semibold leading-[1.25] tracking-[-0.01em] text-slate-900 dark:text-slate-100"
+            :title="node.name"
+            :aria-label="node.name"
+          >
             {{ node.name }}
           </h3>
-          <span v-if="role" class="shrink-0 text-[10px] text-slate-500">· {{ role }}</span>
+          <span v-if="role" class="shrink-0 pt-0.5 text-[10px] text-slate-500">· {{ role }}</span>
         </div>
         <div class="flex shrink-0 items-center gap-2">
           <button
@@ -137,20 +142,20 @@ const statusEdgeTone = computed(() => {
           >
         </div>
       </div>
-      <div class="mt-1.5 flex min-w-0 items-center justify-between gap-3 text-[10px] text-slate-500">
-        <div class="flex min-w-0 shrink-0 items-center gap-2">
-          <span :class="isMaintenance && 'font-medium text-amber-700 dark:text-amber-300'">
+      <div data-node-status-row class="mt-1.5 flex min-w-0 flex-wrap items-start justify-between gap-x-3 gap-y-1 text-[10px] text-slate-500">
+        <div class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+          <span data-node-uptime class="break-words" :class="isMaintenance && 'font-medium text-amber-700 dark:text-amber-300'">
             {{ isMaintenance ? '维护中' : node.online ? `在线 ${getUptimeDays(node.uptime)} 天` : '离线' }}
           </span>
-          <span v-if="price">{{ price }}</span>
-          <span v-if="isSilenced && !isMaintenance" class="font-medium text-slate-600 dark:text-slate-300">已静默</span>
+          <span v-if="price" data-node-price class="break-words">{{ price }}</span>
+          <span v-if="isSilenced && !isMaintenance" data-node-maintenance-state class="break-words font-medium text-slate-600 dark:text-slate-300">已静默</span>
         </div>
         <TooltipProvider v-if="visibleAlert && node.online" :delay-duration="160">
           <Tooltip>
             <TooltipTrigger as-child>
               <span
                 data-node-alert-reason
-                class="pointer-events-auto flex min-w-0 max-w-[58%] items-center gap-1.5 font-medium tabular-nums"
+                class="pointer-events-auto flex min-w-0 max-w-full items-center gap-1.5 font-medium tabular-nums"
                 :class="alertTone"
                 @click="emit('click')"
               >
@@ -173,7 +178,7 @@ const statusEdgeTone = computed(() => {
           <strong class="font-medium tabular-nums text-slate-700 dark:text-slate-200">{{ node.cpu.toFixed(1) }}%</strong>
         </div>
         <ProgressThin class="mt-1.5" :percentage="node.cpu" :status="resourceStatus(node.cpu)" :height="3" />
-        <div class="mt-1 truncate text-[9px] tabular-nums text-slate-500 dark:text-slate-600">
+        <div data-node-resource-value class="mt-1 break-words text-[9px] leading-tight tabular-nums text-slate-500 dark:text-slate-600">
           {{ node.load.toFixed(2) }}, {{ node.load5.toFixed(2) }}, {{ node.load15.toFixed(2) }}
         </div>
       </div>
@@ -183,7 +188,7 @@ const statusEdgeTone = computed(() => {
           <strong class="font-medium tabular-nums text-slate-700 dark:text-slate-200">{{ memoryPercentage.toFixed(1) }}%</strong>
         </div>
         <ProgressThin class="mt-1.5" :percentage="memoryPercentage" :status="resourceStatus(memoryPercentage)" :height="3" />
-        <div class="mt-1 truncate text-[9px] tabular-nums text-slate-500 dark:text-slate-600">
+        <div data-node-resource-value class="mt-1 break-words text-[9px] leading-tight tabular-nums text-slate-500 dark:text-slate-600">
           {{ formatBytes(node.ram) }} / {{ formatBytes(node.mem_total) }}
         </div>
       </div>
@@ -193,40 +198,40 @@ const statusEdgeTone = computed(() => {
           <strong class="font-medium tabular-nums text-slate-700 dark:text-slate-200">{{ diskPercentage.toFixed(1) }}%</strong>
         </div>
         <ProgressThin class="mt-1.5" :percentage="diskPercentage" :status="resourceStatus(diskPercentage)" :height="3" />
-        <div class="mt-1 truncate text-[9px] tabular-nums text-slate-500 dark:text-slate-600">
+        <div data-node-resource-value class="mt-1 break-words text-[9px] leading-tight tabular-nums text-slate-500 dark:text-slate-600">
           {{ formatBytes(node.disk) }} / {{ formatBytes(node.disk_total) }}
         </div>
       </div>
     </div>
 
-    <div class="pointer-events-none relative z-1 mt-2.5 grid grid-cols-[0.78fr_0.92fr_1.65fr] gap-2">
-      <div class="node-card-cell flex flex-col justify-center px-2.5 py-2 text-[10px] tabular-nums">
-        <span class="text-emerald-600 dark:text-emerald-400">↑ {{ formatSpeed(node.net_out) }}</span>
-        <span class="mt-1 text-slate-700 dark:text-slate-300">↓ {{ formatSpeed(node.net_in) }}</span>
+    <div data-node-card-detail-grid class="node-card-detail-grid pointer-events-none relative z-1 mt-2.5 grid gap-2">
+      <div data-node-speed-cell class="node-card-cell flex min-w-0 flex-col justify-center px-2.5 py-2 text-[10px] tabular-nums">
+        <span class="break-words text-emerald-600 dark:text-emerald-400">↑ {{ formatSpeed(node.net_out) }}</span>
+        <span class="mt-1 break-words text-slate-700 dark:text-slate-300">↓ {{ formatSpeed(node.net_in) }}</span>
       </div>
 
-      <div class="node-card-cell min-w-0 px-2.5 py-2 text-[9px]">
-        <div class="flex items-center justify-between gap-2 text-slate-500">
+      <div data-node-traffic-cell class="node-card-cell min-w-0 px-2.5 py-2 text-[9px]">
+        <div class="flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5 text-slate-500">
           <span>累计流量</span>
           <span v-if="hasTrafficLimit(node)" class="tabular-nums">{{ trafficPercentage.toFixed(1) }}%</span>
         </div>
-        <div class="mt-1 truncate text-[10px] font-medium tabular-nums text-slate-700 dark:text-slate-200">
+        <div data-node-traffic-value class="mt-1 break-words text-[10px] font-medium leading-tight tabular-nums text-slate-700 dark:text-slate-200">
           {{ formatBytes(trafficUsed) }}<template v-if="hasTrafficLimit(node)">
             / {{ formatBytes(node.traffic_limit) }}
           </template>
         </div>
-        <div data-node-expiry-row class="mt-1 flex min-w-0 flex-wrap items-center gap-x-1 gap-y-0.5 text-slate-500">
-          <span data-node-expiry-text class="shrink-0 whitespace-nowrap">{{ expiryText }}</span>
-          <span v-if="expiryDate" data-node-expiry-date class="ml-auto shrink-0 whitespace-nowrap text-[8px] tabular-nums">{{ expiryDate }}</span>
+        <div data-node-expiry-row class="mt-1 flex min-w-0 flex-col items-start gap-y-0.5 text-slate-500">
+          <span data-node-expiry-text class="max-w-full whitespace-nowrap">{{ expiryText }}</span>
+          <span v-if="expiryDate" data-node-expiry-date class="max-w-full whitespace-nowrap text-[8px] tabular-nums">{{ expiryDate }}</span>
         </div>
       </div>
 
-      <div class="node-card-cell min-w-0 px-2.5 py-1.5">
-        <div class="mb-1 flex items-center justify-between text-[9px] text-slate-500">
+      <div data-node-carrier-cell class="node-card-cell min-w-0 px-2.5 py-1.5">
+        <div class="mb-1 flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5 text-[9px] text-slate-500">
           <span>三网质量</span><span :class="carrierStatsStale && 'text-amber-700 dark:text-amber-300'">{{ carrierStatsStale ? `${carrierScopeLabel} 数据过期` : carrierScopeLabel }}</span>
         </div>
         <div class="space-y-1">
-          <div v-for="carrier in carrierDisplays" :key="carrier.key" class="grid grid-cols-[26px_1fr_38px_34px] items-center gap-1 text-[8px] leading-none">
+          <div v-for="carrier in carrierDisplays" :key="carrier.key" data-node-carrier-row class="grid min-w-0 grid-cols-[26px_minmax(24px,1fr)_minmax(38px,auto)_minmax(34px,auto)] items-center gap-1 text-[8px] leading-none">
             <span class="flex items-center gap-1 text-slate-500"><i class="size-1.5 rounded-full" :class="carrier.dotClass" />{{ carrier.label }}</span>
             <CarrierPingSamples
               :bars="carrier.latencyBars.slice(-12)"
@@ -266,10 +271,64 @@ const statusEdgeTone = computed(() => {
   -webkit-backdrop-filter: none !important;
 }
 
+.panda-node-card {
+  container-type: inline-size;
+}
+
+.node-card-name {
+  display: -webkit-box;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.node-card-detail-grid {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .node-card-cell {
   border: 1px solid var(--panda-divider);
   border-radius: 0.65rem;
   background: var(--panda-cell-bg);
+}
+
+@container (min-width: 22rem) {
+  .node-card-detail-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  [data-node-carrier-cell] {
+    grid-column: 1 / -1;
+  }
+}
+
+@container (min-width: 35rem) {
+  .node-card-detail-grid {
+    grid-template-columns: minmax(0, 0.78fr) minmax(0, 0.92fr) minmax(0, 1.65fr);
+  }
+
+  [data-node-carrier-cell] {
+    grid-column: auto;
+  }
+}
+
+@container (max-width: 21rem) {
+  .panda-node-card__header > div:first-child {
+    gap: 0.5rem;
+  }
+
+  [data-node-resource-grid] {
+    gap: 0.45rem;
+  }
+
+  [data-node-resource-value] {
+    font-size: 0.5rem;
+  }
+
+  .node-card-cell {
+    padding-inline: 0.6rem;
+  }
 }
 
 .panda-node-card[data-panda-node-card-size='mini'] {
