@@ -25,6 +25,14 @@ const missingTopLevel = expectedTopLevel.filter(entry => !topLevel.has(entry))
 const forbidden = entries.filter(entry => entry === 'dist/admin-app' || entry.startsWith('dist/admin-app/'))
 const forbiddenTestArtifacts = entries.filter(entry => TEST_ARTIFACT_PATTERN.test(entry))
 const duplicateEntries = entries.filter((entry, index) => entries.indexOf(entry) !== index)
+const distFiles = entries.filter(entry => entry.startsWith('dist/') && entry !== 'dist/')
+const sortedDistFiles = [...distFiles].sort((left, right) => left < right ? -1 : left > right ? 1 : 0)
+const archiveRoots = new Set(entries.slice(0, 3))
+const deterministicOrder = archiveRoots.size === 3
+  && archiveRoots.has('komari-theme.json')
+  && archiveRoots.has('preview.png')
+  && archiveRoots.has('dist/')
+  && distFiles.every((entry, index) => entry === sortedDistFiles[index])
 const archiveManifest = JSON.parse(execFileSync('unzip', ['-p', zipPath, 'komari-theme.json'], { encoding: 'utf8' })) as { version?: unknown }
 const sourceManifest = JSON.parse(readFileSync(resolve(process.cwd(), 'komari-theme.json'), 'utf8')) as { version?: unknown }
 const detailedEntries = execFileSync('unzip', ['-ZTs', zipPath], { encoding: 'utf8' })
@@ -54,6 +62,7 @@ if (
   || forbidden.length
   || forbiddenTestArtifacts.length
   || duplicateEntries.length
+  || !deterministicOrder
   || archiveManifest.version !== sourceManifest.version
   || detailedEntries.length !== entries.length
   || archiveTimestamps.size !== 1
@@ -68,6 +77,7 @@ if (
     forbidden.length ? 'Forbidden embedded admin bundle detected' : '',
     forbiddenTestArtifacts.length ? `Forbidden functional-test artifacts: ${forbiddenTestArtifacts.join(', ')}` : '',
     duplicateEntries.length ? `Duplicate archive entries: ${[...new Set(duplicateEntries)].join(', ')}` : '',
+    !deterministicOrder ? 'Archive entries are not in the deterministic manifest/preview/dist/sorted-files order' : '',
     archiveManifest.version !== sourceManifest.version ? 'Packaged manifest version does not match the source manifest' : '',
     detailedEntries.length !== entries.length ? 'Could not inspect every archive entry metadata record' : '',
     archiveTimestamps.size !== 1 ? 'Archive entry timestamps are not deterministic' : '',

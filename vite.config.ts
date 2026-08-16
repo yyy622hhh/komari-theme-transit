@@ -1,7 +1,6 @@
-import type { Stats } from 'node:fs'
 import type { Plugin } from 'vite'
 import { execSync } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { resolve } from 'node:path'
 import process from 'node:process'
@@ -21,9 +20,9 @@ interface ThemeManifest {
   version?: unknown
 }
 
-interface ArchiveEntryData {
-  [key: string]: unknown
-  stats?: Stats
+interface ArchiveFile {
+  absolutePath: string
+  archivePath: string
 }
 
 const themeJsonPath = resolve(__dirname, 'komari-theme.json')
@@ -76,6 +75,27 @@ function getArchiveDate(): Date {
   return new Date('1980-01-01T00:00:00.000Z')
 }
 
+function collectSortedArchiveFiles(root: string, archiveRoot: string): ArchiveFile[] {
+  const files: ArchiveFile[] = []
+
+  function visit(directory: string, archiveDirectory: string): void {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      const absolutePath = resolve(directory, entry.name)
+      const archivePath = `${archiveDirectory}/${entry.name}`
+      if (entry.isDirectory()) {
+        visit(absolutePath, archivePath)
+        continue
+      }
+      if (!entry.isFile())
+        throw new Error(`Release blocked: unsupported dist entry ${archivePath}`)
+      files.push({ absolutePath, archivePath })
+    }
+  }
+
+  visit(root, archiveRoot)
+  return files.sort((left, right) => left.archivePath < right.archivePath ? -1 : left.archivePath > right.archivePath ? 1 : 0)
+}
+
 /**
  * Vite 插件：构建后打包 Komari 主题 Zip
  * theme.zip
@@ -126,20 +146,19 @@ function komariThemeZip(): Plugin {
 
         archive.pipe(output)
 
-        archive.file(themeJsonPath, { name: 'komari-theme.json', date: archiveDate, mode: 0o644 })
+        archive.append(readFileSync(themeJsonPath), { name: 'komari-theme.json', date: archiveDate, mode: 0o644 })
 
         if (existsSync(previewPath)) {
-          archive.file(previewPath, { name: 'preview.png', date: archiveDate, mode: 0o644 })
+          const preview = readFileSync(previewPath)
+          archive.append(preview, { name: 'preview.png', date: archiveDate, mode: 0o644 })
           if (manifestPreviewName !== 'preview.png') {
-            archive.file(previewPath, { name: manifestPreviewName, date: archiveDate, mode: 0o644 })
+            archive.append(preview, { name: manifestPreviewName, date: archiveDate, mode: 0o644 })
           }
         }
 
-        archive.directory(distDir, 'dist', (data: ArchiveEntryData) => ({
-          ...data,
-          date: archiveDate,
-          mode: data.stats?.isDirectory() ? 0o755 : 0o644,
-        }))
+        archive.append('', { name: 'dist/', date: archiveDate, mode: 0o755 })
+        for (const file of collectSortedArchiveFiles(distDir, 'dist'))
+          archive.append(readFileSync(file.absolutePath), { name: file.archivePath, date: archiveDate, mode: 0o644 })
 
         archive.finalize()
       })
