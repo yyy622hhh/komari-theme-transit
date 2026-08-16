@@ -46,6 +46,7 @@ export interface VisualFixtureOptions {
   orderSaveFailure?: boolean
   authenticationExpires?: boolean
   nodeCardWorstCase?: boolean
+  nodeCardPanels?: Record<string, { mode: string, pingTasks?: string[] }>
   /** Generate a deterministic large node fleet for performance coverage. */
   nodeCount?: number
 }
@@ -499,6 +500,7 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
     opsDashboardEnabled: options.pandaOps ?? false,
     topologyEnabled: options.pandaOps ?? false,
     carrierPingRegion: 'all',
+    nodeCardPanels: options.nodeCardPanels ? JSON.stringify(options.nodeCardPanels) : undefined,
     topologyRoute: options.pandaOps && !options.emptyTopology
       ? `北京电信|CN|入口;主控-洛杉矶|US|线路机;${options.pandaOpsMissingNode ? '未纳管-西雅图' : '香港边缘节点-超长名称布局测试'}|${options.pandaOpsMissingNode ? 'US' : 'HK'}|落地机||北京电信|CN|入口;东京-高负载|JP|线路机;${options.pandaOpsComparableRoutes ? '香港边缘节点-超长名称布局测试-10|HK' : '新加坡-A100|SG'}|落地机`
       : '',

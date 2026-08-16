@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import type { ServerListSortKey, ServerListStatusFilter } from '@/services/server-list.service'
 import type { NodeData } from '@/stores/nodes'
+import type { NodeCardPanelDefaultMode } from '@/utils/nodeCardPanel'
 import { Icon } from '@iconify/vue'
 import { computed, nextTick, ref } from 'vue'
+import { AppDialog } from '@/components/ui/app-dialog'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Empty } from '@/components/ui/empty'
@@ -12,6 +14,7 @@ import { useOrderMoveFeedback } from '@/composables/useOrderMoveFeedback'
 import { useServerList } from '@/composables/useServerList'
 import { useSortableOrder } from '@/composables/useSortableOrder'
 import { KOMARI_ADMIN_SERVERS_PATH } from '@/constants'
+import { saveNodeCardPanelConfigs } from '@/services/node-card-panel.service'
 import { useAppStore } from '@/stores/app'
 import {
   formatBytesPerSecondWithConfig,
@@ -19,6 +22,7 @@ import {
   formatDateTime,
   getStatus,
 } from '@/utils/helper'
+import { NODE_CARD_PANEL_OPTIONS } from '@/utils/nodeCardPanel'
 import { getRegionDisplayName } from '@/utils/regionHelper'
 
 const props = defineProps<{
@@ -55,6 +59,10 @@ const {
 const desktopOrderContainer = ref<HTMLElement | null>(null)
 const mobileOrderContainer = ref<HTMLElement | null>(null)
 const panel = ref<HTMLElement | null>(null)
+const bulkPanelOpen = ref(false)
+const bulkPanelMode = ref<'inherit' | NodeCardPanelDefaultMode>('inherit')
+const savingBulkPanel = ref(false)
+const bulkPanelOptions = NODE_CARD_PANEL_OPTIONS.filter(option => option.value !== 'ping') as Array<{ value: NodeCardPanelDefaultMode, label: string }>
 const {
   announcement: orderAnnouncement,
   handleKeydown: handleOrderKeydown,
@@ -175,6 +183,34 @@ async function saveOrder(): Promise<void> {
     window.$message?.error(`保存服务器顺序失败：${error instanceof Error ? error.message : String(error)}`)
   }
 }
+
+async function saveBulkPanel(): Promise<void> {
+  const publicSettings = appStore.publicSettings
+  if (!publicSettings || props.nodes.length === 0)
+    return
+
+  const nextConfigs = { ...appStore.nodeCardPanels }
+  for (const node of props.nodes) {
+    if (bulkPanelMode.value === 'inherit')
+      delete nextConfigs[node.uuid]
+    else
+      nextConfigs[node.uuid] = { mode: bulkPanelMode.value }
+  }
+
+  savingBulkPanel.value = true
+  try {
+    const payload = await saveNodeCardPanelConfigs({ theme: publicSettings.theme, configs: nextConfigs })
+    appStore.publicSettings = { ...publicSettings, theme_settings: payload }
+    bulkPanelOpen.value = false
+    window.$message?.success(`已更新 ${props.nodes.length} 台节点的卡片面板。`)
+  }
+  catch (error) {
+    window.$message?.error(error instanceof Error ? error.message : '批量面板保存失败。')
+  }
+  finally {
+    savingBulkPanel.value = false
+  }
+}
 </script>
 
 <template>
@@ -189,6 +225,10 @@ async function saveOrder(): Promise<void> {
         </p>
       </div>
       <div class="flex shrink-0 flex-wrap gap-2 self-start sm:self-auto">
+        <Button v-if="appStore.privateFeaturesAllowed && !editingOrder" variant="outline" size="sm" aria-label="批量卡片面板" title="批量卡片面板" @click="bulkPanelOpen = true">
+          <Icon icon="tabler:layout-dashboard" />
+          <span class="hidden sm:inline">批量卡片面板</span>
+        </Button>
         <Button v-if="!editingOrder" data-server-order-edit-trigger variant="outline" size="sm" :title="canEditOrder ? '编辑首页顺序' : '请先切换到全部节点'" :aria-disabled="!canEditOrder" @click="startOrderEdit">
           <Icon icon="tabler:arrows-move-vertical" />
           编辑首页顺序
@@ -464,6 +504,42 @@ async function saveOrder(): Promise<void> {
     </div>
 
     <Empty v-if="!rows.length" :description="query.trim() ? '没有匹配的服务器' : '当前筛选下暂无服务器'" class="py-10" />
+
+    <AppDialog
+      v-model:open="bulkPanelOpen"
+      title="批量设置节点卡片面板"
+      :description="`应用到当前分组中的 ${nodes.length} 台节点；自定义 Ping 仍需逐台选择任务。`"
+      content-class="max-w-md"
+    >
+      <div class="space-y-3" data-bulk-node-card-panel-dialog>
+        <label class="block text-xs font-medium text-foreground" for="bulk-node-card-panel-mode">面板类型</label>
+        <select
+          id="bulk-node-card-panel-mode"
+          v-model="bulkPanelMode"
+          class="h-9 w-full rounded-md border border-border bg-background px-2 text-xs text-foreground outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/40"
+          :disabled="savingBulkPanel"
+        >
+          <option value="inherit">
+            跟随全局默认
+          </option>
+          <option v-for="option in bulkPanelOptions" :key="option.value" :value="option.value">
+            {{ option.label }}
+          </option>
+        </select>
+        <p class="rounded-md bg-muted/45 px-3 py-2 text-[10px] leading-5 text-muted-foreground">
+          该操作只修改卡片观测面板，不改变服务器顺序、Ping 任务、节点标签或 Komari Agent 配置。
+        </p>
+        <div class="flex justify-end gap-2">
+          <Button variant="ghost" size="sm" :disabled="savingBulkPanel" @click="bulkPanelOpen = false">
+            取消
+          </Button>
+          <Button size="sm" :disabled="savingBulkPanel || nodes.length === 0" @click="saveBulkPanel">
+            <Icon :icon="savingBulkPanel ? 'tabler:loader-2' : 'tabler:device-floppy'" :class="savingBulkPanel && 'animate-spin'" />
+            {{ savingBulkPanel ? '保存中' : `应用到 ${nodes.length} 台` }}
+          </Button>
+        </div>
+      </div>
+    </AppDialog>
   </section>
 </template>
 

@@ -2,10 +2,9 @@
 import type { NodeData } from '@/stores/nodes'
 import { Icon } from '@iconify/vue'
 import { computed } from 'vue'
-import CarrierPingSamples from '@/components/CarrierPingSamples.vue'
+import NodeCardInsightPanel from '@/components/NodeCardInsightPanel.vue'
 import { ProgressThin } from '@/components/ui/progress-thin'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
-import { useNodeCarrierPingDisplay } from '@/composables/useNodeCarrierPingDisplay'
 import { usePandaOpsNodeAlert } from '@/composables/usePandaOpsAlertState'
 import { useAppStore } from '@/stores/app'
 import { formatBytesPerSecondWithConfig, formatBytesWithConfig, formatDateTime, getStatus, getUptimeDays } from '@/utils/helper'
@@ -52,7 +51,6 @@ const expiryDate = computed(() => expiryStatus.value === 'unknown' || expiryStat
   ? ''
   : formatDateTime(props.node.expired_at, 'YYYY-MM-DD'))
 
-const { carrierDisplays, carrierScopeLabel, stale: carrierStatsStale } = useNodeCarrierPingDisplay(() => props.node.uuid)
 const primaryAlert = usePandaOpsNodeAlert(() => props.node.uuid)
 const visibleAlert = computed(() => isMaintenance.value ? null : primaryAlert.value)
 const formatBytes = (value: number) => formatBytesWithConfig(value, appStore.byteDecimals)
@@ -60,15 +58,6 @@ const formatSpeed = (value: number) => formatBytesPerSecondWithConfig(value, app
 
 function resourceStatus(value: number) {
   return getStatus(value)
-}
-
-function lossTone(loss: string): string {
-  const value = Number.parseFloat(loss)
-  if (!Number.isFinite(value) || value <= 1)
-    return 'text-slate-700 dark:text-slate-300'
-  if (value <= 3)
-    return 'text-amber-700 dark:text-amber-300'
-  return 'text-rose-600 dark:text-rose-400'
 }
 
 const alertTone = computed(() => visibleAlert.value?.severity === 'critical'
@@ -226,22 +215,7 @@ const statusEdgeTone = computed(() => {
         </div>
       </div>
 
-      <div data-node-carrier-cell class="node-card-cell min-w-0 px-2.5 py-1.5">
-        <div class="mb-1 flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5 text-[9px] text-slate-500">
-          <span>三网质量</span><span :class="carrierStatsStale && 'text-amber-700 dark:text-amber-300'">{{ carrierStatsStale ? `${carrierScopeLabel} 数据过期` : carrierScopeLabel }}</span>
-        </div>
-        <div class="space-y-1">
-          <div v-for="carrier in carrierDisplays" :key="carrier.key" data-node-carrier-row class="grid min-w-0 grid-cols-[26px_minmax(24px,1fr)_minmax(38px,auto)_minmax(34px,auto)] items-center gap-1 text-[8px] leading-none">
-            <span class="flex items-center gap-1 text-slate-500"><i class="size-1.5 rounded-full" :class="carrier.dotClass" />{{ carrier.label }}</span>
-            <CarrierPingSamples
-              :bars="carrier.latencyBars.slice(-12)"
-              :label="`${carrier.label}延迟`"
-            />
-            <strong class="text-right font-medium tabular-nums text-slate-700 dark:text-slate-200">{{ carrier.latencyDisplay.replace(' ms', '') }}</strong>
-            <strong class="text-right font-medium tabular-nums" :class="lossTone(carrier.lossDisplay)">{{ carrier.lossDisplay }}</strong>
-          </div>
-        </div>
-      </div>
+      <NodeCardInsightPanel :node="node" />
     </div>
 
     <footer v-if="tags.length" class="pointer-events-none relative z-1 mt-2.5 flex min-w-0 gap-1 overflow-hidden">
@@ -298,7 +272,7 @@ const statusEdgeTone = computed(() => {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  [data-node-carrier-cell] {
+  [data-node-insight-panel] {
     grid-column: 1 / -1;
   }
 }
@@ -308,7 +282,7 @@ const statusEdgeTone = computed(() => {
     grid-template-columns: minmax(0, 0.78fr) minmax(0, 0.92fr) minmax(0, 1.65fr);
   }
 
-  [data-node-carrier-cell] {
+  [data-node-insight-panel] {
     grid-column: auto;
   }
 }

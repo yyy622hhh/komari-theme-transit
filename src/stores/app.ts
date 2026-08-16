@@ -23,6 +23,7 @@ import { useNow, useStorageAsync } from '@vueuse/core'
 import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
 import { getAuthSession, requirePermission, setAuthSessionFromLogin, verifyLogin } from '@/services/auth.service'
+import { isNodeCardPanelDefaultMode, parseNodeCardPanelConfigs } from '@/utils/nodeCardPanel'
 import { parsePandaOpsNodeControls } from '@/utils/pandaOpsNodeControl'
 import { normalizeThemeSettings, resolveThemeBackgroundSource } from '@/utils/themeSettings'
 
@@ -897,6 +898,13 @@ const useAppStore = defineStore('app', () => {
     minuteTick.value.getTime(),
   ))
 
+  const nodeCardPanelDefault = computed(() => {
+    const value = themeSettings.value.nodeCardPanelDefault
+    return isNodeCardPanelDefaultMode(value) ? value : 'carrier'
+  })
+
+  const nodeCardPanels = computed(() => parseNodeCardPanelConfigs(themeSettings.value.nodeCardPanels))
+
   const carrierPingRegion = computed<string>(() => {
     const value = readStringSetting(themeSettings.value, 'carrierPingRegion')
     return ['all', 'beijing', 'shanghai', 'guangdong'].includes(value) ? value : 'beijing'
@@ -1207,6 +1215,8 @@ const useAppStore = defineStore('app', () => {
     topologyRoute,
     topologyMetrics,
     pandaOpsNodeControls,
+    nodeCardPanelDefault,
+    nodeCardPanels,
     carrierPingRegion,
     generalCardEnabledMap,
     generalCardOrder,

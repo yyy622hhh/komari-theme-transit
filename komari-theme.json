@@ -2,7 +2,7 @@
   "name": "Transit",
   "short": "Transit",
   "description": "A topology-first network operations theme for Komari",
-  "version": "1.0.26",
+  "version": "1.0.27",
   "author": "PandaKiko, based on sanrokamlan/vlongx",
   "url": "https://github.com/yyy622hhh/komari-theme-transit",
   "preview": "preview.png",
@@ -16,6 +16,7 @@
       { "key": "rpcTransportMode", "name": "RPC 连接模式", "type": "select", "default": "http", "options": "http,websocket", "help": "HTTP 兼容性更好；反代支持时可改 websocket。" },
       { "key": "defaultViewMode", "name": "默认视图模式", "type": "select", "default": "card", "options": "card,list", "help": "节点列表的默认显示模式" },
       { "key": "nodeCardSize", "name": "节点卡片尺寸", "type": "select", "default": "compact", "options": "mini,compact,comfortable,large", "help": "从高密度 mini 到宽松 large；默认 compact。" },
+      { "key": "nodeCardPanelDefault", "name": "节点卡默认观测面板", "type": "select", "default": "carrier", "options": "carrier,auto,system,traffic,storage,gpu,compact", "help": "carrier=三网质量；auto=按 GPU、三网、流量和节点用途自动选择；system=系统；traffic=流量；storage=存储；gpu=GPU；compact=精简。单节点可在 Transit 服务器列表的运维按钮中覆盖。" },
 
       { "name": "02 · 首页布局", "type": "title" },
       { "key": "alertEnabled", "name": "启用公告", "type": "switch", "default": false, "help": "在首页显示自定义公告" },

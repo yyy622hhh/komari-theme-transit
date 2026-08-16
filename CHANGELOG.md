@@ -4,6 +4,22 @@
 
 ## [Unreleased]
 
+## [1.0.27] - 2026-08-16
+
+### Added
+
+- 新增节点卡片智能观测面板，可按节点 UUID 选择自动、三网、自定义 Ping、系统、流量、存储、GPU 或精简模式；自定义 Ping 最多绑定三个该节点真实执行的任务。
+- Transit 服务器列表新增当前分组批量面板设置；单节点配置继续复用节点运维入口，并保存到 Komari 托管主题设置。
+
+### Changed
+
+- 节点卡全局默认继续保持三网质量，旧安装无需迁移；不同观测面板使用统一高度，自动模式按 GPU、可用三网任务、流量配额和节点用途安全回退。
+- 自定义 Ping 使用任务名称精确匹配，避免短名称同时聚合多个相似任务。
+
+### Testing
+
+- 新增面板配置解析、自动选择、按 UUID 更新、六种混合面板等高、单节点 Ping 任务保存和分组批量保存回归。
+
 ## [1.0.26] - 2026-08-16
 
 ### Fixed
@@ -351,7 +367,8 @@
 - 亮暗主题、桌面/移动布局和 Transit 风格内嵌 Komari 管理端。
 - Playwright 视觉与交互回归、自动构建和 GitHub Release 发布流程。
 
-[Unreleased]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.26...HEAD
+[Unreleased]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.27...HEAD
+[1.0.27]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.26...v1.0.27
 [1.0.26]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.25...v1.0.26
 [1.0.25]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.24...v1.0.25
 [1.0.24]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.23...v1.0.24

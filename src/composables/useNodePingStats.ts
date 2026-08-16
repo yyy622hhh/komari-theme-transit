@@ -110,8 +110,17 @@ function stopPingRefreshScheduler(): void {
   }
 }
 
-function getCacheKey(uuid: string, hours: number, maxCount?: number, taskNameFilter = ''): string {
-  return `${CACHE_KEY_PREFIX}:${uuid}:${hours}:${maxCount ?? 'all'}:${normalizePingTaskFilter(taskNameFilter) || 'all'}`
+type PingTaskNameMatch = 'contains' | 'exact'
+
+function getCacheKey(uuid: string, hours: number, maxCount?: number, taskNameFilter = '', taskNameMatch: PingTaskNameMatch = 'contains'): string {
+  return `${CACHE_KEY_PREFIX}:${uuid}:${hours}:${maxCount ?? 'all'}:${taskNameMatch}:${normalizePingTaskFilter(taskNameFilter) || 'all'}`
+}
+
+function matchesTaskName(name: string, normalizedFilter: string, match: PingTaskNameMatch): boolean {
+  if (!normalizedFilter)
+    return true
+  const normalizedName = normalizePingTaskFilter(name)
+  return match === 'exact' ? normalizedName === normalizedFilter : normalizedName.includes(normalizedFilter)
 }
 
 function getSharedPingRecordsKey(hours: number, maxCount?: number, uuid?: string): string {
@@ -224,12 +233,12 @@ function removeStatsCacheKey(key: string): void {
   writeStatsCacheIndex(readStatsCacheIndex().filter(entry => entry.key !== key))
 }
 
-function readStatsCache(uuid: string, hours: number, maxCount?: number, taskNameFilter = ''): NodePingStatsState | null {
+function readStatsCache(uuid: string, hours: number, maxCount?: number, taskNameFilter = '', taskNameMatch: PingTaskNameMatch = 'contains'): NodePingStatsState | null {
   if (typeof window === 'undefined')
     return null
 
   try {
-    const key = getCacheKey(uuid, hours, maxCount, taskNameFilter)
+    const key = getCacheKey(uuid, hours, maxCount, taskNameFilter, taskNameMatch)
     const raw = window.localStorage.getItem(key)
     if (!raw)
       return null
@@ -253,12 +262,12 @@ function readStatsCache(uuid: string, hours: number, maxCount?: number, taskName
   }
 }
 
-function writeStatsCache(uuid: string, hours: number, maxCount: number | undefined, value: NodePingStatsState, taskNameFilter = ''): void {
+function writeStatsCache(uuid: string, hours: number, maxCount: number | undefined, value: NodePingStatsState, taskNameFilter = '', taskNameMatch: PingTaskNameMatch = 'contains'): void {
   if (typeof window === 'undefined')
     return
 
   try {
-    const key = getCacheKey(uuid, hours, maxCount, taskNameFilter)
+    const key = getCacheKey(uuid, hours, maxCount, taskNameFilter, taskNameMatch)
     const updatedAt = Date.now()
     window.localStorage.setItem(
       key,
@@ -588,6 +597,7 @@ export function useNodePingStats(
     enabled?: MaybeRefOrGetter<boolean>
     maxCount?: MaybeRefOrGetter<number | undefined>
     taskNameFilter?: MaybeRefOrGetter<string>
+    taskNameMatch?: MaybeRefOrGetter<PingTaskNameMatch>
   },
 ) {
   const loading = ref(false)
@@ -597,12 +607,14 @@ export function useNodePingStats(
     const hours = Math.max(1, Math.floor(toValue(options?.hours) ?? 24))
     const maxCount = normalizeMaxCount(toValue(options?.maxCount) ?? PING_RECORD_MAX_COUNT)
     const taskNameFilter = toValue(options?.taskNameFilter)?.trim() ?? ''
+    const taskNameMatch: PingTaskNameMatch = toValue(options?.taskNameMatch) === 'exact' ? 'exact' : 'contains'
     return {
       uuid: toValue(uuid),
       hours,
       maxCount,
       cacheKey: getSharedPingRecordsKey(hours, maxCount, toValue(uuid)),
       taskNameFilter,
+      taskNameMatch,
       enabled: toValue(options?.enabled) ?? true,
     }
   })
@@ -635,7 +647,7 @@ export function useNodePingStats(
     // 即使网络刷新失败，也要按分钟重新校验 localStorage，避免已经过期的
     // 历史数据在页面常驻期间无限展示。
     void pingFreshnessTick.value
-    const { uuid: nodeUuid, hours, maxCount, taskNameFilter, enabled } = resolved.value
+    const { uuid: nodeUuid, hours, maxCount, taskNameFilter, taskNameMatch, enabled } = resolved.value
     if (!enabled || !nodeUuid.trim())
       return createEmptyNodePingStats()
 
@@ -644,12 +656,12 @@ export function useNodePingStats(
     const entry = getSharedPingRecordsEntry(hours, maxCount, nodeUuid)
     const state = entry.data.value
     if (!state)
-      return readStatsCache(nodeUuid, hours, maxCount, taskNameFilter) ?? createEmptyNodePingStats()
+      return readStatsCache(nodeUuid, hours, maxCount, taskNameFilter, taskNameMatch) ?? createEmptyNodePingStats()
 
     const normalizedFilter = normalizePingTaskFilter(taskNameFilter)
     const matchingTaskIds = normalizedFilter
       ? new Set([...state.taskNamesById.entries()]
-          .filter(([, name]) => normalizePingTaskFilter(name).includes(normalizedFilter))
+          .filter(([, name]) => matchesTaskName(name, normalizedFilter, taskNameMatch))
           .map(([taskId]) => taskId))
       : null
     const records = (state.recordsByClient.get(nodeUuid) ?? [])
@@ -662,7 +674,7 @@ export function useNodePingStats(
   })
 
   const taskNames = computed<string[]>(() => {
-    const { uuid: nodeUuid, hours, maxCount, taskNameFilter, enabled } = resolved.value
+    const { uuid: nodeUuid, hours, maxCount, taskNameFilter, taskNameMatch, enabled } = resolved.value
     if (!enabled || !nodeUuid.trim())
       return []
 
@@ -672,7 +684,7 @@ export function useNodePingStats(
 
     const normalizedFilter = normalizePingTaskFilter(taskNameFilter)
     return [...new Set([...state.taskNamesById.values()]
-      .filter(name => !normalizedFilter || normalizePingTaskFilter(name).includes(normalizedFilter)))]
+      .filter(name => matchesTaskName(name, normalizedFilter, taskNameMatch)))]
   })
 
   const lastFetchedAt = computed(() => {
@@ -739,8 +751,8 @@ export function useNodePingStats(
 
   // 共享记录会定时刷新，节流回写 localStorage，避免多节点同时重算时密集写盘。
   const persistStats = useThrottleFn(
-    (nodeUuid: string, hours: number, maxCount: number | undefined, taskNameFilter: string, value: NodePingStatsState) => {
-      writeStatsCache(nodeUuid, hours, maxCount, value, taskNameFilter)
+    (nodeUuid: string, hours: number, maxCount: number | undefined, taskNameFilter: string, taskNameMatch: PingTaskNameMatch, value: NodePingStatsState) => {
+      writeStatsCache(nodeUuid, hours, maxCount, value, taskNameFilter, taskNameMatch)
     },
     30_000,
     true,
@@ -750,9 +762,9 @@ export function useNodePingStats(
   watch(stats, (value) => {
     if (!value.hasData)
       return
-    const { uuid: nodeUuid, hours, maxCount, taskNameFilter, enabled } = resolved.value
+    const { uuid: nodeUuid, hours, maxCount, taskNameFilter, taskNameMatch, enabled } = resolved.value
     if (enabled && nodeUuid.trim())
-      persistStats(nodeUuid, hours, maxCount, taskNameFilter, value)
+      persistStats(nodeUuid, hours, maxCount, taskNameFilter, taskNameMatch, value)
   })
 
   return {

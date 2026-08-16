@@ -705,6 +705,65 @@ test('Transit node maintenance saves globally and updates alerts immediately', a
   await expect(page.locator('[data-panda-alert-strip]').getByRole('heading', { name: '10 个异常需要关注' })).toBeVisible()
 })
 
+test('Transit node cards render per-node insight panels without changing card height', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, {
+    pandaOps: true,
+    dark: true,
+    authenticated: true,
+    nodeCardPanels: {
+      '00000000-0000-4000-8000-000000000001': { mode: 'system' },
+      '00000000-0000-4000-8000-000000000002': { mode: 'traffic' },
+      '00000000-0000-4000-8000-000000000003': { mode: 'storage' },
+      '00000000-0000-4000-8000-000000000004': { mode: 'gpu' },
+      '00000000-0000-4000-8000-000000000005': { mode: 'compact' },
+      '00000000-0000-4000-8000-000000000006': { mode: 'ping', pingTasks: ['Tokyo', 'PandaOps-Local-Hop'] },
+    },
+  })
+  await openStablePage(page)
+
+  const cards = page.locator('[data-node-card-grid] .panda-node-card')
+  await expect(cards.nth(0).locator('[data-node-insight-mode="system"]')).toContainText('系统状态')
+  await expect(cards.nth(1).locator('[data-node-insight-mode="traffic"]')).toContainText('流量状态')
+  await expect(cards.nth(2).locator('[data-node-insight-mode="storage"]')).toContainText('存储状态')
+  await expect(cards.nth(3).locator('[data-node-insight-mode="gpu"]')).toContainText('NVIDIA A100')
+  await expect(cards.nth(4).locator('[data-node-insight-mode="compact"]')).toContainText('精简信息')
+  await expect(cards.nth(5).locator('[data-node-insight-mode="ping"]')).toContainText('Tokyo')
+
+  const firstRowHeights = await cards.evaluateAll(elements => elements.slice(0, 3).map(element => element.getBoundingClientRect().height))
+  expect(Math.max(...firstRowHeights) - Math.min(...firstRowHeights)).toBeLessThanOrEqual(1)
+})
+
+test('Transit node panel editor saves selected custom Ping tasks by UUID', async ({ page }) => {
+  const saves: Record<string, unknown>[] = []
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, { pandaOps: true, dark: true, authenticated: true, pingTaskOrdering: true })
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && request.url().includes('/api/admin/theme/settings?theme=Transit'))
+      saves.push(request.postDataJSON() as Record<string, unknown>)
+  })
+  await openStablePage(page)
+
+  const nodeCard = page.getByRole('button', { name: '查看节点 主控-洛杉矶 详情' }).locator('xpath=..')
+  await nodeCard.getByRole('button', { name: '管理节点 主控-洛杉矶' }).click()
+  const dialog = page.getByRole('dialog', { name: /节点运维/ })
+  await dialog.getByLabel('面板类型').selectOption('ping')
+  await dialog.getByRole('checkbox', { name: '浙江联通' }).check()
+  await dialog.getByRole('checkbox', { name: '浙江移动' }).check()
+  await dialog.getByRole('button', { name: '保存面板' }).click()
+
+  await expect.poll(() => saves.length).toBe(1)
+  const configs = JSON.parse(String(saves[0]?.nodeCardPanels)) as Record<string, { mode: string, pingTasks: string[] }>
+  expect(configs['00000000-0000-4000-8000-000000000001']).toEqual({
+    mode: 'ping',
+    pingTasks: ['浙江联通', '浙江移动'],
+  })
+  await dialog.getByRole('button', { name: '关闭' }).click()
+  const insightPanel = nodeCard.locator('[data-node-insight-panel]')
+  await expect(insightPanel).toHaveAttribute('data-node-insight-mode', 'ping')
+  await expect(insightPanel).toContainText('浙江联通')
+})
+
 test('home quick controls, node comparison and network data change visible results', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await installKomariFixture(page, { pandaOps: true, dark: true, authenticated: true })
@@ -867,9 +926,15 @@ test('Transit server list filters and sorts reactive nodes without the blocked a
   let blockedAdminListRequests = 0
   let nodeMetadataRequests = 0
   const savedOrders: Array<Record<string, number>> = []
+  const savedPanelConfigs: Array<Record<string, { mode: string }>> = []
   page.on('request', (request) => {
     if (request.url().includes('/api/admin/client/list'))
       blockedAdminListRequests++
+    if (request.method() === 'POST' && request.url().includes('/api/admin/theme/settings?theme=Transit')) {
+      const body = request.postDataJSON() as { nodeCardPanels?: string } | null
+      if (body?.nodeCardPanels)
+        savedPanelConfigs.push(JSON.parse(body.nodeCardPanels) as Record<string, { mode: string }>)
+    }
     if (!request.url().endsWith('/api/rpc2'))
       return
     const payload = request.postDataJSON() as { method?: string, params?: Record<string, number> } | null
@@ -897,6 +962,14 @@ test('Transit server list filters and sorts reactive nodes without the blocked a
     element.setAttribute('style', 'display: none !important')
   })
   await expect(panel).toHaveScreenshot('server-list-desktop.png')
+
+  await panel.getByRole('button', { name: '批量卡片面板' }).click()
+  const bulkDialog = page.getByRole('dialog', { name: '批量设置节点卡片面板' })
+  await bulkDialog.getByLabel('面板类型').selectOption('system')
+  await bulkDialog.getByRole('button', { name: '应用到 12 台' }).click()
+  await expect.poll(() => savedPanelConfigs.length).toBe(1)
+  expect(Object.values(savedPanelConfigs[0] ?? {})).toHaveLength(12)
+  expect(Object.values(savedPanelConfigs[0] ?? {}).every(config => config.mode === 'system')).toBe(true)
 
   await panel.getByRole('button', { name: /离线\s*1/ }).click()
   await expect(panel.locator('tbody tr')).toHaveCount(1)

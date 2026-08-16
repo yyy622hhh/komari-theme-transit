@@ -80,6 +80,20 @@ TopologyManager / node maintenance
 
 Komari 1.4 uses the `/settings` endpoint. Permission, validation and server errors are surfaced directly and never trigger the legacy fallback.
 
+## Node card insight panels
+
+```text
+PandaOpsNodeControlDialog / ServerListPanel
+  -> node-card-panel.service.ts
+  -> ThemeSettingsService
+  -> AuthService forced verification
+  -> POST /api/admin/theme/settings?theme=Transit
+  -> appStore.nodeCardPanels
+  -> NodeCardInsightPanel
+```
+
+Per-node overrides are keyed by node UUID and stored as the `nodeCardPanels` JSON string. Missing entries inherit `nodeCardPanelDefault`; the backward-compatible default is `carrier`. Custom Ping mode stores at most three task names and uses exact task-name matching against shared Ping records. Batch changes apply only to the node array supplied by the current server-list group and cannot assign custom Ping tasks because task availability is node-specific.
+
 ## Snapshot export
 
 ```text
