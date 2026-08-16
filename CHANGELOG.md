@@ -2,6 +2,54 @@
 
 所有面向用户的重要变化记录在此。项目遵循 [Semantic Versioning](https://semver.org/)。
 
+## [Unreleased]
+
+## [1.0.25] - 2026-08-16
+
+### Fixed
+
+- 实时拓扑采样现在按 Komari 的真实采集语义标注“探测来源节点 + Ping 任务”，不再用视觉线路顺序暗示相反的探测方向。
+
+### Documentation
+
+- README 同步当前安装方式、兼容矩阵、320px 节点卡回归、完整质量门禁与实时 Ping 数据方向边界。
+- 补齐 1.0.22 至 1.0.24 的发布记录和版本比较链接。
+
+## [1.0.24] - 2026-08-16
+
+### Changed
+
+- 节点卡底部改为基于卡片实际宽度的容器响应式布局：宽卡片三列，中窄卡片两列并让三网质量独占整行，极窄卡片单列。
+- 节点名最多显示两行并提供完整辅助名称；在线时间、价格、维护状态、资源数值、实时速度、累计流量和三网指标允许自适应换行。
+
+### Fixed
+
+- 到期日期取消右推，与“剩余 N 天”左边缘对齐；未设置到期和长期状态不保留空日期占位。
+- 调整四档卡片密度的异步占位高度，并保持同一网格行等高，减少加载后的布局跳动。
+
+### Testing
+
+- 新增超长名称、长价格、PB 级流量、完整日期、TB/s 速度和四位数三网延迟夹具，覆盖 320、390、768、1280、1700px。
+- 自动断言关键文字不溢出、卡片单元不交叠、日期左对齐、页面无横向滚动和移动触摸排序可用。
+
+## [1.0.23] - 2026-08-16
+
+### Fixed
+
+- 修复 compact 节点卡中到期日期因列宽不足而被裁切的问题，并增加完整日期可见性回归。
+
+## [1.0.22] - 2026-08-16
+
+### Fixed
+
+- 地球渲染器在 WebGL2 不可用时安全降级，避免整页因图形能力不足而不可用。
+- 进一步收紧管理路由、RPC 持久化、认证恢复、异步取消和请求生命周期边界。
+
+### Testing and release
+
+- GitHub 发布流程统一等待 Quality、Visual Regression、Browser Functional 和 Komari Compatibility 后再创建 Release。
+- 真实 Komari 隔离实验覆盖 1.2.6、1.4.2 和 1.4.3 的主题安装、升级、回滚、路由、RPC 与重启持久化。
+
 ## [1.0.21] - 2026-08-16
 
 ### Fixed
@@ -293,7 +341,17 @@
 - 亮暗主题、桌面/移动布局和 Transit 风格内嵌 Komari 管理端。
 - Playwright 视觉与交互回归、自动构建和 GitHub Release 发布流程。
 
-[Unreleased]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.15...HEAD
+[Unreleased]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.25...HEAD
+[1.0.25]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.24...v1.0.25
+[1.0.24]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.23...v1.0.24
+[1.0.23]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.22...v1.0.23
+[1.0.22]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.21...v1.0.22
+[1.0.21]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.20...v1.0.21
+[1.0.20]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.19...v1.0.20
+[1.0.19]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.18...v1.0.19
+[1.0.18]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.17...v1.0.18
+[1.0.17]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.16...v1.0.17
+[1.0.16]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.15...v1.0.16
 [1.0.15]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.14...v1.0.15
 [1.0.14]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.13...v1.0.14
 [1.0.13]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.12...v1.0.13

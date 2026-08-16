@@ -5,10 +5,17 @@
 [![Release](https://img.shields.io/github/v/release/yyy622hhh/komari-theme-transit?style=flat-square&color=10b981)](https://github.com/yyy622hhh/komari-theme-transit/releases)
 [![Quality](https://img.shields.io/github/actions/workflow/status/yyy622hhh/komari-theme-transit/quality.yml?branch=main&style=flat-square&label=quality)](https://github.com/yyy622hhh/komari-theme-transit/actions/workflows/quality.yml)
 [![Visual Regression](https://img.shields.io/github/actions/workflow/status/yyy622hhh/komari-theme-transit/visual-regression.yml?branch=main&style=flat-square&label=visual)](https://github.com/yyy622hhh/komari-theme-transit/actions/workflows/visual-regression.yml)
+[![Browser Functional](https://img.shields.io/github/actions/workflow/status/yyy622hhh/komari-theme-transit/browser-functional.yml?branch=main&style=flat-square&label=browsers)](https://github.com/yyy622hhh/komari-theme-transit/actions/workflows/browser-functional.yml)
+[![Komari Compatibility](https://img.shields.io/github/actions/workflow/status/yyy622hhh/komari-theme-transit/komari-compat.yml?branch=main&style=flat-square&label=komari)](https://github.com/yyy622hhh/komari-theme-transit/actions/workflows/komari-compat.yml)
 [![License](https://img.shields.io/github/license/yyy622hhh/komari-theme-transit?style=flat-square)](LICENSE)
 [![Vue 3](https://img.shields.io/badge/Vue-3-42b883?style=flat-square&logo=vuedotjs&logoColor=white)](https://vuejs.org/)
 
 Transit 是一个面向多节点、多线路和跨境链路监控的 Komari 社区主题。它把“入口 → 线路机 → 落地机”的链路拓扑、北京/上海/广州三网 Ping、实时资源、异常告警和资产信息放进同一套紧凑界面，并提供可视化拓扑管理器。
+
+- 当前稳定版：[v1.0.25](https://github.com/yyy622hhh/komari-theme-transit/releases/tag/v1.0.25)
+- 在线演示：[status.pandakiko.com](https://status.pandakiko.com/)
+- 安装包：只从 [GitHub Releases](https://github.com/yyy622hhh/komari-theme-transit/releases) 下载 `komari-theme-Transit-build-*.zip`
+- 项目定位：社区主题，不修改 Komari 数据库、Agent、系统账户或公开 API
 
 ![Transit 暗色总览](docs/screenshots/transit-overview-dark.png)
 
@@ -30,7 +37,7 @@ Transit 是一个面向多节点、多线路和跨境链路监控的 Komari 社�
 | -------- | ---------------------------------------------------------------------------------- |
 | 线路状态 | 多线路拓扑、入口探测点切换、逐段实时/静态指标、采样浮窗、历史详情、健康评分        |
 | 拓扑管理 | 添加/删除/排序线路、选择线路机与落地机、绑定 Ping 任务、备用延迟与丢包、保存和恢复 |
-| 节点卡片 | CPU、内存、硬盘、上下行、累计流量、到期信息、价格和三网质量                        |
+| 节点卡片 | CPU、内存、硬盘、上下行、累计流量、到期信息、价格、三网质量和容器响应式布局        |
 | 告警     | 离线、高负载、流量预警、即将到期、Ping 丢包、维护状态和异常时间线                  |
 | 首页工具 | 服务器列表、节点对比、厂商性价比、健康摘要、快照导出、网络信息和核心审计日志       |
 | 节点详情 | 自定义概览卡、完整负载图、Ping 延迟/丢包历史、GPU 与磁盘耗尽预测                   |
@@ -55,6 +62,8 @@ Transit 是一个面向多节点、多线路和跨境链路监控的 Komari 社�
 3. 启用短名称为 `Transit` 的主题。
 4. 打开主题设置，选择主题模式、节点卡密度和三网地区。
 5. 新安装不会预置任何真实节点；返回首页，按“还没有配置线路”的引导创建第一条拓扑并保存。
+
+升级已有 `Transit` 时，Komari 会继续使用同一短名称下保存的托管主题设置。建议升级前保留上一版 Release，并在更新后强制刷新浏览器。
 
 发布 zip 的根目录固定为：
 
@@ -106,6 +115,8 @@ Transit 使用独立短名称 `Transit`，不会覆盖已有的 PandaOps、Glass
 - **静态基线**：直接填写延迟和丢包，适合暂时没有对应 Ping 任务的链路。
 
 实时任务还可以填写备用延迟和备用丢包。任务尚未产生样本、查询失败或短暂不可用时，页面使用备用值维持拓扑可读性，而不会伪造历史采样。
+
+> **数据方向必须按采集端理解。** Komari Ping 样本由“探测来源节点”发起，任务名称表示该来源节点执行的 Ping 任务。视觉上把线路画成“北京电信 → JP”并不会自动获得北京电信到 JP 的正向路径；如果实际来源节点在 JP，数据仍是 JP 节点发起的探测。真正的“北京电信 → JP”需要北京电信网络内的探测节点。Transit 会在实时采样和线路详情中明确显示“探测来源节点 + Ping 任务”，不会把反向测试伪装成正向线路。
 
 如果下拉框没有列出任务：
 
@@ -180,6 +191,8 @@ live@Relay-JP@北京电信@51@0;live@Relay-JP@Relay-JP-to-Exit-US@84@0||live@Rel
 
 桌面端将鼠标放到采样格上即可查看时间、延迟和丢包；点击可以固定浮窗。移动端直接点击采样格查看，点击空白处关闭。拓扑、节点卡和详情页使用同一套采样交互。
 
+节点卡底部按卡片自身宽度响应，而不是只看浏览器宽度：宽卡片显示速度、累计流量和三网质量三列；中窄卡片让三网质量独占整行；极窄卡片使用单列。节点名最多两行，价格、到期日期、大流量和三网指标不会用省略号隐藏关键数据。
+
 ## 告警、可靠性与运维工具
 
 Transit 不只展示在线/离线状态，还会把可操作信息集中到首页：
@@ -247,13 +260,13 @@ Transit 不再内嵌或再分发 `komari-web` 构建物。登录后的服务器�
 
 ## 兼容性
 
-| 项目     | 支持范围                                                                         |
-| -------- | -------------------------------------------------------------------------------- |
-| Komari   | 重点适配 1.2.6 Metric Store；保留 1.2.5 records 回退；维护者生产环境已验证 1.4.2 |
-| 浏览器   | Chromium 为正式验证目标；最新稳定版 Edge、Safari、Firefox 按尽力兼容处理         |
-| 设备     | 桌面与移动端响应式布局，最低自动验证宽度 390px                                   |
-| 主题设置 | 同一 `Transit` 短名称升级时保留托管设置                                          |
-| 服务端   | 主题包不修改 Komari 数据库结构、Agent 或系统账户                                 |
+| 项目     | 支持范围                                                               |
+| -------- | ---------------------------------------------------------------------- |
+| Komari   | 隔离实验覆盖 1.2.6、1.4.2、1.4.3；维护者生产环境运行 1.4.2             |
+| 浏览器   | Playwright 自动验证 Chromium、Firefox、WebKit 和移动 WebKit            |
+| 设备     | 桌面与移动端响应式布局；节点卡最坏情况覆盖 320、390、768、1280、1700px |
+| 主题设置 | 同一 `Transit` 短名称升级时保留托管设置                                |
+| 服务端   | 主题包不修改 Komari 数据库结构、Agent 或系统账户                       |
 
 Komari 新增接口时，Transit 优先使用 Metric Store；接口不可用时再回退到兼容 records 路径。
 
@@ -296,6 +309,10 @@ Transit 不执行数据库迁移。主题设置格式发生变化时会保留旧
 
 检查来源节点、任务名称和目标是否对应正确链路。任务名称匹配成功但尚无样本时，等待至少一个采样周期。
 
+### 拓扑上的方向就是实际路由方向吗
+
+不一定。拓扑节点顺序是展示配置，实时指标的真实采集方向由“探测来源节点”决定。页面会显示来源节点和 Ping 任务；如果要测“北京电信 → 海外节点”，需要在北京电信网络中部署探测端。Transit 当前不采集 traceroute，也不会根据任务名称伪造跳点或正向路径。
+
 ### 为什么管理后台仍是官方样式
 
 这是预期行为。Transit 提供自有的实时服务器列表和主题内运维工具，但不再分发授权状态不明确的 `komari-web` 派生管理端；完整配置操作请使用 Komari 自带后台。
@@ -326,17 +343,26 @@ bun run dev
 ```bash
 bun run lint:check
 bun run type-check
-bun run build-only
+bun run test:unit
 bun run test:visual
+bun run test:functional
+bun run test:performance
+bun run audit:bundle
+bun run audit:performance
+bun run audit:dependencies
+bun run audit:reproducible
 bun run build
+bun run audit:release
 ```
+
+Linux 环境还可以运行 `bun run test:komari`，在隔离的真实 Komari 实例中验证主题安装、覆盖升级、回滚、路由、认证边界、RPC 和重启持久化。具体版本矩阵见 [兼容性实验文档](docs/Compatibility.md)。
 
 `bun run build` 会生成：
 
 - `dist/`
 - `komari-theme-Transit-build-<short-sha>.zip`
 
-视觉回归覆盖亮暗主题、桌面/移动端、拓扑管理器、统一采样交互和节点卡等高布局。像素基准由 Playwright Chromium 在 macOS 环境维护，Linux CI 另外执行 lint、类型检查和生产构建。更新截图基准前必须人工确认设计差异。
+视觉回归覆盖亮暗主题、桌面/移动端、拓扑管理器、统一采样交互、无障碍扫描和节点卡等高布局。功能回归覆盖 Chromium、Firefox、WebKit 与移动 WebKit；性能回归覆盖大规模节点虚拟化和反复导航后的资源释放。像素基准由 Playwright Chromium 在 macOS 环境维护，Linux CI 负责质量、依赖安全、兼容性与发布结构门禁。更新截图基准前必须人工确认设计差异。
 
 ## 发布物授权边界
 

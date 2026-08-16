@@ -62,6 +62,23 @@ export function formatTopologyMetricNumber(value: number | null): string {
   return value === null ? '-' : `${value}`
 }
 
+/**
+ * Describe where a displayed topology metric actually comes from.
+ *
+ * A live Komari Ping sample is collected by the configured source node. The
+ * visual route labels are an operator-defined diagram and must not be used to
+ * imply the opposite probe direction.
+ */
+export function formatTopologyTelemetryLabel(metric: string, visualSource: string, visualTarget: string): string {
+  const configured = parseTopologyMetric(metric)
+  if (!configured.live)
+    return `${visualSource} → ${visualTarget}（静态基线）`
+
+  const source = configured.nodeName || '未指定来源节点'
+  const task = configured.taskFilter || '未指定任务'
+  return `探测来源：${source} · Ping 任务：${task}`
+}
+
 export function formatTopologyMetricForProbe(metric: string, probeKey: string, targetFallback = ''): string {
   const configured = parseTopologyMetric(metric)
   const defaultProbeKey = findTopologyProbeKey(configured.taskFilter)

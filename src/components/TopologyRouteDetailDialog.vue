@@ -151,7 +151,7 @@ function baselineTone(reliability: TopologyRouteReliability): string {
 
       <div class="flex items-center justify-between gap-3">
         <div class="text-xs text-muted-foreground">
-          数据来自该段配置的 Komari Ping 任务；没有任务时显示备用基线。
+          实时数据由探测来源节点执行绑定的 Ping 任务；上方视觉线路不代表反向探测。没有样本时显示备用基线。
         </div>
         <div class="flex shrink-0 rounded-md border border-border/60 bg-background/45 p-0.5">
           <button

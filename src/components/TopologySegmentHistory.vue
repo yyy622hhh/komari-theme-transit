@@ -3,7 +3,7 @@ import type { NodeData } from '@/stores/nodes'
 import type { TopologyReliabilityWindow } from '@/utils/topologyIntelligence'
 import { computed } from 'vue'
 import { useNodePingStats } from '@/composables/useNodePingStats'
-import { formatTopologyLatency, formatTopologyLoss, parseTopologyMetric } from '@/utils/topologyHelper'
+import { formatTopologyLatency, formatTopologyLoss, formatTopologyTelemetryLabel, parseTopologyMetric } from '@/utils/topologyHelper'
 import { calculateAdaptiveBaseline } from '@/utils/topologyIntelligence'
 
 const props = defineProps<{
@@ -15,6 +15,7 @@ const props = defineProps<{
 }>()
 
 const config = computed(() => parseTopologyMetric(props.metric))
+const telemetryLabel = computed(() => formatTopologyTelemetryLabel(props.metric, props.sourceLabel, props.targetLabel))
 const sourceNode = computed(() => props.nodes.find(node => node.name.trim().toLowerCase() === config.value.nodeName.toLowerCase()))
 const ping = useNodePingStats(
   () => sourceNode.value?.uuid ?? '',
@@ -114,8 +115,8 @@ const adaptiveTone = computed(() => {
           <span class="text-muted-foreground">→</span>
           <span class="truncate">{{ targetLabel }}</span>
         </div>
-        <div class="mt-1 truncate text-[10px] text-muted-foreground">
-          {{ config.live ? `Ping 任务 · ${config.taskFilter || '未指定'}` : '手动录入的实测基线' }}
+        <div class="mt-1 text-[10px] text-muted-foreground" :title="telemetryLabel">
+          {{ telemetryLabel }}
         </div>
       </div>
       <div class="flex shrink-0 items-center gap-1.5 text-[10px]" :class="status.tone">

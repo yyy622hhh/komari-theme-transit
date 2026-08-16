@@ -6,7 +6,7 @@ import { computed, watch } from 'vue'
 import TopologyEdgeSamples from '@/components/TopologyEdgeSamples.vue'
 import { useNodePingStats } from '@/composables/useNodePingStats'
 import { formatDateTime } from '@/utils/helper'
-import { formatTopologyLatency, formatTopologyLoss, parseTopologyMetric } from '@/utils/topologyHelper'
+import { formatTopologyLatency, formatTopologyLoss, formatTopologyTelemetryLabel, parseTopologyMetric } from '@/utils/topologyHelper'
 
 const props = defineProps<{
   metric: string
@@ -22,6 +22,7 @@ const emit = defineEmits<{
   metricsChange: [metrics: TopologySegmentTelemetry]
 }>()
 const config = computed(() => parseTopologyMetric(props.metric))
+const telemetryLabel = computed(() => formatTopologyTelemetryLabel(props.metric, props.sourceLabel, props.targetLabel))
 const sourceNode = computed(() => props.nodes.find(node => node.name.trim().toLowerCase() === config.value.nodeName.toLowerCase()))
 const ping = useNodePingStats(
   () => sourceNode.value?.uuid ?? '',
@@ -123,7 +124,7 @@ const sampleBars = computed<TelemetrySample[]>(() => {
       valueText: latencyText,
       secondaryText: lossText,
       timeText: formatDateTime(point.time, 'HH:mm:ss'),
-      ariaLabel: `${props.sourceLabel}到${props.targetLabel}，${latencyText}，${lossText}，${formatDateTime(point.time)}`,
+      ariaLabel: `${telemetryLabel.value}，${latencyText}，${lossText}，${formatDateTime(point.time)}`,
     }
   })
 })
@@ -140,7 +141,7 @@ const sampleBars = computed<TelemetrySample[]>(() => {
     <TopologyEdgeSamples
       :bars="sampleBars"
       :line-class="sourceState.line"
-      :label="`${sourceLabel}到${targetLabel}`"
+      :label="telemetryLabel"
     />
     <button
       type="button"
