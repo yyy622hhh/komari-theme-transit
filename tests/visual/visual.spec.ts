@@ -465,14 +465,10 @@ test('Transit desktop topology and cards remain contained', async ({ page }) => 
   await expect(nodeCardSurface.locator('.panda-node-card__header')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
   await expect(nodeCardSurface.locator('.panda-node-card__header')).toHaveCSS('border-bottom-width', '0px')
   const healthyCard = page.getByRole('button', { name: '查看节点 香港边缘节点-超长名称布局测试 详情' }).locator('xpath=..')
-  await expect(healthyCard.locator('[data-node-status-edge]')).toHaveClass(/bg-emerald-500\/85/)
-  await expect(healthyCard.locator('[data-node-alert-edge]')).toHaveCount(0)
-  await expect.poll(async () => healthyCard.evaluate((card) => {
-    const edge = card.querySelector<HTMLElement>('[data-node-status-edge]')
-    if (!edge)
-      return Number.POSITIVE_INFINITY
-    return Math.abs(edge.getBoundingClientRect().left - card.getBoundingClientRect().left)
-  })).toBeLessThanOrEqual(0.1)
+  await expect(healthyCard).toHaveAttribute('data-node-status-edge', '')
+  await expect(healthyCard).toHaveClass(/!border-l-emerald-500\/85/)
+  await expect(healthyCard).toHaveCSS('border-left-width', '3px')
+  await expect(healthyCard).not.toHaveAttribute('data-node-alert-edge')
   await expect.poll(async () => healthyCard.evaluate((card) => {
     const title = card.querySelector<HTMLElement>('[data-node-name]')
     const role = title?.nextElementSibling as HTMLElement | null
@@ -512,9 +508,10 @@ test('Transit desktop topology and cards remain contained', async ({ page }) => 
   const alertReason = alertCard.locator('[data-node-alert-reason]')
   await expect(alertReason).toBeVisible()
   await expect(alertReason).toHaveCSS('border-top-width', '0px')
-  await expect(alertCard.locator('[data-node-alert-edge]')).toBeVisible()
-  await expect(alertCard.locator('[data-node-status-edge]')).toHaveClass(/bg-rose-500\/85/)
-  await expect(plainCard.locator('[data-node-status-edge]')).toHaveCount(0)
+  await expect(alertCard).toHaveAttribute('data-node-alert-edge', '')
+  await expect(alertCard).toHaveAttribute('data-node-status-edge', '')
+  await expect(alertCard).toHaveClass(/!border-l-rose-500\/85/)
+  await expect(plainCard).not.toHaveAttribute('data-node-status-edge')
   await expect(plainCard.locator('[data-node-alert-reason]')).toHaveCount(0)
   await alertReason.hover()
   await expect(page.locator('[data-node-alert-tooltip]')).toContainText('CPU 96.4%')

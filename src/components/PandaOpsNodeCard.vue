@@ -65,34 +65,28 @@ const alertTone = computed(() => visibleAlert.value?.severity === 'critical'
   : 'text-amber-700 dark:text-amber-300')
 const statusEdgeTone = computed(() => {
   if (isMaintenance.value)
-    return 'bg-amber-500/90 dark:bg-amber-300/80'
+    return '!border-l-[3px] !border-l-amber-500/90 dark:!border-l-amber-300/80'
   if (visibleAlert.value?.severity === 'critical')
-    return 'bg-rose-500/85 dark:bg-rose-400/75'
+    return '!border-l-[3px] !border-l-rose-500/85 dark:!border-l-rose-400/75'
   if (visibleAlert.value)
-    return 'bg-amber-500/90 dark:bg-amber-300/80'
-  return 'bg-emerald-500/85 dark:bg-emerald-400/75'
+    return '!border-l-[3px] !border-l-amber-500/90 dark:!border-l-amber-300/80'
+  return '!border-l-[3px] !border-l-emerald-500/85 dark:!border-l-emerald-400/75'
 })
 </script>
 
 <template>
   <article
     :data-panda-node-card-size="appStore.nodeCardSize"
+    :data-node-status-edge="node.online ? '' : undefined"
+    :data-node-alert-edge="visibleAlert ? '' : undefined"
     class="panda-node-card group relative h-full min-w-0 cursor-pointer overflow-hidden rounded-2xl p-3.5 transition duration-200 hover:-translate-y-px hover:border-emerald-400/25"
-    :class="!node.online ? 'opacity-75' : ''"
+    :class="[!node.online ? 'opacity-75' : '', node.online && statusEdgeTone]"
   >
     <button
       type="button"
       class="absolute inset-0 z-0 cursor-pointer rounded-2xl border-0 bg-transparent p-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-400/70"
       :aria-label="`查看节点 ${node.name} 详情`"
       @click="emit('click')"
-    />
-
-    <span
-      v-if="node.online"
-      data-node-status-edge
-      :data-node-alert-edge="visibleAlert ? '' : undefined"
-      class="pointer-events-none absolute inset-y-3 -left-px z-1 w-0.5 rounded-r-full"
-      :class="statusEdgeTone"
     />
 
     <header class="panda-node-card__header pointer-events-none relative z-1 min-h-[2.65rem]">
