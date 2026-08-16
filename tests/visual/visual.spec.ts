@@ -664,6 +664,40 @@ test('Transit topology manager saves through managed theme API', async ({ page }
   expect(saves[0]).toMatchObject({ topologyEnabled: true })
 })
 
+test('Transit topology quick setup creates and binds its relay task automatically', async ({ page }) => {
+  const creates: unknown[] = []
+  const saves: unknown[] = []
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, { pandaOps: true, dark: true, authenticated: true })
+  page.on('request', (request) => {
+    if (request.method() !== 'POST')
+      return
+    if (request.url().includes('/api/rpc2') && request.postDataJSON()?.method === 'admin:addPingTask')
+      creates.push(request.postDataJSON())
+    if (request.url().includes('/api/admin/theme/settings?theme=Transit'))
+      saves.push(request.postDataJSON())
+  })
+  await openStablePage(page)
+
+  await page.getByRole('button', { name: '管理', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: '拓扑管理' })
+  await dialog.getByRole('button', { name: '一键创建任务并保存' }).first().click()
+
+  await expect.poll(() => creates.length).toBe(1)
+  expect(creates[0]).toMatchObject({
+    method: 'admin:addPingTask',
+    params: {
+      clients: ['00000000-0000-4000-8000-000000000001'],
+      default_on: false,
+      name: 'Transit-主控-洛杉矶-to-香港边缘节点-超长名称布局测试',
+      target: '192.0.2.11',
+      type: 'icmp',
+      interval: 30,
+    },
+  })
+  await expect.poll(() => saves.length).toBe(1)
+})
+
 test('Transit topology manager lists configured Ping tasks without recent samples', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await installKomariFixture(page, {
@@ -676,6 +710,7 @@ test('Transit topology manager lists configured Ping tasks without recent sample
 
   await page.getByRole('button', { name: '管理', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: '拓扑管理' })
+  await dialog.getByRole('button', { name: '高级设置' }).nth(1).click()
   const taskSelect = dialog.getByLabel('第 2 条线路第 1 段 Ping 任务')
   await expect(taskSelect).toBeVisible()
   await expect(taskSelect.locator('option')).toContainText(['Configured-No-Recent-Sample'])

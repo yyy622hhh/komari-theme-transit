@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useTopologyManager } from '@/composables/useTopologyManager'
 import { loadPingTaskNamesForNode } from '@/services/metrics.service'
+import { topologyPingTaskName } from '@/services/topology-tasks.service'
 
 const props = defineProps<{ nodes: NodeData[], open: boolean }>()
 const emit = defineEmits<{ 'update:open': [open: boolean] }>()
@@ -14,6 +15,8 @@ const manager = reactive(useTopologyManager(() => props.nodes))
 const taskOptions = ref<Record<string, string[]>>({})
 const taskLoading = ref<Record<string, boolean>>({})
 const taskErrors = ref<Record<string, string>>({})
+const advancedRouteIds = ref<Set<number>>(new Set())
+const quickSavingRouteIds = ref<Set<number>>(new Set())
 
 const isOpen = computed({
   get: () => props.open,
@@ -23,6 +26,11 @@ const isOpen = computed({
 watch(() => props.open, (value) => {
   if (value) {
     manager.reset()
+    taskOptions.value = {}
+    taskLoading.value = {}
+    taskErrors.value = {}
+    advancedRouteIds.value = new Set()
+    quickSavingRouteIds.value = new Set()
     const sourceNames = manager.routes.flatMap(route => route.metrics.map(metric => metric.nodeName)).filter(Boolean)
     void Promise.all(Array.from(new Set(sourceNames), loadTasks))
   }
@@ -74,6 +82,91 @@ async function save(): Promise<void> {
   }
 }
 
+function isAdvanced(routeId: number): boolean {
+  return advancedRouteIds.value.has(routeId)
+}
+
+function toggleAdvanced(routeId: number): void {
+  const next = new Set(advancedRouteIds.value)
+  if (next.has(routeId))
+    next.delete(routeId)
+  else
+    next.add(routeId)
+  advancedRouteIds.value = next
+}
+
+function quickSaving(routeId: number): boolean {
+  return quickSavingRouteIds.value.has(routeId)
+}
+
+function setQuickNode(route: typeof manager.routes[number], index: 1 | 2, name: string): void {
+  manager.selectNode(route, index, name)
+  manager.prepareQuickRoute(route)
+  if (index === 1 && name)
+    void loadTasks(name)
+}
+
+function matchingQuickTask(sourceName: string, targetName: string): string {
+  const source = props.nodes.find(node => node.name === sourceName)
+  const target = props.nodes.find(node => node.name === targetName)
+  if (!source || !target)
+    return ''
+  const expected = topologyPingTaskName(source, target)
+  return nodeTasks(sourceName).find(task => task === expected) ?? ''
+}
+
+async function configureQuickRoute(route: typeof manager.routes[number]): Promise<void> {
+  manager.prepareQuickRoute(route)
+  const entryName = route.nodes[0]?.name.trim()
+  const relayName = route.nodes[1]?.name.trim()
+  const targetName = route.nodes[2]?.name.trim()
+  if (!entryName || !relayName || !targetName) {
+    window.$message?.warning('填写入口名称，选择线路机和落地机后即可一键完成。')
+    return
+  }
+
+  const saving = new Set(quickSavingRouteIds.value)
+  saving.add(route.id)
+  quickSavingRouteIds.value = saving
+  try {
+    await loadTasks(relayName)
+    const existing = matchingQuickTask(relayName, targetName)
+    const metric = route.metrics[1]
+    if (existing && metric) {
+      metric.live = true
+      metric.nodeName = relayName
+      metric.taskFilter = existing
+    }
+    else {
+      const created = await manager.createQuickRouteTask(route)
+      const source = props.nodes.find(node => node.name === relayName)
+      if (source) {
+        taskOptions.value = {
+          ...taskOptions.value,
+          [source.uuid]: [...new Set([...nodeTasks(relayName), created.name])],
+        }
+      }
+    }
+
+    if (await manager.save()) {
+      window.$message?.success(existing
+        ? `已复用任务 ${existing}，线路已保存。`
+        : 'Ping 任务已创建、绑定并保存。')
+    }
+    else {
+      window.$message?.warning('任务已绑定；请补全其他线路后，再点击底部保存。')
+    }
+  }
+  catch (error) {
+    window.$message?.error(error instanceof Error ? error.message : '一键配置失败，请稍后重试。')
+  }
+  finally {
+    const next = new Set(quickSavingRouteIds.value)
+    next.delete(route.id)
+    quickSavingRouteIds.value = next
+  }
+}
+
 function updateFallback(metric: { fallbackLatency: number | null, fallbackLoss: number | null }, key: 'fallbackLatency' | 'fallbackLoss', event: Event): void {
   const raw = (event.target as HTMLInputElement).value.trim()
   const value = Number.parseFloat(raw)
@@ -85,13 +178,13 @@ function updateFallback(metric: { fallbackLatency: number | null, fallbackLoss: 
   <AppDialog
     v-model:open="isOpen"
     title="拓扑管理"
-    description="添加、排序线路，并为每一段选择实时 Ping 任务或静态基线。"
+    description="填入口、选择线路机和落地机；系统会自动创建并绑定 Ping 任务。"
     content-class="max-w-6xl"
   >
     <div class="space-y-4">
       <div class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/60 bg-background/45 px-3 py-2">
         <div class="text-xs text-muted-foreground">
-          修改会保存到 Komari 主题设置，所有设备同步生效。
+          快速配置会创建「线路机 → 落地机」的 ICMP Ping 任务，并保存到 Komari 主题设置。
         </div>
         <Button size="sm" variant="outline" @click="manager.addRoute">
           <Icon icon="tabler:plus" />添加线路
@@ -112,6 +205,7 @@ function updateFallback(metric: { fallbackLatency: number | null, fallbackLoss: 
         <header class="mb-3 flex items-center justify-between gap-3">
           <div class="flex items-center gap-2">
             <span class="text-sm font-semibold">线路 {{ routeIndex + 1 }}</span>
+            <span class="rounded border border-emerald-500/25 bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-300">快速配置</span>
           </div>
           <div class="flex items-center gap-1">
             <Button size="icon-xs" variant="ghost" :disabled="routeIndex === 0" aria-label="上移线路" @click="manager.moveRoute(routeIndex, -1)">
@@ -126,7 +220,51 @@ function updateFallback(metric: { fallbackLatency: number | null, fallbackLoss: 
           </div>
         </header>
 
-        <div class="grid gap-3 lg:grid-cols-[1fr_1.1fr_1fr_1.1fr_1fr]">
+        <section class="rounded-lg border border-emerald-500/20 bg-emerald-500/[0.045] p-3" :aria-label="`第 ${routeIndex + 1} 条线路快速配置`">
+          <div class="grid gap-3 md:grid-cols-3">
+            <label class="space-y-1 text-xs font-medium">
+              <span>1. 入口名称</span>
+              <Input v-model="route.nodes[0]!.name" :aria-label="`第 ${routeIndex + 1} 条线路入口名称`" placeholder="例如：北京电信" />
+            </label>
+            <label class="space-y-1 text-xs font-medium">
+              <span>2. 线路机</span>
+              <select
+                :value="route.nodes[1]?.name ?? ''"
+                :aria-label="`第 ${routeIndex + 1} 条线路快速线路机`"
+                class="h-9 w-full rounded-md border border-input bg-background/70 px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring"
+                @change="setQuickNode(route, 1, ($event.target as HTMLSelectElement).value)"
+              >
+                <option value="">选择线路机</option>
+                <option v-for="option in props.nodes" :key="option.uuid" :value="option.name">{{ option.name }}</option>
+              </select>
+            </label>
+            <label class="space-y-1 text-xs font-medium">
+              <span>3. 落地机</span>
+              <select
+                :value="route.nodes[2]?.name ?? ''"
+                :aria-label="`第 ${routeIndex + 1} 条线路快速落地机`"
+                class="h-9 w-full rounded-md border border-input bg-background/70 px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring"
+                @change="setQuickNode(route, 2, ($event.target as HTMLSelectElement).value)"
+              >
+                <option value="">选择落地机</option>
+                <option v-for="option in props.nodes" :key="option.uuid" :value="option.name">{{ option.name }}</option>
+              </select>
+            </label>
+          </div>
+          <div class="mt-3 flex flex-wrap items-center gap-2">
+            <Button size="sm" :disabled="quickSaving(route.id) || manager.saving" @click="configureQuickRoute(route)">
+              <Icon :icon="quickSaving(route.id) ? 'tabler:loader-2' : 'tabler:wand-stars'" :class="quickSaving(route.id) && 'animate-spin'" />
+              {{ quickSaving(route.id) ? '正在配置…' : '一键创建任务并保存' }}
+            </Button>
+            <span class="text-[10px] text-muted-foreground">同名任务会自动复用；需要细调时再打开高级设置。</span>
+            <Button size="xs" variant="ghost" class="ml-auto" @click="toggleAdvanced(route.id)">
+              <Icon :icon="isAdvanced(route.id) ? 'tabler:chevron-up' : 'tabler:adjustments'" />
+              {{ isAdvanced(route.id) ? '收起高级设置' : '高级设置' }}
+            </Button>
+          </div>
+        </section>
+
+        <div v-if="isAdvanced(route.id)" class="mt-3 grid gap-3 border-t border-border/50 pt-3 lg:grid-cols-[1fr_1.1fr_1fr_1.1fr_1fr]">
           <div
             v-for="(node, nodeIndex) in route.nodes"
             :key="`${route.id}-node-${nodeIndex}`"

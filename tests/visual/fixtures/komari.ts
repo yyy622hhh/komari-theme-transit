@@ -413,6 +413,9 @@ async function handleRpc(
       // Komari's Go JSON response omits a nil result via `omitempty`.
       result = undefined
       break
+    case 'admin:addPingTask':
+      result = { task_id: 100 }
+      break
     case 'public:getMe':
       result = { logged_in: false }
       break

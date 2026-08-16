@@ -1,13 +1,19 @@
 import type { MaybeRefOrGetter } from 'vue'
+import type { TopologyTaskCreationResult } from '@/services/topology-tasks.service'
 import type { NodeData } from '@/stores/nodes'
 import type { TopologyMetricConfig, TopologyNodeConfig, TopologyRouteConfig } from '@/utils/topologyHelper'
 import { computed, ref, toValue } from 'vue'
+import { createTopologyPingTask } from '@/services/topology-tasks.service'
 import { saveTopologyConfiguration } from '@/services/topology.service'
 import { useAppStore } from '@/stores/app'
 import { createTopologyRoute, parseTopologyRoutes } from '@/utils/topologyHelper'
 
 function defaultMetric(nodeName = '', taskFilter = ''): TopologyMetricConfig {
   return { live: Boolean(nodeName && taskFilter), nodeName, taskFilter, fallbackLatency: null, fallbackLoss: null }
+}
+
+function staticMetric(): TopologyMetricConfig {
+  return { live: false, nodeName: '', taskFilter: '', fallbackLatency: null, fallbackLoss: null }
 }
 
 function nodeConfig(node?: NodeData, role = '节点'): TopologyNodeConfig {
@@ -47,7 +53,7 @@ export function useTopologyManager(nodes: MaybeRefOrGetter<NodeData[]>) {
     const second = availableNodes.value[1]
     routes.value.push(createTopologyRoute(
       [nodeConfig(undefined, '入口'), nodeConfig(first, '线路机'), nodeConfig(second, '落地机')],
-      [defaultMetric(first?.name ?? ''), defaultMetric(first?.name ?? '')],
+      [staticMetric(), defaultMetric(first?.name ?? '')],
     ))
   }
 
@@ -78,6 +84,48 @@ export function useTopologyManager(nodes: MaybeRefOrGetter<NodeData[]>) {
       metric.nodeName = ''
       metric.taskFilter = ''
     }
+  }
+
+  /** Keeps a route in the three-field shape used by the quick setup form. */
+  function prepareQuickRoute(route: TopologyRouteConfig): void {
+    route.nodes = route.nodes.slice(0, 3)
+    while (route.nodes.length < 3)
+      route.nodes.push(nodeConfig(undefined, route.nodes.length === 0 ? '入口' : route.nodes.length === 1 ? '线路机' : '落地机'))
+
+    route.nodes[0]!.role = '入口'
+    route.nodes[1]!.role = '线路机'
+    route.nodes[2]!.role = '落地机'
+    const relayName = route.nodes[1]!.name.trim()
+    const liveMetric = route.metrics[1] ?? defaultMetric(relayName)
+    route.metrics = [route.metrics[0] ?? staticMetric(), {
+      ...liveMetric,
+      live: true,
+      nodeName: relayName,
+      taskFilter: liveMetric.taskFilter.trim(),
+    }]
+  }
+
+  async function createQuickRouteTask(route: TopologyRouteConfig): Promise<TopologyTaskCreationResult> {
+    prepareQuickRoute(route)
+    const sourceName = route.nodes[1]?.name.trim() ?? ''
+    const targetName = route.nodes[2]?.name.trim() ?? ''
+    const source = availableNodes.value.find(node => node.name === sourceName)
+    const target = availableNodes.value.find(node => node.name === targetName)
+    if (!source || !target)
+      throw new Error('请先选择线路机和落地机。')
+
+    const permitted = await appStore.requireLoginPermission('nodeTopology', { force: true })
+    if (!permitted)
+      throw new Error('登录状态已过期，请重新登录后创建任务。')
+
+    const created = await createTopologyPingTask(source, target)
+    const metric = route.metrics[1]
+    if (!metric)
+      throw new Error('线路实时指标初始化失败，请重试。')
+    metric.live = true
+    metric.nodeName = source.name
+    metric.taskFilter = created.name
+    return created
   }
 
   async function save(): Promise<boolean> {
@@ -115,6 +163,8 @@ export function useTopologyManager(nodes: MaybeRefOrGetter<NodeData[]>) {
     moveRoute,
     selectNode,
     setMetricMode,
+    prepareQuickRoute,
+    createQuickRouteTask,
     save,
   }
 }

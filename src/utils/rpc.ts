@@ -263,6 +263,20 @@ export interface PingTaskInfo {
   type?: string
 }
 
+/** Parameters accepted by Komari's administrator-only Ping task creator. */
+export interface CreatePingTaskParams extends Record<string, unknown> {
+  clients: string[]
+  default_on: boolean
+  name: string
+  target: string
+  type: 'icmp'
+  interval: number
+}
+
+export interface CreatePingTaskResponse {
+  task_id: number
+}
+
 export interface AuditLogEntry {
   id: number
   ip: string
@@ -1089,6 +1103,11 @@ export class KomariRpc {
 
   async orderClients(order: Record<string, number>, signal?: AbortSignal): Promise<void> {
     await this.client.callOverHttp('admin:orderClients', order, signal)
+  }
+
+  /** Create a Ping task through Komari's administrator RPC endpoint. */
+  async createPingTask(params: CreatePingTaskParams, signal?: AbortSignal): Promise<CreatePingTaskResponse> {
+    return this.client.callOverHttp<CreatePingTaskResponse>('admin:addPingTask', params, signal)
   }
 
   // ==================== Public 方法（主题/公开页优先使用） ====================
