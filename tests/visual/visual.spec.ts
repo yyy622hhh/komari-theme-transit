@@ -676,6 +676,28 @@ test('Transit topology manager saves through managed theme API', async ({ page }
   expect(saves[0]).toMatchObject({ topologyEnabled: true })
 })
 
+test('Transit opening topology management never creates a Ping task', async ({ page }) => {
+  const creates: unknown[] = []
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, { pandaOps: true, dark: true, authenticated: true })
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && request.url().includes('/api/rpc2') && request.postDataJSON()?.method === 'admin:addPingTask')
+      creates.push(request.postDataJSON())
+  })
+  await openStablePage(page)
+
+  const manager = page.getByRole('button', { name: '管理', exact: true })
+  const dialog = page.getByRole('dialog', { name: '拓扑管理' })
+  await manager.click()
+  await expect(dialog).toBeVisible()
+  await dialog.getByRole('button', { name: '关闭' }).click()
+  await expect(dialog).toBeHidden()
+  await manager.click()
+  await expect(dialog).toBeVisible()
+
+  expect(creates).toHaveLength(0)
+})
+
 test('Transit topology quick setup creates and binds its relay task automatically', async ({ page }) => {
   const creates: unknown[] = []
   const saves: unknown[] = []

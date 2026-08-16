@@ -35,8 +35,6 @@ watch(() => props.open, (value) => {
     taskErrors.value = {}
     advancedRouteIds.value = new Set()
     quickSavingRouteIds.value = new Set()
-    const sourceNames = manager.routes.flatMap(route => route.metrics.map(metric => metric.nodeName)).filter(Boolean)
-    void Promise.all(Array.from(new Set(sourceNames), loadTasks))
   }
 }, { immediate: true })
 
@@ -107,12 +105,26 @@ function isAdvanced(routeId: number): boolean {
   return advancedRouteIds.value.has(routeId)
 }
 
-function toggleAdvanced(routeId: number): void {
+function loadRouteTasks(route: typeof manager.routes[number]): void {
+  const sourceNames = route.metrics
+    .filter(metric => metric.live)
+    .map(metric => metric.nodeName.trim())
+    .filter(Boolean)
+  void Promise.all(Array.from(new Set(sourceNames), loadTasks))
+}
+
+function toggleAdvanced(route: typeof manager.routes[number]): void {
   const next = new Set(advancedRouteIds.value)
-  if (next.has(routeId))
-    next.delete(routeId)
-  else
-    next.add(routeId)
+  if (next.has(route.id)) {
+    next.delete(route.id)
+  }
+  else {
+    next.add(route.id)
+    // Opening the manager itself is deliberately side-effect free. Task
+    // choices are needed only by the optional advanced editor, so defer their
+    // read until the operator explicitly expands that editor.
+    loadRouteTasks(route)
+  }
   advancedRouteIds.value = next
 }
 
@@ -126,8 +138,6 @@ function setQuickNode(route: typeof manager.routes[number], index: 1 | 2, name: 
   manager.prepareQuickRoute(route)
   if (previousName !== name && route.metrics[1])
     route.metrics[1].taskFilter = ''
-  if (index === 1 && name)
-    void loadTasks(name)
 }
 
 function isCustomEntry(name: string): boolean {
@@ -139,7 +149,7 @@ function setQuickEntry(route: typeof manager.routes[number], value: string): voi
   if (value === CUSTOM_ENTRY_VALUE) {
     route.nodes[0]!.name = ''
     if (!isAdvanced(route.id))
-      toggleAdvanced(route.id)
+      toggleAdvanced(route)
     return
   }
   route.nodes[0]!.name = value
@@ -300,12 +310,12 @@ function updateFallback(metric: { fallbackLatency: number | null, fallbackLoss: 
             </label>
           </div>
           <div class="mt-3 flex flex-wrap items-center gap-2">
-            <Button size="sm" :disabled="formBusy" @click="configureQuickRoute(route)">
+            <Button type="button" size="sm" :disabled="formBusy" @click.stop="configureQuickRoute(route)">
               <Icon :icon="quickSaving(route.id) ? 'tabler:loader-2' : 'tabler:wand-stars'" :class="quickSaving(route.id) && 'animate-spin'" />
               {{ quickSaving(route.id) ? '正在配置…' : '一键创建任务并保存' }}
             </Button>
             <span class="text-[10px] text-muted-foreground">同名任务会自动复用；需要细调时再打开高级设置。</span>
-            <Button size="xs" variant="ghost" class="ml-auto" :disabled="formBusy" @click="toggleAdvanced(route.id)">
+            <Button type="button" size="xs" variant="ghost" class="ml-auto" :disabled="formBusy" @click="toggleAdvanced(route)">
               <Icon :icon="isAdvanced(route.id) ? 'tabler:chevron-up' : 'tabler:adjustments'" />
               {{ isAdvanced(route.id) ? '收起高级设置' : '高级设置' }}
             </Button>
