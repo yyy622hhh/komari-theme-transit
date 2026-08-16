@@ -90,7 +90,7 @@ function lossTone(loss: string): string {
   <section
     data-node-insight-panel
     :data-node-insight-mode="effectiveMode"
-    class="node-card-insight h-16 min-w-0 overflow-hidden px-2.5 py-1.5"
+    class="node-card-insight h-24 min-w-0 overflow-hidden px-2.5 py-1.5"
     :aria-label="`${node.name} ${panelLabel}`"
   >
     <template v-if="effectiveMode === 'carrier'">

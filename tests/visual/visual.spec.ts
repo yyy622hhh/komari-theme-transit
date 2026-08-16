@@ -718,6 +718,7 @@ test('Transit node cards render per-node insight panels without changing card he
       '00000000-0000-4000-8000-000000000004': { mode: 'gpu' },
       '00000000-0000-4000-8000-000000000005': { mode: 'compact' },
       '00000000-0000-4000-8000-000000000006': { mode: 'ping', pingTasks: ['Tokyo', 'PandaOps-Local-Hop'] },
+      '00000000-0000-4000-8000-000000000007': { mode: 'carrier' },
     },
   })
   await openStablePage(page)
@@ -729,6 +730,17 @@ test('Transit node cards render per-node insight panels without changing card he
   await expect(cards.nth(3).locator('[data-node-insight-mode="gpu"]')).toContainText('NVIDIA A100')
   await expect(cards.nth(4).locator('[data-node-insight-mode="compact"]')).toContainText('精简信息')
   await expect(cards.nth(5).locator('[data-node-insight-mode="ping"]')).toContainText('Tokyo')
+  await expect(cards.nth(6).locator('[data-node-insight-mode="carrier"] [data-node-carrier-row]')).toHaveCount(3)
+
+  await expect.poll(() => cards.locator('[data-node-insight-panel]').evaluateAll(panels => panels.every((panel) => {
+    const panelBox = panel.getBoundingClientRect()
+    const content = [...panel.querySelectorAll<HTMLElement>('[data-node-carrier-row], [data-node-custom-ping-row]')]
+    return panel.scrollHeight <= panel.clientHeight + 1
+      && content.every((row) => {
+        const rowBox = row.getBoundingClientRect()
+        return rowBox.top >= panelBox.top - 1 && rowBox.bottom <= panelBox.bottom + 1
+      })
+  }))).toBe(true)
 
   const firstRowHeights = await cards.evaluateAll(elements => elements.slice(0, 3).map(element => element.getBoundingClientRect().height))
   expect(Math.max(...firstRowHeights) - Math.min(...firstRowHeights)).toBeLessThanOrEqual(1)

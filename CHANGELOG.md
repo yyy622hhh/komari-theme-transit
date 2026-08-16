@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+## [1.0.28] - 2026-08-16
+
+### Fixed
+
+- 增加节点卡片底部观测面板的统一高度，三网质量第三行及内容较多的 GPU、系统、流量和存储面板不再被裁剪。
+
+### Testing
+
+- 扩展混合观测面板视觉回归，覆盖三网三行完整显示、内容无垂直溢出及同排卡片等高。
+
 ## [1.0.27] - 2026-08-16
 
 ### Added
@@ -371,7 +381,8 @@
 - 亮暗主题、桌面/移动布局和 Transit 风格内嵌 Komari 管理端。
 - Playwright 视觉与交互回归、自动构建和 GitHub Release 发布流程。
 
-[Unreleased]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.27...HEAD
+[Unreleased]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.28...HEAD
+[1.0.28]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.27...v1.0.28
 [1.0.27]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.26...v1.0.27
 [1.0.26]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.25...v1.0.26
 [1.0.25]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.24...v1.0.25
