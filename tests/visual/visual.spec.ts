@@ -1268,6 +1268,23 @@ test('Transit node card size changes the real desktop grid density', async ({ pa
   await expect(page.getByRole('button', { name: '查看节点 主控-洛杉矶 详情' }).locator('xpath=..')).toHaveAttribute('data-panda-node-card-size', 'mini')
 })
 
+test('Transit compact node card keeps expiry text and date fully visible', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 })
+  await installKomariFixture(page, { pandaOps: true, dark: true, nodeCardSize: 'compact' })
+  await openStablePage(page)
+
+  const card = page.getByRole('button', { name: '查看节点 主控-洛杉矶 详情' }).locator('xpath=..')
+  const expiryText = card.locator('[data-node-expiry-text]')
+  const expiryDate = card.locator('[data-node-expiry-date]')
+
+  await expect(expiryText).toHaveText('剩余 365 天')
+  await expect(expiryDate).toHaveText('2027-07-25')
+  await expect(expiryText).toBeVisible()
+  await expect(expiryDate).toBeVisible()
+  await expect.poll(() => expiryText.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
+  await expect.poll(() => expiryDate.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
+})
+
 test('node card expiry uses red through 5 days and yellow through 10 days', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 })
   await installKomariFixture(page, { expiryThresholds: true, hideEarth: true })
