@@ -467,6 +467,21 @@ test('Transit desktop topology and cards remain contained', async ({ page }) => 
   const healthyCard = page.getByRole('button', { name: '查看节点 香港边缘节点-超长名称布局测试 详情' }).locator('xpath=..')
   await expect(healthyCard.locator('[data-node-status-edge]')).toHaveClass(/bg-emerald-500\/85/)
   await expect(healthyCard.locator('[data-node-alert-edge]')).toHaveCount(0)
+  await expect.poll(async () => healthyCard.evaluate((card) => {
+    const edge = card.querySelector<HTMLElement>('[data-node-status-edge]')
+    if (!edge)
+      return Number.POSITIVE_INFINITY
+    return Math.abs(edge.getBoundingClientRect().left - card.getBoundingClientRect().left)
+  })).toBeLessThanOrEqual(0.1)
+  await expect.poll(async () => healthyCard.evaluate((card) => {
+    const title = card.querySelector<HTMLElement>('[data-node-name]')
+    const role = title?.nextElementSibling as HTMLElement | null
+    if (!title || !role)
+      return Number.POSITIVE_INFINITY
+    const titleBox = title.getBoundingClientRect()
+    const roleBox = role.getBoundingClientRect()
+    return Math.abs((titleBox.top + titleBox.height / 2) - (roleBox.top + roleBox.height / 2))
+  })).toBeLessThanOrEqual(0.1)
   const carrierSample = nodeCardSurface.locator('[data-carrier-sample][aria-label*="ms"]').first()
   await carrierSample.hover()
   const carrierTooltip = page.locator('[data-carrier-sample-tooltip]')
@@ -681,6 +696,10 @@ test('Transit topology quick setup creates and binds its relay task automaticall
 
   await page.getByRole('button', { name: '管理', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: '拓扑管理' })
+  const entrySelect = dialog.getByLabel('第 1 条线路入口运营商')
+  await expect(entrySelect.locator('option')).toContainText(['北京电信', '上海联通', '广州移动'])
+  await entrySelect.selectOption('北京联通')
+  await expect(entrySelect).toHaveValue('北京联通')
   await dialog.getByRole('button', { name: '一键创建任务并保存' }).first().click()
 
   await expect.poll(() => creates.length).toBe(1)

@@ -91,13 +91,13 @@ const statusEdgeTone = computed(() => {
       v-if="node.online"
       data-node-status-edge
       :data-node-alert-edge="visibleAlert ? '' : undefined"
-      class="pointer-events-none absolute inset-y-3 left-0 z-1 w-0.5 rounded-r-full"
+      class="pointer-events-none absolute inset-y-3 -left-px z-1 w-0.5 rounded-r-full"
       :class="statusEdgeTone"
     />
 
     <header class="panda-node-card__header pointer-events-none relative z-1 min-h-[2.65rem]">
-      <div class="flex min-w-0 items-start justify-between gap-3">
-        <div class="flex min-w-0 flex-1 items-start gap-2">
+      <div class="flex min-w-0 items-center justify-between gap-3">
+        <div class="flex min-w-0 flex-1 items-center gap-2">
           <span class="size-2.5 shrink-0 rounded-full" :class="isMaintenance ? 'bg-amber-400' : node.online ? 'bg-emerald-400' : 'bg-rose-400'" />
           <h3
             data-node-name
@@ -107,7 +107,7 @@ const statusEdgeTone = computed(() => {
           >
             {{ node.name }}
           </h3>
-          <span v-if="role" class="shrink-0 pt-0.5 text-[10px] text-slate-500">· {{ role }}</span>
+          <span v-if="role" class="shrink-0 text-[10px] text-slate-500">· {{ role }}</span>
         </div>
         <div class="flex shrink-0 items-center gap-2">
           <button

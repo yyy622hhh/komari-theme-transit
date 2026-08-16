@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input'
 import { useTopologyManager } from '@/composables/useTopologyManager'
 import { loadPingTaskNamesForNode } from '@/services/metrics.service'
 import { topologyPingTaskName } from '@/services/topology-tasks.service'
+import { TOPOLOGY_PROBE_OPTIONS } from '@/utils/topologyHelper'
 
 const props = defineProps<{ nodes: NodeData[], open: boolean }>()
 const emit = defineEmits<{ 'update:open': [open: boolean] }>()
@@ -17,6 +18,8 @@ const taskLoading = ref<Record<string, boolean>>({})
 const taskErrors = ref<Record<string, string>>({})
 const advancedRouteIds = ref<Set<number>>(new Set())
 const quickSavingRouteIds = ref<Set<number>>(new Set())
+const CUSTOM_ENTRY_VALUE = '__transit_custom_entry__'
+const entryOptions = TOPOLOGY_PROBE_OPTIONS.map(option => option.label)
 
 const isOpen = computed({
   get: () => props.open,
@@ -104,6 +107,21 @@ function setQuickNode(route: typeof manager.routes[number], index: 1 | 2, name: 
   manager.prepareQuickRoute(route)
   if (index === 1 && name)
     void loadTasks(name)
+}
+
+function isCustomEntry(name: string): boolean {
+  return Boolean(name && !entryOptions.includes(name))
+}
+
+function setQuickEntry(route: typeof manager.routes[number], value: string): void {
+  manager.prepareQuickRoute(route)
+  if (value === CUSTOM_ENTRY_VALUE) {
+    route.nodes[0]!.name = ''
+    if (!isAdvanced(route.id))
+      toggleAdvanced(route.id)
+    return
+  }
+  route.nodes[0]!.name = value
 }
 
 function matchingQuickTask(sourceName: string, targetName: string): string {
@@ -223,8 +241,18 @@ function updateFallback(metric: { fallbackLatency: number | null, fallbackLoss: 
         <section class="rounded-lg border border-emerald-500/20 bg-emerald-500/[0.045] p-3" :aria-label="`第 ${routeIndex + 1} 条线路快速配置`">
           <div class="grid gap-3 md:grid-cols-3">
             <label class="space-y-1 text-xs font-medium">
-              <span>1. 入口名称</span>
-              <Input v-model="route.nodes[0]!.name" :aria-label="`第 ${routeIndex + 1} 条线路入口名称`" placeholder="例如：北京电信" />
+              <span>1. 入口运营商</span>
+              <select
+                :value="route.nodes[0]?.name ?? ''"
+                :aria-label="`第 ${routeIndex + 1} 条线路入口运营商`"
+                class="h-9 w-full rounded-md border border-input bg-background/70 px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring"
+                @change="setQuickEntry(route, ($event.target as HTMLSelectElement).value)"
+              >
+                <option value="">选择入口运营商</option>
+                <option v-for="option in entryOptions" :key="option" :value="option">{{ option }}</option>
+                <option v-if="isCustomEntry(route.nodes[0]?.name ?? '')" :value="route.nodes[0]!.name">当前自定义：{{ route.nodes[0]!.name }}</option>
+                <option :value="CUSTOM_ENTRY_VALUE">自定义入口…</option>
+              </select>
             </label>
             <label class="space-y-1 text-xs font-medium">
               <span>2. 线路机</span>
