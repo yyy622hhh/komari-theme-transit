@@ -220,7 +220,7 @@ const statusEdgeTone = computed(() => {
             / {{ formatBytes(node.traffic_limit) }}
           </template>
         </div>
-        <div data-node-expiry-row class="mt-1 flex min-w-0 flex-col items-start gap-y-0.5 text-slate-500">
+        <div data-node-expiry-row class="mt-1 flex h-[1.65rem] min-w-0 flex-col items-start gap-y-0.5 text-slate-500">
           <span data-node-expiry-text class="max-w-full whitespace-nowrap">{{ expiryText }}</span>
           <span v-if="expiryDate" data-node-expiry-date class="max-w-full whitespace-nowrap text-[8px] tabular-nums">{{ expiryDate }}</span>
         </div>

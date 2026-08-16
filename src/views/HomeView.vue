@@ -744,7 +744,7 @@ const nodeCardGridClass = computed(() => {
                 >
                   <Icon icon="tabler:grip-vertical" :width="17" :height="17" />
                 </button>
-                <div :class="homeOrder.editingOrder.value && 'pointer-events-none'">
+                <div :class="[appStore.opsDashboardEnabled && 'h-full', homeOrder.editingOrder.value && 'pointer-events-none']">
                   <DeferredRender
                     :enabled="deferNodeCards"
                     :min-height="deferredNodeCardHeight"

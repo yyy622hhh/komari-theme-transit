@@ -12,7 +12,7 @@
 
 Transit 是一个面向多节点、多线路和跨境链路监控的 Komari 社区主题。它把“入口 → 线路机 → 落地机”的链路拓扑、北京/上海/广州三网 Ping、实时资源、异常告警和资产信息放进同一套紧凑界面，并提供可视化拓扑管理器。
 
-- 当前稳定版：[v1.0.25](https://github.com/yyy622hhh/komari-theme-transit/releases/tag/v1.0.25)
+- 当前稳定版：[v1.0.26](https://github.com/yyy622hhh/komari-theme-transit/releases/tag/v1.0.26)
 - 在线演示：[status.pandakiko.com](https://status.pandakiko.com/)
 - 安装包：只从 [GitHub Releases](https://github.com/yyy622hhh/komari-theme-transit/releases) 下载 `komari-theme-Transit-build-*.zip`
 - 项目定位：社区主题，不修改 Komari 数据库、Agent、系统账户或公开 API
@@ -191,7 +191,7 @@ live@Relay-JP@北京电信@51@0;live@Relay-JP@Relay-JP-to-Exit-US@84@0||live@Rel
 
 桌面端将鼠标放到采样格上即可查看时间、延迟和丢包；点击可以固定浮窗。移动端直接点击采样格查看，点击空白处关闭。拓扑、节点卡和详情页使用同一套采样交互。
 
-节点卡底部按卡片自身宽度响应，而不是只看浏览器宽度：宽卡片显示速度、累计流量和三网质量三列；中窄卡片让三网质量独占整行；极窄卡片使用单列。节点名最多两行，价格、到期日期、大流量和三网指标不会用省略号隐藏关键数据。
+节点卡底部按卡片自身宽度响应，而不是只看浏览器宽度：宽卡片显示速度、累计流量和三网质量三列；中窄卡片让三网质量独占整行；极窄卡片使用单列。节点名最多两行，价格、到期日期、大流量和三网指标不会用省略号隐藏关键数据；未设置到期时也会保留一致的布局高度，不会让同排卡片参差。
 
 ## 告警、可靠性与运维工具
 

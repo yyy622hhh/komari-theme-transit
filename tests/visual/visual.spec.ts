@@ -1310,6 +1310,34 @@ test('Transit compact node card keeps expiry text and date fully visible', async
   await expect.poll(() => expiryDate.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
 })
 
+test('Transit cards reserve the same expiry height when no date is configured', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await installKomariFixture(page, {
+    pandaOps: true,
+    dark: true,
+    hideEarth: true,
+    nodeCardSize: 'compact',
+    nodeCardWorstCase: true,
+  })
+  await openStablePage(page)
+
+  const datedCard = page.getByRole('button', { name: /查看节点 北京联通精品线路/ }).locator('xpath=..')
+  const undatedCard = page.getByRole('button', { name: '查看节点 香港边缘节点-超长名称布局测试 详情' }).locator('xpath=..')
+  const datedExpiry = datedCard.locator('[data-node-expiry-row]')
+  const undatedExpiry = undatedCard.locator('[data-node-expiry-row]')
+
+  await expect(undatedExpiry.locator('[data-node-expiry-text]')).toHaveText('未设置到期')
+  await expect(undatedExpiry.locator('[data-node-expiry-date]')).toHaveCount(0)
+  await expect.poll(async () => {
+    const [datedBox, undatedBox] = await Promise.all([datedExpiry.boundingBox(), undatedExpiry.boundingBox()])
+    return datedBox && undatedBox ? Math.abs(datedBox.height - undatedBox.height) : Number.POSITIVE_INFINITY
+  }).toBeLessThan(1)
+  await expect.poll(async () => {
+    const [datedBox, undatedBox] = await Promise.all([datedCard.boundingBox(), undatedCard.boundingBox()])
+    return datedBox && undatedBox ? Math.abs(datedBox.height - undatedBox.height) : Number.POSITIVE_INFINITY
+  }).toBeLessThan(1)
+})
+
 test('Transit worst-case node cards remain complete and responsive across densities', async ({ page }) => {
   const cases = [
     { width: 320, height: 900, size: 'mini', columns: 1 },

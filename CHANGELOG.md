@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+## [1.0.26] - 2026-08-16
+
+### Fixed
+
+- 未设置到期日期的 Transit 节点卡现在保留与已设置日期相同的到期区高度，同一网格行不再因缺少日期而出现卡片高低不一。
+
+### Testing
+
+- 新增有日期与无日期节点卡的到期区和整卡等高浏览器回归，同时确保无日期状态不渲染虚假日期占位文本。
+
 ## [1.0.25] - 2026-08-16
 
 ### Fixed
@@ -341,7 +351,8 @@
 - 亮暗主题、桌面/移动布局和 Transit 风格内嵌 Komari 管理端。
 - Playwright 视觉与交互回归、自动构建和 GitHub Release 发布流程。
 
-[Unreleased]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.25...HEAD
+[Unreleased]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.26...HEAD
+[1.0.26]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.25...v1.0.26
 [1.0.25]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.24...v1.0.25
 [1.0.24]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.23...v1.0.24
 [1.0.23]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.22...v1.0.23

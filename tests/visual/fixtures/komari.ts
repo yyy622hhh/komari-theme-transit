@@ -471,6 +471,9 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
       net_total_down: 2.345 * 1024 * TIB,
       uptime: 3652 * 86_400,
     })
+    Object.assign(clientFixtures[uuidFor(1)]!, {
+      expired_at: null,
+    })
   }
   let settings: Record<string, unknown> = {
     alertEnabled: options.announcementEscaping ?? false,
