@@ -4,6 +4,7 @@ import type { CurrencyCode } from '@/utils/financeHelper'
 import { Icon } from '@iconify/vue'
 import { computed, defineAsyncComponent, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import ComponentErrorBoundary from '@/components/ComponentErrorBoundary.vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { CardX } from '@/components/ui/card-x'
@@ -769,8 +770,20 @@ const metricCards = computed<MetricCard[]>(() => appStore.detailMetricCardOrder.
         </CardX>
       </div>
 
-      <LoadChart v-if="!appStore.nodeDetailSectionTabsEnabled || activeDetailSection === 'load'" :uuid="data.uuid" class="px-4" />
-      <PingChart v-if="!appStore.nodeDetailSectionTabsEnabled || activeDetailSection === 'ping'" :uuid="data.uuid" class="px-4" />
+      <ComponentErrorBoundary
+        v-if="!appStore.nodeDetailSectionTabsEnabled || activeDetailSection === 'load'"
+        label="负载图表"
+        :reset-key="data.uuid"
+      >
+        <LoadChart :uuid="data.uuid" class="px-4" />
+      </ComponentErrorBoundary>
+      <ComponentErrorBoundary
+        v-if="!appStore.nodeDetailSectionTabsEnabled || activeDetailSection === 'ping'"
+        label="延迟图表"
+        :reset-key="data.uuid"
+      >
+        <PingChart :uuid="data.uuid" class="px-4" />
+      </ComponentErrorBoundary>
     </template>
   </div>
 </template>

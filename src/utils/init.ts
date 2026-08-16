@@ -10,6 +10,7 @@ import { useAppStore } from '@/stores/app'
 import { useNodesStore } from '@/stores/nodes'
 import { getSharedApi } from '@/utils/api'
 import { getSharedRpc, isRpcPermissionError, RpcError } from '@/utils/rpc'
+import { logAppError, logAppWarning } from '@/utils/safeError'
 
 /** 初始化配置 */
 interface InitConfig {
@@ -127,7 +128,7 @@ export class InitManager {
     if (typeof document !== 'undefined' && document.visibilityState === 'hidden')
       return
     void this.revalidateSessionAndTransport()
-      .catch(error => console.warn('[InitManager] Failed to revalidate session on focus:', error))
+      .catch(error => logAppWarning('Failed to revalidate session on focus', error))
   }
 
   private readonly handleVisibilityChange = (): void => {
@@ -199,7 +200,7 @@ export class InitManager {
     catch (error) {
       if (!this.isLifecycleCurrent(generation))
         return
-      console.error('[InitManager] Initialization failed:', error)
+      logAppError('Initialization failed', error)
       this.appStore.connectionError = true
       throw error
     }
@@ -294,7 +295,7 @@ export class InitManager {
         lastError = error
         if (attempt < this.config.healthCheckAttempts) {
           const retryDelay = this.config.healthCheckRetryInterval * 2 ** (attempt - 1)
-          console.warn(`[InitManager] Health check attempt ${attempt} failed, retrying in ${retryDelay}ms`, error)
+          logAppWarning(`Health check attempt ${attempt} failed; retrying in ${retryDelay}ms`, error)
           await waitWithAbort(retryDelay, signal)
         }
       }
@@ -306,7 +307,7 @@ export class InitManager {
 
     if (!canCommit())
       throw createAbortError()
-    console.error('[InitManager] Health check failed after retries:', lastError)
+    logAppError('Health check failed after retries', lastError)
     throw new Error('Backend service unavailable')
   }
 
@@ -323,7 +324,7 @@ export class InitManager {
     catch (error) {
       if (signal.aborted || !canCommit())
         return
-      console.error('[InitManager] Failed to fetch public settings:', error)
+      logAppError('Failed to fetch public settings', error)
       // 非关键错误，继续初始化
     }
   }
@@ -342,7 +343,7 @@ export class InitManager {
       if (signal.aborted || !canCommit())
         return
       this.appStore.updateLoginState(false)
-      console.error('[InitManager] Failed to fetch user info:', error)
+      logAppError('Failed to fetch user info', error)
       // 非关键错误，继续初始化
     }
   }
@@ -367,7 +368,7 @@ export class InitManager {
     catch (error) {
       if (signal.aborted || !canCommit())
         return
-      console.error('[InitManager] Failed to fetch nodes data:', error)
+      logAppError('Failed to fetch nodes data', error)
       throw error
     }
   }
@@ -526,7 +527,7 @@ export class InitManager {
     catch (error) {
       if (!this.isTransportCurrent(generation) || !this.useWebSocket)
         return
-      console.error('[InitManager] WebSocket connection failed:', error)
+      logAppError('WebSocket connection failed', error)
       this.nodesStore.updateWsState('disconnected')
       this.scheduleReconnect(generation)
     }
@@ -584,7 +585,7 @@ export class InitManager {
       catch (error) {
         if (!this.isTransportCurrent(generation))
           return
-        console.error('[InitManager] Reconnect failed:', error)
+        logAppError('WebSocket reconnect failed', error)
         this.scheduleReconnect(generation)
       }
     }, backoff)
@@ -687,10 +688,10 @@ export class InitManager {
         return
 
       if (error instanceof RpcError) {
-        console.error('[InitManager] Poll RPC error:', error.message)
+        logAppError('Poll RPC error', error)
       }
       else {
-        console.error('[InitManager] Poll error:', error)
+        logAppError('Poll error', error)
       }
 
       this.postFailureCount += 1

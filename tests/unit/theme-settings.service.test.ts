@@ -19,15 +19,18 @@ afterEach(() => {
 describe('managed theme settings compatibility', () => {
   test('uses the Komari 1.4 settings endpoint', async () => {
     const calls: Array<{ method?: string, url: string }> = []
+    let persisted: Record<string, unknown> = { preserved: 'server-value' }
     globalThis.fetch = (async (input, init) => {
       const url = String(input)
       calls.push({ url, method: init?.method })
       if (url.endsWith('/api/me'))
         return jsonResponse({ logged_in: true, username: 'admin' })
       if (url.endsWith('/api/public'))
-        return jsonResponse({ status: 'success', message: '', data: { theme: 'Transit', theme_settings: { preserved: 'server-value' } } })
-      if (url.includes('/api/admin/theme/settings?theme=Transit'))
+        return jsonResponse({ status: 'success', message: '', data: { theme: 'Transit', theme_settings: persisted } })
+      if (url.includes('/api/admin/theme/settings?theme=Transit')) {
+        persisted = JSON.parse(String(init?.body)) as Record<string, unknown>
         return jsonResponse({ status: 'success', data: null })
+      }
       return jsonResponse({ message: 'unexpected endpoint' }, 500)
     }) as typeof fetch
     setAuthSessionFromLogin(true, { logged_in: true, username: 'admin' })
@@ -48,17 +51,20 @@ describe('managed theme settings compatibility', () => {
 
   test('falls back to the legacy config endpoint only when the new route is unavailable', async () => {
     const calls: Array<{ method?: string, url: string }> = []
+    let persisted: Record<string, unknown> = {}
     globalThis.fetch = (async (input, init) => {
       const url = String(input)
       calls.push({ url, method: init?.method })
       if (url.endsWith('/api/me'))
         return jsonResponse({ logged_in: true, username: 'admin' })
       if (url.endsWith('/api/public'))
-        return jsonResponse({ status: 'success', message: '', data: { theme: 'Transit', theme_settings: {} } })
+        return jsonResponse({ status: 'success', message: '', data: { theme: 'Transit', theme_settings: persisted } })
       if (url.includes('/api/admin/theme/settings'))
         return jsonResponse({ message: 'not found' }, 404)
-      if (url.includes('/api/admin/theme/config?short=Transit'))
+      if (url.includes('/api/admin/theme/config?short=Transit')) {
+        persisted = JSON.parse(String(init?.body)) as Record<string, unknown>
         return jsonResponse({ status: 'success', data: null })
+      }
       return jsonResponse({ message: 'unexpected endpoint' }, 500)
     }) as typeof fetch
     setAuthSessionFromLogin(true, { logged_in: true, username: 'admin' })
@@ -70,7 +76,7 @@ describe('managed theme settings compatibility', () => {
       requestKey: 'test:theme-settings:legacy',
     })
 
-    expect(calls.at(-1)).toEqual({
+    expect(calls).toContainEqual({
       method: 'PUT',
       url: '/api/admin/theme/config?short=Transit',
     })
@@ -120,14 +126,16 @@ describe('managed theme settings compatibility', () => {
 
   test('merges a patch with the latest server settings instead of a stale page snapshot', async () => {
     let postedBody: Record<string, unknown> | undefined
+    let persisted: Record<string, unknown> = { changedInOtherTab: 2, topologyEnabled: false }
     globalThis.fetch = (async (input, init) => {
       const url = String(input)
       if (url.endsWith('/api/me'))
         return jsonResponse({ logged_in: true, username: 'admin' })
       if (url.endsWith('/api/public'))
-        return jsonResponse({ status: 'success', message: '', data: { theme: 'Transit', theme_settings: { changedInOtherTab: 2, topologyEnabled: false } } })
+        return jsonResponse({ status: 'success', message: '', data: { theme: 'Transit', theme_settings: persisted } })
       if (url.includes('/api/admin/theme/settings')) {
         postedBody = JSON.parse(String(init?.body)) as Record<string, unknown>
+        persisted = postedBody
         return jsonResponse({ status: 'success', data: null })
       }
       return jsonResponse({ message: 'unexpected endpoint' }, 500)
@@ -218,5 +226,73 @@ describe('managed theme settings compatibility', () => {
     await expect(failed).rejects.toThrow('first save rejected')
     await expect(recovered).resolves.toEqual({ preserved: true, pandaOpsNodeControls: '{}' })
     expect(saveAttempt).toBe(2)
+  })
+
+  test('uses a named Web Lock when the browser supports cross-tab serialization', async () => {
+    const originalNavigator = globalThis.navigator
+    const lockNames: string[] = []
+    let persisted: Record<string, unknown> = {}
+    Object.defineProperty(globalThis, 'navigator', {
+      configurable: true,
+      value: {
+        locks: {
+          request: async <T>(name: string, callback: () => Promise<T>): Promise<T> => {
+            lockNames.push(name)
+            return callback()
+          },
+        },
+      },
+    })
+    try {
+      globalThis.fetch = (async (input, init) => {
+        const url = String(input)
+        if (url.endsWith('/api/me'))
+          return jsonResponse({ logged_in: true, username: 'admin' })
+        if (url.endsWith('/api/public'))
+          return jsonResponse({ status: 'success', message: '', data: { theme: 'Transit', theme_settings: persisted } })
+        if (url.includes('/api/admin/theme/settings')) {
+          persisted = JSON.parse(String(init?.body)) as Record<string, unknown>
+          return jsonResponse({ status: 'success', data: null })
+        }
+        return jsonResponse({ message: 'unexpected endpoint' }, 500)
+      }) as typeof fetch
+      setAuthSessionFromLogin(true, { logged_in: true, username: 'admin' })
+
+      await saveManagedThemeSettings({
+        theme: 'Transit',
+        patch: { topologyEnabled: true },
+        permission: 'nodeTopology',
+        requestKey: 'save:web-lock',
+      })
+      expect(lockNames).toEqual(['transit:theme-settings:Transit'])
+    }
+    finally {
+      Object.defineProperty(globalThis, 'navigator', { configurable: true, value: originalNavigator })
+    }
+  })
+
+  test('rejects a nominally successful write when the server does not persist the patch', async () => {
+    let publicReadCount = 0
+    globalThis.fetch = (async (input) => {
+      const url = String(input)
+      if (url.endsWith('/api/me'))
+        return jsonResponse({ logged_in: true, username: 'admin' })
+      if (url.endsWith('/api/public')) {
+        publicReadCount++
+        return jsonResponse({ status: 'success', message: '', data: { theme: 'Transit', theme_settings: { topologyEnabled: false } } })
+      }
+      if (url.includes('/api/admin/theme/settings'))
+        return jsonResponse({ status: 'success', data: null })
+      return jsonResponse({ message: 'unexpected endpoint' }, 500)
+    }) as typeof fetch
+    setAuthSessionFromLogin(true, { logged_in: true, username: 'admin' })
+
+    await expect(saveManagedThemeSettings({
+      theme: 'Transit',
+      patch: { topologyEnabled: true },
+      permission: 'nodeTopology',
+      requestKey: 'save:not-persisted',
+    })).rejects.toThrow('服务器未保留')
+    expect(publicReadCount).toBe(2)
   })
 })

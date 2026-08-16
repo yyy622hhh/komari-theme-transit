@@ -24,6 +24,7 @@ import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
 import { getAuthSession, requirePermission, setAuthSessionFromLogin, verifyLogin } from '@/services/auth.service'
 import { parsePandaOpsNodeControls } from '@/utils/pandaOpsNodeControl'
+import { normalizeThemeSettings, resolveThemeBackgroundSource } from '@/utils/themeSettings'
 
 type GeneralCardPreset = 'official' | 'basic' | 'ops' | 'resource' | 'finance' | 'traffic' | 'gpu' | 'asset' | 'full' | 'custom'
 type HomeQuickControlPreset = 'basic' | 'traffic' | 'ops' | 'full' | 'custom'
@@ -475,7 +476,6 @@ const DEFAULT_GLASS_CUSTOM_COLORS: GlassCustomColors = {
 
 const HEX_COLOR_REGEX = /^#[0-9a-f]{6}(?:[0-9a-f]{2})?$/i
 const KEY_LIST_SEPARATOR_REGEX = /[\s,，;；]+/u
-const EMPTY_THEME_SETTINGS: ThemeSettings = {}
 
 function isValidThemeMode(value: unknown): value is ThemeMode {
   return value === 'auto' || value === 'light' || value === 'dark'
@@ -620,26 +620,6 @@ function normalizeHomeQuickControlOrder(keys: HomeQuickControlKey[]): HomeQuickC
   return [...new Set(keys)]
 }
 
-function normalizeThemeSettings(raw: unknown): ThemeSettings {
-  if (!raw)
-    return EMPTY_THEME_SETTINGS
-
-  if (typeof raw === 'string') {
-    try {
-      const parsed = JSON.parse(raw) as unknown
-      return normalizeThemeSettings(parsed)
-    }
-    catch {
-      return EMPTY_THEME_SETTINGS
-    }
-  }
-
-  if (typeof raw === 'object' && !Array.isArray(raw))
-    return raw as ThemeSettings
-
-  return EMPTY_THEME_SETTINGS
-}
-
 function parseKeyList<T extends string>(rawValue: unknown, isValid: (value: string) => value is T, fallback: readonly T[]): T[] {
   const parsedKeys: T[] = []
   const seenKeys = new Set<T>()
@@ -700,25 +680,6 @@ function readNumberSetting(settings: ThemeSettings, key: string, fallback: numbe
 function readStringSetting(settings: ThemeSettings, key: string, fallback = ''): string {
   const value = settings[key]
   return typeof value === 'string' ? value.trim() : fallback
-}
-
-function resolveBackgroundSource(value: unknown): string {
-  if (typeof value !== 'string')
-    return ''
-
-  const source = value.trim()
-  if (!source.toLowerCase().startsWith('local:'))
-    return source
-
-  const segments = source.slice('local:'.length)
-    .replaceAll('\\', '/')
-    .split('/')
-    .filter(Boolean)
-
-  if (segments.length === 0 || segments.some(segment => segment === '.' || segment === '..'))
-    return ''
-
-  return `/themes/user-assets/${segments.map(segment => encodeURIComponent(segment)).join('/')}`
 }
 
 function readColorSetting(settings: ThemeSettings, key: string, fallback: string): string {
@@ -1115,11 +1076,11 @@ const useAppStore = defineStore('app', () => {
   })
 
   const lightBackgroundUrl = computed<string>(() => {
-    return resolveBackgroundSource(themeSettings.value.lightBackgroundUrl)
+    return resolveThemeBackgroundSource(themeSettings.value.lightBackgroundUrl)
   })
 
   const darkBackgroundUrl = computed<string>(() => {
-    return resolveBackgroundSource(themeSettings.value.darkBackgroundUrl)
+    return resolveThemeBackgroundSource(themeSettings.value.darkBackgroundUrl)
   })
 
   const backgroundBlur = computed<number>(() => readNumberSetting(themeSettings.value, 'backgroundBlur', 0, 0, Number.MAX_SAFE_INTEGER))

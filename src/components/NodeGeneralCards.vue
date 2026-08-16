@@ -6,6 +6,7 @@ import type { TopNodeMetric } from '@/utils/nodeMetricsHelper'
 import { Icon } from '@iconify/vue'
 import { useNow } from '@vueuse/core'
 import { computed, defineAsyncComponent, onMounted, ref, watch } from 'vue'
+import ComponentErrorBoundary from '@/components/ComponentErrorBoundary.vue'
 import NodeEarthGlobe from '@/components/NodeEarthGlobe.vue'
 import { CardX } from '@/components/ui/card-x'
 import { DataTooltip } from '@/components/ui/data-tooltip'
@@ -838,11 +839,12 @@ onMounted(() => {
 
 <template>
   <div v-if="shouldRenderHeader" :class="wrapperClass">
-    <NodeEarthGlobe
-      v-if="showEarth"
-      :nodes="globeNodes"
-      :class="earthClass"
-    />
+    <ComponentErrorBoundary v-if="showEarth" label="节点地图" :reset-key="appStore.earthRenderer">
+      <NodeEarthGlobe
+        :nodes="globeNodes"
+        :class="earthClass"
+      />
+    </ComponentErrorBoundary>
 
     <div v-if="visibleCards.length > 0" :class="cardGridClass">
       <CardX

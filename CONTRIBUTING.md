@@ -42,20 +42,37 @@ bun run type-check
 bun run test:unit
 bun run build-only
 bun run audit:bundle
+bun run audit:performance
+bun run audit:reproducible
 bun run audit:dependencies
 ```
+
+`audit:reproducible` 会在同一检出目录和工具链中连续重建并比较 Release zip 的 SHA-256，用于阻止本项目构建逻辑产生非确定性输出；它不替代跨操作系统、跨工具链的独立可复现构建证明。
 
 涉及页面、样式、响应式或交互时还需运行：
 
 ```bash
 bun run test:visual
+bun run test:functional
 ```
+
+`test:functional` 会在 Chromium、Firefox、WebKit 与移动 WebKit 上验证公开浏览、详情跳转、后台入口契约和排序持久化。
 
 无障碍相关改动也可先单独运行：
 
 ```bash
 bun run test:accessibility
 ```
+
+涉及大规模节点、虚拟列表、定时刷新、缓存或组件生命周期时，还应运行：
+
+```bash
+bun run test:performance
+```
+
+该命令覆盖大规模节点渲染与长稳资源释放；预算和加压参数见 [docs/Performance.md](docs/Performance.md)。
+
+修改 RPC、认证、主题安装或排序持久化时，应在 Linux 隔离环境运行 `bun run test:komari`。该命令只操作临时 Komari/SQLite，详情见 [docs/Compatibility.md](docs/Compatibility.md)。
 
 该命令在开发测试环境对首页、节点详情和登录后的服务器列表执行 axe 结构与交互扫描，并阻止 serious/critical 级违规。毛玻璃主题的动态透明色由高对比度样式和视觉回归共同覆盖。`audit:dependencies` 会按提交的 `bun.lock` 查询 OSV，并阻止 HIGH/CRITICAL 依赖漏洞。
 
@@ -86,3 +103,5 @@ Release 不得包含 `public/admin-app/`、`dist/admin-app/`、第三方管理�
 ## Release 规则
 
 项目采用语义化版本。只有维护者应修改 `komari-theme.json.version` 和创建 Release。修复已发布版本时发布新的 patch 版本，不覆盖已经被用户下载的历史 tag。
+
+版本变更推送到 `main` 后，Release 工作流会等待同一提交的 Quality、Visual Regression、Browser Functional 和 Komari Compatibility 全部成功，再创建 tag 与 GitHub Release。不要绕过失败或仍在运行的发布门禁手工覆盖同版本 tag。

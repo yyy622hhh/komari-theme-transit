@@ -44,8 +44,22 @@ jobs:
       - name: Audit initial bundle
         run: bun run audit:bundle
 
+      - name: Record performance budget trend
+        run: bun run audit:performance
+
+      - name: Upload performance budget report
+        uses: actions/upload-artifact@v6
+        with:
+          name: performance-budget-${{ github.sha }}
+          path: test-results/performance/bundle-performance.json
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Audit release package
         run: bun run audit:release
+
+      - name: Verify reproducible release package
+        run: bun run audit:reproducible
 
       - name: Audit dependencies with OSV
         run: bun run audit:dependencies

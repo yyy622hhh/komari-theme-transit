@@ -6,6 +6,7 @@ on:
       - main
 
 permissions:
+  actions: read
   contents: write
 
 concurrency:
@@ -45,7 +46,46 @@ jobs:
 
           const zeroSha = '0000000000000000000000000000000000000000'
           const beforeSha = process.env.BEFORE_SHA
-          const versionRe = /^\d+\.\d+\.\d+(?:[-+][0-9A-Z.-]+)?$/i
+          const versionRe = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:0|[1-9]\d*|\d*[A-Z-][0-9A-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Z-][0-9A-Z-]*))*)?(?:\+[0-9A-Z-]+(?:\.[0-9A-Z-]+)*)?$/i
+
+          function compareVersions(left, right) {
+            const parse = (version) => {
+              const buildIndex = version.indexOf('+')
+              const withoutBuild = buildIndex === -1 ? version : version.slice(0, buildIndex)
+              const prereleaseIndex = withoutBuild.indexOf('-')
+              const core = prereleaseIndex === -1 ? withoutBuild : withoutBuild.slice(0, prereleaseIndex)
+              const prerelease = prereleaseIndex === -1 ? '' : withoutBuild.slice(prereleaseIndex + 1)
+              return { core: core.split('.').map(Number), prerelease: prerelease ? prerelease.split('.') : [] }
+            }
+            const a = parse(left)
+            const b = parse(right)
+            for (let index = 0; index < 3; index += 1) {
+              if (a.core[index] !== b.core[index])
+                return a.core[index] > b.core[index] ? 1 : -1
+            }
+            if (!a.prerelease.length || !b.prerelease.length) {
+              if (a.prerelease.length === b.prerelease.length)
+                return 0
+              return a.prerelease.length ? -1 : 1
+            }
+            const length = Math.max(a.prerelease.length, b.prerelease.length)
+            for (let index = 0; index < length; index += 1) {
+              const leftPart = a.prerelease[index]
+              const rightPart = b.prerelease[index]
+              if (leftPart === undefined || rightPart === undefined)
+                return leftPart === undefined ? -1 : 1
+              if (leftPart === rightPart)
+                continue
+              const leftNumeric = /^\d+$/.test(leftPart)
+              const rightNumeric = /^\d+$/.test(rightPart)
+              if (leftNumeric && rightNumeric)
+                return Number(leftPart) > Number(rightPart) ? 1 : -1
+              if (leftNumeric !== rightNumeric)
+                return leftNumeric ? -1 : 1
+              return leftPart > rightPart ? 1 : -1
+            }
+            return 0
+          }
 
           function readJson(filePath) {
             return JSON.parse(readFileSync(filePath, 'utf8'))
@@ -77,6 +117,17 @@ jobs:
             }
           }
 
+          if (versionChanged && previousVersion) {
+            if (typeof previousVersion !== 'string' || !versionRe.test(previousVersion)) {
+              console.error(`Invalid previous komari-theme.json version: ${previousVersion}`)
+              process.exit(1)
+            }
+            if (compareVersions(currentVersion, previousVersion) <= 0) {
+              console.error(`Theme version must increase: ${previousVersion} -> ${currentVersion}`)
+              process.exit(1)
+            }
+          }
+
           console.log(`current_version=${currentVersion}`)
           console.log(`previous_version=${previousVersion}`)
           console.log(`version_changed=${versionChanged}`)
@@ -88,6 +139,7 @@ jobs:
         env:
           RELEASE_TAG: ${{ steps.version.outputs.release_tag }}
           CURRENT_SHA: ${{ github.sha }}
+          VERSION_CHANGED: ${{ steps.version.outputs.version_changed }}
         run: |
           git fetch --force --tags
 
@@ -99,7 +151,11 @@ jobs:
               echo "current=true" >> "$GITHUB_OUTPUT"
             else
               echo "current=false" >> "$GITHUB_OUTPUT"
-              echo "Tag ${RELEASE_TAG} already exists on ${tag_sha}, not on ${CURRENT_SHA}. Assuming the release was handled manually and skipping automation."
+              if [ "${VERSION_CHANGED}" = "true" ]; then
+                echo "Version changed, but tag ${RELEASE_TAG} already exists on ${tag_sha}, not on ${CURRENT_SHA}. Refusing to reuse a released version." >&2
+                exit 1
+              fi
+              echo "Tag ${RELEASE_TAG} already exists on ${tag_sha}; the manifest version is unchanged, so no release is needed."
             fi
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
@@ -110,6 +166,70 @@ jobs:
         if: steps.version.outputs.version_changed != 'true' && steps.tag.outputs.exists == 'true'
         run: |
           echo "komari-theme.json version has not changed and ${{ steps.version.outputs.release_tag }} already exists. Skipping release."
+
+      - name: Wait for required checks on this commit
+        if: (steps.version.outputs.version_changed == 'true' || steps.tag.outputs.exists == 'false') && (steps.tag.outputs.exists == 'false' || steps.tag.outputs.current == 'true')
+        timeout-minutes: 45
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CURRENT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          required_workflows=(
+            "Quality"
+            "Visual Regression"
+            "Browser Functional"
+            "Komari Compatibility"
+          )
+          deadline=$((SECONDS + 2400))
+          all_succeeded=false
+
+          while (( SECONDS < deadline )); do
+            response="$(gh api "/repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${CURRENT_SHA}&per_page=100")"
+            waiting=false
+
+            for workflow in "${required_workflows[@]}"; do
+              run="$(jq -c --arg workflow "${workflow}" '
+                [.workflow_runs[] | select(.name == $workflow and .event == "push")]
+                | sort_by(.run_number)
+                | last // empty
+              ' <<< "${response}")"
+
+              if [[ -z "${run}" ]]; then
+                echo "Waiting for ${workflow}: run has not started for ${CURRENT_SHA}."
+                waiting=true
+                continue
+              fi
+
+              status="$(jq -r '.status' <<< "${run}")"
+              conclusion="$(jq -r '.conclusion // ""' <<< "${run}")"
+              url="$(jq -r '.html_url' <<< "${run}")"
+
+              if [[ "${status}" != "completed" ]]; then
+                echo "Waiting for ${workflow}: ${status} (${url})."
+                waiting=true
+              elif [[ "${conclusion}" != "success" ]]; then
+                echo "Required workflow ${workflow} concluded ${conclusion}: ${url}" >&2
+                exit 1
+              else
+                echo "Required workflow ${workflow}: success (${url})."
+              fi
+            done
+
+            if [[ "${waiting}" == "false" ]]; then
+              echo "All required workflows succeeded for ${CURRENT_SHA}."
+              all_succeeded=true
+              break
+            fi
+
+            sleep 15
+          done
+
+          if [[ "${all_succeeded}" != "true" ]]; then
+            echo "Timed out waiting for required workflows on ${CURRENT_SHA}." >&2
+            exit 1
+          fi
 
       - name: Unit tests
         if: steps.version.outputs.version_changed == 'true' || steps.tag.outputs.exists == 'false'
@@ -127,6 +247,10 @@ jobs:
         if: steps.version.outputs.version_changed == 'true' || steps.tag.outputs.exists == 'false'
         run: bun run audit:release
 
+      - name: Verify reproducible release package
+        if: steps.version.outputs.version_changed == 'true' || steps.tag.outputs.exists == 'false'
+        run: bun run audit:reproducible
+
       - name: Audit dependencies with OSV
         if: steps.version.outputs.version_changed == 'true' || steps.tag.outputs.exists == 'false'
         run: bun run audit:dependencies
@@ -140,11 +264,6 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git tag -a "${RELEASE_TAG}" -m "Release ${RELEASE_TAG}"
           git push origin "${RELEASE_TAG}"
-
-      - name: Skip when release tag was handled manually
-        if: (steps.version.outputs.version_changed == 'true' || steps.tag.outputs.exists == 'false') && steps.tag.outputs.exists == 'true' && steps.tag.outputs.current == 'false'
-        run: |
-          echo "${{ steps.version.outputs.release_tag }} already exists on ${{ steps.tag.outputs.sha }}. Skipping release creation."
 
       - name: Create or update GitHub release
         if: (steps.version.outputs.version_changed == 'true' || steps.tag.outputs.exists == 'false') && (steps.tag.outputs.exists == 'false' || steps.tag.outputs.current == 'true')

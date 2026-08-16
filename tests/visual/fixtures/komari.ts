@@ -45,14 +45,16 @@ export interface VisualFixtureOptions {
   hidePriceWhenLoggedOut?: boolean
   orderSaveFailure?: boolean
   authenticationExpires?: boolean
+  /** Generate a deterministic large node fleet for performance coverage. */
+  nodeCount?: number
 }
 
 function uuidFor(index: number): string {
   return `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`
 }
 
-function buildClients(freePriceNode = false, expiryThresholds = false) {
-  return Object.fromEntries(Array.from({ length: 12 }, (_, index) => {
+function buildClients(freePriceNode = false, expiryThresholds = false, nodeCount = 12) {
+  return Object.fromEntries(Array.from({ length: nodeCount }, (_, index) => {
     const fixture = REGION_FIXTURES[index % REGION_FIXTURES.length]
     const uuid = uuidFor(index)
     return [uuid, {
@@ -95,8 +97,8 @@ function buildClients(freePriceNode = false, expiryThresholds = false) {
   }))
 }
 
-function buildStatuses() {
-  return Object.fromEntries(Array.from({ length: 12 }, (_, index) => {
+function buildStatuses(nodeCount = 12) {
+  return Object.fromEntries(Array.from({ length: nodeCount }, (_, index) => {
     const uuid = uuidFor(index)
     const offline = index === 5
     const highLoad = index === 2
@@ -265,7 +267,12 @@ function jsonRpcError(id: unknown, code: number, message: string) {
   return { jsonrpc: '2.0', id, error: { code, message } }
 }
 
-async function handleRpc(route: Route, clientFixtures = clients, options: VisualFixtureOptions = {}): Promise<void> {
+async function handleRpc(
+  route: Route,
+  clientFixtures = clients,
+  statusFixtures = statuses,
+  options: VisualFixtureOptions = {},
+): Promise<void> {
   const payload = route.request().postDataJSON() as { id: unknown, method: string, params?: Record<string, unknown> }
   const uuid = typeof payload.params?.uuid === 'string' ? payload.params.uuid : uuidFor(0)
   const pingTasks = options.pingTaskOrdering
@@ -325,7 +332,7 @@ async function handleRpc(route: Route, clientFixtures = clients, options: Visual
       result = clientFixtures
       break
     case 'common:getNodesLatestStatus':
-      result = statuses
+      result = statusFixtures
       break
     case 'admin:listPlugins':
       result = []
@@ -432,11 +439,13 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
     contentType: 'font/woff2',
   }))
 
-  const sourceClients = options.freePriceNode || options.expiryThresholds
-    ? buildClients(options.freePriceNode, options.expiryThresholds)
+  const nodeCount = Math.max(1, Math.floor(options.nodeCount ?? 12))
+  const sourceClients = options.freePriceNode || options.expiryThresholds || options.nodeCount
+    ? buildClients(options.freePriceNode, options.expiryThresholds, nodeCount)
     : clients
   const clientFixtures = structuredClone(sourceClients)
-  const settings = {
+  const statusFixtures = options.nodeCount ? buildStatuses(nodeCount) : statuses
+  let settings: Record<string, unknown> = {
     alertEnabled: options.announcementEscaping ?? false,
     alertTitle: options.announcementEscaping ? '状态公告' : '',
     alertContent: options.announcementEscaping ? 'Status <green> & healthy' : '',
@@ -507,7 +516,7 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
         ping_record_preserve_time: 720,
         sitename: 'Komari Visual Lab',
         theme: options.pandaOps ? 'Transit' : 'Glassmorphism',
-        theme_settings: settings,
+        theme_settings: structuredClone(settings),
         ...(options.visitorAuditSupported ? { visitor_audit_enabled: false } : {}),
       },
     }),
@@ -541,10 +550,15 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
     contentType: 'application/json',
     body: JSON.stringify({ status: 'success', data: { main: { size: 12 * 1024 ** 2 }, monitoring: { size: 486 * 1024 ** 2 } } }),
   }))
-  await page.route('**/api/admin/theme/settings?theme=*', route => route.fulfill({
-    contentType: 'application/json',
-    body: JSON.stringify({ status: 'success', message: 'ok' }),
-  }))
+  await page.route('**/api/admin/theme/settings?theme=*', async (route) => {
+    const body = route.request().postDataJSON() as Record<string, unknown> | null
+    if (body)
+      settings = structuredClone(body)
+    return route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ status: 'success', message: 'ok' }),
+    })
+  })
   await page.route('**/api/admin/theme/config?short=*', route => route.fulfill({
     contentType: 'application/json',
     body: JSON.stringify({ status: 'success', message: 'legacy ok' }),
@@ -553,7 +567,7 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
     contentType: 'application/json',
     body: JSON.stringify({ status: 'success', message: 'ok', data: { version: '1.2.6-visual', hash: 'visual' } }),
   }))
-  await page.route('**/rpc2', route => handleRpc(route, clientFixtures, options))
+  await page.route('**/rpc2', route => handleRpc(route, clientFixtures, statusFixtures, options))
   for (const pattern of [
     'https://api.ip.sb/geoip/**',
     'https://ipinfo.io/**/json',

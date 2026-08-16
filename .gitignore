@@ -41,6 +41,8 @@ __screenshots__/
 
 # Playwright
 playwright-report/
+playwright-functional-report/
+dist-functional/
 test-results/
 
 # Vite

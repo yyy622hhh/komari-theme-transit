@@ -1,4 +1,5 @@
 import type { NodeData } from '@/stores/nodes'
+import { logAppWarning } from '@/utils/safeError'
 import { isFreeNode } from '@/utils/tagHelper'
 
 export type CurrencyCode = 'CNY' | 'USD' | 'HKD' | 'EUR' | 'GBP' | 'JPY' | 'RUB' | 'CHF' | 'INR' | 'VND' | 'THB' | 'CAD'
@@ -446,7 +447,7 @@ async function fetchExchangeRates(): Promise<ExchangeRates | null> {
         return rates
     }
     catch (error) {
-      console.warn(`获取汇率失败: ${api.url}`, error)
+      logAppWarning(`Exchange-rate request failed for ${new URL(api.url).hostname}`, error)
     }
   }
 

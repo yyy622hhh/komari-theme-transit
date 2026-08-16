@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { Icon } from '@iconify/vue'
-import { nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { defineAsyncComponent, onMounted, onUnmounted, ref } from 'vue'
 import { Alert, AlertAction, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Toaster } from '@/components/ui/sonner'
 import { useVisitorPageAudit } from '@/composables/useVisitorAudit'
 import { useAppStore } from '@/stores/app'
+import { logAppError } from '@/utils/safeError'
 import Background from './components/Background.vue'
+import ComponentErrorBoundary from './components/ComponentErrorBoundary.vue'
 import Footer from './components/Footer.vue'
 import Header from './components/Header.vue'
 import LoadingCover from './components/LoadingCover.vue'
@@ -15,7 +17,12 @@ import Provider from './components/Provider.vue'
 const appStore = useAppStore()
 useVisitorPageAudit()
 
-const isReady = ref(false)
+const componentBoundaryTestEnabled = import.meta.env.VITE_COMPONENT_BOUNDARY_TEST === 'true'
+  && new URLSearchParams(location.search).has('component-boundary-test')
+const ComponentErrorBoundaryProbe = componentBoundaryTestEnabled
+  ? defineAsyncComponent(() => import('./components/ComponentErrorBoundaryProbe.vue'))
+  : null
+
 const isRetryingConnection = ref(false)
 type InitModule = typeof import('@/utils/init')
 let initModule: InitModule | null = null
@@ -54,7 +61,7 @@ async function retryConnection(): Promise<void> {
   catch (error) {
     if (!componentActive)
       return
-    console.error('[App] Connection retry failed:', error)
+    logAppError('Connection retry failed', error)
     window.$message?.error('重试失败，请稍后再试。')
   }
   finally {
@@ -71,18 +78,12 @@ onMounted(async () => {
     await initApp()
     if (!componentActive) {
       initModule?.destroyInitManager()
-      return
     }
-    await nextTick()
-    if (!componentActive)
-      return
-    isReady.value = true
   }
   catch (error) {
     if (!componentActive)
       return
-    console.error('[App] Initialization failed:', error)
-    isReady.value = true
+    logAppError('Initialization failed', error)
   }
 })
 
@@ -94,6 +95,11 @@ onUnmounted(() => {
 
 <template>
   <Provider>
+    <ComponentErrorBoundary v-if="componentBoundaryTestEnabled" label="测试组件" class="relative z-50">
+      <template #default="{ retryAttempt }">
+        <ComponentErrorBoundaryProbe :attempt="retryAttempt" />
+      </template>
+    </ComponentErrorBoundary>
     <Background />
     <Transition
       :css="!appStore.disablePageAnimation"

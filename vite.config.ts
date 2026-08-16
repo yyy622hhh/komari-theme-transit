@@ -28,6 +28,7 @@ interface ArchiveEntryData {
 
 const themeJsonPath = resolve(__dirname, 'komari-theme.json')
 const devApiTarget = process.env.VITE_API_TARGET || 'http://127.0.0.1:25774'
+const isFunctionalTestBuild = process.env.VITE_COMPONENT_BOUNDARY_TEST === 'true'
 
 function readThemeManifest(): ThemeManifest {
   if (!existsSync(themeJsonPath))
@@ -155,7 +156,7 @@ export default defineConfig({
     vue(),
     vueDevTools(),
     tailwindcss(),
-    komariThemeZip(),
+    ...(!isFunctionalTestBuild ? [komariThemeZip()] : []),
   ],
   resolve: {
     alias: {
@@ -180,6 +181,7 @@ export default defineConfig({
     },
   },
   build: {
+    outDir: isFunctionalTestBuild ? 'dist-functional' : 'dist',
     target: ['es2018', 'safari15.4'],
     cssTarget: 'safari15.4',
     chunkSizeWarningLimit: 600,
