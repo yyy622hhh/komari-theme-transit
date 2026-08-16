@@ -37,6 +37,7 @@ export interface VisualFixtureOptions {
   pandaOpsMissingNode?: boolean
   pandaOpsNoRecentTask?: boolean
   pandaOpsComparableRoutes?: boolean
+  topologyQuickTaskExists?: boolean
   emptyTopology?: boolean
   visitorInfoEnabled?: boolean
   visitorAuditClientEnabled?: boolean
@@ -49,6 +50,17 @@ export interface VisualFixtureOptions {
   nodeCardPanels?: Record<string, { mode: string, pingTasks?: string[] }>
   /** Generate a deterministic large node fleet for performance coverage. */
   nodeCount?: number
+}
+
+interface FixturePingTask {
+  id: number
+  name: string
+  interval: number
+  loss: number
+  weight: number
+  all_clients?: boolean
+  default_on?: boolean
+  clients?: string[]
 }
 
 function uuidFor(index: number): string {
@@ -274,10 +286,11 @@ async function handleRpc(
   clientFixtures = clients,
   statusFixtures = statuses,
   options: VisualFixtureOptions = {},
+  createdPingTasks: FixturePingTask[] = [],
 ): Promise<void> {
   const payload = route.request().postDataJSON() as { id: unknown, method: string, params?: Record<string, unknown> }
   const uuid = typeof payload.params?.uuid === 'string' ? payload.params.uuid : uuidFor(0)
-  const pingTasks = options.pingTaskOrdering
+  const basePingTasks: FixturePingTask[] = options.pingTaskOrdering
     ? [
         { id: 30, name: '浙江移动', interval: 60, loss: 0, weight: 0 },
         { id: 10, name: '浙江联通', interval: 60, loss: 0, weight: 1 },
@@ -292,6 +305,18 @@ async function handleRpc(
           { id: 18, name: 'PandaOps-Local-Hop', interval: 30, loss: 0, weight: 5 },
         ]
       : [{ id: 1, name: 'Tokyo', interval: 60, loss: 3.2, weight: 1 }]
+  const pingTasks = [...basePingTasks, ...createdPingTasks]
+  if (options.topologyQuickTaskExists) {
+    pingTasks.push({
+      id: 100,
+      name: 'Transit-主控-洛杉矶-to-香港边缘节点-超长名称布局测试',
+      interval: 30,
+      loss: 0,
+      weight: 100,
+      default_on: false,
+      clients: [uuidFor(0)],
+    })
+  }
   if (options.pandaOpsNoRecentTask) {
     pingTasks.push({
       id: 99,
@@ -414,7 +439,22 @@ async function handleRpc(
       result = undefined
       break
     case 'admin:addPingTask':
-      result = { task_id: 100 }
+      {
+        const taskClients = Array.isArray(payload.params?.clients)
+          ? payload.params.clients.filter((client): client is string => typeof client === 'string')
+          : []
+        const task: FixturePingTask = {
+          id: 1_000 + createdPingTasks.length,
+          name: typeof payload.params?.name === 'string' ? payload.params.name : 'Transit-created-task',
+          interval: typeof payload.params?.interval === 'number' ? payload.params.interval : 30,
+          loss: 0,
+          weight: 1_000 + createdPingTasks.length,
+          default_on: Boolean(payload.params?.default_on),
+          clients: taskClients,
+        }
+        createdPingTasks.push(task)
+        result = { task_id: task.id }
+      }
       break
     case 'public:getMe':
       result = { logged_in: false }
@@ -454,6 +494,7 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
   const statusFixtures = options.nodeCount || options.nodeCardWorstCase
     ? structuredClone(options.nodeCount ? buildStatuses(nodeCount) : statuses)
     : statuses
+  const createdPingTasks: FixturePingTask[] = []
   if (options.nodeCardWorstCase) {
     Object.assign(clientFixtures[uuidFor(0)]!, {
       name: '北京联通精品线路-日本东京-A100-超长节点名称完整展示压力测试',
@@ -602,7 +643,7 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
     contentType: 'application/json',
     body: JSON.stringify({ status: 'success', message: 'ok', data: { version: '1.2.6-visual', hash: 'visual' } }),
   }))
-  await page.route('**/rpc2', route => handleRpc(route, clientFixtures, statusFixtures, options))
+  await page.route('**/rpc2', route => handleRpc(route, clientFixtures, statusFixtures, options, createdPingTasks))
   for (const pattern of [
     'https://api.ip.sb/geoip/**',
     'https://ipinfo.io/**/json',

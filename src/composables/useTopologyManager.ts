@@ -113,6 +113,8 @@ export function useTopologyManager(nodes: MaybeRefOrGetter<NodeData[]>) {
     const target = availableNodes.value.find(node => node.name === targetName)
     if (!source || !target)
       throw new Error('请先选择线路机和落地机。')
+    if (source.uuid === target.uuid)
+      throw new Error('线路机和落地机不能是同一台节点。')
 
     const permitted = await appStore.requireLoginPermission('nodeTopology', { force: true })
     if (!permitted)

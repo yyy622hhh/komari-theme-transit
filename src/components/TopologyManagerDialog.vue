@@ -18,6 +18,7 @@ const taskLoading = ref<Record<string, boolean>>({})
 const taskErrors = ref<Record<string, string>>({})
 const advancedRouteIds = ref<Set<number>>(new Set())
 const quickSavingRouteIds = ref<Set<number>>(new Set())
+const taskRequests = new Map<string, Promise<boolean>>()
 const CUSTOM_ENTRY_VALUE = '__transit_custom_entry__'
 const entryOptions = TOPOLOGY_PROBE_OPTIONS.map(option => option.label)
 
@@ -39,23 +40,40 @@ watch(() => props.open, (value) => {
   }
 }, { immediate: true })
 
-async function loadTasks(nodeName: string): Promise<void> {
+async function loadTasks(nodeName: string): Promise<boolean> {
   const node = props.nodes.find(item => item.name === nodeName)
-  if (!node || taskLoading.value[node.uuid])
-    return
-  taskLoading.value = { ...taskLoading.value, [node.uuid]: true }
-  taskErrors.value = { ...taskErrors.value, [node.uuid]: '' }
-  try {
-    taskOptions.value = { ...taskOptions.value, [node.uuid]: await loadPingTaskNamesForNode(node.uuid) }
-  }
-  catch (error) {
-    taskErrors.value = {
-      ...taskErrors.value,
-      [node.uuid]: error instanceof Error ? error.message : '无法读取 Ping 任务。',
+  if (!node)
+    return false
+
+  const pending = taskRequests.get(node.uuid)
+  if (pending)
+    return pending
+
+  const request = (async () => {
+    taskLoading.value = { ...taskLoading.value, [node.uuid]: true }
+    taskErrors.value = { ...taskErrors.value, [node.uuid]: '' }
+    try {
+      taskOptions.value = { ...taskOptions.value, [node.uuid]: await loadPingTaskNamesForNode(node.uuid) }
+      return true
     }
+    catch (error) {
+      taskErrors.value = {
+        ...taskErrors.value,
+        [node.uuid]: error instanceof Error ? error.message : '无法读取 Ping 任务。',
+      }
+      return false
+    }
+    finally {
+      taskLoading.value = { ...taskLoading.value, [node.uuid]: false }
+    }
+  })()
+  taskRequests.set(node.uuid, request)
+  try {
+    return await request
   }
   finally {
-    taskLoading.value = { ...taskLoading.value, [node.uuid]: false }
+    if (taskRequests.get(node.uuid) === request)
+      taskRequests.delete(node.uuid)
   }
 }
 
@@ -134,6 +152,8 @@ function matchingQuickTask(sourceName: string, targetName: string): string {
 }
 
 async function configureQuickRoute(route: typeof manager.routes[number]): Promise<void> {
+  if (quickSaving(route.id) || manager.saving)
+    return
   manager.prepareQuickRoute(route)
   const entryName = route.nodes[0]?.name.trim()
   const relayName = route.nodes[1]?.name.trim()
@@ -147,7 +167,8 @@ async function configureQuickRoute(route: typeof manager.routes[number]): Promis
   saving.add(route.id)
   quickSavingRouteIds.value = saving
   try {
-    await loadTasks(relayName)
+    if (!await loadTasks(relayName))
+      throw new Error('无法确认已有 Ping 任务，为避免重复创建，请稍后重试。')
     const existing = matchingQuickTask(relayName, targetName)
     const metric = route.metrics[1]
     if (existing && metric) {

@@ -59,4 +59,10 @@ describe('createTopologyPingTask', () => {
       .rejects
       .toThrow('没有公网 IP')
   })
+
+  test('refuses a self-ping task before calling the server', async () => {
+    await expect(createTopologyPingTask(node(), node()))
+      .rejects
+      .toThrow('不能是同一台节点')
+  })
 })

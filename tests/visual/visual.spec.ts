@@ -712,6 +712,62 @@ test('Transit topology quick setup creates and binds its relay task automaticall
     },
   })
   await expect.poll(() => saves.length).toBe(1)
+
+  await dialog.getByRole('button', { name: '关闭' }).click()
+  await expect(dialog).toBeHidden()
+  await page.getByRole('button', { name: '管理', exact: true }).click()
+  const reopenedDialog = page.getByRole('dialog', { name: '拓扑管理' })
+  await reopenedDialog.getByRole('button', { name: '一键创建任务并保存' }).first().click()
+  await expect(page.getByText('已复用任务 Transit-主控-洛杉矶-to-香港边缘节点-超长名称布局测试，线路已保存。')).toBeVisible()
+  expect(creates).toHaveLength(1)
+})
+
+test('Transit topology quick setup reuses an existing task instead of creating a duplicate', async ({ page }) => {
+  const creates: unknown[] = []
+  const saves: unknown[] = []
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, {
+    pandaOps: true,
+    dark: true,
+    authenticated: true,
+    topologyQuickTaskExists: true,
+  })
+  page.on('request', (request) => {
+    if (request.method() !== 'POST')
+      return
+    if (request.url().includes('/api/rpc2') && request.postDataJSON()?.method === 'admin:addPingTask')
+      creates.push(request.postDataJSON())
+    if (request.url().includes('/api/admin/theme/settings?theme=Transit'))
+      saves.push(request.postDataJSON())
+  })
+  await openStablePage(page)
+
+  await page.getByRole('button', { name: '管理', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: '拓扑管理' })
+  await dialog.getByRole('button', { name: '一键创建任务并保存' }).first().click()
+
+  await expect(page.getByText('已复用任务 Transit-主控-洛杉矶-to-香港边缘节点-超长名称布局测试，线路已保存。')).toBeVisible()
+  expect(creates).toHaveLength(0)
+  await expect.poll(() => saves.length).toBe(1)
+})
+
+test('Transit topology quick setup rejects a relay that is also the destination', async ({ page }) => {
+  const creates: unknown[] = []
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, { pandaOps: true, dark: true, authenticated: true })
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && request.url().includes('/api/rpc2') && request.postDataJSON()?.method === 'admin:addPingTask')
+      creates.push(request.postDataJSON())
+  })
+  await openStablePage(page)
+
+  await page.getByRole('button', { name: '管理', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: '拓扑管理' })
+  await dialog.getByLabel('第 1 条线路快速落地机').selectOption('主控-洛杉矶')
+  await dialog.getByRole('button', { name: '一键创建任务并保存' }).first().click()
+
+  await expect(dialog.getByText('第 1 条线路存在重复节点')).toBeVisible()
+  expect(creates).toHaveLength(0)
 })
 
 test('Transit topology manager lists configured Ping tasks without recent samples', async ({ page }) => {

@@ -1,5 +1,6 @@
 import type { NodeData } from '@/stores/nodes'
 import type { CreatePingTaskResponse } from '@/utils/rpc'
+import { invalidatePublicPingTasks } from '@/services/metrics.service'
 import { requestManager } from '@/services/request.service'
 import { getSharedRpc } from '@/utils/rpc'
 
@@ -25,6 +26,8 @@ function targetAddress(target: NodeData): string {
 export async function createTopologyPingTask(source: NodeData, target: NodeData): Promise<TopologyTaskCreationResult> {
   const name = topologyPingTaskName(source, target)
   const targetIp = targetAddress(target)
+  if (source.uuid === target.uuid)
+    throw new Error('线路机和落地机不能是同一台节点。')
   if (!source.uuid.trim())
     throw new Error('线路机没有有效的 Komari 节点标识。')
   if (!targetIp)
@@ -43,6 +46,8 @@ export async function createTopologyPingTask(source: NodeData, target: NodeData)
     // Retrying a timed-out create could make duplicate Ping tasks.
     { retryAttempts: 0 },
   )
+
+  invalidatePublicPingTasks()
 
   return { ...task, name }
 }

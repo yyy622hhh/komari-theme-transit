@@ -103,6 +103,11 @@ export function getPublicPingTasksRequestKey(): string {
   return 'metrics:public-ping-tasks'
 }
 
+/** Refresh task names after an administrator creates or changes a Ping task. */
+export function invalidatePublicPingTasks(): void {
+  publicPingTasksCache.delete(getPublicPingTasksRequestKey())
+}
+
 export function partitionMetricEntityIds(
   entityIds: string[],
   batchSize = REQUEST_CONFIG.metrics.entityBatchSize,
