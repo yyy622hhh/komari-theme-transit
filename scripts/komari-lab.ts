@@ -418,7 +418,10 @@ async function verifyThemeInBrowser(baseUrl: string, label: string): Promise<voi
       body: JSON.stringify({ prefix: 'lab', icons: {} }),
     }))
     await page.goto(baseUrl, { waitUntil: 'domcontentloaded' })
-    await page.waitForFunction(() => document.body.textContent?.includes('Transit Komari Lab'), undefined, { timeout: 15_000 })
+    await page.locator('#app > *').first().waitFor({ state: 'visible', timeout: 15_000 })
+    const renderedText = (await page.locator('#app').textContent())?.trim() ?? ''
+    if (!renderedText)
+      throw new Error(`Transit mounted without visible content ${label}`)
     await page.waitForTimeout(500)
     if (failures.length)
       throw new Error(`Transit browser smoke failed ${label}: ${failures.join('; ')}`)
