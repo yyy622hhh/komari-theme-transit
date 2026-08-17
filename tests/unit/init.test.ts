@@ -1,6 +1,6 @@
 import type { Client, NodeStatus } from '../../src/utils/rpc'
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { InitManager } from '../../src/utils/init'
+import { calculatePollingInterval, InitManager, shouldLogPollingFailure } from '../../src/utils/init'
 import { RpcError } from '../../src/utils/rpc'
 
 interface Deferred<T> {
@@ -243,6 +243,63 @@ describe('InitManager lifecycle isolation', () => {
 
     expect(harness.events).toContain('nodes:init')
     expect(harness.events.filter(event => event === 'transport:ws')).toHaveLength(1)
+    manager.destroy()
+  })
+})
+
+describe('InitManager polling recovery', () => {
+  test('backs off consecutive failures, caps the delay and throttles repeated logs', () => {
+    expect(calculatePollingInterval(3_000, 0, 60_000)).toBe(3_000)
+    expect(calculatePollingInterval(3_000, 1, 60_000)).toBe(6_000)
+    expect(calculatePollingInterval(3_000, 2, 60_000)).toBe(12_000)
+    expect(calculatePollingInterval(3_000, 5, 60_000)).toBe(60_000)
+    expect(calculatePollingInterval(3_000, 100, 60_000)).toBe(60_000)
+
+    expect([1, 2, 3, 4, 5, 8].filter(shouldLogPollingFailure)).toEqual([1, 2, 4, 8])
+  })
+
+  test('keeps applying realtime statuses when the periodic node metadata refresh fails', async () => {
+    installBrowserEvents()
+    let polling = false
+    let metadataAttempts = 0
+    const harness = createHarness((method) => {
+      if (polling && method === 'common:getNodes') {
+        metadataAttempts++
+        return Promise.reject(new Error('metadata unavailable'))
+      }
+      return Promise.resolve({}) as never
+    })
+    harness.appStore.rpcTransportMode = 'http'
+    const manager = createManager(harness, {
+      getMe: async () => ({ logged_in: false }),
+      getPublicSettings: async () => ({}),
+    }, async () => 'pong')
+
+    await manager.init()
+    harness.events.length = 0
+    polling = true
+    const internal = manager as unknown as {
+      lastClientsFetchAttemptAt: number
+      lastClientsFetchedAt: number
+      poll: (refreshAfterCurrent?: boolean, generation?: number) => Promise<void>
+      postFailureCount: number
+      transportGeneration: number
+    }
+    internal.lastClientsFetchedAt = 0
+    internal.lastClientsFetchAttemptAt = 0
+
+    await internal.poll(false, internal.transportGeneration)
+
+    expect(harness.events).toContain('nodes:statuses')
+    expect(harness.events).not.toContain('nodes:clients')
+    expect(harness.appStore.connectionError).toBe(false)
+    expect(internal.postFailureCount).toBe(0)
+    expect(metadataAttempts).toBe(1)
+
+    harness.events.length = 0
+    await internal.poll(false, internal.transportGeneration)
+    expect(harness.events).toContain('nodes:statuses')
+    expect(metadataAttempts).toBe(1)
     manager.destroy()
   })
 })

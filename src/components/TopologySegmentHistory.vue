@@ -24,6 +24,7 @@ const ping = useNodePingStats(
     maxCount: 240,
     enabled: () => config.value.live && Boolean(sourceNode.value),
     taskNameFilter: () => config.value.taskFilter,
+    taskNameMatch: 'exact',
   },
 )
 
@@ -34,6 +35,7 @@ const currentPing = useNodePingStats(
     maxCount: 240,
     enabled: () => config.value.live && Boolean(sourceNode.value),
     taskNameFilter: () => config.value.taskFilter,
+    taskNameMatch: 'exact',
   },
 )
 
@@ -44,14 +46,15 @@ const baselinePing = useNodePingStats(
     maxCount: 240,
     enabled: () => config.value.live && Boolean(sourceNode.value),
     taskNameFilter: () => config.value.taskFilter,
+    taskNameMatch: 'exact',
   },
 )
 
-const latency = computed(() => ping.hasData.value ? ping.avgLatency.value : config.value.fallbackLatency)
-const loss = computed(() => ping.hasData.value ? ping.avgLoss.value : config.value.fallbackLoss)
+const hasLiveData = computed(() => config.value.live && ping.hasData.value && !ping.stale.value)
+const latency = computed(() => hasLiveData.value ? ping.avgLatency.value : config.value.fallbackLatency)
+const loss = computed(() => hasLiveData.value ? ping.avgLoss.value : config.value.fallbackLoss)
 const history = computed(() => ping.history.value.slice(-20))
 const maximumLatency = computed(() => Math.max(...history.value.map(point => point.latency ?? 0), 1))
-const hasLiveData = computed(() => config.value.live && ping.hasData.value)
 const baselineWindow = computed<TopologyReliabilityWindow>(() => ({
   hours: 24,
   availability: baselinePing.hasData.value ? baselinePing.availability.value : null,
@@ -71,6 +74,8 @@ const adaptive = computed(() => calculateAdaptiveBaseline(
 const status = computed(() => {
   if (ping.loading.value)
     return { label: '读取中', tone: 'text-slate-500 dark:text-slate-400', dot: 'bg-slate-500' }
+  if (config.value.live && ping.stale.value)
+    return { label: '数据已过期', tone: 'text-amber-700 dark:text-amber-300', dot: 'bg-amber-400' }
   if (!hasLiveData.value)
     return { label: config.value.live ? '等待任务数据' : '静态基线', tone: 'text-slate-500 dark:text-slate-400', dot: 'bg-slate-500' }
   if ((loss.value ?? 0) > 3 || ping.avgVolatility.value > 1.8)

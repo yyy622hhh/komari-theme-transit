@@ -11,5 +11,6 @@ export const REALTIME_CONFIG = {
   polling: {
     clientsRefreshInterval: TIME_MS.minute,
     postFailureThreshold: 3,
+    maxRetryInterval: TIME_MS.minute,
   },
 } as const

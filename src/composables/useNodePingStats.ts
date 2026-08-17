@@ -10,7 +10,7 @@ import { SharedCache } from '@/services/cache.service'
 import { abortPingRecords, loadPingRecords } from '@/services/history.service'
 import { loadPingMetricStats, loadPublicPingTasks, partitionMetricEntityIds, queryMetrics } from '@/services/metrics.service'
 import { isPingMetric, normalizeMetricSeriesList, PING_LATENCY_METRIC, PING_LOSS_METRIC, pingTaskId } from '@/utils/metricSeries'
-import { buildNodePingStats, createEmptyNodePingStats, normalizePingTaskFilter } from '@/utils/pingStats'
+import { buildNodePingStats, createEmptyNodePingStats, matchesPingTaskName, normalizeExactPingTaskName, normalizePingTaskFilter } from '@/utils/pingStats'
 
 function normalizeMaxCount(maxCount: number | null | undefined): number | undefined {
   if (typeof maxCount !== 'number' || !Number.isFinite(maxCount) || maxCount <= 0)
@@ -52,7 +52,9 @@ interface PendingMetricBatch {
   scheduled: boolean
 }
 
-const CACHE_VERSION = 11
+// Exact task matching no longer removes separators. Bump the persisted schema
+// so results aggregated with the old looser semantics cannot leak forward.
+const CACHE_VERSION = 12
 const CACHE_KEY_PREFIX = 'komari-theme-emerald:node-ping-stats'
 const CACHE_INDEX_KEY = `${CACHE_KEY_PREFIX}:index`
 const PING_RECORD_REFRESH_INTERVAL_MS = 60_000
@@ -113,14 +115,18 @@ function stopPingRefreshScheduler(): void {
 type PingTaskNameMatch = 'contains' | 'exact'
 
 function getCacheKey(uuid: string, hours: number, maxCount?: number, taskNameFilter = '', taskNameMatch: PingTaskNameMatch = 'contains'): string {
-  return `${CACHE_KEY_PREFIX}:${uuid}:${hours}:${maxCount ?? 'all'}:${taskNameMatch}:${normalizePingTaskFilter(taskNameFilter) || 'all'}`
+  const normalizedFilter = taskNameMatch === 'exact'
+    ? normalizeExactPingTaskName(taskNameFilter)
+    : normalizePingTaskFilter(taskNameFilter)
+  return `${CACHE_KEY_PREFIX}:${uuid}:${hours}:${maxCount ?? 'all'}:${taskNameMatch}:${normalizedFilter || 'all'}`
 }
 
 function matchesTaskName(name: string, normalizedFilter: string, match: PingTaskNameMatch): boolean {
-  if (!normalizedFilter)
-    return true
-  const normalizedName = normalizePingTaskFilter(name)
-  return match === 'exact' ? normalizedName === normalizedFilter : normalizedName.includes(normalizedFilter)
+  return matchesPingTaskName(name, normalizedFilter, match === 'exact')
+}
+
+function normalizeTaskNameFilter(value: string, match: PingTaskNameMatch): string {
+  return match === 'exact' ? normalizeExactPingTaskName(value) : normalizePingTaskFilter(value)
 }
 
 function getSharedPingRecordsKey(hours: number, maxCount?: number, uuid?: string): string {
@@ -658,7 +664,7 @@ export function useNodePingStats(
     if (!state)
       return readStatsCache(nodeUuid, hours, maxCount, taskNameFilter, taskNameMatch) ?? createEmptyNodePingStats()
 
-    const normalizedFilter = normalizePingTaskFilter(taskNameFilter)
+    const normalizedFilter = normalizeTaskNameFilter(taskNameFilter, taskNameMatch)
     const matchingTaskIds = normalizedFilter
       ? new Set([...state.taskNamesById.entries()]
           .filter(([, name]) => matchesTaskName(name, normalizedFilter, taskNameMatch))
@@ -682,7 +688,7 @@ export function useNodePingStats(
     if (!state)
       return []
 
-    const normalizedFilter = normalizePingTaskFilter(taskNameFilter)
+    const normalizedFilter = normalizeTaskNameFilter(taskNameFilter, taskNameMatch)
     return [...new Set([...state.taskNamesById.values()]
       .filter(name => matchesTaskName(name, normalizedFilter, taskNameMatch)))]
   })

@@ -9,6 +9,7 @@ const VISUAL_FONT_FILES = {
 const FIXED_NOW = '2026-07-25T12:00:00.000Z'
 const GIB = 1024 ** 3
 const TIB = 1024 ** 4
+const FIRST_TOPOLOGY_METRIC_PATTERN = /^live@[^;]+/
 
 const REGION_FIXTURES = [
   { code: 'US', name: '主控-洛杉矶', cpu: 'Intel Xeon Gold 6152 CPU @ 2.10GHz' },
@@ -37,6 +38,11 @@ export interface VisualFixtureOptions {
   pandaOpsMissingNode?: boolean
   pandaOpsNoRecentTask?: boolean
   pandaOpsComparableRoutes?: boolean
+  pandaOpsCustomFirstMetric?: boolean
+  pandaOpsKnownEntryCustomTask?: boolean
+  pandaOpsOverlappingTask?: boolean
+  pandaOpsStaticFirstMetric?: boolean
+  pandaOpsTwoNodeRoute?: boolean
   emptyTopology?: boolean
   visitorInfoEnabled?: boolean
   visitorAuditClientEnabled?: boolean
@@ -303,6 +309,26 @@ async function handleRpc(
       clients: [uuidFor(2)],
     })
   }
+  if (options.pandaOpsOverlappingTask) {
+    pingTasks.push({
+      id: 112,
+      name: '北京电信-备用',
+      interval: 60,
+      loss: 0,
+      weight: 112,
+      clients: [uuid],
+    })
+  }
+  if (options.pandaOpsCustomFirstMetric || options.pandaOpsKnownEntryCustomTask) {
+    pingTasks.push({
+      id: 77,
+      name: 'Relay-JP-to-Exit-US',
+      interval: 60,
+      loss: 0,
+      weight: 77,
+      clients: [uuid],
+    })
+  }
   const metricPingTasks = options.pingTaskOrdering
     ? [pingTasks[2]!, pingTasks[0]!, pingTasks[1]!]
     : pingTasks
@@ -476,6 +502,23 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
       expired_at: null,
     })
   }
+  const defaultTopologyRoute = `北京电信|CN|入口;主控-洛杉矶|US|线路机;${options.pandaOpsMissingNode ? '未纳管-西雅图' : '香港边缘节点-超长名称布局测试'}|${options.pandaOpsMissingNode ? 'US' : 'HK'}|落地机||北京电信|CN|入口;东京-高负载|JP|线路机;${options.pandaOpsComparableRoutes ? '香港边缘节点-超长名称布局测试-10|HK' : '新加坡-A100|SG'}|落地机`
+  const defaultTopologyMetrics = options.pandaOpsComparableRoutes
+    ? 'live@主控-洛杉矶@北京电信@51@0;live@主控-洛杉矶@PandaOps-Local-Hop@84@0||live@东京-高负载@Tokyo@72@0;live@东京-高负载@PandaOps-Local-Hop@1.1@0'
+    : 'live@主控-洛杉矶@北京电信@51@0;84,0||live@东京-高负载@Tokyo@72@0;live@东京-高负载@PandaOps-Local-Hop@1.1@0'
+  const topologyRoute = options.pandaOpsTwoNodeRoute
+    ? '北京电信|CN|入口;主控-洛杉矶|US|落地机||北京电信|CN|入口;东京-高负载|JP|线路机;新加坡-A100|SG|落地机'
+    : options.pandaOpsCustomFirstMetric
+      ? defaultTopologyRoute.replace('北京电信|CN|入口', '自定义入口|CN|入口')
+      : defaultTopologyRoute
+  const topologyMetrics = options.pandaOpsStaticFirstMetric
+    ? defaultTopologyMetrics.replace(FIRST_TOPOLOGY_METRIC_PATTERN, '51,0')
+    : options.pandaOpsCustomFirstMetric || options.pandaOpsKnownEntryCustomTask
+      ? defaultTopologyMetrics.replace(FIRST_TOPOLOGY_METRIC_PATTERN, 'live@主控-洛杉矶@Relay-JP-to-Exit-US@72@0')
+      : options.pandaOpsTwoNodeRoute
+        ? `51,0||${defaultTopologyMetrics.split('||')[1] ?? ''}`
+        : defaultTopologyMetrics
+
   let settings: Record<string, unknown> = {
     alertEnabled: options.announcementEscaping ?? false,
     alertTitle: options.announcementEscaping ? '状态公告' : '',
@@ -502,12 +545,10 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
     carrierPingRegion: 'all',
     nodeCardPanels: options.nodeCardPanels ? JSON.stringify(options.nodeCardPanels) : undefined,
     topologyRoute: options.pandaOps && !options.emptyTopology
-      ? `北京电信|CN|入口;主控-洛杉矶|US|线路机;${options.pandaOpsMissingNode ? '未纳管-西雅图' : '香港边缘节点-超长名称布局测试'}|${options.pandaOpsMissingNode ? 'US' : 'HK'}|落地机||北京电信|CN|入口;东京-高负载|JP|线路机;${options.pandaOpsComparableRoutes ? '香港边缘节点-超长名称布局测试-10|HK' : '新加坡-A100|SG'}|落地机`
+      ? topologyRoute
       : '',
     topologyMetrics: options.pandaOps && !options.emptyTopology
-      ? options.pandaOpsComparableRoutes
-        ? 'live@主控-洛杉矶@Tokyo@51@0;live@主控-洛杉矶@PandaOps-Local-Hop@84@0||live@东京-高负载@Tokyo@72@0;live@东京-高负载@PandaOps-Local-Hop@1.1@0'
-        : 'live@主控-洛杉矶@Tokyo@51@0;84,0||live@东京-高负载@Tokyo@72@0;live@东京-高负载@PandaOps-Local-Hop@1.1@0'
+      ? topologyMetrics
       : '',
   }
 

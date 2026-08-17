@@ -52,6 +52,18 @@ export function normalizePingTaskFilter(value: string): string {
   return value.toLowerCase().replace(TASK_FILTER_SEPARATOR_PATTERN, '')
 }
 
+export function normalizeExactPingTaskName(value: string): string {
+  return value.trim().toLowerCase()
+}
+
+export function matchesPingTaskName(name: string, filter: string, exact = false): boolean {
+  if (!filter.trim())
+    return true
+  return exact
+    ? normalizeExactPingTaskName(name) === normalizeExactPingTaskName(filter)
+    : normalizePingTaskFilter(name).includes(normalizePingTaskFilter(filter))
+}
+
 function average(values: number[]): number {
   if (!values.length)
     return 0

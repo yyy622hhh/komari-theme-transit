@@ -634,6 +634,66 @@ test('Transit topology reports an unresolved configured node as an error', async
   await expect(page.getByText('异常', { exact: true })).toHaveCount(0)
 })
 
+test('Transit keeps a configured first-segment static baseline static', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, { pandaOps: true, dark: true, pandaOpsStaticFirstMetric: true })
+  await openStablePage(page)
+
+  const firstMetric = page.locator('[data-topology-current-metric]').first()
+  await expect(firstMetric).toContainText('51ms')
+  await expect(firstMetric.locator('xpath=..')).toHaveAttribute('title', /^静态基线/)
+  await expect(firstMetric.locator('xpath=..')).not.toHaveAttribute('data-topology-edge-samples', '')
+})
+
+test('Transit matches topology Ping tasks exactly instead of aggregating similarly named tasks', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, { pandaOps: true, dark: true, pandaOpsOverlappingTask: true })
+  await openStablePage(page)
+
+  await expect(page.locator('[data-topology-current-metric]').first()).toContainText('112ms')
+  await expect(page.locator('[data-topology-sample]').first()).toHaveAttribute('aria-label', /Ping 任务：北京电信/)
+})
+
+test('Transit preserves a custom first-segment task and entry label', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, { pandaOps: true, dark: true, pandaOpsCustomFirstMetric: true })
+  await openStablePage(page)
+
+  await expect(page.getByLabel('当前入口 自定义入口，点击切换').first()).toBeVisible()
+  await expect(page.locator('[data-topology-sample]').first()).toHaveAttribute('aria-label', /Ping 任务：Relay-JP-to-Exit-US/)
+})
+
+test('Transit does not replace a custom first-segment task when the entry uses a preset label', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, { pandaOps: true, dark: true, pandaOpsKnownEntryCustomTask: true })
+  await openStablePage(page)
+
+  await expect(page.getByLabel('当前入口 北京电信，点击切换').first()).toBeVisible()
+  await expect(page.locator('[data-topology-sample]').first()).toHaveAttribute('aria-label', /Ping 任务：Relay-JP-to-Exit-US/)
+  await expect(page.locator('[data-topology-current-metric]').first()).toContainText('77ms')
+
+  const probe = page.locator('select[aria-label^="当前入口"]').first()
+  const firstEdge = page.locator('[data-topology-current-metric]').first().locator('xpath=..')
+  await probe.selectOption('shanghai-telecom')
+  await expect(firstEdge).toHaveAttribute('title', /上海电信/)
+  await expect(probe.locator('option').first()).toContainText('恢复原始配置')
+  await probe.selectOption('')
+  await expect(firstEdge).toHaveAttribute('title', /Relay-JP-to-Exit-US/)
+})
+
+test('Transit renders and edits a two-node topology without a phantom segment', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, { pandaOps: true, dark: true, authenticated: true, pandaOpsTwoNodeRoute: true })
+  await openStablePage(page)
+
+  const desktopRoutes = page.locator('.topology-scroll article')
+  await expect(desktopRoutes.first().locator('[data-topology-current-metric]')).toHaveCount(1)
+  await page.getByRole('button', { name: '管理', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: '拓扑管理' })
+  await expect(dialog.getByLabel('第 1 条线路落地机节点')).toBeVisible()
+  await expect(dialog.getByLabel('第 1 条线路第 2 段指标模式')).toBeVisible()
+})
+
 test('Transit empty topology guides an authenticated operator into the manager', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await installKomariFixture(page, { pandaOps: true, authenticated: true, emptyTopology: true })
@@ -658,10 +718,23 @@ test('Transit topology manager saves through managed theme API', async ({ page }
   const dialog = page.getByRole('dialog', { name: '拓扑管理' })
   await expect(dialog).toBeVisible()
   await dialog.getByRole('button', { name: '添加线路' }).click()
+  await dialog.getByLabel('第 3 条线路线路机节点').selectOption('东京-高负载')
+  await dialog.getByLabel('第 3 条线路第 1 段 Ping 任务').fill('Tokyo')
   await dialog.getByRole('button', { name: '保存并应用' }).click()
   await expect(dialog).toBeHidden()
   await expect.poll(() => saves.length).toBe(1)
   expect(saves[0]).toMatchObject({ topologyEnabled: true })
+  const saved = saves[0] as { topologyRoute: string, topologyMetrics: string }
+  const savedRoutes = saved.topologyRoute.split('||')
+  const savedMetricGroups = saved.topologyMetrics.split('||')
+  expect(savedRoutes).toHaveLength(3)
+  expect(savedRoutes[2]?.split(';').map(node => node.split('|')[0])).toEqual([
+    '北京电信',
+    '东京-高负载',
+    '香港边缘节点-超长名称布局测试',
+  ])
+  expect(savedMetricGroups).toHaveLength(3)
+  expect(savedMetricGroups[2]).toMatch(/^live@东京-高负载@Tokyo@-@-;/)
 })
 
 test('Transit topology manager lists configured Ping tasks without recent samples', async ({ page }) => {
@@ -679,6 +752,33 @@ test('Transit topology manager lists configured Ping tasks without recent sample
   const taskSelect = dialog.getByLabel('第 2 条线路第 1 段 Ping 任务')
   await expect(taskSelect).toBeVisible()
   await expect(taskSelect.locator('option')).toContainText(['Configured-No-Recent-Sample'])
+})
+
+test('Transit clears an incompatible Ping task when its source node changes', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, { pandaOps: true, dark: true, authenticated: true })
+  await openStablePage(page)
+
+  await page.getByRole('button', { name: '管理', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: '拓扑管理' })
+  await dialog.getByLabel('第 1 条线路第 1 段探测来源').selectOption('东京-高负载')
+  await expect(dialog.getByLabel('第 1 条线路第 1 段 Ping 任务')).toHaveValue('')
+  await expect(dialog).toContainText('第 1 条线路第 1 段缺少实时任务来源')
+  await expect(dialog.getByRole('button', { name: '保存并应用' })).toBeDisabled()
+})
+
+test('Transit clears an incompatible Ping task when its followed route node changes', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, { pandaOps: true, dark: true, authenticated: true })
+  await openStablePage(page)
+
+  await page.getByRole('button', { name: '管理', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: '拓扑管理' })
+  await dialog.getByLabel('第 1 条线路线路机节点').selectOption('东京-高负载')
+
+  await expect(dialog.getByLabel('第 1 条线路第 1 段探测来源')).toHaveValue('东京-高负载')
+  await expect(dialog.getByLabel('第 1 条线路第 1 段 Ping 任务')).toHaveValue('')
+  await expect(dialog).toContainText('第 1 条线路第 1 段缺少实时任务来源')
 })
 
 test('Transit node maintenance saves globally and updates alerts immediately', async ({ page }) => {

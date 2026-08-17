@@ -30,6 +30,7 @@ const ping = useNodePingStats(
     hours: 1,
     enabled: () => config.value.live && Boolean(sourceNode.value),
     taskNameFilter: () => config.value.taskFilter,
+    taskNameMatch: 'exact',
   },
 )
 

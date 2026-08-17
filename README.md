@@ -12,7 +12,7 @@
 
 Transit 是一个面向多节点、多线路和跨境链路监控的 Komari 社区主题。它把“入口 → 线路机 → 落地机”的链路拓扑、北京/上海/广州三网 Ping、实时资源、异常告警和资产信息放进同一套紧凑界面，并提供可视化拓扑管理器。
 
-- 当前稳定版：[v1.0.26](https://github.com/yyy622hhh/komari-theme-transit/releases/tag/v1.0.26)
+- 当前稳定版：[v1.0.29](https://github.com/yyy622hhh/komari-theme-transit/releases/tag/v1.0.29)
 - 安装包：只从 [GitHub Releases](https://github.com/yyy622hhh/komari-theme-transit/releases) 下载 `komari-theme-Transit-build-*.zip`
 - 项目定位：社区主题，不修改 Komari 数据库、Agent、系统账户或公开 API
 
@@ -171,6 +171,8 @@ Transit 使用独立短名称 `Transit`，不会覆盖已有的 PandaOps、Glass
 ```text
 live@探测来源节点@Ping任务名称@备用延迟@备用丢包
 ```
+
+`|`、`;`、`||` 和 `@` 是高级文本格式的结构分隔符，不能出现在对应的节点字段或实时任务字段中；可视化管理器会在保存前明确提示并阻止写入，避免线路与指标错位。
 
 完整示例：
 

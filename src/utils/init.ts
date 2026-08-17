@@ -26,6 +26,8 @@ interface InitConfig {
   healthCheckRetryInterval?: number
   /** POST 模式连续失败次数阈值 */
   postFailureThreshold?: number
+  /** POST 模式失败退避上限（毫秒） */
+  postMaxRetryInterval?: number
 }
 
 const DEFAULT_CONFIG: Required<InitConfig> = {
@@ -35,9 +37,23 @@ const DEFAULT_CONFIG: Required<InitConfig> = {
   healthCheckAttempts: REALTIME_CONFIG.websocket.healthCheckAttempts,
   healthCheckRetryInterval: REALTIME_CONFIG.websocket.healthCheckRetryInterval,
   postFailureThreshold: REALTIME_CONFIG.polling.postFailureThreshold,
+  postMaxRetryInterval: REALTIME_CONFIG.polling.maxRetryInterval,
 }
 
 const CLIENTS_REFRESH_INTERVAL_MS = REALTIME_CONFIG.polling.clientsRefreshInterval
+
+export function calculatePollingInterval(baseIntervalMs: number, failureCount: number, maxRetryIntervalMs: number): number {
+  const normalizedBase = Math.max(1, Math.floor(baseIntervalMs))
+  const normalizedFailures = Math.max(0, Math.floor(failureCount))
+  const normalizedMaximum = Math.max(normalizedBase, Math.floor(maxRetryIntervalMs))
+  const exponent = Math.min(normalizedFailures, 16)
+  return Math.min(normalizedBase * 2 ** exponent, normalizedMaximum)
+}
+
+export function shouldLogPollingFailure(failureCount: number): boolean {
+  const normalized = Math.max(0, Math.floor(failureCount))
+  return normalized > 0 && (normalized & (normalized - 1)) === 0
+}
 
 function createAbortError(): Error {
   const error = new Error('Operation aborted')
@@ -112,6 +128,7 @@ export class InitManager {
   private destroyed = false
   private postFailureCount = 0
   private lastClientsFetchedAt = 0
+  private lastClientsFetchAttemptAt = 0
   private clientsRefreshPromise: Promise<Record<string, Client>> | null = null
   private isInitialized = false
   private metadataRefreshListenersAttached = false
@@ -169,7 +186,11 @@ export class InitManager {
    * 从 publicSettings.theme_settings.dataUpdateInterval 读取，默认 3 秒
    */
   private getPollInterval(): number {
-    return this.appStore.dataUpdateInterval * 1000
+    return calculatePollingInterval(
+      this.appStore.dataUpdateInterval * 1000,
+      this.postFailureCount,
+      this.config.postMaxRetryInterval,
+    )
   }
 
   /**
@@ -364,6 +385,7 @@ export class InitManager {
       // 初始化节点数据
       this.nodesStore.initNodes(clientsResult, statusesResult)
       this.lastClientsFetchedAt = Date.now()
+      this.lastClientsFetchAttemptAt = this.lastClientsFetchedAt
     }
     catch (error) {
       if (signal.aborted || !canCommit())
@@ -391,11 +413,13 @@ export class InitManager {
       return
 
     const generation = this.transportGeneration
+    this.lastClientsFetchAttemptAt = Date.now()
     const clients = await this.fetchClientsSnapshot(this.transportController.signal)
     if (!this.isTransportCurrent(generation))
       return
     this.nodesStore.updateNodeClients(clients)
     this.lastClientsFetchedAt = Date.now()
+    this.lastClientsFetchAttemptAt = this.lastClientsFetchedAt
   }
 
   /**
@@ -433,6 +457,7 @@ export class InitManager {
     this.unsubscribeWsClose = null
     this.useWebSocket = false
     this.clientsRefreshPromise = null
+    this.lastClientsFetchAttemptAt = 0
     this.refreshAfterCurrentPoll = false
 
     const client = this.rpc.getClient()
@@ -660,9 +685,12 @@ export class InitManager {
 
     try {
       const now = Date.now()
-      const shouldRefreshClients = now - this.lastClientsFetchedAt >= CLIENTS_REFRESH_INTERVAL_MS
+      const lastClientsRequestAt = Math.max(this.lastClientsFetchedAt, this.lastClientsFetchAttemptAt)
+      const shouldRefreshClients = now - lastClientsRequestAt >= CLIENTS_REFRESH_INTERVAL_MS
+      if (shouldRefreshClients)
+        this.lastClientsFetchAttemptAt = now
 
-      const [statusesResult, clientsResult] = await Promise.all([
+      const [statusesResult, clientsResult] = await Promise.allSettled([
         this.rpc.getClient().call<Record<string, NodeStatus>>('common:getNodesLatestStatus', undefined, this.transportController.signal),
         shouldRefreshClients
           ? this.fetchClientsSnapshot(this.transportController.signal)
@@ -672,12 +700,18 @@ export class InitManager {
       if (!this.isTransportCurrent(generation))
         return
 
-      if (clientsResult) {
-        this.nodesStore.updateNodeClients(clientsResult)
+      if (clientsResult.status === 'fulfilled' && clientsResult.value) {
+        this.nodesStore.updateNodeClients(clientsResult.value)
         this.lastClientsFetchedAt = now
       }
+      else if (clientsResult.status === 'rejected') {
+        logAppWarning('Failed to refresh node metadata; keeping previous node data', clientsResult.reason)
+      }
 
-      this.nodesStore.updateNodeStatuses(statusesResult)
+      if (statusesResult.status === 'rejected')
+        throw statusesResult.reason
+
+      this.nodesStore.updateNodeStatuses(statusesResult.value)
 
       // 连接恢复正常，重置错误状态
       this.postFailureCount = 0
@@ -687,14 +721,15 @@ export class InitManager {
       if (!this.isTransportCurrent(generation))
         return
 
-      if (error instanceof RpcError) {
-        logAppError('Poll RPC error', error)
-      }
-      else {
-        logAppError('Poll error', error)
+      const nextFailureCount = this.postFailureCount + 1
+      if (shouldLogPollingFailure(nextFailureCount)) {
+        if (error instanceof RpcError)
+          logAppError(`Poll RPC error (${nextFailureCount} consecutive failures)`, error)
+        else
+          logAppError(`Poll error (${nextFailureCount} consecutive failures)`, error)
       }
 
-      this.postFailureCount += 1
+      this.postFailureCount = nextFailureCount
       this.appStore.connectionError = this.postFailureCount >= this.config.postFailureThreshold
     }
     finally {

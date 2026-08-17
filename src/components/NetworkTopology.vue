@@ -21,9 +21,11 @@ import {
   findTopologyProbeKey,
   formatTopologyMetricForProbe,
   getTopologyProbe,
+  getTopologyProbeStorageKey,
   parseTopologyMetric,
   parseTopologyNodes,
   splitTopologyGroups,
+  TOPOLOGY_PROBE_OPTIONS,
 } from '@/utils/topologyHelper'
 import { aggregateTopologyRouteReliability, rankTopologyRoutes } from '@/utils/topologyIntelligence'
 
@@ -39,6 +41,9 @@ interface RouteRow {
   key: string
   probeStorageKey: string
   probeKey: string
+  probeLabel: string
+  probeOverridden: boolean
+  probeSelectable: boolean
   nodes: RouteNode[]
   metrics: string[]
   directionKey: string
@@ -65,8 +70,10 @@ const routeSegmentReliability = ref<Record<string, Record<number, TopologySegmen
 const activeDirection = ref('all')
 const isDesktop = useMediaQuery('(min-width: 768px)')
 
-const routeGroups = computed(() => splitTopologyGroups(appStore.topologyRoute))
-const metricGroups = computed(() => splitTopologyGroups(appStore.topologyMetrics))
+const routeGroups = computed(() => splitTopologyGroups(appStore.topologyRoute, true))
+// Metric groups map to route groups by index. Empty groups must remain in the
+// array or later routes will display another route's latency and loss.
+const metricGroups = computed(() => splitTopologyGroups(appStore.topologyMetrics, true))
 
 function findNode(name: string): NodeData | undefined {
   return props.nodes.find(node => node.name.trim().toLowerCase() === name.trim().toLowerCase())
@@ -95,7 +102,7 @@ function getRouteDirection(nodes: RouteNode[]): { key: string, label: string } {
 }
 
 const routes = computed<RouteRow[]>(() => routeGroups.value.map((group, routeIndex) => {
-  const nodes = parseTopologyNodes(group).slice(0, 3).map((config, nodeIndex) => {
+  const nodes = parseTopologyNodes(group, true).slice(0, 3).map((config, nodeIndex) => {
     const node = findNode(config.name)
     return {
       key: `${routeIndex}-${nodeIndex}-${config.name}`,
@@ -105,18 +112,28 @@ const routes = computed<RouteRow[]>(() => routeGroups.value.map((group, routeInd
       node,
     }
   })
-  const metrics = (metricGroups.value[routeIndex] || metricGroups.value[0] || '')
+  const metrics = (metricGroups.value[routeIndex] || '')
     .split(';')
     .map(metric => metric.trim())
   const configuredFirstMetric = parseTopologyMetric(metrics[0] || '')
-  const defaultProbeKey = findTopologyProbeKey(configuredFirstMetric.taskFilter, nodes[0]?.name || '')
-  const probeStorageKey = `${nodes[1]?.name || routeIndex}>${nodes[2]?.name || ''}`
-  const probeKey = probeSelections.value[probeStorageKey] || defaultProbeKey
-  const probe = getTopologyProbe(probeKey)
-  metrics[0] = formatTopologyMetricForProbe(metrics[0] || '', probeKey, nodes[1]?.name || '')
+  const configuredEntryProbeKey = findTopologyProbeKey(nodes[0]?.name || '')
+  const configuredTaskProbeKey = findTopologyProbeKey(configuredFirstMetric.taskFilter)
+  const configuredProbeKey = configuredEntryProbeKey === configuredTaskProbeKey
+    ? configuredTaskProbeKey
+    : undefined
+  const probeStorageKey = getTopologyProbeStorageKey(group, metrics[0] || '')
+  const rawStoredProbeKey = configuredFirstMetric.live ? probeSelections.value[probeStorageKey] : undefined
+  const storedProbeKey = TOPOLOGY_PROBE_OPTIONS.find(option => option.key === rawStoredProbeKey)?.key
+  const probeKey = storedProbeKey || configuredProbeKey || ''
+  const selectedProbe = probeKey ? getTopologyProbe(probeKey) : null
+  const probeLabel = nodes[0]?.name || selectedProbe?.label || configuredFirstMetric.taskFilter || '自定义入口'
+  const probeSelectable = configuredFirstMetric.live
 
-  if (nodes[0])
-    nodes[0].name = probe.label
+  if (configuredFirstMetric.live && storedProbeKey && selectedProbe) {
+    metrics[0] = formatTopologyMetricForProbe(metrics[0] || '', selectedProbe.key, nodes[1]?.name || '')
+    if (nodes[0])
+      nodes[0].name = selectedProbe.label
+  }
 
   const direction = getRouteDirection(nodes)
 
@@ -124,12 +141,15 @@ const routes = computed<RouteRow[]>(() => routeGroups.value.map((group, routeInd
     key: `route-${routeIndex}`,
     probeStorageKey,
     probeKey,
+    probeLabel,
+    probeOverridden: Boolean(storedProbeKey),
+    probeSelectable,
     nodes,
     metrics,
     directionKey: direction.key,
     directionLabel: direction.label,
   }
-}).filter(route => route.nodes.length >= 2))
+}).filter(route => route.nodes.filter(node => node.name.trim()).length >= 2))
 
 const directions = computed<RouteDirection[]>(() => {
   const counts = new Map<string, RouteDirection>()
@@ -153,6 +173,9 @@ watch(directions, (items) => {
 })
 
 function getRouteHealth(route: RouteRow): TopologyRouteHealth {
+  if (route.nodes.some(item => !item.name.trim()))
+    return 'error'
+
   const configuredNodes = route.nodes.slice(1)
   if (configuredNodes.some(item => item.node?.online === false))
     return 'offline'
@@ -267,7 +290,12 @@ function openNode(item: RouteNode) {
 }
 
 function updateProbe(route: RouteRow, value: string) {
-  probeSelections.value = { ...probeSelections.value, [route.probeStorageKey]: value }
+  const nextSelections = { ...probeSelections.value }
+  if (value)
+    nextSelections[route.probeStorageKey] = value
+  else
+    delete nextSelections[route.probeStorageKey]
+  probeSelections.value = nextSelections
 }
 
 function openRouteDetail(route: RouteRow): void {
@@ -377,7 +405,8 @@ function routeRankingLabel(route: RouteRow): string {
           <article
             v-for="route in visibleRoutes"
             :key="route.key"
-            class="panda-divider panda-hover-surface group grid min-h-16 grid-cols-[144px_minmax(190px,1fr)_178px_minmax(190px,1fr)_190px] items-center gap-3 border-b px-2 transition-colors last:border-b-0"
+            class="panda-divider panda-hover-surface group grid min-h-16 items-center gap-3 border-b px-2 transition-colors last:border-b-0"
+            :class="route.nodes[2] ? 'grid-cols-[144px_minmax(190px,1fr)_178px_minmax(190px,1fr)_190px]' : 'grid-cols-[144px_minmax(190px,1fr)_190px]'"
           >
             <div class="min-w-0">
               <div class="flex min-w-0 items-center gap-2">
@@ -389,6 +418,9 @@ function routeRankingLabel(route: RouteRow): string {
                 />
                 <TopologyProbeSelect
                   :model-value="route.probeKey"
+                  :custom-label="route.probeLabel"
+                  :disabled="!route.probeSelectable"
+                  :resettable="route.probeOverridden"
                   @update:model-value="updateProbe(route, $event)"
                 />
               </div>
@@ -438,35 +470,37 @@ function routeRankingLabel(route: RouteRow): string {
               </span>
             </button>
 
-            <TopologyEdgeMetric
-              :metric="route.metrics[1] || '-,-'"
-              :nodes="nodes"
-              :source-label="route.nodes[1]?.name || '线路机'"
-              :target-label="route.nodes[2]?.name || '落地机'"
-              :segment-index="1"
-              @open-detail="openRouteDetail(route)"
-              @status-change="updateRouteSegmentHealth(route.key, 1, $event)"
-              @metrics-change="updateRouteSegmentMetrics(route.key, 1, $event)"
-            />
+            <template v-if="route.nodes[2]">
+              <TopologyEdgeMetric
+                :metric="route.metrics[1] || '-,-'"
+                :nodes="nodes"
+                :source-label="route.nodes[1]?.name || '线路机'"
+                :target-label="route.nodes[2]?.name || '落地机'"
+                :segment-index="1"
+                @open-detail="openRouteDetail(route)"
+                @status-change="updateRouteSegmentHealth(route.key, 1, $event)"
+                @metrics-change="updateRouteSegmentMetrics(route.key, 1, $event)"
+              />
 
-            <button
-              type="button"
-              class="flex min-w-0 items-center gap-2.5 text-left disabled:cursor-default"
-              :disabled="!route.nodes[2]?.node"
-              @click="route.nodes[2] && openNode(route.nodes[2])"
-            >
-              <span class="panda-dot-ring size-1.5 shrink-0 rounded-full ring-4" :class="!route.nodes[2]?.node ? 'bg-amber-400' : route.nodes[2].node.online ? 'bg-emerald-400' : 'bg-rose-400'" />
-              <img
-                v-if="route.nodes[2]?.region"
-                :src="`/images/flags/${getRegionCode(route.nodes[2].region)}.svg`"
-                :alt="route.nodes[2].region"
-                class="h-4 w-6 shrink-0 rounded-[3px] object-cover"
+              <button
+                type="button"
+                class="flex min-w-0 items-center gap-2.5 text-left disabled:cursor-default"
+                :disabled="!route.nodes[2]?.node"
+                @click="route.nodes[2] && openNode(route.nodes[2])"
               >
-              <span class="flex min-w-0 flex-col leading-tight">
-                <span class="truncate text-[13px] font-semibold">{{ route.nodes[2]?.name }}</span>
-                <span class="mt-0.5 truncate text-[10px] text-slate-500">{{ route.nodes[2]?.role }}</span>
-              </span>
-            </button>
+                <span class="panda-dot-ring size-1.5 shrink-0 rounded-full ring-4" :class="!route.nodes[2]?.node ? 'bg-amber-400' : route.nodes[2].node.online ? 'bg-emerald-400' : 'bg-rose-400'" />
+                <img
+                  v-if="route.nodes[2]?.region"
+                  :src="`/images/flags/${getRegionCode(route.nodes[2].region)}.svg`"
+                  :alt="route.nodes[2].region"
+                  class="h-4 w-6 shrink-0 rounded-[3px] object-cover"
+                >
+                <span class="flex min-w-0 flex-col leading-tight">
+                  <span class="truncate text-[13px] font-semibold">{{ route.nodes[2]?.name }}</span>
+                  <span class="mt-0.5 truncate text-[10px] text-slate-500">{{ route.nodes[2]?.role }}</span>
+                </span>
+              </button>
+            </template>
           </article>
         </div>
       </div>
@@ -489,6 +523,9 @@ function routeRankingLabel(route: RouteRow): string {
             </span>
             <TopologyProbeSelect
               :model-value="route.probeKey"
+              :custom-label="route.probeLabel"
+              :disabled="!route.probeSelectable"
+              :resettable="route.probeOverridden"
               @update:model-value="updateProbe(route, $event)"
             />
             <button

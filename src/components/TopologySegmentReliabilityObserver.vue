@@ -28,6 +28,7 @@ const dayPing = useNodePingStats(
     maxCount: 240,
     enabled,
     taskNameFilter: () => config.value.taskFilter,
+    taskNameMatch: 'exact',
   },
 )
 
@@ -38,6 +39,7 @@ const weekPing = useNodePingStats(
     maxCount: 240,
     enabled,
     taskNameFilter: () => config.value.taskFilter,
+    taskNameMatch: 'exact',
   },
 )
 

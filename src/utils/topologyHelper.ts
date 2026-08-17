@@ -45,17 +45,17 @@ export function normalizePingTaskName(value: string): string {
   return value.toLowerCase().replace(TOPOLOGY_PROBE_SEPARATOR_PATTERN, '')
 }
 
-export function getTopologyProbe(key: string): TopologyProbeOption {
+export function getTopologyProbe(key?: string): TopologyProbeOption {
   return TOPOLOGY_PROBE_OPTIONS.find(option => option.key === key) ?? TOPOLOGY_PROBE_OPTIONS[0]!
 }
 
-export function findTopologyProbeKey(...values: string[]): string {
+export function findTopologyProbeKey(...values: string[]): string | undefined {
   const normalizedValues = values.map(normalizePingTaskName).filter(Boolean)
   return TOPOLOGY_PROBE_OPTIONS.find(option => normalizedValues.some((value) => {
     const taskName = normalizePingTaskName(option.taskFilter)
     const label = normalizePingTaskName(option.label)
-    return value.includes(taskName) || value.includes(label) || taskName.includes(value) || label.includes(value)
-  }))?.key ?? TOPOLOGY_PROBE_OPTIONS[0]!.key
+    return value === taskName || value === label
+  }))?.key
 }
 
 export function formatTopologyMetricNumber(value: number | null): string {
@@ -81,6 +81,9 @@ export function formatTopologyTelemetryLabel(metric: string, visualSource: strin
 
 export function formatTopologyMetricForProbe(metric: string, probeKey: string, targetFallback = ''): string {
   const configured = parseTopologyMetric(metric)
+  if (!configured.live)
+    return metric.trim() || '-,-'
+
   const defaultProbeKey = findTopologyProbeKey(configured.taskFilter)
   const probe = getTopologyProbe(probeKey || defaultProbeKey)
   const useConfiguredFallback = probe.key === defaultProbeKey
@@ -93,11 +96,16 @@ export function formatTopologyMetricForProbe(metric: string, probeKey: string, t
   ].join('@')
 }
 
-export function splitTopologyGroups(value: string): string[] {
-  return value
+export function splitTopologyGroups(value: string, preserveEmpty = false): string[] {
+  const groups = value
     .split('||')
     .map(group => group.trim())
-    .filter(Boolean)
+  return preserveEmpty ? groups : groups.filter(Boolean)
+}
+
+export function getTopologyProbeStorageKey(routeGroup: string, metric: string): string {
+  const configured = parseTopologyMetric(metric)
+  return [routeGroup.trim(), configured.nodeName, configured.taskFilter].join('::')
 }
 
 export function createTopologyRoute(nodes: TopologyNodeConfig[] = [], metrics: TopologyMetricConfig[] = []): TopologyRouteConfig {
@@ -110,19 +118,22 @@ export function createTopologyRoute(nodes: TopologyNodeConfig[] = [], metrics: T
 }
 
 export function parseTopologyRoutes(routeValue: string, metricValue: string): TopologyRouteConfig[] {
-  const routeGroups = splitTopologyGroups(routeValue)
-  const metricGroups = splitTopologyGroups(metricValue)
+  // Routes and metrics are positional. Preserve empty groups in both arrays,
+  // then discard only truly empty routes after their matching metric is read.
+  const routeGroups = splitTopologyGroups(routeValue, true)
+  const metricGroups = splitTopologyGroups(metricValue, true)
   return routeGroups.map((group, index) => {
-    const nodes = parseTopologyNodes(group).slice(0, 3)
+    const nodes = parseTopologyNodes(group, true).slice(0, 3)
     const metrics = (metricGroups[index] || '')
       .split(';')
-      .filter(Boolean)
       .map(parseTopologyMetric)
       .slice(0, 2)
-    while (metrics.length < Math.max(1, nodes.length - 1))
+    while (nodes.length < 3)
+      nodes.push({ name: '', region: '', role: nodes.length === 0 ? '入口' : nodes.length === 1 ? '线路机' : '落地机' })
+    while (metrics.length < 2)
       metrics.push(parseTopologyMetric('-, -'))
     return createTopologyRoute(nodes, metrics)
-  })
+  }).filter(route => route.nodes.some(node => node.name.trim()))
 }
 
 export function formatTopologyMetric(config: TopologyMetricConfig): string {
@@ -139,29 +150,76 @@ export function formatTopologyMetric(config: TopologyMetricConfig): string {
 }
 
 export function serializeTopologyRoutes(routes: TopologyRouteConfig[]): { topologyRoute: string, topologyMetrics: string } {
-  const activeRoutes = routes.filter(route => route.enabled && route.nodes.length >= 2)
+  const activeRoutes = routes
+    .filter(route => route.enabled)
+    .map((route) => {
+      const nodes = route.nodes.slice(0, 3)
+      while (nodes.length && !nodes.at(-1)?.name.trim())
+        nodes.pop()
+      return { route, nodes }
+    })
+    .filter(({ nodes }) => nodes.filter(node => node.name.trim()).length >= 2)
   return {
-    topologyRoute: activeRoutes.map(route => route.nodes
-      .slice(0, 3)
+    topologyRoute: activeRoutes.map(({ nodes }) => nodes
       .map(node => `${node.name.trim()}|${node.region.trim()}|${node.role.trim() || '节点'}`)
       .join(';'))
       .join('||'),
-    topologyMetrics: activeRoutes.map(route => route.metrics
-      .slice(0, Math.max(1, route.nodes.length - 1))
+    topologyMetrics: activeRoutes.map(({ route, nodes }) => route.metrics
+      .slice(0, Math.max(1, nodes.length - 1))
       .map(formatTopologyMetric)
       .join(';'))
       .join('||'),
   }
 }
 
-export function parseTopologyNodes(value: string): TopologyNodeConfig[] {
-  return value
-    .split(';')
-    .map((segment) => {
-      const [name = '', region = '', role = '节点'] = segment.split('|').map(part => part.trim())
-      return { name, region, role }
+const TOPOLOGY_NODE_RESERVED_PATTERN = /[|;]/
+const TOPOLOGY_METRIC_RESERVED_PATTERN = /@|;|\|\|/
+
+export function validateTopologyRoutes(routes: TopologyRouteConfig[]): string[] {
+  return routes.flatMap((route, routeIndex) => {
+    const errors: string[] = []
+    const routeLabel = `第 ${routeIndex + 1} 条线路`
+    const nodes = route.nodes.slice(0, 3)
+    const names = nodes.map(node => node.name.trim()).filter(Boolean)
+    const lastConfiguredIndex = nodes.reduce((last, node, index) => node.name.trim() ? index : last, -1)
+
+    if (names.length < 2)
+      errors.push(`${routeLabel}至少需要两个节点`)
+    if (new Set(names.map(name => name.toLowerCase())).size !== names.length)
+      errors.push(`${routeLabel}存在重复节点`)
+    if (nodes.slice(0, lastConfiguredIndex + 1).some(node => !node.name.trim()))
+      errors.push(`${routeLabel}节点顺序存在空位`)
+    if (nodes.some(node => [node.name, node.region, node.role].some(value => TOPOLOGY_NODE_RESERVED_PATTERN.test(value))))
+      errors.push(`${routeLabel}节点名称、地区或角色不能包含“|”或“;”`)
+
+    const segmentCount = Math.max(1, lastConfiguredIndex)
+    route.metrics.slice(0, segmentCount).forEach((metric, metricIndex) => {
+      const segmentLabel = `${routeLabel}第 ${metricIndex + 1} 段`
+      if (metric.live && (!metric.nodeName.trim() || !metric.taskFilter.trim()))
+        errors.push(`${segmentLabel}缺少实时任务来源`)
+      if (metric.live && [metric.nodeName, metric.taskFilter].some(value => TOPOLOGY_METRIC_RESERVED_PATTERN.test(value)))
+        errors.push(`${segmentLabel}来源节点或 Ping 任务不能包含“@”、“;”或“||”`)
+      if (metric.fallbackLatency !== null && metric.fallbackLatency < 0)
+        errors.push(`${segmentLabel}备用延迟不能小于 0`)
+      if (metric.fallbackLoss !== null && (metric.fallbackLoss < 0 || metric.fallbackLoss > 100))
+        errors.push(`${segmentLabel}备用丢包必须在 0 到 100 之间`)
     })
-    .filter(node => node.name)
+    return errors
+  })
+}
+
+export function parseTopologyNodes(value: string, preserveEmpty = false): TopologyNodeConfig[] {
+  const nodes = value.split(';').map((segment, index) => {
+    const [name = '', region = '', ...roleParts] = segment.split('|').map(part => part.trim())
+    const defaultRole = index === 0 ? '入口' : index === 1 ? '线路机' : index === 2 ? '落地机' : '节点'
+    return {
+      name,
+      region,
+      role: roleParts.join('|').trim() || defaultRole,
+    }
+  })
+
+  return preserveEmpty ? nodes : nodes.filter(node => node.name)
 }
 
 function parseNumber(value: string | undefined): number | null {

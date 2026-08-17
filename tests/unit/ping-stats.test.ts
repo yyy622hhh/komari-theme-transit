@@ -1,6 +1,6 @@
 import type { PingMetricTaskStats, PingRecord } from '../../src/utils/rpc'
 import { describe, expect, test } from 'bun:test'
-import { buildNodePingStats, createEmptyNodePingStats, normalizePingTaskFilter } from '../../src/utils/pingStats'
+import { buildNodePingStats, createEmptyNodePingStats, matchesPingTaskName, normalizePingTaskFilter } from '../../src/utils/pingStats'
 
 describe('ping statistics helpers', () => {
   test('builds legacy latency, loss, percentile and availability values', () => {
@@ -39,6 +39,9 @@ describe('ping statistics helpers', () => {
     expect(stats.avgLoss).toBe(10)
     expect(stats.availability).toBe(90)
     expect(normalizePingTaskFilter('中国-电 信')).toBe('中国电信')
+    expect(matchesPingTaskName('北京-电信', '北京电信')).toBe(true)
+    expect(matchesPingTaskName('北京-电信', '北京电信', true)).toBe(false)
+    expect(matchesPingTaskName(' 北京电信 ', '北京电信', true)).toBe(true)
     expect(createEmptyNodePingStats().hasData).toBe(false)
   })
 })

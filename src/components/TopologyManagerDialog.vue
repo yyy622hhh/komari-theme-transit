@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { NodeData } from '@/stores/nodes'
+import type { TopologyRouteConfig } from '@/utils/topologyHelper'
 import { Icon } from '@iconify/vue'
 import { computed, reactive, ref, watch } from 'vue'
 import { AppDialog } from '@/components/ui/app-dialog'
@@ -59,6 +60,14 @@ function nodeTaskState(nodeName: string): { uuid: string, loading: boolean, erro
     uuid,
     loading: Boolean(uuid && taskLoading.value[uuid]),
     error: uuid ? taskErrors.value[uuid] ?? '' : '',
+  }
+}
+
+function selectRouteNode(route: TopologyRouteConfig, index: number, nodeName: string): void {
+  manager.selectNode(route, index, nodeName)
+  for (const metric of route.metrics) {
+    if (metric.live && metric.nodeName === nodeName)
+      void loadTasks(nodeName)
   }
 }
 
@@ -145,7 +154,7 @@ function updateFallback(metric: { fallbackLatency: number | null, fallbackLoss: 
               :value="node.name"
               :aria-label="`第 ${routeIndex + 1} 条线路${nodeIndex === 1 ? '线路机' : '落地机'}节点`"
               class="h-9 w-full rounded-md border border-input bg-background/70 px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring"
-              @change="manager.selectNode(route, nodeIndex, ($event.target as HTMLSelectElement).value)"
+              @change="selectRouteNode(route, nodeIndex, ($event.target as HTMLSelectElement).value)"
             >
               <option value="">
                 选择节点
@@ -181,10 +190,10 @@ function updateFallback(metric: { fallbackLatency: number | null, fallbackLoss: 
             </div>
             <template v-if="metric.live">
               <select
-                v-model="metric.nodeName"
+                :value="metric.nodeName"
                 :aria-label="`第 ${routeIndex + 1} 条线路第 ${metricIndex + 1} 段探测来源`"
                 class="h-8 w-full rounded-md border border-input bg-background px-2 text-xs"
-                @change="loadTasks(metric.nodeName)"
+                @change="manager.selectMetricSource(metric, ($event.target as HTMLSelectElement).value); loadTasks(metric.nodeName)"
               >
                 <option value="">
                   探测来源节点
