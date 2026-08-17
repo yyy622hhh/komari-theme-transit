@@ -10,6 +10,7 @@ interface SaveThemeSettingsOptions {
   expected?: Record<string, unknown>
   permission: PermissionKey
   requestKey: string
+  lockHeld?: boolean
 }
 
 const themeSaveTails = new Map<string, Promise<void>>()
@@ -43,10 +44,22 @@ function persistedPatchMatches(settings: Record<string, unknown>, patch: Record<
   })
 }
 
-async function withCrossTabThemeLock<T>(theme: string, save: () => Promise<T>): Promise<T> {
+export async function withManagedThemeSettingsLock<T>(theme: string, save: () => Promise<T>): Promise<T> {
   if (typeof navigator === 'undefined' || !navigator.locks)
     return save()
   return navigator.locks.request(`transit:theme-settings:${theme}`, save)
+}
+
+export async function assertManagedThemeSettingsCurrent(options: Pick<SaveThemeSettingsOptions, 'theme' | 'expected' | 'permission'>): Promise<void> {
+  const permission = await requirePermission(options.permission, { force: true })
+  if (!permission.granted)
+    throw new Error('登录状态已过期，请重新登录后保存。')
+  const current = await getSharedApi().getPublicSettings()
+  if (current.theme !== options.theme)
+    throw new Error('当前主题已改变，请刷新页面后重试。')
+  const currentSettings = validateServerThemeSettings(current.theme_settings)
+  if (options.expected && !persistedPatchMatches(currentSettings, options.expected))
+    throw new Error('拓扑配置已被其他会话修改，请重新打开管理器后再保存。')
 }
 
 async function serializeThemeSave<T>(theme: string, save: () => Promise<T>): Promise<T> {
@@ -92,7 +105,7 @@ async function sendThemeSettings(
 export async function saveManagedThemeSettings(options: SaveThemeSettingsOptions): Promise<Record<string, unknown>> {
   const patch = validateThemeSettings(options.patch)
   let savedSettings: Record<string, unknown> = {}
-  await withCrossTabThemeLock(options.theme, () => serializeThemeSave(options.theme, async () => {
+  const runSave = () => serializeThemeSave(options.theme, async () => {
     // Revalidate only after older saves finish. A queued mutation must not use
     // an authentication decision made before it waited.
     const permission = await requirePermission(options.permission, { force: true })
@@ -146,7 +159,11 @@ export async function saveManagedThemeSettings(options: SaveThemeSettingsOptions
     if (persisted.theme !== options.theme || !persistedPatchMatches(persistedSettings, patch))
       throw new Error('服务器未保留本次主题配置，请刷新后重试。')
     savedSettings = persistedSettings
-  }))
+  })
+  if (options.lockHeld)
+    await runSave()
+  else
+    await withManagedThemeSettingsLock(options.theme, runSave)
 
   return savedSettings
 }

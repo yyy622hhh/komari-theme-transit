@@ -16,6 +16,7 @@ const props = defineProps<{
   targetLabel: string
   segmentIndex: number
   mobile?: boolean
+  observeOnly?: boolean
 }>()
 const emit = defineEmits<{
   openDetail: []
@@ -35,8 +36,13 @@ const ping = useNodePingStats(
   },
 )
 
-const latency = computed(() => ping.hasData.value && !ping.stale.value ? ping.avgLatency.value : config.value.fallbackLatency)
+const latency = computed(() => ping.hasData.value && !ping.stale.value
+  ? (ping.hasLatencyData.value ? ping.avgLatency.value : null)
+  : config.value.fallbackLatency)
 const loss = computed(() => ping.hasData.value && !ping.stale.value ? ping.avgLoss.value : config.value.fallbackLoss)
+const latencyText = computed(() => config.value.live && ping.hasData.value && !ping.stale.value && !ping.hasLatencyData.value
+  ? '无响应'
+  : formatTopologyLatency(latency.value))
 const sourceState = computed(() => {
   if (!config.value.live)
     return { label: '静态基线', line: 'bg-slate-400/70 dark:bg-slate-500/55' }
@@ -71,6 +77,7 @@ const health = computed<TopologyRouteHealth>(() => {
     error: ping.error.value,
     stale: ping.stale.value,
     hasData: ping.hasData.value,
+    avgLatency: ping.hasLatencyData.value ? ping.avgLatency.value : null,
     avgLoss: ping.avgLoss.value,
     avgVolatility: ping.avgVolatility.value,
     fallbackLatency: config.value.fallbackLatency,
@@ -137,11 +144,12 @@ const sampleBars = computed<TelemetrySample[]>(() => {
 
 <template>
   <div
+    v-if="!observeOnly"
     class="relative flex h-10 flex-1 items-center"
     :class="mobile ? 'min-w-0' : 'min-w-[190px]'"
     :data-topology-edge-samples="sampleBars.length ? '' : undefined"
     :title="`${sourceState.label}${config.live ? ` · ${config.taskFilter || '未指定任务'}` : ''}`"
-    :aria-label="`${sourceState.label}：${formatTopologyLatency(latency)}，丢包 ${formatTopologyLoss(loss)}`"
+    :aria-label="`${sourceState.label}：${latencyText}，丢包 ${formatTopologyLoss(loss)}`"
   >
     <TopologyEdgeSamples
       :bars="sampleBars"
@@ -152,12 +160,13 @@ const sampleBars = computed<TelemetrySample[]>(() => {
       type="button"
       data-topology-current-metric
       class="absolute left-1/2 top-0 z-2 -translate-x-1/2 whitespace-nowrap rounded px-1 text-[10px] font-medium tabular-nums text-slate-500 transition-colors hover:text-slate-900 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500/60 dark:text-slate-400 dark:hover:text-slate-100 dark:focus-visible:ring-emerald-400/60 sm:text-[11px]"
-      aria-label="查看线路历史"
+      :aria-label="`${telemetryLabel}，线路状态：${sourceState.label}，${latencyText}，丢包 ${formatTopologyLoss(loss)}，查看线路历史`"
       @click="emit('openDetail')"
     >
-      {{ formatTopologyLatency(latency) }}
+      {{ latencyText }}
       <span class="mx-0.5 text-slate-400 dark:text-slate-600">/</span>
       <span :class="lossTone">{{ formatTopologyLoss(loss) }}</span>
     </button>
   </div>
+  <span v-else data-topology-telemetry-observer class="hidden" aria-hidden="true" />
 </template>

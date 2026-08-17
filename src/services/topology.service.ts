@@ -6,6 +6,7 @@ interface SaveTopologyOptions {
   theme: string
   routes: TopologyRouteConfig[]
   expected?: Record<string, unknown>
+  lockHeld?: boolean
 }
 
 function getSaveKey(theme: string): string {
@@ -30,5 +31,6 @@ export async function saveTopologyConfiguration(options: SaveTopologyOptions): P
     expected: options.expected,
     permission: 'nodeTopology',
     requestKey: getSaveKey(options.theme),
+    lockHeld: options.lockHeld,
   })
 }

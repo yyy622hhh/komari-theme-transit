@@ -2,7 +2,7 @@ import type { MaybeRefOrGetter } from 'vue'
 import type { NodeData } from '@/stores/nodes'
 import type { TopologyMetricConfig, TopologyNodeConfig, TopologyRouteConfig } from '@/utils/topologyHelper'
 import { computed, ref, toValue } from 'vue'
-import { createThemeSettingsSnapshot } from '@/services/theme-settings.service'
+import { assertManagedThemeSettingsCurrent, createThemeSettingsSnapshot, withManagedThemeSettingsLock } from '@/services/theme-settings.service'
 import { saveTopologyConfiguration } from '@/services/topology.service'
 import { useAppStore } from '@/stores/app'
 import { buildQuickTopologyRoute, createTopologyRoute, findDuplicateTopologyRouteIndex, findUniqueTopologyNode, getQuickTopologySourceNode, getTopologyProbe, listQuickTopologyNodes, parseTopologyRoutes, TOPOLOGY_LIMITS, validateTopologyRoutes } from '@/utils/topologyHelper'
@@ -56,7 +56,7 @@ export function useTopologyManager(nodes: MaybeRefOrGetter<NodeData[]>) {
   const canAddRoute = computed(() => routes.value.length < TOPOLOGY_LIMITS.maxRoutes)
   const quickSourceNode = computed(() => getQuickTopologySourceNode(availableNodes.value))
   const quickNodes = computed(() => listQuickTopologyNodes(availableNodes.value).filter(node => node.uuid))
-  const quickConfigurationAvailable = computed(() => canAddRoute.value && quickNodes.value.length > 0)
+  const quickConfigurationAvailable = computed(() => quickNodes.value.length > 0)
 
   function isAmbiguousNodeName(name: string): boolean {
     return duplicateNodeNames.value.has(name.trim().toLowerCase())
@@ -86,20 +86,34 @@ export function useTopologyManager(nodes: MaybeRefOrGetter<NodeData[]>) {
   function addQuickRoute(
     taskNames: string[] = [],
     sourceUuid = '',
-    options: { landingUuid?: string | null, hopTask?: string } = {},
-  ): TopologyRouteConfig | null {
-    if (!canAddRoute.value)
-      return null
+    options: { landingUuid?: string | null, entryTask?: string, hopTask?: string } = {},
+  ): { route: TopologyRouteConfig, created: boolean } | null {
     const route = buildQuickTopologyRoute(availableNodes.value, {
       sourceTasks: taskNames,
       sourceUuid,
       landingUuid: options.landingUuid,
+      entryTask: options.entryTask,
       hopTask: options.hopTask,
     })
     if (!route)
       return null
+    const duplicateIndex = findDuplicateTopologyRouteIndex(
+      routes.value,
+      route.nodes[1]?.name ?? '',
+      route.nodes[2]?.name ?? '',
+    )
+    if (duplicateIndex >= 0) {
+      const existing = routes.value[duplicateIndex]
+      if (!existing)
+        return null
+      const replacement = { ...route, id: existing.id }
+      routes.value.splice(duplicateIndex, 1, replacement)
+      return { route: replacement, created: false }
+    }
+    if (!canAddRoute.value)
+      return null
     routes.value.push(route)
-    return route
+    return { route, created: true }
   }
 
   function removeRoute(index: number): void {
@@ -133,10 +147,10 @@ export function useTopologyManager(nodes: MaybeRefOrGetter<NodeData[]>) {
         metric.nodeName = nodeName
       }
     }
-    else if (index > 0 && route.metrics[index - 1] && !route.metrics[index - 1]!.nodeName.trim()) {
-      if (route.metrics[index - 1]!.nodeName.trim() !== nextName)
-        route.metrics[index - 1]!.taskFilter = ''
-      route.metrics[index - 1]!.nodeName = nodeName
+    else if (index === 2 && route.metrics[1]?.live) {
+      route.metrics[1].nodeName = route.nodes[1]?.name.trim() ?? ''
+      if (previousName !== nextName)
+        route.metrics[1].taskFilter = ''
     }
   }
 
@@ -157,7 +171,25 @@ export function useTopologyManager(nodes: MaybeRefOrGetter<NodeData[]>) {
     }
   }
 
-  async function save(): Promise<'invalid' | 'saved' | 'changed'> {
+  async function preflightSave(): Promise<void> {
+    const publicSettings = appStore.publicSettings
+    if (!publicSettings)
+      throw new Error('站点配置尚未加载完成。')
+    await assertManagedThemeSettingsCurrent({
+      theme: publicSettings.theme,
+      expected: expectedTopologySettings.value,
+      permission: 'nodeTopology',
+    })
+  }
+
+  async function withSaveLock<T>(save: () => Promise<T>): Promise<T> {
+    const theme = appStore.publicSettings?.theme
+    if (!theme)
+      throw new Error('站点配置尚未加载完成。')
+    return withManagedThemeSettingsLock(theme, save)
+  }
+
+  async function save(options: { lockHeld?: boolean } = {}): Promise<'invalid' | 'saved' | 'changed'> {
     if (validationErrors.value.length)
       return 'invalid'
 
@@ -173,6 +205,7 @@ export function useTopologyManager(nodes: MaybeRefOrGetter<NodeData[]>) {
         theme: publicSettings.theme,
         routes: submittedRoutes,
         expected: expectedTopologySettings.value,
+        lockHeld: options.lockHeld,
       })
       const latestPublicSettings = appStore.publicSettings
       if (latestPublicSettings?.theme === publicSettings.theme)
@@ -209,6 +242,8 @@ export function useTopologyManager(nodes: MaybeRefOrGetter<NodeData[]>) {
     selectNode,
     selectMetricSource,
     setMetricMode,
+    preflightSave,
+    withSaveLock,
     save,
   }
 }

@@ -56,7 +56,10 @@ const baselinePing = useNodePingStats(
 )
 
 const hasLiveData = computed(() => config.value.live && ping.hasData.value && !ping.stale.value)
-const latency = computed(() => hasLiveData.value ? ping.avgLatency.value : config.value.fallbackLatency)
+const latency = computed(() => hasLiveData.value
+  ? (ping.hasLatencyData.value ? ping.avgLatency.value : null)
+  : config.value.fallbackLatency)
+const latencyText = computed(() => hasLiveData.value && !ping.hasLatencyData.value ? '无响应' : formatTopologyLatency(latency.value))
 const loss = computed(() => hasLiveData.value ? ping.avgLoss.value : config.value.fallbackLoss)
 const history = computed(() => ping.history.value.slice(-20))
 const maximumLatency = computed(() => Math.max(...history.value.map(point => point.latency ?? 0), 1))
@@ -68,6 +71,7 @@ const health = computed<TopologyRouteHealth>(() => resolveTopologySegmentHealth(
   error: ping.error.value,
   stale: ping.stale.value,
   hasData: ping.hasData.value,
+  avgLatency: ping.hasLatencyData.value ? ping.avgLatency.value : null,
   avgLoss: ping.avgLoss.value,
   avgVolatility: ping.avgVolatility.value,
   fallbackLatency: config.value.fallbackLatency,
@@ -76,9 +80,9 @@ const health = computed<TopologyRouteHealth>(() => resolveTopologySegmentHealth(
 const baselineWindow = computed<TopologyReliabilityWindow>(() => ({
   hours: 24,
   availability: baselinePing.hasData.value ? baselinePing.availability.value : null,
-  avgLatency: baselinePing.hasData.value ? baselinePing.avgLatency.value : null,
-  p50Latency: baselinePing.hasData.value ? baselinePing.p50Latency.value : null,
-  p95Latency: baselinePing.hasData.value ? baselinePing.p95Latency.value : null,
+  avgLatency: baselinePing.hasLatencyData.value ? baselinePing.avgLatency.value : null,
+  p50Latency: baselinePing.hasLatencyData.value ? baselinePing.p50Latency.value : null,
+  p95Latency: baselinePing.hasLatencyData.value ? baselinePing.p95Latency.value : null,
   sampleCount: baselinePing.hasData.value ? baselinePing.sampleCount.value : 0,
   hasData: baselinePing.hasData.value,
   stale: baselinePing.stale.value,
@@ -86,7 +90,7 @@ const baselineWindow = computed<TopologyReliabilityWindow>(() => ({
   error: baselinePing.error.value,
 }))
 const adaptive = computed(() => calculateAdaptiveBaseline(
-  currentPing.hasData.value && !currentPing.stale.value ? currentPing.avgLatency.value : null,
+  currentPing.hasLatencyData.value && !currentPing.stale.value ? currentPing.avgLatency.value : null,
   baselineWindow.value,
 ))
 const status = computed(() => {
@@ -99,6 +103,8 @@ const status = computed(() => {
       return { label: '实时任务读取失败', tone: 'text-rose-600 dark:text-rose-400', dot: 'bg-rose-400' }
     if ((loss.value ?? 0) >= 20)
       return { label: '严重丢包', tone: 'text-rose-600 dark:text-rose-400', dot: 'bg-rose-400' }
+    if ((latency.value ?? 0) >= 1000)
+      return { label: '延迟异常', tone: 'text-rose-600 dark:text-rose-400', dot: 'bg-rose-400' }
     return { label: '异常', tone: 'text-rose-600 dark:text-rose-400', dot: 'bg-rose-400' }
   }
   if (ping.loading.value)
@@ -181,7 +187,7 @@ const sampleBars = computed<TelemetrySample[]>(() => history.value.map((point, i
           平均延迟
         </div>
         <div class="mt-1 text-base font-semibold tabular-nums">
-          {{ formatTopologyLatency(latency) }}
+          {{ latencyText }}
         </div>
       </div>
       <div class="rounded-lg bg-card/55 px-2.5 py-2">
@@ -189,7 +195,7 @@ const sampleBars = computed<TelemetrySample[]>(() => history.value.map((point, i
           P95 延迟
         </div>
         <div class="mt-1 text-base font-semibold tabular-nums">
-          {{ hasLiveData ? formatTopologyLatency(ping.p95Latency.value) : '-' }}
+          {{ hasLiveData ? (ping.hasLatencyData.value ? formatTopologyLatency(ping.p95Latency.value) : '无响应') : '-' }}
         </div>
       </div>
       <div class="rounded-lg bg-card/55 px-2.5 py-2">

@@ -16,6 +16,7 @@ export interface NodePingStatsState {
   sampleCount: number
   history: NodePingHistoryPoint[]
   hasData: boolean
+  hasLatencyData: boolean
 }
 
 export interface MetricLossPoint {
@@ -45,6 +46,7 @@ export function createEmptyNodePingStats(): NodePingStatsState {
     sampleCount: 0,
     history: [],
     hasData: false,
+    hasLatencyData: false,
   }
 }
 
@@ -232,7 +234,7 @@ export function buildNodePingStats(
         ? [{ value: stat.avg, weight: stat.valid }]
         : [])
     const latestLatencyValues = statsWithSamples
-      .map(stat => stat.latest)
+      .flatMap(stat => stat.valid > 0 ? [stat.latest] : [])
       .filter(isFiniteNumber)
     const lossValues = statsWithSamples
       .filter(stat => !stat.loss_approximate && isFiniteNumber(stat.loss))
@@ -264,6 +266,7 @@ export function buildNodePingStats(
       sampleCount,
       history,
       hasData: true,
+      hasLatencyData: latencyValues.length > 0 || latestLatencyValues.length > 0,
     }
   }
 
@@ -332,5 +335,6 @@ export function buildNodePingStats(
     sampleCount: filteredRecords.length,
     history,
     hasData,
+    hasLatencyData: validLatencyValues.length > 0,
   }
 }

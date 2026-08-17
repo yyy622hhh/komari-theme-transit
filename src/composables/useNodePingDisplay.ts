@@ -129,8 +129,10 @@ export function useNodePingDisplay(
   const lossRenderBars = computed(() => lossBars.value.length ? lossBars.value : buildEmptyPingBars('loss'))
 
   const latencyDisplay = computed(() => {
-    if (pingStats.hasData.value)
+    if (pingStats.hasLatencyData.value)
       return `${Math.round(pingStats.avgLatency.value)} ms`
+    if (pingStats.hasData.value)
+      return '无响应'
     if (pingStats.loading.value)
       return options.loadingDisplayText ?? '加载中'
     return options.emptyDisplayText ?? '-'
@@ -145,7 +147,9 @@ export function useNodePingDisplay(
   })
 
   const latencyPanelTooltip = computed(() => {
-    if (!pingStats.hasData.value) {
+    if (!pingStats.hasLatencyData.value) {
+      if (pingStats.hasData.value)
+        return '没有成功的延迟样本'
       if (pingStats.loading.value)
         return options.loadingPanelTooltipText?.latency ?? ''
       return options.emptyPanelTooltipText?.latency ?? ''

@@ -17,10 +17,12 @@ const root = ref<HTMLElement | null>(null)
 const activeIndex = ref<number | null>(null)
 const pinned = ref(false)
 const tooltipId = useId()
+const sampleListId = useId()
 const tooltipPosition = ref({ left: 0, top: 0, below: false })
 let stopViewportRefresh: (() => void) | null = null
 
 const activeSample = computed(() => activeIndex.value === null ? null : props.samples[activeIndex.value] ?? null)
+const activeSampleId = computed(() => activeIndex.value === null ? undefined : `${sampleListId}-sample-${activeIndex.value}`)
 
 const rootClass = computed(() => props.variant === 'ticks'
   ? 'absolute inset-x-2 bottom-0 flex h-4 items-center justify-between outline-none focus-visible:ring-1 focus-visible:ring-emerald-500/70 dark:focus-visible:ring-emerald-300/70'
@@ -176,10 +178,12 @@ onClickOutside(root, closeTooltip)
     data-sample-strip
     :data-sample-kind="kind"
     :class="rootClass"
-    role="group"
+    role="listbox"
     tabindex="0"
+    aria-orientation="horizontal"
     :aria-label="`${label}历史采样，左右方向键切换，回车固定`"
     :aria-describedby="activeSample ? tooltipId : undefined"
+    :aria-activedescendant="activeSampleId"
     @focus="handleFocus"
     @focusout="handleFocusOut"
     @keydown="handleKeyboard"
@@ -187,8 +191,10 @@ onClickOutside(root, closeTooltip)
   >
     <button
       v-for="(sample, index) in samples"
+      :id="`${sampleListId}-sample-${index}`"
       :key="sample.key"
       type="button"
+      role="option"
       data-sample-trigger
       :data-sample-index="index"
       :data-topology-sample="kind === 'topology' ? '' : undefined"
@@ -198,7 +204,7 @@ onClickOutside(root, closeTooltip)
       tabindex="-1"
       :class="sampleButtonClass"
       :aria-label="sample.ariaLabel"
-      :aria-pressed="pinned && activeIndex === index"
+      :aria-selected="activeIndex === index"
       @pointerenter="handlePointerEnter($event, index)"
       @focus="openTooltip(index, $event.currentTarget as HTMLElement)"
       @click="toggleSample($event, index)"
@@ -212,8 +218,10 @@ onClickOutside(root, closeTooltip)
         :style="variant === 'ticks' ? { height: `${sample.height ?? 7}px` } : undefined"
       />
     </button>
-
     <Teleport to="body">
+      <span class="sr-only" aria-live="polite" aria-atomic="true">
+        {{ activeSample?.ariaLabel || '' }}
+      </span>
       <div
         v-if="activeSample"
         :id="tooltipId"

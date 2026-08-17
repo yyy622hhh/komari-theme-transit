@@ -19,7 +19,7 @@ const emit = defineEmits<{
 
 const config = computed(() => parseTopologyMetric(props.metric))
 const sourceNode = computed(() => findUniqueTopologyNode(props.nodes, config.value.nodeName))
-const enabled = computed(() => config.value.live && Boolean(sourceNode.value))
+const enabled = computed(() => config.value.live && Boolean(sourceNode.value) && sourceNode.value?.online !== false)
 
 const dayPing = useNodePingStats(
   () => sourceNode.value?.uuid ?? '',
@@ -47,9 +47,9 @@ function reliabilityWindow(hours: 24 | 168, ping: typeof dayPing): TopologyRelia
   return {
     hours,
     availability: ping.hasData.value ? ping.availability.value : null,
-    avgLatency: ping.hasData.value ? ping.avgLatency.value : null,
-    p50Latency: ping.hasData.value ? ping.p50Latency.value : null,
-    p95Latency: ping.hasData.value ? ping.p95Latency.value : null,
+    avgLatency: ping.hasLatencyData.value ? ping.avgLatency.value : null,
+    p50Latency: ping.hasLatencyData.value ? ping.p50Latency.value : null,
+    p95Latency: ping.hasLatencyData.value ? ping.p95Latency.value : null,
     sampleCount: ping.hasData.value ? ping.sampleCount.value : 0,
     hasData: ping.hasData.value,
     stale: ping.stale.value,

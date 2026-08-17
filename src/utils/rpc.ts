@@ -42,6 +42,7 @@ const WS_PROTOCOL_PREFIX = 'ws://'
 const WSS_PROTOCOL_PREFIX = 'wss://'
 const RPC_REQUEST_ABORTED = -32800
 const RPC_METHODS_ALLOWING_MISSING_RESULT = new Set([
+  'admin:addPingTask',
   'admin:editSettings',
   'admin:orderClients',
 ])
@@ -261,6 +262,17 @@ export interface PingTaskInfo {
   stddev?: number
   loss_approximate?: boolean
   type?: string
+  target?: string
+}
+
+export interface PingTaskMutation {
+  [key: string]: unknown
+  clients: string[]
+  default_on: boolean
+  name: string
+  target: string
+  type: 'icmp' | 'tcp' | 'http' | string
+  interval: number
 }
 
 export interface AuditLogEntry {
@@ -1089,6 +1101,14 @@ export class KomariRpc {
 
   async orderClients(order: Record<string, number>, signal?: AbortSignal): Promise<void> {
     await this.client.callOverHttp('admin:orderClients', order, signal)
+  }
+
+  async getAllPingTasks(signal?: AbortSignal): Promise<PingTaskInfo[]> {
+    return this.client.callOverHttp<PingTaskInfo[]>('admin:getAllPingTasks', undefined, signal)
+  }
+
+  async addPingTask(task: PingTaskMutation, signal?: AbortSignal): Promise<void> {
+    await this.client.callOverHttp('admin:addPingTask', task, signal)
   }
 
   // ==================== Public 方法（主题/公开页优先使用） ====================

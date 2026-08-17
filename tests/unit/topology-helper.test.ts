@@ -8,6 +8,7 @@ import {
   formatTopologyMetricForProbe,
   formatTopologyTelemetryLabel,
   getQuickTopologySourceNode,
+  getTopologyProbe,
   getTopologyProbeStorageKey,
   listUnusedQuickLandingUuids,
   nextQuickLandingUuid,
@@ -169,12 +170,16 @@ describe('quick topology configuration', () => {
     expect(validateTopologyRoutes(route ? [route] : [])).toEqual([])
   })
 
-  test('uses a custom entry label for non-preset Ping tasks', () => {
+  test('does not guess a custom task as the entry probe', () => {
     const route = buildQuickTopologyRoute([{ name: '北京电信', region: 'CN', online: true }], ['my-ping'])
 
     expect(route?.nodes[0]?.name).toBe('自定义入口')
-    expect(route?.metrics[0]?.taskFilter).toBe('my-ping')
+    expect(route?.metrics[0]).toMatchObject({ live: false, taskFilter: '' })
     expect(validateTopologyRoutes(route ? [route] : [])).toEqual([])
+  })
+
+  test('does not guess between multiple task names for the same entry probe', () => {
+    expect(pickQuickTopologyTaskName(['北京电信', '北京-电信'], getTopologyProbe('beijing-telecom'))).toBe('')
   })
 
   test('keeps preset entry semantics aligned when the preset label is also a node name', () => {
@@ -189,7 +194,7 @@ describe('quick topology configuration', () => {
     const route = buildQuickTopologyRoute([
       { uuid: 'node-a', name: 'source-a', region: 'US', online: true },
       { uuid: 'node-b', name: 'source-b', region: 'JP', online: true },
-    ], ['Tokyo'], 'node-b')
+    ], { sourceUuid: 'node-b', landingUuid: null, sourceTasks: ['Tokyo'], entryTask: 'Tokyo' })
 
     expect(route?.nodes[1]?.name).toBe('source-b')
     expect(route?.metrics[0]).toMatchObject({ nodeName: 'source-b', taskFilter: 'Tokyo' })
@@ -210,7 +215,7 @@ describe('quick topology configuration', () => {
     const route = buildQuickTopologyRoute([
       { uuid: 'invalid', name: 'bad|source', online: true },
       { uuid: 'safe', name: 'safe-source', region: 'US', online: true },
-    ], ['bad@task', 'safe-task'])
+    ], { sourceTasks: ['bad@task', 'safe-task'], entryTask: 'safe-task' })
 
     expect(route?.nodes[1]?.name).toBe('safe-source')
     expect(route?.metrics[0]?.taskFilter).toBe('safe-task')
@@ -253,7 +258,8 @@ describe('quick topology configuration', () => {
       { name: 'offline', online: false },
       { name: 'online', online: true },
     ])?.name).toBe('online')
-    expect(pickQuickTopologyTaskName(['上海移动备用', '探测任务'])).toBe('上海移动备用')
+    expect(pickQuickTopologyTaskName(['上海移动备用', '探测任务'])).toBe('')
+    expect(pickQuickTopologyTaskName(['探测任务', '北京-电信'])).toBe('北京-电信')
     expect(buildQuickTopologyRoute([])).toBeNull()
   })
 

@@ -28,6 +28,7 @@ interface SharedPingRecordsState {
   metricStats?: PingMetricTaskStats[]
   metricLossPoints?: MetricLossPoint[]
   taskNamesById: Map<number, string>
+  taskClientsById: Map<number, Set<string>>
 }
 
 interface SharedPingRecordsEntry {
@@ -129,6 +130,27 @@ function normalizeTaskNameFilter(value: string, match: PingTaskNameMatch): strin
   return match === 'exact' ? normalizeExactPingTaskName(value) : normalizePingTaskFilter(value)
 }
 
+export function collectNodePingTaskIds(
+  nodeUuid: string,
+  records: readonly PingRecord[],
+  metricStats: readonly Pick<PingMetricTaskStats, 'task_id'>[] = [],
+  metricLossPoints: readonly Pick<MetricLossPoint, 'taskId'>[] = [],
+  taskClientsById: ReadonlyMap<number, ReadonlySet<string>> = new Map(),
+): Set<number> {
+  const taskIds = new Set<number>()
+  for (const record of records)
+    taskIds.add(record.task_id)
+  for (const stat of metricStats)
+    taskIds.add(normalizeTaskId(stat.task_id))
+  for (const point of metricLossPoints)
+    taskIds.add(point.taskId)
+  for (const [taskId, clients] of taskClientsById) {
+    if (clients.has(nodeUuid))
+      taskIds.add(taskId)
+  }
+  return taskIds
+}
+
 function getSharedPingRecordsKey(hours: number, maxCount?: number, uuid?: string): string {
   return `${uuid?.trim() || 'all'}:${hours}:${maxCount ?? 'all'}`
 }
@@ -159,6 +181,7 @@ function isValidStatsState(value: unknown): value is NodePingStatsState {
     && (state.availability === null || typeof state.availability === 'number')
     && typeof state.sampleCount === 'number'
     && typeof state.hasData === 'boolean'
+    && typeof state.hasLatencyData === 'boolean'
     && Array.isArray(state.history)
     && state.history.every(isValidHistoryPoint)
 }
@@ -432,6 +455,7 @@ function buildPingMetricState(
     metricStats: stats,
     metricLossPoints,
     taskNamesById: new Map(),
+    taskClientsById: new Map(),
   }
 }
 
@@ -504,6 +528,10 @@ async function loadSharedPingRecords(entry: SharedPingRecordsEntry, hours: numbe
         loadPublicPingTasks().catch(() => []),
       ])
       const taskNamesById = new Map(pingTasks.map(task => [normalizeTaskId(String(task.id)), task.name]))
+      const taskClientsById = new Map(pingTasks.map(task => [
+        normalizeTaskId(String(task.id)),
+        new Set(Array.isArray(task.clients) ? task.clients : []),
+      ]))
       for (const stat of metricState?.metricStats ?? []) {
         if (stat.name?.trim())
           taskNamesById.set(normalizeTaskId(stat.task_id), stat.name.trim())
@@ -512,7 +540,7 @@ async function loadSharedPingRecords(entry: SharedPingRecordsEntry, hours: numbe
         return
 
       if (metricState) {
-        entry.data.value = { ...metricState, taskNamesById }
+        entry.data.value = { ...metricState, taskNamesById, taskClientsById }
       }
       else {
         const { records, tasks } = await loadPingRecordsWithTasks(hours, maxCount, nodeUuid)
@@ -521,6 +549,8 @@ async function loadSharedPingRecords(entry: SharedPingRecordsEntry, hours: numbe
           const taskId = normalizeTaskId(String(task.id))
           if (name && !taskNamesById.has(taskId))
             taskNamesById.set(taskId, name)
+          if (!taskClientsById.has(taskId))
+            taskClientsById.set(taskId, new Set(Array.isArray(task.clients) ? task.clients : []))
         }
         if (entry.subscribers === 0)
           return
@@ -528,6 +558,7 @@ async function loadSharedPingRecords(entry: SharedPingRecordsEntry, hours: numbe
           recordsByClient: buildRecordsByClient(records),
           source: 'legacy',
           taskNamesById,
+          taskClientsById,
         }
       }
       entry.lastFetchedAt = Date.now()
@@ -613,7 +644,6 @@ export function useNodePingStats(
   },
 ) {
   const loading = ref(false)
-  const error = ref<string | null>(null)
 
   const resolved = computed(() => {
     const hours = Math.max(1, Math.floor(toValue(options?.hours) ?? 24))
@@ -671,11 +701,20 @@ export function useNodePingStats(
       return readStatsCache(nodeUuid, hours, maxCount, taskNameFilter, taskNameMatch) ?? createEmptyNodePingStats()
 
     const normalizedFilter = normalizeTaskNameFilter(taskNameFilter, taskNameMatch)
+    const nodeTaskIds = collectNodePingTaskIds(
+      nodeUuid,
+      state.recordsByClient.get(nodeUuid) ?? [],
+      state.metricStats,
+      state.metricLossPoints,
+      state.taskClientsById,
+    )
     const matchingTaskIds = normalizedFilter
       ? new Set([...state.taskNamesById.entries()]
-          .filter(([, name]) => matchesTaskName(name, normalizedFilter, taskNameMatch))
+          .filter(([taskId, name]) => nodeTaskIds.has(taskId) && matchesTaskName(name, normalizedFilter, taskNameMatch))
           .map(([taskId]) => taskId))
       : null
+    if (taskNameMatch === 'exact' && matchingTaskIds && matchingTaskIds.size > 1)
+      return createEmptyNodePingStats()
     const records = (state.recordsByClient.get(nodeUuid) ?? [])
       .filter(record => !matchingTaskIds || matchingTaskIds.has(record.task_id))
     const metricStats = state.metricStats?.filter(stat => !matchingTaskIds || matchingTaskIds.has(normalizeTaskId(stat.task_id)))
@@ -695,8 +734,16 @@ export function useNodePingStats(
       return []
 
     const normalizedFilter = normalizeTaskNameFilter(taskNameFilter, taskNameMatch)
-    return [...new Set([...state.taskNamesById.values()]
-      .filter(name => matchesTaskName(name, normalizedFilter, taskNameMatch)))]
+    const nodeTaskIds = collectNodePingTaskIds(
+      nodeUuid,
+      state.recordsByClient.get(nodeUuid) ?? [],
+      state.metricStats,
+      state.metricLossPoints,
+      state.taskClientsById,
+    )
+    return [...new Set([...state.taskNamesById.entries()]
+      .filter(([taskId, name]) => nodeTaskIds.has(taskId) && matchesTaskName(name, normalizedFilter, taskNameMatch))
+      .map(([, name]) => name))]
   })
 
   const lastFetchedAt = computed(() => {
@@ -714,6 +761,31 @@ export function useNodePingStats(
     return fetchedAt > 0 && pingFreshnessTick.value - fetchedAt > OPS_PING_STALE_AFTER_MS
   })
 
+  const error = computed<string | null>(() => {
+    const { uuid: nodeUuid, hours, maxCount, enabled, taskNameFilter, taskNameMatch } = resolved.value
+    if (!enabled || !nodeUuid.trim())
+      return null
+    const entry = getSharedPingRecordsEntry(hours, maxCount, nodeUuid)
+    const normalizedFilter = normalizeTaskNameFilter(taskNameFilter, taskNameMatch)
+    if (taskNameMatch === 'exact' && normalizedFilter) {
+      const state = entry.data.value
+      const nodeTaskIds = state
+        ? collectNodePingTaskIds(
+            nodeUuid,
+            state.recordsByClient.get(nodeUuid) ?? [],
+            state.metricStats,
+            state.metricLossPoints,
+            state.taskClientsById,
+          )
+        : new Set<number>()
+      const matches = [...(state?.taskNamesById.entries() ?? [])]
+        .filter(([taskId, name]) => nodeTaskIds.has(taskId) && matchesTaskName(name, normalizedFilter, 'exact'))
+      if (matches.length > 1)
+        return `存在多个同名 Ping 任务“${taskNameFilter}”，无法唯一绑定。`
+    }
+    return entry.error.value ?? null
+  })
+
   // 副作用：按需触发首次共享加载并维护 loading/error，不再命令式写入 stats。
   watch(
     resolved,
@@ -727,7 +799,6 @@ export function useNodePingStats(
       if (!enabled || !nodeUuid.trim()) {
         syncSharedRecordsSubscription(null)
         loading.value = false
-        error.value = null
         return
       }
 
@@ -738,21 +809,16 @@ export function useNodePingStats(
 
       if (!shouldLoadRecords) {
         loading.value = false
-        error.value = null
         return
       }
 
       const shouldShowLoading = !entry.data.value
       loading.value = shouldShowLoading
-      error.value = null
 
       try {
         await loadSharedPingRecords(entry, hours, maxCount, nodeUuid)
       }
-      catch (err) {
-        if (!cancelled && shouldShowLoading)
-          error.value = err instanceof Error ? err.message : '获取 Ping 历史失败'
-      }
+      catch {}
       finally {
         if (!cancelled)
           loading.value = false
@@ -792,6 +858,7 @@ export function useNodePingStats(
     availability: computed(() => stats.value.availability),
     sampleCount: computed(() => stats.value.sampleCount),
     hasData: computed(() => stats.value.hasData),
+    hasLatencyData: computed(() => stats.value.hasLatencyData),
     lastFetchedAt,
     stale,
     taskNames,
@@ -835,7 +902,7 @@ export function useNodeCarrierPingStats(uuid: MaybeRefOrGetter<string>, options?
       labelEn: carrier.labelEn,
       taskNames: carrier.ping.taskNames.value,
       stats: carrier.ping.stats.value,
-      hasLatency: carrier.ping.hasData.value && carrier.ping.avgLatency.value > 0,
+      hasLatency: carrier.ping.hasLatencyData.value,
       stale: carrier.ping.stale.value,
     }))),
     loading: computed(() => carrierPings.some(carrier => carrier.ping.loading.value)),

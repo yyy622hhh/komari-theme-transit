@@ -4,6 +4,30 @@
 
 ## [Unreleased]
 
+## [1.0.32] - 2026-08-17
+
+### Added
+
+- 拓扑管理器按线路机 UUID 与落地机 IP 自动复用 Ping 任务；没有匹配任务时，在保存配置时创建并绑定 ICMP 任务。
+- 线路节点变更会自动重新规划两段任务，并提供“一键校正全部任务”处理旧配置中的错误绑定。
+
+### Changed
+
+- 快速生成简化为线路机、入口探测和落地机选择，第 2 段任务不再要求手工挑选。
+- 健康评分、推荐和详情统一处理离线、缺失、查询错误、100% 丢包与极高延迟；异常线路不再参与正常线路排名。
+- 线路历史样本、桌面与移动状态、健康汇总和时间范围控件补齐键盘及屏幕阅读器语义。
+
+### Fixed
+
+- 修复旧版按任务名称或城市名猜测导致线路指标串线的问题；同名任务、重名节点和不唯一入口任务现在拒绝猜测。
+- 修复 Ping 任务列表加载失败、认证过期、快速生成关闭、异步重开和任务创建并发时可能保存错误草稿或留下重复任务的问题。
+- 修复主题字段从不存在变为新增时的跨标签页陈旧保存，并在写入后确认拓扑字段真实持久化。
+- 拒绝包含额外 `@` 的非法实时指标，避免任务名称被静默改写。
+
+### Testing
+
+- 扩展拓扑解析、健康评分、Ping 任务服务、主题并发保存、无障碍和多浏览器交互回归。
+
 ## [1.0.31] - 2026-08-17
 
 ### Added
@@ -430,7 +454,8 @@
 - 亮暗主题、桌面/移动布局和 Transit 风格内嵌 Komari 管理端。
 - Playwright 视觉与交互回归、自动构建和 GitHub Release 发布流程。
 
-[Unreleased]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.31...HEAD
+[Unreleased]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.32...HEAD
+[1.0.32]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.31...v1.0.32
 [1.0.31]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.30...v1.0.31
 [1.0.30]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.29...v1.0.30
 [1.0.29]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.28...v1.0.29

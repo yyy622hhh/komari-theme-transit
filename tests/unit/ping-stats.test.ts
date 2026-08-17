@@ -1,5 +1,6 @@
 import type { PingMetricTaskStats, PingRecord } from '../../src/utils/rpc'
 import { describe, expect, test } from 'bun:test'
+import { collectNodePingTaskIds } from '../../src/composables/useNodePingStats'
 import { buildNodePingStats, createEmptyNodePingStats, matchesPingTaskName, normalizePingTaskFilter } from '../../src/utils/pingStats'
 
 describe('ping statistics helpers', () => {
@@ -17,6 +18,7 @@ describe('ping statistics helpers', () => {
     expect(stats.avgLoss).toBeCloseTo(100 / 3)
     expect(stats.availability).toBeCloseTo(200 / 3)
     expect(stats.p50Latency).toBe(150)
+    expect(stats.hasLatencyData).toBe(true)
   })
 
   test('prefers metric aggregates and normalizes carrier filters', () => {
@@ -43,5 +45,31 @@ describe('ping statistics helpers', () => {
     expect(matchesPingTaskName('北京-电信', '北京电信', true)).toBe(false)
     expect(matchesPingTaskName(' 北京电信 ', '北京电信', true)).toBe(true)
     expect(createEmptyNodePingStats().hasData).toBe(false)
+  })
+
+  test('keeps total loss data without inventing zero latency', () => {
+    const stats = buildNodePingStats([], [{
+      task_id: '1',
+      total: 10,
+      valid: 0,
+      latest: 0,
+      loss: 100,
+      loss_approximate: false,
+      tags: {},
+    }])
+
+    expect(stats.hasData).toBe(true)
+    expect(stats.hasLatencyData).toBe(false)
+    expect(stats.avgLoss).toBe(100)
+  })
+
+  test('scopes same-named task candidates to the current source node', () => {
+    const taskClients = new Map([
+      [1, new Set(['node-a'])],
+      [2, new Set(['node-b'])],
+    ])
+
+    expect([...collectNodePingTaskIds('node-a', [], [], [], taskClients)]).toEqual([1])
+    expect([...collectNodePingTaskIds('node-b', [], [], [], taskClients)]).toEqual([2])
   })
 })

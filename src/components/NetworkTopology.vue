@@ -169,6 +169,9 @@ const directions = computed<RouteDirection[]>(() => {
 const visibleRoutes = computed(() => activeDirection.value === 'all'
   ? routes.value
   : routes.value.filter(route => route.directionKey === activeDirection.value))
+const hiddenRoutes = computed(() => activeDirection.value === 'all'
+  ? []
+  : routes.value.filter(route => route.directionKey !== activeDirection.value))
 
 watch(directions, (items) => {
   if (activeDirection.value !== 'all' && !items.some(item => item.key === activeDirection.value))
@@ -257,7 +260,7 @@ function getRouteReliability(route: RouteRow): TopologyRouteReliability {
 
 const routeRankings = computed<Record<string, TopologyRouteRanking>>(() => rankTopologyRoutes(routes.value.map(route => ({
   key: route.key,
-  directionKey: route.directionKey,
+  directionKey: `${route.probeKey || findTopologyProbeKey(route.probeLabel) || route.probeLabel.trim().toLowerCase()}::${route.directionKey}`,
   healthScore: getRouteScore(route).score,
   status: getRouteHealth(route),
   reliability: getRouteReliability(route),
@@ -273,7 +276,7 @@ const selectedRoute = computed<TopologyRouteDetail | null>(() => {
     metrics: route.metrics,
     score: getRouteScore(route),
     reliability: getRouteReliability(route),
-    ranking: routeRankings.value[route.key],
+    ranking: ['healthy', 'warning'].includes(getRouteHealth(route)) ? routeRankings.value[route.key] : undefined,
     directionLabel: route.directionLabel,
   }
 })
@@ -357,6 +360,8 @@ function routeScoreClass(route: RouteRow): string {
 }
 
 function routeRankingLabel(route: RouteRow): string {
+  if (!['healthy', 'warning'].includes(getRouteHealth(route)))
+    return ''
   const ranking = routeRankings.value[route.key]
   if (!ranking || ranking.total <= 1)
     return ''
@@ -665,7 +670,21 @@ function routeRankingLabel(route: RouteRow): string {
       </div>
 
       <div class="hidden" aria-hidden="true">
-        <template v-for="route in visibleRoutes" :key="`${route.key}-reliability`">
+        <template v-for="route in hiddenRoutes" :key="`${route.key}-telemetry`">
+          <TopologyEdgeMetric
+            v-for="(metric, segmentIndex) in route.metrics.slice(0, Math.max(1, route.nodes.length - 1))"
+            :key="`${route.key}-${segmentIndex}-telemetry`"
+            observe-only
+            :metric="metric || '-,-'"
+            :nodes="nodes"
+            :source-label="route.nodes[segmentIndex]?.name || `节点 ${segmentIndex + 1}`"
+            :target-label="route.nodes[segmentIndex + 1]?.name || `节点 ${segmentIndex + 2}`"
+            :segment-index="segmentIndex"
+            @status-change="updateRouteSegmentHealth(route.key, segmentIndex, $event)"
+            @metrics-change="updateRouteSegmentMetrics(route.key, segmentIndex, $event)"
+          />
+        </template>
+        <template v-for="route in routes" :key="`${route.key}-reliability`">
           <TopologySegmentReliabilityObserver
             v-for="(metric, segmentIndex) in route.metrics.slice(0, Math.max(1, route.nodes.length - 1))"
             :key="`${route.key}-${segmentIndex}-reliability`"

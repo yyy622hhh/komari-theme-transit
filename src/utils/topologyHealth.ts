@@ -17,6 +17,7 @@ export interface TopologySegmentHealthInput {
   error: unknown
   stale: boolean
   hasData: boolean
+  avgLatency: number | null
   avgLoss: number
   avgVolatility: number
   fallbackLatency: number | null
@@ -81,9 +82,9 @@ export function resolveTopologySegmentHealth(input: TopologySegmentHealthInput):
   if (!input.live) {
     if (input.fallbackLatency === null && input.fallbackLoss === null)
       return 'pending'
-    if ((input.fallbackLoss ?? 0) >= 20)
+    if ((input.fallbackLoss ?? 0) >= 20 || (input.fallbackLatency ?? 0) >= 1000)
       return 'error'
-    return (input.fallbackLoss ?? 0) > 3 ? 'warning' : 'healthy'
+    return (input.fallbackLoss ?? 0) > 3 || (input.fallbackLatency ?? 0) >= 350 ? 'warning' : 'healthy'
   }
   if (!input.sourceExists || input.error)
     return 'error'
@@ -93,9 +94,9 @@ export function resolveTopologySegmentHealth(input: TopologySegmentHealthInput):
     return 'pending'
   if (input.loading || !input.hasData)
     return 'pending'
-  if (input.avgLoss >= 20)
+  if (input.avgLoss >= 20 || (input.avgLatency ?? 0) >= 1000)
     return 'error'
-  return input.avgLoss > 3 || input.avgVolatility > 1.8 ? 'warning' : 'healthy'
+  return input.avgLoss > 3 || input.avgVolatility > 1.8 || (input.avgLatency ?? 0) >= 350 ? 'warning' : 'healthy'
 }
 
 export function calculateTopologyRouteScore(options: RouteScoreOptions): TopologyRouteScore {

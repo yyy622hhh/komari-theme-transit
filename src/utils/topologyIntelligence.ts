@@ -219,23 +219,23 @@ export function rankTopologyRoutes(inputs: TopologyRouteRankingInput[]): Record<
   }
 
   for (const group of groups.values()) {
-    const validLatencies = group
+    const eligibleGroup = group.filter(recommendationEligible)
+    const validLatencies = eligibleGroup
       .map(input => input.reliability.day.avgLatency)
       .filter((value): value is number => value !== null && value > 0)
     const fastestLatency = validLatencies.length ? Math.min(...validLatencies) : null
-    const ranked = group
-      .map(input => ({ input, score: rankingScore(input, fastestLatency), eligible: recommendationEligible(input) }))
-      .sort((left, right) => Number(right.eligible) - Number(left.eligible)
-        || right.score - left.score
+    const ranked = eligibleGroup
+      .map(input => ({ input, score: rankingScore(input, fastestLatency) }))
+      .sort((left, right) => right.score - left.score
         || left.input.key.localeCompare(right.input.key))
 
     ranked.forEach((item, index) => {
       result[item.input.key] = {
         rank: index + 1,
         total: ranked.length,
-        recommended: ranked.length > 1 && index === 0 && item.eligible,
+        recommended: ranked.length > 1 && index === 0,
         compositeScore: Math.round(item.score),
-        reason: index === 0 && item.eligible ? recommendationReason(item.input, ranked[1]?.input) : '',
+        reason: index === 0 ? recommendationReason(item.input, ranked[1]?.input) : '',
         hasHistoricalData: item.input.reliability.day.hasData,
       }
     })

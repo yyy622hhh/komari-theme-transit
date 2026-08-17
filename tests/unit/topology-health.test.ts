@@ -1,6 +1,6 @@
 import type { TopologySegmentTelemetry } from '../../src/utils/topologyHealth'
 import { describe, expect, test } from 'bun:test'
-import { calculateTopologyRouteScore } from '../../src/utils/topologyHealth'
+import { calculateTopologyRouteScore, resolveTopologySegmentHealth } from '../../src/utils/topologyHealth'
 
 function segment(overrides: Partial<TopologySegmentTelemetry> = {}): TopologySegmentTelemetry {
   return {
@@ -37,6 +37,36 @@ describe('topology health scoring', () => {
     })
 
     expect(score).toMatchObject({ score: 45, label: '异常', tone: 'critical' })
+    expect(resolveTopologySegmentHealth({
+      live: true,
+      sourceExists: true,
+      sourceOnline: true,
+      loading: false,
+      error: null,
+      stale: false,
+      hasData: true,
+      avgLatency: 1_000,
+      avgLoss: 0,
+      avgVolatility: 0,
+      fallbackLatency: null,
+      fallbackLoss: null,
+    })).toBe('error')
+  })
+
+  test('marks an extreme static baseline as an error', () => {
+    expect(resolveTopologySegmentHealth({
+      live: false,
+      sourceExists: false,
+      loading: false,
+      error: null,
+      stale: false,
+      hasData: false,
+      avgLatency: null,
+      avgLoss: 0,
+      avgVolatility: 0,
+      fallbackLatency: 5_000,
+      fallbackLoss: 0,
+    })).toBe('error')
   })
 
   test('scores severe loss as an outage deduction', () => {

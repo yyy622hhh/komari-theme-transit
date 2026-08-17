@@ -179,6 +179,10 @@ export async function loadPublicPingTasks(): Promise<PingTaskInfo[]> {
   return publicPingTasksCache.set(key, tasks)
 }
 
+export function invalidatePublicPingTasksCache(): void {
+  publicPingTasksCache.clear()
+}
+
 export async function loadPingTaskNamesForNode(nodeUuid: string): Promise<string[]> {
   if (!nodeUuid.trim())
     return []

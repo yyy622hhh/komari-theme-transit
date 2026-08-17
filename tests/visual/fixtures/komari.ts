@@ -36,6 +36,7 @@ export interface VisualFixtureOptions {
   opsDashboard?: boolean
   authenticated?: boolean
   opsMissingNode?: boolean
+  opsMissingPingSource?: boolean
   opsNoRecentTask?: boolean
   opsComparableRoutes?: boolean
   opsCustomFirstMetric?: boolean
@@ -47,11 +48,14 @@ export interface VisualFixtureOptions {
   opsExternalOfflineSource?: boolean
   opsLegacyPingFallback?: boolean
   opsSevereLoss?: boolean
+  opsExtremeLatency?: boolean
   opsMetricDelayMs?: number
   quickTopologyCustomTask?: boolean
   quickTopologyPresetConflict?: boolean
   quickTopologyTaskFailure?: boolean
   quickTopologyTaskDelayMs?: number
+  quickTopologyNoTasks?: boolean
+  quickTopologyNoAddress?: boolean
   themeSaveDelayMs?: number
   emptyTopology?: boolean
   visitorInfoEnabled?: boolean
@@ -290,6 +294,7 @@ async function handleRpc(
   clientFixtures = clients,
   statusFixtures = statuses,
   options: VisualFixtureOptions = {},
+  adminPingTasks: Array<Record<string, unknown>> = [],
 ): Promise<void> {
   const payload = route.request().postDataJSON() as { id: unknown, method: string, params?: Record<string, unknown> }
   const uuid = typeof payload.params?.uuid === 'string'
@@ -298,7 +303,9 @@ async function handleRpc(
       ? payload.params.entity_id
       : uuidFor(0)
   if ((options.quickTopologyTaskFailure || options.opsLegacyPingFallback)
-    && (payload.method === 'public:getPublicPingTasks' || payload.method === 'public:getPingMetricStats')) {
+    && (payload.method === 'public:getPublicPingTasks'
+      || payload.method === 'public:getPingMetricStats'
+      || payload.method === 'admin:getAllPingTasks')) {
     await route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify(jsonRpcError(payload.id, -32000, 'visual Ping task failure')),
@@ -307,6 +314,8 @@ async function handleRpc(
   }
   if (options.opsMetricDelayMs && (payload.method === 'public:queryMetrics' || payload.method === 'public:getPingMetricStats'))
     await new Promise(resolve => setTimeout(resolve, options.opsMetricDelayMs))
+  if (options.quickTopologyTaskDelayMs && payload.method === 'admin:getAllPingTasks')
+    await new Promise(resolve => setTimeout(resolve, options.quickTopologyTaskDelayMs))
   const pingTasks = options.pingTaskOrdering
     ? [
         { id: 30, name: '浙江移动', interval: 60, loss: 0, weight: 0 },
@@ -382,13 +391,15 @@ async function handleRpc(
     time: new Date(Date.parse(FIXED_NOW) - (47 - index) * 75_000).toISOString(),
     value: options.opsSevereLoss && task.name === '北京电信'
       ? -1
-      : uuid !== uuidFor(1) && index % 17 === 0
-        ? -1
-        : options.nodeCardWorstCase
-          ? 9_876 + index * 13 + task.id
-          : task.name === 'PandaOps-Local-Hop'
-            ? 1.1 + Math.sin(index / 4) * 0.15
-            : 76 + index + task.id,
+      : options.opsExtremeLatency && task.name === '北京电信'
+        ? 5_000
+        : uuid !== uuidFor(1) && index % 17 === 0
+          ? -1
+          : options.nodeCardWorstCase
+            ? 9_876 + index * 13 + task.id
+            : task.name === 'PandaOps-Local-Hop'
+              ? 1.1 + Math.sin(index / 4) * 0.15
+              : 76 + index + task.id,
   })))
   let result: unknown
 
@@ -478,6 +489,17 @@ async function handleRpc(
         ],
       }
       break
+    case 'admin:getAllPingTasks':
+      result = adminPingTasks
+      break
+    case 'admin:addPingTask':
+      adminPingTasks.push({
+        id: Math.max(100, ...adminPingTasks.map(task => Number(task.id) || 0)) + 1,
+        weight: adminPingTasks.length,
+        ...(payload.params ?? {}),
+      })
+      result = undefined
+      break
     case 'admin:orderClients':
       for (const [uuid, weight] of Object.entries(payload.params ?? {})) {
         const client = clientFixtures[uuid]
@@ -522,9 +544,31 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
     ? buildClients(options.freePriceNode, options.expiryThresholds, nodeCount)
     : clients
   const clientFixtures = structuredClone(sourceClients)
+  if (options.quickTopologyNoAddress) {
+    Object.assign(clientFixtures[uuidFor(1)]!, {
+      ipv4: '',
+      ipv6: '',
+    })
+  }
   const statusFixtures = options.nodeCount || options.nodeCardWorstCase
     ? structuredClone(options.nodeCount ? buildStatuses(nodeCount) : statuses)
     : statuses
+  const allClientUuids = Object.keys(clientFixtures)
+  const adminPingTasks: Array<Record<string, unknown>> = options.quickTopologyNoTasks
+    ? []
+    : [
+        { id: 1, weight: 0, name: 'Tokyo', clients: [uuidFor(2)], default_on: false, type: 'icmp', target: '198.51.100.1', interval: 60 },
+        { id: 11, weight: 1, name: '北京联通', clients: allClientUuids, default_on: true, type: 'tcp', target: '198.51.100.11:80', interval: 60 },
+        { id: 12, weight: 2, name: '北京电信', clients: allClientUuids, default_on: true, type: 'tcp', target: '198.51.100.12:80', interval: 60 },
+        { id: 13, weight: 3, name: '北京移动', clients: allClientUuids, default_on: true, type: 'tcp', target: '198.51.100.13:80', interval: 60 },
+        { id: 18, weight: 4, name: 'PandaOps-Local-Hop', clients: [uuidFor(0), uuidFor(2)], default_on: false, type: 'icmp', target: clientFixtures[uuidFor(1)]?.ipv4 ?? '192.0.2.11', interval: 30 },
+      ]
+  if (options.opsNoRecentTask) {
+    adminPingTasks.push({ id: 99, weight: 99, name: 'Configured-No-Recent-Sample', clients: [uuidFor(2)], default_on: false, type: 'icmp', target: '198.51.100.99', interval: 30 })
+  }
+  if (options.quickTopologyCustomTask) {
+    adminPingTasks.push({ id: 88, weight: 88, name: 'Relay-Custom-Hop', clients: [uuidFor(0)], default_on: false, type: 'icmp', target: '198.51.100.88', interval: 60 })
+  }
   if (options.nodeCardWorstCase) {
     Object.assign(clientFixtures[uuidFor(0)]!, {
       name: '北京联通精品线路-日本东京-A100-超长节点名称完整展示压力测试',
@@ -578,6 +622,8 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
         : defaultTopologyMetrics
   if (options.opsExternalOfflineSource)
     topologyMetrics = topologyMetrics.replace('live@主控-洛杉矶@北京电信', 'live@伦敦-离线归档@北京电信')
+  if (options.opsMissingPingSource)
+    topologyMetrics = topologyMetrics.replace('live@主控-洛杉矶@北京电信', 'live@已删除-线路机@北京电信')
 
   let settings: Record<string, unknown> = {
     alertEnabled: options.announcementEscaping ?? false,
@@ -702,7 +748,7 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
     contentType: 'application/json',
     body: JSON.stringify({ status: 'success', message: 'ok', data: { version: '1.2.6-visual', hash: 'visual' } }),
   }))
-  await page.route('**/rpc2', route => handleRpc(route, clientFixtures, statusFixtures, options))
+  await page.route('**/rpc2', route => handleRpc(route, clientFixtures, statusFixtures, options, adminPingTasks))
   for (const pattern of [
     'https://api.ip.sb/geoip/**',
     'https://ipinfo.io/**/json',

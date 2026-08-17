@@ -79,8 +79,8 @@ describe('topology route intelligence', () => {
       rankingInput({ key: 'operational', healthScore: 60, status: 'warning' }),
     ])
 
-    expect(rankings.operational).toMatchObject({ rank: 1, recommended: true })
-    expect(rankings.offline).toMatchObject({ rank: 2, recommended: false })
+    expect(rankings.operational).toMatchObject({ rank: 1, total: 1, recommended: false })
+    expect(rankings.offline).toBeUndefined()
   })
 
   test('does not invent a recommendation when every route is pending', () => {
@@ -89,7 +89,7 @@ describe('topology route intelligence', () => {
       rankingInput({ key: 'pending-b', healthScore: 82, status: 'pending' }),
     ])
 
-    expect(Object.values(rankings).every(item => !item.recommended && !item.reason)).toBe(true)
+    expect(rankings).toEqual({})
   })
 
   test('does not add independent segment percentiles into a route percentile', () => {

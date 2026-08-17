@@ -228,10 +228,13 @@ function makeUniqueQuickEntryLabel(label: string, configuredNames: Set<string>):
 export function pickQuickTopologyTaskName(taskNames: readonly string[], probe: TopologyProbeOption = getTopologyProbe('')): string {
   const normalizedProbe = normalizePingTaskName(probe.taskFilter)
   const normalizedTasks = normalizeQuickTopologyTaskNames(taskNames)
+  const matches = normalizedTasks.filter(task => normalizePingTaskName(task) === normalizedProbe)
 
-  return normalizedTasks.find(task => normalizePingTaskName(task) === normalizedProbe)
-    ?? normalizedTasks[0]
-    ?? probe.taskFilter
+  return matches.length === 1 ? matches[0]! : ''
+}
+
+export function listQuickTopologyProbeTasks(taskNames: readonly string[]): string[] {
+  return normalizeQuickTopologyTaskNames(taskNames).filter(task => Boolean(findTopologyProbeKey(task)))
 }
 
 function namesLooselyMatch(left: string, right: string): boolean {
@@ -279,6 +282,7 @@ export interface QuickTopologyRouteOptions {
   sourceUuid?: string
   landingUuid?: string | null
   sourceTasks?: readonly string[]
+  entryTask?: string
   hopTask?: string
 }
 
@@ -378,8 +382,13 @@ export function buildQuickTopologyRoute(
 
   const configuredNames = new Set(candidates.map(node => node.name.trim().toLowerCase()))
   const usableTaskNames = normalizeQuickTopologyTaskNames(options.sourceTasks ?? [])
-  const probe = findQuickTopologyTaskProbe(usableTaskNames)
-  const entryTask = probe ? pickQuickTopologyTaskName(usableTaskNames, probe) : usableTaskNames[0] ?? ''
+  const autoProbe = findQuickTopologyTaskProbe(usableTaskNames)
+  const explicitEntryTask = options.entryTask === undefined
+    ? undefined
+    : normalizeQuickTopologyTaskNames([options.entryTask]).find(task => usableTaskNames.includes(task)) ?? ''
+  const entryTask = explicitEntryTask ?? (autoProbe ? pickQuickTopologyTaskName(usableTaskNames, autoProbe) : '')
+  const probeKey = findTopologyProbeKey(entryTask)
+  const probe = probeKey ? getTopologyProbe(probeKey) : null
   const hopTask = landing
     ? (options.hopTask === undefined
         ? pickQuickHopTaskName(usableTaskNames, landing.name, entryTask)
