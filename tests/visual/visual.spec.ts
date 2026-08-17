@@ -202,7 +202,7 @@ test('home dark mobile', async ({ page }) => {
 
 test('personal wallpaper upload persists with glass, blur and HD effects', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 })
-  await installKomariFixture(page, { pandaOps: true })
+  await installKomariFixture(page, { opsDashboard: true })
   await openStablePage(page)
 
   await expect(page.getByRole('link', { name: '后台管理' })).toHaveAttribute('href', '/admin/servers')
@@ -336,7 +336,7 @@ test('announcement renders literal symbols without double escaping', async ({ pa
 
 test('Transit light desktop uses light surfaces and readable telemetry', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
-  await installKomariFixture(page, { pandaOps: true })
+  await installKomariFixture(page, { opsDashboard: true })
   await openStablePage(page)
 
   const assetValue = page.locator('#asset-summary .telemetry-item strong').first()
@@ -356,7 +356,7 @@ test('Transit light desktop uses light surfaces and readable telemetry', async (
 
 test('Transit light mobile keeps the vertical route readable', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
-  await installKomariFixture(page, { pandaOps: true })
+  await installKomariFixture(page, { opsDashboard: true })
   await openStablePage(page)
 
   await expect(page.locator('[data-topology-mobile-route]')).toHaveCount(2)
@@ -368,7 +368,7 @@ test('Transit light mobile keeps the vertical route readable', async ({ page }) 
 
 test('Transit dark asset summary keeps a readable text hierarchy', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
-  await installKomariFixture(page, { pandaOps: true, dark: true })
+  await installKomariFixture(page, { opsDashboard: true, dark: true })
   await openStablePage(page)
 
   const telemetry = page.locator('#asset-summary .telemetry-item')
@@ -388,7 +388,7 @@ test('Transit desktop topology and cards remain contained', async ({ page }) => 
       reliabilityRequests.push(payload)
   })
   await page.setViewportSize({ width: 1440, height: 900 })
-  await installKomariFixture(page, { pandaOps: true, dark: true })
+  await installKomariFixture(page, { opsDashboard: true, dark: true })
   await openStablePage(page)
 
   await expect.poll(() => reliabilityRequests.length).toBe(4)
@@ -396,8 +396,8 @@ test('Transit desktop topology and cards remain contained', async ({ page }) => 
   expect(reliabilityRequests.some(request => request.params?.entity_id !== undefined)).toBe(false)
 
   await expect(page.getByRole('heading', { name: '线路状态' })).toBeVisible()
-  await expect(page.locator('[data-panda-alert-strip]')).toBeVisible()
-  const alertStrip = page.locator('[data-panda-alert-strip]')
+  await expect(page.locator('[data-transit-alert-strip]')).toBeVisible()
+  const alertStrip = page.locator('[data-transit-alert-strip]')
   await expect(alertStrip.getByRole('heading', { name: '11 个异常需要关注' })).toBeVisible()
   await expect(alertStrip.getByRole('button', { name: '另有 7 个' })).toBeVisible()
   const topologySection = page.getByRole('heading', { name: '线路状态' }).locator('xpath=ancestor::section[1]')
@@ -457,13 +457,13 @@ test('Transit desktop topology and cards remain contained', async ({ page }) => 
   await page.getByRole('button', { name: '查看异常时间线' }).click()
   const timelineDialog = page.getByRole('dialog', { name: '异常时间线' })
   await expect(timelineDialog).toBeVisible()
-  await expect(timelineDialog.locator('[data-panda-incident-event]').first()).toBeVisible()
+  await expect(timelineDialog.locator('[data-transit-incident-event]').first()).toBeVisible()
   await timelineDialog.getByRole('button', { name: '关闭' }).click()
   const nodeCard = page.getByRole('button', { name: '查看节点 主控-洛杉矶 详情' })
   await expect(nodeCard).toBeVisible()
   const nodeCardSurface = nodeCard.locator('xpath=..')
-  await expect(nodeCardSurface.locator('.panda-node-card__header')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
-  await expect(nodeCardSurface.locator('.panda-node-card__header')).toHaveCSS('border-bottom-width', '0px')
+  await expect(nodeCardSurface.locator('.transit-node-card__header')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
+  await expect(nodeCardSurface.locator('.transit-node-card__header')).toHaveCSS('border-bottom-width', '0px')
   const healthyCard = page.getByRole('button', { name: '查看节点 香港边缘节点-超长名称布局测试 详情' }).locator('xpath=..')
   await expect(healthyCard.locator('[data-node-status-edge]')).toHaveClass(/bg-emerald-500\/85/)
   await expect(healthyCard.locator('[data-node-alert-edge]')).toHaveCount(0)
@@ -530,7 +530,7 @@ test('Transit desktop topology and cards remain contained', async ({ page }) => 
 
 test('Transit ranks comparable routes with real reliability windows', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
-  await installKomariFixture(page, { pandaOps: true, dark: true, pandaOpsComparableRoutes: true })
+  await installKomariFixture(page, { opsDashboard: true, dark: true, opsComparableRoutes: true })
   await openStablePage(page)
 
   const rankings = page.locator('[data-topology-route-ranking]')
@@ -554,17 +554,17 @@ test('Transit ranks comparable routes with real reliability windows', async ({ p
 
 test('Transit mobile keeps document width contained', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
-  await installKomariFixture(page, { pandaOps: true, dark: true })
+  await installKomariFixture(page, { opsDashboard: true, dark: true })
   await openStablePage(page)
 
   await expect(page.getByRole('heading', { name: '线路状态' })).toBeVisible()
-  const mobileTelemetry = page.locator('#asset-summary .panda-telemetry-grid')
+  const mobileTelemetry = page.locator('#asset-summary .transit-telemetry-grid')
   await expect.poll(() => mobileTelemetry.evaluate((element) => {
     const style = getComputedStyle(element)
     return style.gridTemplateColumns.split(' ').filter(Boolean).length
   })).toBe(3)
   await expect.poll(() => mobileTelemetry.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
-  const mobileAlertStrip = page.locator('[data-panda-alert-strip]')
+  const mobileAlertStrip = page.locator('[data-transit-alert-strip]')
   await expect(mobileAlertStrip.getByRole('heading', { name: '11 个异常需要关注' })).toBeVisible()
   await expect(mobileAlertStrip.getByRole('button', { name: '另有 9 个' })).toBeVisible()
   await mobileAlertStrip.getByRole('button', { name: '另有 9 个' }).click()
@@ -585,7 +585,7 @@ test('Transit mobile keeps document width contained', async ({ page }) => {
 
 test('Transit mobile topology manager remains contained and scrollable', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
-  await installKomariFixture(page, { pandaOps: true, authenticated: true })
+  await installKomariFixture(page, { opsDashboard: true, authenticated: true })
   await openStablePage(page)
 
   await page.getByRole('button', { name: '管理', exact: true }).click()
@@ -605,7 +605,7 @@ test('Transit mobile topology manager remains contained and scrollable', async (
 
 test('reduced motion disables interface animations and smooth back-to-top scrolling', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' })
-  await installKomariFixture(page, { pandaOps: true, visitorInfoEnabled: true })
+  await installKomariFixture(page, { opsDashboard: true, visitorInfoEnabled: true })
   await openStablePage(page)
 
   await expect.poll(() => page.getByRole('button', { name: '壁纸与背景效果' }).evaluate((element) => {
@@ -631,7 +631,7 @@ test('reduced motion disables interface animations and smooth back-to-top scroll
 
 test('Transit topology reports an unresolved configured node as an error', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
-  await installKomariFixture(page, { pandaOps: true, dark: true, pandaOpsMissingNode: true })
+  await installKomariFixture(page, { opsDashboard: true, dark: true, opsMissingNode: true })
   await openStablePage(page)
 
   await expect(page.getByText(/1 异常/)).toBeVisible()
@@ -641,7 +641,7 @@ test('Transit topology reports an unresolved configured node as an error', async
 
 test('Transit keeps a configured first-segment static baseline static', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
-  await installKomariFixture(page, { pandaOps: true, dark: true, pandaOpsStaticFirstMetric: true })
+  await installKomariFixture(page, { opsDashboard: true, dark: true, opsStaticFirstMetric: true })
   await openStablePage(page)
 
   const firstMetric = page.locator('[data-topology-current-metric]').first()
@@ -652,7 +652,7 @@ test('Transit keeps a configured first-segment static baseline static', async ({
 
 test('Transit matches topology Ping tasks exactly instead of aggregating similarly named tasks', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
-  await installKomariFixture(page, { pandaOps: true, dark: true, pandaOpsOverlappingTask: true })
+  await installKomariFixture(page, { opsDashboard: true, dark: true, opsOverlappingTask: true })
   await openStablePage(page)
 
   await expect(page.locator('[data-topology-current-metric]').first()).toContainText('112ms')
@@ -661,7 +661,7 @@ test('Transit matches topology Ping tasks exactly instead of aggregating similar
 
 test('Transit preserves task names when topology falls back to legacy Ping records', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
-  await installKomariFixture(page, { pandaOps: true, dark: true, pandaOpsLegacyPingFallback: true })
+  await installKomariFixture(page, { opsDashboard: true, dark: true, opsLegacyPingFallback: true })
   await openStablePage(page)
 
   await expect(page.locator('[data-topology-current-metric]').first()).toContainText('112ms')
@@ -670,7 +670,7 @@ test('Transit preserves task names when topology falls back to legacy Ping recor
 
 test('Transit marks an external offline Ping source as offline', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
-  await installKomariFixture(page, { pandaOps: true, dark: true, pandaOpsExternalOfflineSource: true })
+  await installKomariFixture(page, { opsDashboard: true, dark: true, opsExternalOfflineSource: true })
   await openStablePage(page)
 
   const firstRoute = page.locator('.topology-scroll article').first()
@@ -681,7 +681,7 @@ test('Transit marks an external offline Ping source as offline', async ({ page }
 
 test('Transit treats complete Ping loss as an error', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
-  await installKomariFixture(page, { pandaOps: true, dark: true, pandaOpsSevereLoss: true })
+  await installKomariFixture(page, { opsDashboard: true, dark: true, opsSevereLoss: true })
   await openStablePage(page)
 
   const firstRoute = page.locator('.topology-scroll article').first()
@@ -691,7 +691,7 @@ test('Transit treats complete Ping loss as an error', async ({ page }) => {
 
 test('Transit keeps an open route detail synchronized with delayed telemetry', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
-  await installKomariFixture(page, { pandaOps: true, dark: true, pandaOpsMetricDelayMs: 2_000 })
+  await installKomariFixture(page, { opsDashboard: true, dark: true, opsMetricDelayMs: 2_000 })
   await openStablePage(page)
 
   await page.locator('[data-topology-route-score]').first().click()
@@ -702,7 +702,7 @@ test('Transit keeps an open route detail synchronized with delayed telemetry', a
 
 test('Transit preserves a custom first-segment task and entry label', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
-  await installKomariFixture(page, { pandaOps: true, dark: true, pandaOpsCustomFirstMetric: true })
+  await installKomariFixture(page, { opsDashboard: true, dark: true, opsCustomFirstMetric: true })
   await openStablePage(page)
 
   await expect(page.getByLabel('当前入口 自定义入口，点击切换').first()).toBeVisible()
@@ -711,7 +711,7 @@ test('Transit preserves a custom first-segment task and entry label', async ({ p
 
 test('Transit does not replace a custom first-segment task when the entry uses a preset label', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
-  await installKomariFixture(page, { pandaOps: true, dark: true, pandaOpsKnownEntryCustomTask: true })
+  await installKomariFixture(page, { opsDashboard: true, dark: true, opsKnownEntryCustomTask: true })
   await openStablePage(page)
 
   await expect(page.getByLabel('当前入口 北京电信，点击切换').first()).toBeVisible()
@@ -729,7 +729,7 @@ test('Transit does not replace a custom first-segment task when the entry uses a
 
 test('Transit renders and edits a two-node topology with a trailing empty slot without a phantom segment', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
-  await installKomariFixture(page, { pandaOps: true, dark: true, authenticated: true, pandaOpsTwoNodeRoute: true, pandaOpsTrailingEmptyNode: true })
+  await installKomariFixture(page, { opsDashboard: true, dark: true, authenticated: true, opsTwoNodeRoute: true, opsTrailingEmptyNode: true })
   await openStablePage(page)
 
   const desktopRoutes = page.locator('.topology-scroll article')
@@ -742,7 +742,7 @@ test('Transit renders and edits a two-node topology with a trailing empty slot w
 
 test('Transit empty topology guides an authenticated operator into the manager', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
-  await installKomariFixture(page, { pandaOps: true, authenticated: true, emptyTopology: true })
+  await installKomariFixture(page, { opsDashboard: true, authenticated: true, emptyTopology: true })
   await openStablePage(page)
 
   await expect(page.getByRole('heading', { name: '还没有配置线路' })).toBeVisible()
@@ -753,7 +753,7 @@ test('Transit empty topology guides an authenticated operator into the manager',
 test('Transit topology manager quick-generates a static first route when no Ping task is available', async ({ page }) => {
   const saves: unknown[] = []
   await page.setViewportSize({ width: 1440, height: 900 })
-  await installKomariFixture(page, { pandaOps: true, authenticated: true, emptyTopology: true })
+  await installKomariFixture(page, { opsDashboard: true, authenticated: true, emptyTopology: true })
   page.on('request', (request) => {
     if (request.method() === 'POST' && request.url().includes('/api/admin/theme/settings?theme=Transit'))
       saves.push(request.postDataJSON())
@@ -777,10 +777,43 @@ test('Transit topology manager quick-generates a static first route when no Ping
   })
 })
 
+test('Transit topology quick generation uses the selected source and landing nodes', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, { opsDashboard: true, authenticated: true, emptyTopology: true })
+  await openStablePage(page)
+
+  await page.getByRole('button', { name: '配置第一条线路' }).click()
+  const dialog = page.getByRole('dialog', { name: '拓扑管理' })
+  await dialog.getByLabel('快速生成线路机').selectOption({ label: '东京-高负载' })
+  await dialog.getByLabel('快速生成落地机').selectOption({ label: '新加坡-A100' })
+  await dialog.getByRole('button', { name: '快速生成' }).click()
+
+  await expect(dialog.getByLabel('第 1 条线路线路机节点')).toHaveValue('东京-高负载')
+  await expect(dialog.getByLabel('第 1 条线路落地机节点')).toHaveValue('新加坡-A100')
+})
+
+test('Transit topology quick generation keeps an empty landing and blocks duplicate routes', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, { opsDashboard: true, authenticated: true, emptyTopology: true })
+  await openStablePage(page)
+
+  await page.getByRole('button', { name: '配置第一条线路' }).click()
+  const dialog = page.getByRole('dialog', { name: '拓扑管理' })
+  await dialog.getByLabel('快速生成落地机').selectOption({ label: '仅入口到线路机' })
+  await dialog.getByRole('button', { name: '快速生成' }).click()
+  await expect(dialog.getByLabel('第 1 条线路线路机节点')).toHaveValue('主控-洛杉矶')
+  await expect(dialog.getByLabel('第 1 条线路落地机节点')).toHaveValue('')
+  await expect(dialog.getByLabel('快速生成落地机')).toHaveValue('')
+
+  await dialog.getByRole('button', { name: '快速生成' }).click()
+  await expect(page.getByText('已有相同线路机和落地机的线路，请直接编辑。')).toBeVisible()
+  await expect(dialog.locator('[data-topology-route-id]')).toHaveCount(1)
+})
+
 test('Transit topology manager saves through managed theme API', async ({ page }) => {
   const saves: unknown[] = []
   await page.setViewportSize({ width: 1440, height: 900 })
-  await installKomariFixture(page, { pandaOps: true, dark: true, authenticated: true })
+  await installKomariFixture(page, { opsDashboard: true, dark: true, authenticated: true })
   page.on('request', (request) => {
     if (request.method() === 'POST' && request.url().includes('/api/admin/theme/settings?theme=Transit'))
       saves.push(request.postDataJSON())
@@ -813,7 +846,7 @@ test('Transit topology manager saves through managed theme API', async ({ page }
 test('Transit topology manager can delete every route and persist an empty topology', async ({ page }) => {
   const saves: unknown[] = []
   await page.setViewportSize({ width: 1440, height: 900 })
-  await installKomariFixture(page, { pandaOps: true, dark: true, authenticated: true })
+  await installKomariFixture(page, { opsDashboard: true, dark: true, authenticated: true })
   page.on('request', (request) => {
     if (request.method() === 'POST' && request.url().includes('/api/admin/theme/settings?theme=Transit'))
       saves.push(request.postDataJSON())
@@ -825,7 +858,7 @@ test('Transit topology manager can delete every route and persist an empty topol
   await expect(dialog.locator('[data-topology-route-id]')).toHaveCount(2)
   while (await dialog.locator('[data-topology-route-id]').count())
     await dialog.getByRole('button', { name: '删除线路' }).first().click()
-  await expect(dialog.getByText('还没有线路，点击“添加线路”开始配置。')).toBeVisible()
+  await expect(dialog.getByText('还没有线路。选择线路机和落地机后点击“快速生成”，或手动添加线路。')).toBeVisible()
   await expect(dialog.getByRole('button', { name: '保存并应用' })).toBeEnabled()
 
   await dialog.getByRole('button', { name: '保存并应用' }).click()
@@ -843,7 +876,7 @@ test('Transit topology quick generation waits for task loading and saves custom 
   const saves: unknown[] = []
   await page.setViewportSize({ width: 1440, height: 900 })
   await installKomariFixture(page, {
-    pandaOps: true,
+    opsDashboard: true,
     dark: true,
     authenticated: true,
     quickTopologyCustomTask: true,
@@ -869,7 +902,9 @@ test('Transit topology quick generation waits for task loading and saves custom 
   await expect(dialog.getByLabel('第 3 条线路入口名称')).toHaveValue('自定义入口')
   await expect(dialog.getByLabel('第 3 条线路入口名称')).toBeFocused()
   await expect(dialog.getByLabel('第 3 条线路线路机节点')).toHaveValue('主控-洛杉矶')
+  await expect(dialog.getByLabel('第 3 条线路落地机节点')).toHaveValue('东京-高负载')
   await expect(dialog.getByLabel('第 3 条线路第 1 段 Ping 任务')).toHaveValue('Relay-Custom-Hop')
+  await expect(dialog.getByLabel('快速生成落地机').locator('option:checked')).toHaveText('新加坡-A100')
   await expect(dialog.locator('[data-topology-route-id]')).toHaveCount(3)
   await dialog.getByRole('button', { name: '保存并应用' }).click()
 
@@ -881,7 +916,7 @@ test('Transit topology quick generation waits for task loading and saves custom 
   expect(savedRoutes[2]?.split(';').map(node => node.split('|')[0])).toEqual([
     '自定义入口',
     '主控-洛杉矶',
-    '香港边缘节点-超长名称布局测试',
+    '东京-高负载',
   ])
   expect(savedMetricGroups[2]).toBe('live@主控-洛杉矶@Relay-Custom-Hop@-@-;-,-')
 })
@@ -889,7 +924,7 @@ test('Transit topology quick generation waits for task loading and saves custom 
 test('Transit topology quick generation stops on Ping task failures', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await installKomariFixture(page, {
-    pandaOps: true,
+    opsDashboard: true,
     authenticated: true,
     emptyTopology: true,
     quickTopologyTaskFailure: true,
@@ -908,7 +943,7 @@ test('Transit topology quick generation stops on Ping task failures', async ({ p
 test('Transit topology quick generation discards delayed work after closing', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await installKomariFixture(page, {
-    pandaOps: true,
+    opsDashboard: true,
     authenticated: true,
     quickTopologyCustomTask: true,
     quickTopologyTaskDelayMs: 500,
@@ -918,7 +953,13 @@ test('Transit topology quick generation discards delayed work after closing', as
   await page.getByRole('button', { name: '管理', exact: true }).click()
   let dialog = page.getByRole('dialog', { name: '拓扑管理' })
   await dialog.getByRole('button', { name: '快速生成' }).click()
-  await expect(dialog.getByRole('button', { name: '生成中' })).toBeVisible()
+  await expect.poll(async () => Promise.all([
+    dialog.getByRole('button', { name: '生成中' }).isVisible(),
+    dialog.getByLabel('快速生成线路机').isDisabled(),
+    dialog.getByLabel('快速生成落地机').isDisabled(),
+    dialog.getByLabel('快速生成第 2 段 Ping 任务').isDisabled(),
+    dialog.getByRole('button', { name: '添加线路' }).isDisabled(),
+  ])).toEqual([true, true, true, true, true])
   await dialog.getByRole('button', { name: '关闭' }).click()
   await expect(dialog).toBeHidden()
 
@@ -932,7 +973,7 @@ test('Transit topology quick generation discards delayed work after closing', as
 test('Transit topology save cannot close or overwrite a reopened editor session', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await installKomariFixture(page, {
-    pandaOps: true,
+    opsDashboard: true,
     authenticated: true,
     themeSaveDelayMs: 500,
   })
@@ -960,7 +1001,7 @@ test('Transit topology quick generation keeps preset task semantics when the sou
   const saves: unknown[] = []
   await page.setViewportSize({ width: 1440, height: 900 })
   await installKomariFixture(page, {
-    pandaOps: true,
+    opsDashboard: true,
     authenticated: true,
     emptyTopology: true,
     quickTopologyPresetConflict: true,
@@ -992,10 +1033,10 @@ test('Transit topology quick generation keeps preset task semantics when the sou
 test('Transit topology manager lists configured Ping tasks without recent samples', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await installKomariFixture(page, {
-    pandaOps: true,
+    opsDashboard: true,
     dark: true,
     authenticated: true,
-    pandaOpsNoRecentTask: true,
+    opsNoRecentTask: true,
   })
   await openStablePage(page)
 
@@ -1008,7 +1049,7 @@ test('Transit topology manager lists configured Ping tasks without recent sample
 
 test('Transit clears an incompatible Ping task when its source node changes', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
-  await installKomariFixture(page, { pandaOps: true, dark: true, authenticated: true })
+  await installKomariFixture(page, { opsDashboard: true, dark: true, authenticated: true })
   await openStablePage(page)
 
   await page.getByRole('button', { name: '管理', exact: true }).click()
@@ -1021,7 +1062,7 @@ test('Transit clears an incompatible Ping task when its source node changes', as
 
 test('Transit clears an incompatible Ping task when its followed route node changes', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
-  await installKomariFixture(page, { pandaOps: true, dark: true, authenticated: true })
+  await installKomariFixture(page, { opsDashboard: true, dark: true, authenticated: true })
   await openStablePage(page)
 
   await page.getByRole('button', { name: '管理', exact: true }).click()
@@ -1036,7 +1077,7 @@ test('Transit clears an incompatible Ping task when its followed route node chan
 test('Transit node maintenance saves globally and updates alerts immediately', async ({ page }) => {
   const saves: Record<string, unknown>[] = []
   await page.setViewportSize({ width: 1440, height: 900 })
-  await installKomariFixture(page, { pandaOps: true, dark: true, authenticated: true })
+  await installKomariFixture(page, { opsDashboard: true, dark: true, authenticated: true })
   page.on('request', (request) => {
     if (request.method() === 'POST' && request.url().includes('/api/admin/theme/settings?theme=Transit'))
       saves.push(request.postDataJSON() as Record<string, unknown>)
@@ -1054,13 +1095,13 @@ test('Transit node maintenance saves globally and updates alerts immediately', a
   expect(Object.values(controls).some(control => Number(control.maintenanceUntil) > 0)).toBe(true)
   await dialog.getByRole('button', { name: '关闭' }).click()
   await expect(nodeCard).toContainText('维护中')
-  await expect(page.locator('[data-panda-alert-strip]').getByRole('heading', { name: '10 个异常需要关注' })).toBeVisible()
+  await expect(page.locator('[data-transit-alert-strip]').getByRole('heading', { name: '10 个异常需要关注' })).toBeVisible()
 })
 
 test('Transit node cards render per-node insight panels without changing card height', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await installKomariFixture(page, {
-    pandaOps: true,
+    opsDashboard: true,
     dark: true,
     authenticated: true,
     nodeCardPanels: {
@@ -1075,7 +1116,7 @@ test('Transit node cards render per-node insight panels without changing card he
   })
   await openStablePage(page)
 
-  const cards = page.locator('[data-node-card-grid] .panda-node-card')
+  const cards = page.locator('[data-node-card-grid] .transit-node-card')
   await expect(cards.nth(0).locator('[data-node-insight-mode="system"]')).toContainText('系统状态')
   await expect(cards.nth(1).locator('[data-node-insight-mode="traffic"]')).toContainText('流量状态')
   await expect(cards.nth(2).locator('[data-node-insight-mode="storage"]')).toContainText('存储状态')
@@ -1101,7 +1142,7 @@ test('Transit node cards render per-node insight panels without changing card he
 test('Transit node panel editor saves selected custom Ping tasks by UUID', async ({ page }) => {
   const saves: Record<string, unknown>[] = []
   await page.setViewportSize({ width: 1440, height: 900 })
-  await installKomariFixture(page, { pandaOps: true, dark: true, authenticated: true, pingTaskOrdering: true })
+  await installKomariFixture(page, { opsDashboard: true, dark: true, authenticated: true, pingTaskOrdering: true })
   page.on('request', (request) => {
     if (request.method() === 'POST' && request.url().includes('/api/admin/theme/settings?theme=Transit'))
       saves.push(request.postDataJSON() as Record<string, unknown>)
@@ -1130,7 +1171,7 @@ test('Transit node panel editor saves selected custom Ping tasks by UUID', async
 
 test('home quick controls, node comparison and network data change visible results', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
-  await installKomariFixture(page, { pandaOps: true, dark: true, authenticated: true })
+  await installKomariFixture(page, { opsDashboard: true, dark: true, authenticated: true })
   await openStablePage(page)
 
   await page.getByRole('button', { name: /切换到离线节点/ }).click()
@@ -1164,7 +1205,7 @@ test('homepage cards can be reordered directly and saved to the official global 
   })
 
   await page.setViewportSize({ width: 1440, height: 900 })
-  await installKomariFixture(page, { pandaOps: true, authenticated: true })
+  await installKomariFixture(page, { opsDashboard: true, authenticated: true })
   await openStablePage(page)
 
   const search = page.getByRole('textbox', { name: '搜索节点' })
@@ -1216,7 +1257,7 @@ test('homepage cards can be reordered directly and saved to the official global 
 
 test('homepage order save failure keeps the draft available for retry', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
-  await installKomariFixture(page, { authenticated: true, orderSaveFailure: true, pandaOps: true })
+  await installKomariFixture(page, { authenticated: true, orderSaveFailure: true, opsDashboard: true })
   await openStablePage(page)
 
   await page.getByRole('button', { name: '编辑首页顺序' }).click()
@@ -1233,7 +1274,7 @@ test('homepage order save failure keeps the draft available for retry', async ({
 })
 
 test('homepage order save and cancel return keyboard focus to the edit trigger', async ({ page }) => {
-  await installKomariFixture(page, { authenticated: true, pandaOps: true })
+  await installKomariFixture(page, { authenticated: true, opsDashboard: true })
   await openStablePage(page)
 
   const editTrigger = page.getByRole('button', { name: '编辑首页顺序' })
@@ -1257,7 +1298,7 @@ test('expired login blocks homepage order editing before a private RPC call', as
       privateRequests.push(payload.method)
   })
 
-  await installKomariFixture(page, { authenticated: true, authenticationExpires: true, pandaOps: true })
+  await installKomariFixture(page, { authenticated: true, authenticationExpires: true, opsDashboard: true })
   await openStablePage(page)
   await page.getByRole('button', { name: '编辑首页顺序' }).click()
 
@@ -1270,7 +1311,7 @@ test.describe('mobile touch sorting', () => {
   test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } })
 
   test('homepage order supports mobile touch dragging', async ({ page }) => {
-    await installKomariFixture(page, { authenticated: true, nodeCardSize: 'mini', pandaOps: true })
+    await installKomariFixture(page, { authenticated: true, nodeCardSize: 'mini', opsDashboard: true })
     await openStablePage(page)
 
     await page.getByRole('button', { name: '编辑首页顺序' }).click()
@@ -1309,7 +1350,7 @@ test('Transit server list filters and sorts reactive nodes without the blocked a
   })
 
   await page.setViewportSize({ width: 1440, height: 900 })
-  await installKomariFixture(page, { pandaOps: true, authenticated: true })
+  await installKomariFixture(page, { opsDashboard: true, authenticated: true })
   await openStablePage(page)
 
   await page.getByRole('button', { name: '显示首页工具' }).click()
@@ -1395,7 +1436,7 @@ test('Transit server list filters and sorts reactive nodes without the blocked a
 
 test('Transit server list stays contained on mobile', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
-  await installKomariFixture(page, { pandaOps: true, authenticated: true })
+  await installKomariFixture(page, { opsDashboard: true, authenticated: true })
   await openStablePage(page)
 
   await page.getByRole('button', { name: '显示首页工具' }).click()
@@ -1421,7 +1462,7 @@ test('Transit server list stays contained on mobile', async ({ page }) => {
 })
 
 test('server list order save and cancel return keyboard focus to the edit trigger', async ({ page }) => {
-  await installKomariFixture(page, { authenticated: true, pandaOps: true })
+  await installKomariFixture(page, { authenticated: true, opsDashboard: true })
   await openStablePage(page)
   await page.getByRole('button', { name: '显示首页工具' }).click()
   await page.getByRole('button', { name: /服务器：/ }).click()
@@ -1449,7 +1490,7 @@ test('health range reloads the selected period and snapshot export downloads rea
   })
 
   await page.setViewportSize({ width: 1440, height: 900 })
-  await installKomariFixture(page, { pandaOps: true, authenticated: true })
+  await installKomariFixture(page, { opsDashboard: true, authenticated: true })
   await openStablePage(page)
   await page.getByRole('button', { name: '显示首页工具' }).click()
   await page.getByRole('button', { name: /健康：/ }).click()
@@ -1471,7 +1512,7 @@ test('health range reloads the selected period and snapshot export downloads rea
 
 test('snapshot export does not download or notify after its tool is closed', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
-  await installKomariFixture(page, { pandaOps: true, authenticated: true })
+  await installKomariFixture(page, { opsDashboard: true, authenticated: true })
   await openStablePage(page)
   await page.getByRole('button', { name: '显示首页工具' }).click()
   await page.getByRole('button', { name: /导出：/ }).click()
@@ -1511,7 +1552,7 @@ test('snapshot export does not download or notify after its tool is closed', asy
 
 test('audit tool shows real core logs without unsupported visitor controls', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
-  await installKomariFixture(page, { pandaOps: true, authenticated: true })
+  await installKomariFixture(page, { opsDashboard: true, authenticated: true })
   await openStablePage(page)
   await page.getByRole('button', { name: '显示首页工具' }).click()
   await page.getByRole('button', { name: /日志：/ }).click()
@@ -1524,7 +1565,7 @@ test('audit tool shows real core logs without unsupported visitor controls', asy
 
 test('audit export does not download or notify after its tool is closed', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
-  await installKomariFixture(page, { pandaOps: true, authenticated: true })
+  await installKomariFixture(page, { opsDashboard: true, authenticated: true })
   await openStablePage(page)
   await page.getByRole('button', { name: '显示首页工具' }).click()
   await page.getByRole('button', { name: /日志：/ }).click()
@@ -1578,7 +1619,7 @@ test('audit export does not download or notify after its tool is closed', async 
 
 test('provider value sorting changes the ranked node order', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
-  await installKomariFixture(page, { pandaOps: true, authenticated: true })
+  await installKomariFixture(page, { opsDashboard: true, authenticated: true })
   await openStablePage(page)
   await page.getByRole('button', { name: '显示首页工具' }).click()
   await page.getByRole('button', { name: /性价比：/ }).click()
@@ -1602,7 +1643,7 @@ test('supported visitor audit toggle writes the core setting', async ({ page }) 
   })
 
   await page.setViewportSize({ width: 1440, height: 900 })
-  await installKomariFixture(page, { pandaOps: true, authenticated: true, visitorAuditSupported: true })
+  await installKomariFixture(page, { opsDashboard: true, authenticated: true, visitorAuditSupported: true })
   await openStablePage(page)
   await page.getByRole('button', { name: '显示首页工具' }).click()
   await page.getByRole('button', { name: /日志：/ }).click()
@@ -1650,7 +1691,7 @@ test('logged-out public routes do not call private HTTP or RPC endpoints', async
       privateRequests.push(payload.method)
   })
 
-  await installKomariFixture(page, { hidePriceWhenLoggedOut: true, pandaOps: true, visitorInfoEnabled: false })
+  await installKomariFixture(page, { hidePriceWhenLoggedOut: true, opsDashboard: true, visitorInfoEnabled: false })
   await openStablePage(page)
   await page.getByRole('button', { name: '查看节点 主控-洛杉矶 详情' }).click()
   await expect(page).toHaveURL('/instance/00000000-0000-4000-8000-000000000001')
@@ -1669,7 +1710,7 @@ test('hidden public prices do not trigger exchange-rate providers', async ({ pag
 
   await installKomariFixture(page, {
     hidePriceWhenLoggedOut: true,
-    pandaOps: true,
+    opsDashboard: true,
   })
   await openStablePage(page)
   await page.waitForTimeout(250)
@@ -1721,18 +1762,18 @@ test('home mini card metric icons remain accessible', async ({ page }) => {
 
 test('Transit node card size changes the real desktop grid density', async ({ page }) => {
   await page.setViewportSize({ width: 1700, height: 1000 })
-  await installKomariFixture(page, { pandaOps: true, dark: true, nodeCardSize: 'mini' })
+  await installKomariFixture(page, { opsDashboard: true, dark: true, nodeCardSize: 'mini' })
   await openStablePage(page)
 
   const grid = page.locator('[data-node-card-grid]')
   await expect(grid).toHaveAttribute('data-node-card-size', 'mini')
   await expect.poll(() => grid.evaluate(element => getComputedStyle(element).gridTemplateColumns.split(' ').length)).toBe(4)
-  await expect(page.getByRole('button', { name: '查看节点 主控-洛杉矶 详情' }).locator('xpath=..')).toHaveAttribute('data-panda-node-card-size', 'mini')
+  await expect(page.getByRole('button', { name: '查看节点 主控-洛杉矶 详情' }).locator('xpath=..')).toHaveAttribute('data-transit-node-card-size', 'mini')
 })
 
 test('Transit compact node card keeps expiry text and date fully visible', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 })
-  await installKomariFixture(page, { pandaOps: true, dark: true, nodeCardSize: 'compact' })
+  await installKomariFixture(page, { opsDashboard: true, dark: true, nodeCardSize: 'compact' })
   await openStablePage(page)
 
   const card = page.getByRole('button', { name: '查看节点 主控-洛杉矶 详情' }).locator('xpath=..')
@@ -1750,7 +1791,7 @@ test('Transit compact node card keeps expiry text and date fully visible', async
 test('Transit cards reserve the same expiry height when no date is configured', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 })
   await installKomariFixture(page, {
-    pandaOps: true,
+    opsDashboard: true,
     dark: true,
     hideEarth: true,
     nodeCardSize: 'compact',
@@ -1787,7 +1828,7 @@ test('Transit worst-case node cards remain complete and responsive across densit
   for (const testCase of cases) {
     await page.setViewportSize({ width: testCase.width, height: testCase.height })
     await installKomariFixture(page, {
-      pandaOps: true,
+      opsDashboard: true,
       dark: true,
       hideEarth: true,
       nodeCardSize: testCase.size,
@@ -1801,7 +1842,7 @@ test('Transit worst-case node cards remain complete and responsive across densit
     const expiryDate = card.locator('[data-node-expiry-date]')
     const name = card.locator('[data-node-name]')
 
-    await expect(card).toHaveAttribute('data-panda-node-card-size', testCase.size)
+    await expect(card).toHaveAttribute('data-transit-node-card-size', testCase.size)
     await expect(name).toHaveAttribute('title', '北京联通精品线路-日本东京-A100-超长节点名称完整展示压力测试')
     await expect.poll(() => name.evaluate(element => element.getBoundingClientRect().height <= Number.parseFloat(getComputedStyle(element).lineHeight) * 2 + 1)).toBe(true)
     await expect(expiryText).toHaveText(/剩余 \d+ 天/)
@@ -1917,7 +1958,7 @@ test('detail dark mobile', async ({ page }) => {
 
 test('detail return restores the previous route and direct entry falls back home', async ({ page }) => {
   const nodeUuid = '00000000-0000-4000-8000-000000000001'
-  await installKomariFixture(page, { pandaOps: true })
+  await installKomariFixture(page, { opsDashboard: true })
   await openStablePage(page)
   await page.getByRole('button', { name: '查看节点 主控-洛杉矶 详情' }).click()
   await expect(page).toHaveURL(`/instance/${nodeUuid}`)

@@ -5,7 +5,7 @@ import { useThrottleFn } from '@vueuse/core'
 import { computed, onScopeDispose, ref, shallowRef, toValue, watch } from 'vue'
 import { CACHE_CONFIG } from '@/constants/cache'
 import { PING_RECORD_MAX_COUNT } from '@/constants/load'
-import { PANDA_OPS_PING_STALE_AFTER_MS } from '@/constants/pandaOps'
+import { OPS_PING_STALE_AFTER_MS } from '@/constants/ops'
 import { SharedCache } from '@/services/cache.service'
 import { abortPingRecords, loadPingRecordsWithTasks } from '@/services/history.service'
 import { loadPingMetricStats, loadPublicPingTasks, partitionMetricEntityIds, queryMetrics } from '@/services/metrics.service'
@@ -256,7 +256,7 @@ function readStatsCache(uuid: string, hours: number, maxCount?: number, taskName
     }
 
     const updatedAt = typeof parsed.updatedAt === 'string' ? Date.parse(parsed.updatedAt) : Number.NaN
-    if (!Number.isFinite(updatedAt) || Date.now() - updatedAt > PANDA_OPS_PING_STALE_AFTER_MS) {
+    if (!Number.isFinite(updatedAt) || Date.now() - updatedAt > OPS_PING_STALE_AFTER_MS) {
       removeStatsCacheKey(key)
       return null
     }
@@ -711,7 +711,7 @@ export function useNodePingStats(
     if (!stats.value.hasData)
       return false
     const fetchedAt = lastFetchedAt.value
-    return fetchedAt > 0 && pingFreshnessTick.value - fetchedAt > PANDA_OPS_PING_STALE_AFTER_MS
+    return fetchedAt > 0 && pingFreshnessTick.value - fetchedAt > OPS_PING_STALE_AFTER_MS
   })
 
   // 副作用：按需触发首次共享加载并维护 loading/error，不再命令式写入 stats。

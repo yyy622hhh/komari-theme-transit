@@ -13,6 +13,7 @@ export type PermissionKey
     | 'auditLog'
     | 'diskPrediction'
     | 'providerGeoLookup'
+    | 'nodeCardPanel'
 
 export interface AuthSession {
   status: AuthStatus

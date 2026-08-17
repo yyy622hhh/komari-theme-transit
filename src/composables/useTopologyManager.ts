@@ -5,7 +5,7 @@ import { computed, ref, toValue } from 'vue'
 import { createThemeSettingsSnapshot } from '@/services/theme-settings.service'
 import { saveTopologyConfiguration } from '@/services/topology.service'
 import { useAppStore } from '@/stores/app'
-import { buildQuickTopologyRoute, createTopologyRoute, findUniqueTopologyNode, getQuickTopologySourceNode, getTopologyProbe, parseTopologyRoutes, TOPOLOGY_LIMITS, validateTopologyRoutes } from '@/utils/topologyHelper'
+import { buildQuickTopologyRoute, createTopologyRoute, findDuplicateTopologyRouteIndex, findUniqueTopologyNode, getQuickTopologySourceNode, getTopologyProbe, listQuickTopologyNodes, parseTopologyRoutes, TOPOLOGY_LIMITS, validateTopologyRoutes } from '@/utils/topologyHelper'
 
 function defaultMetric(nodeName = '', taskFilter = ''): TopologyMetricConfig {
   return { live: Boolean(nodeName && taskFilter), nodeName, taskFilter, fallbackLatency: null, fallbackLoss: null }
@@ -55,7 +55,8 @@ export function useTopologyManager(nodes: MaybeRefOrGetter<NodeData[]>) {
   })
   const canAddRoute = computed(() => routes.value.length < TOPOLOGY_LIMITS.maxRoutes)
   const quickSourceNode = computed(() => getQuickTopologySourceNode(availableNodes.value))
-  const quickConfigurationAvailable = computed(() => canAddRoute.value && Boolean(quickSourceNode.value))
+  const quickNodes = computed(() => listQuickTopologyNodes(availableNodes.value).filter(node => node.uuid))
+  const quickConfigurationAvailable = computed(() => canAddRoute.value && quickNodes.value.length > 0)
 
   function isAmbiguousNodeName(name: string): boolean {
     return duplicateNodeNames.value.has(name.trim().toLowerCase())
@@ -64,8 +65,9 @@ export function useTopologyManager(nodes: MaybeRefOrGetter<NodeData[]>) {
   function addRoute(): void {
     if (!canAddRoute.value)
       return
-    const first = availableNodes.value[0]
-    const second = availableNodes.value[1]
+    const candidates = listQuickTopologyNodes(availableNodes.value)
+    const first = candidates[0]
+    const second = candidates[1]
     const defaultProbe = getTopologyProbe('')
     routes.value.push(createTopologyRoute(
       [
@@ -73,14 +75,27 @@ export function useTopologyManager(nodes: MaybeRefOrGetter<NodeData[]>) {
         nodeConfig(first, '线路机'),
         nodeConfig(second, '落地机'),
       ],
-      [defaultMetric(first?.name ?? '', defaultProbe.taskFilter), defaultMetric(first?.name ?? '')],
+      [defaultMetric(first?.name ?? '', first ? defaultProbe.taskFilter : ''), defaultMetric()],
     ))
   }
 
-  function addQuickRoute(taskNames: string[] = [], sourceUuid = ''): TopologyRouteConfig | null {
+  function findDuplicateRoute(sourceName: string, landingName = ''): number {
+    return findDuplicateTopologyRouteIndex(routes.value, sourceName, landingName)
+  }
+
+  function addQuickRoute(
+    taskNames: string[] = [],
+    sourceUuid = '',
+    options: { landingUuid?: string | null, hopTask?: string } = {},
+  ): TopologyRouteConfig | null {
     if (!canAddRoute.value)
       return null
-    const route = buildQuickTopologyRoute(availableNodes.value, taskNames, sourceUuid)
+    const route = buildQuickTopologyRoute(availableNodes.value, {
+      sourceTasks: taskNames,
+      sourceUuid,
+      landingUuid: options.landingUuid,
+      hopTask: options.hopTask,
+    })
     if (!route)
       return null
     routes.value.push(route)
@@ -182,8 +197,10 @@ export function useTopologyManager(nodes: MaybeRefOrGetter<NodeData[]>) {
     validationErrors,
     canAddRoute,
     quickSourceNode,
+    quickNodes,
     quickConfigurationAvailable,
     isAmbiguousNodeName,
+    findDuplicateRoute,
     reset,
     addRoute,
     addQuickRoute,

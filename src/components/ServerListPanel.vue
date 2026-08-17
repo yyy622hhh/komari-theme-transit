@@ -97,7 +97,7 @@ const mobileSortOptions: Array<{ key: ServerListSortKey, label: string }> = [
 ]
 
 function isMaintenanceNode(node: NodeData): boolean {
-  return Boolean(appStore.pandaOpsNodeControls[node.uuid]?.maintenanceUntil)
+  return Boolean(appStore.nodeControls[node.uuid]?.maintenanceUntil)
 }
 
 function getNodeStatus(node: NodeData): { label: string, class: string, dot: string } {

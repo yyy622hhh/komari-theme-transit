@@ -4,6 +4,55 @@
 
 ## [Unreleased]
 
+## [1.0.31] - 2026-08-17
+
+### Added
+
+- 拓扑快速生成可先选择线路机和落地机，第 2 段可自动匹配或从线路机任务中手选。
+
+### Changed
+
+- 界面图标改为本地打包，不再在运行时请求 `api.iconify.design`。
+- 首页快捷按钮在自定义 keys 中支持按月成本排序；未登录且隐藏价格时不显示该按钮。
+- 源码中的 PandaOps 命名改为 Transit/运维标识；Komari 托管设置仍读写 `pandaOpsNodeControls`，旧安装无需迁移。
+
+### Fixed
+
+- 补齐 1.0.29 与 1.0.30 的变更记录，并让 README 与当前稳定版一致。
+- 节点详情近一天网速峰值改回只拉取当前节点历史，避免全量共享缓存把单机样本挤没后显示 0。
+- 未登录隐藏价格后会取消已激活的月成本快捷筛选，避免按钮消失后列表仍按成本排序。
+- 快速生成选择“仅入口到线路机”后，节点列表刷新不再把落地机填回去。
+- 手动“添加线路”改为只使用在线且不重名的节点。
+- 相同线路机和落地机的快速生成会提示已有线路，不再重复添加。
+- 已有线路时，快速生成默认选择尚未使用的落地机，生成后自动切到下一台。
+- 第 2 段自动匹配支持中文城市名和英文城市任务名，例如 `Tokyo` 对应“东京-高负载”。
+- 拓扑解析会保留并阻止保存孤立指标、非法额外分隔符和重复线路，快速生成等待期间会锁定当前草稿。
+
+## [1.0.30] - 2026-08-17
+
+### Fixed
+
+- 拓扑管理器保存前强制重新验证登录，并拒绝覆盖其他会话已修改的线路配置。
+- 加强线路与指标校验：空组、分隔符、探测任务和备用值边界不再被静默改写。
+- 更换探测来源或线路机时清除不兼容的旧 Ping 任务，避免把旧节点任务名套到新节点。
+
+### Testing
+
+- 扩展拓扑对齐、两节点线路、过期缓存、保存冲突和管理器回归。
+
+## [1.0.29] - 2026-08-17
+
+### Fixed
+
+- 多条线路的节点组和指标组按原始位置对齐，空指标不再让后续线路借用前一条延迟。
+- 支持“入口 → 目标”两节点线路，只渲染和保存实际存在的一段链路。
+- Ping 任务改为完整名称匹配；过期缓存不再标记为实时稳定，无新数据时明确使用备用基线。
+- 节点元数据刷新失败时保留本轮已成功返回的实时状态，连续失败会指数退避。
+
+### Documentation
+
+- README 说明拓扑数据一致性、探测方向和两节点线路边界。
+
 ## [1.0.28] - 2026-08-16
 
 ### Fixed
@@ -381,7 +430,10 @@
 - 亮暗主题、桌面/移动布局和 Transit 风格内嵌 Komari 管理端。
 - Playwright 视觉与交互回归、自动构建和 GitHub Release 发布流程。
 
-[Unreleased]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.28...HEAD
+[Unreleased]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.31...HEAD
+[1.0.31]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.30...v1.0.31
+[1.0.30]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.29...v1.0.30
+[1.0.29]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.28...v1.0.29
 [1.0.28]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.27...v1.0.28
 [1.0.27]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.26...v1.0.27
 [1.0.26]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.25...v1.0.26

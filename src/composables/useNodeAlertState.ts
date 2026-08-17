@@ -1,39 +1,39 @@
 import type { MaybeRefOrGetter } from 'vue'
-import type { PandaOpsAlert } from '@/utils/pandaOpsAlert'
+import type { NodeAlert } from '@/utils/nodeAlert'
 import { computed, shallowReactive, toValue } from 'vue'
-import { recordPandaOpsAlertTransition } from '@/composables/usePandaOpsIncidentTimeline'
-import { PANDA_OPS_ALERT_STABILITY } from '@/constants/pandaOps'
+import { recordAlertTransition } from '@/composables/useIncidentTimeline'
+import { OPS_ALERT_STABILITY } from '@/constants/ops'
 
 interface AlertTracker {
   initialized: boolean
-  current: PandaOpsAlert | null
-  pending: PandaOpsAlert | null
+  current: NodeAlert | null
+  pending: NodeAlert | null
   pendingSamples: number
   recoverySamples: number
   sampleToken: string
 }
 
-const alertRegistry = shallowReactive(new Map<string, PandaOpsAlert>())
+const alertRegistry = shallowReactive(new Map<string, NodeAlert>())
 const alertTrackers = new Map<string, AlertTracker>()
 
-function requiredSamples(alert: PandaOpsAlert): number {
+function requiredSamples(alert: NodeAlert): number {
   if (alert.key.endsWith(':offline') || alert.key.includes(':carrier:'))
     return 1
   return alert.severity === 'critical'
-    ? PANDA_OPS_ALERT_STABILITY.criticalSamples
-    : PANDA_OPS_ALERT_STABILITY.warningSamples
+    ? OPS_ALERT_STABILITY.criticalSamples
+    : OPS_ALERT_STABILITY.warningSamples
 }
 
-function publish(uuid: string, alert: PandaOpsAlert | null): void {
+function publish(uuid: string, alert: NodeAlert | null): void {
   const previous = alertRegistry.get(uuid) ?? null
   if (alert)
     alertRegistry.set(uuid, alert)
   else
     alertRegistry.delete(uuid)
-  recordPandaOpsAlertTransition(previous, alert)
+  recordAlertTransition(previous, alert)
 }
 
-export function reportPandaOpsNodeAlert(uuid: string, candidate: PandaOpsAlert | null, sampleToken: string): void {
+export function reportNodeAlert(uuid: string, candidate: NodeAlert | null, sampleToken: string): void {
   if (!uuid || !sampleToken)
     return
 
@@ -76,7 +76,7 @@ export function reportPandaOpsNodeAlert(uuid: string, candidate: PandaOpsAlert |
     tracker.pendingSamples = 0
     if (tracker.current) {
       tracker.recoverySamples += 1
-      if (tracker.recoverySamples >= PANDA_OPS_ALERT_STABILITY.recoverySamples) {
+      if (tracker.recoverySamples >= OPS_ALERT_STABILITY.recoverySamples) {
         tracker.current = null
         tracker.recoverySamples = 0
         publish(uuid, null)
@@ -105,20 +105,20 @@ export function reportPandaOpsNodeAlert(uuid: string, candidate: PandaOpsAlert |
   alertTrackers.set(uuid, tracker)
 }
 
-export function resetPandaOpsNodeAlert(uuid: string): void {
+export function resetNodeAlert(uuid: string): void {
   alertTrackers.delete(uuid)
   alertRegistry.delete(uuid)
 }
 
-export function suppressPandaOpsNodeAlert(uuid: string): void {
+export function suppressNodeAlert(uuid: string): void {
   alertTrackers.delete(uuid)
   publish(uuid, null)
 }
 
-export function getPandaOpsNodeAlert(uuid: string): PandaOpsAlert | null {
+export function getNodeAlert(uuid: string): NodeAlert | null {
   return alertRegistry.get(uuid) ?? null
 }
 
-export function usePandaOpsNodeAlert(uuid: MaybeRefOrGetter<string>) {
-  return computed(() => getPandaOpsNodeAlert(toValue(uuid)))
+export function useNodeAlert(uuid: MaybeRefOrGetter<string>) {
+  return computed(() => getNodeAlert(toValue(uuid)))
 }

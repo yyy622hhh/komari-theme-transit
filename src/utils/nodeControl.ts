@@ -1,21 +1,21 @@
-export interface PandaOpsNodeControl {
+export interface NodeControl {
   maintenanceUntil?: number
   silenceUntil?: number
 }
 
-export type PandaOpsNodeControls = Record<string, PandaOpsNodeControl>
+export type NodeControls = Record<string, NodeControl>
 
 function validUntil(value: unknown, now: number): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) && value > now ? value : undefined
 }
 
-export function parsePandaOpsNodeControls(value: unknown, now = Date.now()): PandaOpsNodeControls {
+export function parseNodeControls(value: unknown, now = Date.now()): NodeControls {
   try {
     const parsed = typeof value === 'string' ? JSON.parse(value) as unknown : value
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
       return {}
 
-    const controls: PandaOpsNodeControls = {}
+    const controls: NodeControls = {}
     for (const [uuid, raw] of Object.entries(parsed)) {
       if (!raw || typeof raw !== 'object' || Array.isArray(raw))
         continue
@@ -32,16 +32,16 @@ export function parsePandaOpsNodeControls(value: unknown, now = Date.now()): Pan
   }
 }
 
-export function serializePandaOpsNodeControls(value: PandaOpsNodeControls): string {
+export function serializeNodeControls(value: NodeControls): string {
   return JSON.stringify(value)
 }
 
-export function updatePandaOpsNodeControl(
-  controls: PandaOpsNodeControls,
+export function updateNodeControl(
+  controls: NodeControls,
   uuid: string,
-  key: keyof PandaOpsNodeControl,
+  key: keyof NodeControl,
   until?: number,
-): PandaOpsNodeControls {
+): NodeControls {
   const next = { ...controls }
   const control = { ...next[uuid] }
   if (until)

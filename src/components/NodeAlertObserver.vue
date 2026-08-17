@@ -1,17 +1,17 @@
 <script setup lang="ts">
 import type { NodeData } from '@/stores/nodes'
-import type { PandaOpsAlert } from '@/utils/pandaOpsAlert'
+import type { NodeAlert } from '@/utils/nodeAlert'
 import { computed, onBeforeUnmount, watch } from 'vue'
+import { reportNodeAlert, resetNodeAlert, suppressNodeAlert } from '@/composables/useNodeAlertState'
 import { useNodeCarrierPingDisplay } from '@/composables/useNodeCarrierPingDisplay'
-import { reportPandaOpsNodeAlert, resetPandaOpsNodeAlert, suppressPandaOpsNodeAlert } from '@/composables/usePandaOpsAlertState'
 import { useAppStore } from '@/stores/app'
-import { getPrimaryNodeAlert } from '@/utils/pandaOpsAlert'
+import { getPrimaryNodeAlert } from '@/utils/nodeAlert'
 
 const props = defineProps<{ node: NodeData }>()
 const appStore = useAppStore()
 const { carrierDisplays, carrierScopeLabel } = useNodeCarrierPingDisplay(() => props.node.uuid)
-const isMaintenance = computed(() => Boolean(appStore.pandaOpsNodeControls[props.node.uuid]?.maintenanceUntil))
-const candidate = computed<PandaOpsAlert | null>(() => isMaintenance.value
+const isMaintenance = computed(() => Boolean(appStore.nodeControls[props.node.uuid]?.maintenanceUntil))
+const candidate = computed<NodeAlert | null>(() => isMaintenance.value
   ? null
   : getPrimaryNodeAlert(props.node, carrierDisplays.value, carrierScopeLabel.value))
 const sampleToken = computed(() => {
@@ -24,12 +24,12 @@ const sampleToken = computed(() => {
 watch(
   [candidate, sampleToken, isMaintenance],
   ([alert, token, maintenance]) => maintenance
-    ? suppressPandaOpsNodeAlert(props.node.uuid)
-    : reportPandaOpsNodeAlert(props.node.uuid, alert, token),
+    ? suppressNodeAlert(props.node.uuid)
+    : reportNodeAlert(props.node.uuid, alert, token),
   { immediate: true },
 )
 
-onBeforeUnmount(() => resetPandaOpsNodeAlert(props.node.uuid))
+onBeforeUnmount(() => resetNodeAlert(props.node.uuid))
 </script>
 
 <template>

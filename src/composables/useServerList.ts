@@ -33,7 +33,7 @@ export function useServerList(nodes: MaybeRefOrGetter<NodeData[]>) {
   } | null = null
 
   const maintenanceIds = computed(() => new Set(
-    Object.entries(appStore.pandaOpsNodeControls)
+    Object.entries(appStore.nodeControls)
       .filter(([, control]) => Boolean(control.maintenanceUntil))
       .map(([uuid]) => uuid),
   ))

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { PermissionKey } from '@/services/auth.service'
+import type { PrivateHomeToolKey } from '@/constants/security'
 import type { HomeQuickControlKey } from '@/stores/app'
 import type { NodeData } from '@/stores/nodes'
 import { Icon } from '@iconify/vue'
@@ -13,19 +13,16 @@ import { Button } from '@/components/ui/button'
 import { Empty } from '@/components/ui/empty'
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { useDailyExchangeRates } from '@/composables/useDailyExchangeRates'
 import { useOrderMoveFeedback } from '@/composables/useOrderMoveFeedback'
 import { useServerList } from '@/composables/useServerList'
 import { useSortableOrder } from '@/composables/useSortableOrder'
 import { useVisitorAudit } from '@/composables/useVisitorAudit'
+import { PRIVATE_HOME_TOOL_KEYS } from '@/constants/security'
 import { UI_CONFIG } from '@/constants/ui'
 import { useAppStore } from '@/stores/app'
 import { useNodesStore } from '@/stores/nodes'
-import {
-  getRealtimePeakSpeed,
-  getTotalTraffic,
-  isExpiringNode,
-  isHighLoadNode,
-} from '@/utils/nodeMetricsHelper'
+import { applyHomeQuickControl, countHomeQuickControl, resolveActiveHomeQuickControl } from '@/utils/homeQuickControls'
 import { isNodeMatchSearch } from '@/utils/nodeSearch'
 
 interface QuickControlOption {
@@ -34,8 +31,7 @@ interface QuickControlOption {
   icon: string
 }
 
-type HomeToolKey = 'nodes' | 'nodeCompare' | 'serverList' | 'topology' | 'providerValue' | 'healthSummary' | 'snapshotExport' | 'auditLog'
-type PrivateHomeToolKey = Exclude<HomeToolKey, 'nodes' | 'nodeCompare'>
+type HomeToolKey = 'nodes' | 'nodeCompare' | PrivateHomeToolKey
 
 interface HomeToolOption {
   key: Exclude<HomeToolKey, 'nodes'>
@@ -52,9 +48,9 @@ const NodeCard = defineAsyncComponent(() => import('@/components/NodeCard.vue'))
 const NodeGeneralCards = defineAsyncComponent(() => import('@/components/NodeGeneralCards.vue'))
 const NodeList = defineAsyncComponent(() => import('@/components/NodeList.vue'))
 const NodeComparePanel = defineAsyncComponent(() => import('@/components/NodeComparePanel.vue'))
-const PandaOpsDashboard = defineAsyncComponent(() => import('@/components/PandaOpsDashboard.vue'))
-const PandaOpsNodeControlDialog = defineAsyncComponent(() => import('@/components/PandaOpsNodeControlDialog.vue'))
-const PandaOpsNodeCard = defineAsyncComponent(() => import('@/components/PandaOpsNodeCard.vue'))
+const TransitDashboard = defineAsyncComponent(() => import('@/components/TransitDashboard.vue'))
+const NodeControlDialog = defineAsyncComponent(() => import('@/components/NodeControlDialog.vue'))
+const TransitNodeCard = defineAsyncComponent(() => import('@/components/TransitNodeCard.vue'))
 const PingMonitorDialog = defineAsyncComponent(() => import('@/components/PingMonitorDialog.vue'))
 const NodeTopologyPanel = defineAsyncComponent(() => import('@/components/NodeTopologyPanel.vue'))
 const ProviderValuePanel = defineAsyncComponent(() => import('@/components/ProviderValuePanel.vue'))
@@ -112,13 +108,17 @@ const {
   move: homeOrder.moveOrderToIndex,
 })
 
-const homeToolPermissionMap: Record<PrivateHomeToolKey, PermissionKey> = {
+const homeToolPermissionMap = {
   serverList: 'serverList',
   topology: 'nodeTopology',
   providerValue: 'providerValue',
   healthSummary: 'healthSummary',
   snapshotExport: 'snapshotExport',
   auditLog: 'auditLog',
+} as const satisfies Record<PrivateHomeToolKey, string>
+
+function isPrivateHomeTool(key: HomeToolKey): key is PrivateHomeToolKey {
+  return (PRIVATE_HOME_TOOL_KEYS as readonly string[]).includes(key)
 }
 
 const quickControlDefinitions: Record<HomeQuickControlKey, QuickControlOption> = {
@@ -159,20 +159,21 @@ const groups = computed(() => [
   ...nodesStore.groups.map(g => ({ tab: g, name: g })),
 ])
 
-const quickControlKeys = computed<HomeQuickControlKey[]>(() => appStore.homeQuickControlOrder.filter(key => key !== 'monthlyCost'))
+const showPrice = computed(() => appStore.privateFeaturesAllowed || !appStore.hidePriceWhenLoggedOut)
+const quickControlKeys = computed<HomeQuickControlKey[]>(() => appStore.homeQuickControlOrder.filter(key => key !== 'monthlyCost' || showPrice.value))
+const needsMonthlyCostRates = computed(() => showPrice.value && quickControlKeys.value.includes('monthlyCost'))
+const { rates: monthlyCostRates } = useDailyExchangeRates(needsMonthlyCostRates)
 const quickControls = computed(() => quickControlKeys.value.map(key => quickControlDefinitions[key]))
 const showQuickControls = computed(() => appStore.homeQuickControlsEnabled && quickControls.value.length > 0)
 
 watch(
-  () => [appStore.homeQuickControlOrder.join('|'), appStore.homeQuickControlsEnabled] as const,
+  () => [appStore.homeQuickControlsEnabled, quickControlKeys.value.join('|')] as const,
   () => {
-    if (!appStore.homeQuickControlsEnabled) {
-      activeQuickControl.value = null
-      return
-    }
-
-    if (activeQuickControl.value && !quickControlKeys.value.includes(activeQuickControl.value))
-      activeQuickControl.value = null
+    activeQuickControl.value = resolveActiveHomeQuickControl(
+      activeQuickControl.value,
+      appStore.homeQuickControlsEnabled,
+      quickControlKeys.value,
+    )
   },
   { immediate: true },
 )
@@ -188,75 +189,27 @@ watch(
   { immediate: true },
 )
 
-function sortNodesByComputedValue(nodes: NodeData[], selector: (node: NodeData) => number): NodeData[] {
-  return nodes
-    .map(node => ({ node, value: selector(node) }))
-    .sort((a, b) => b.value - a.value)
-    .map(item => item.node)
-}
-
-function placeOfflineNodesLast(nodes: NodeData[]): NodeData[] {
-  if (!appStore.offlineNodesLast)
-    return nodes
-
-  return [...nodes].sort((a, b) => {
-    if (a.online === b.online)
-      return 0
-    return a.online ? -1 : 1
-  })
-}
-
 function isNodeInMaintenance(node: NodeData): boolean {
-  return Boolean(appStore.pandaOpsNodeControls[node.uuid]?.maintenanceUntil)
+  return Boolean(appStore.nodeControls[node.uuid]?.maintenanceUntil)
+}
+
+function getQuickControlContext() {
+  return {
+    isFavorite: (uuid: string) => appStore.isFavoriteNode(uuid),
+    isMaintenance: isNodeInMaintenance,
+    highLoadThreshold: appStore.homeHighLoadThreshold,
+    expiringDays: appStore.homeExpiringDays,
+    offlineNodesLast: appStore.offlineNodesLast,
+    exchangeRates: monthlyCostRates.value,
+  }
 }
 
 function getQuickControlNodes(nodes: NodeData[], control: HomeQuickControlKey | null): NodeData[] {
-  let result: NodeData[]
-
-  switch (control) {
-    case 'favorite':
-      return nodes.filter(node => appStore.isFavoriteNode(node.uuid))
-    case 'totalTraffic':
-      result = sortNodesByComputedValue(nodes, getTotalTraffic)
-      break
-    case 'upload':
-      result = [...nodes].sort((a, b) => (b.net_out || 0) - (a.net_out || 0))
-      break
-    case 'download':
-      result = [...nodes].sort((a, b) => (b.net_in || 0) - (a.net_in || 0))
-      break
-    case 'peak':
-      result = sortNodesByComputedValue(nodes, getRealtimePeakSpeed)
-      break
-    case 'offline':
-      return nodes.filter(node => !node.online && !isNodeInMaintenance(node))
-    case 'highLoad':
-      result = nodes.filter(node => isHighLoadNode(node, appStore.homeHighLoadThreshold))
-      break
-    case 'expiring':
-      result = nodes.filter(node => isExpiringNode(node, appStore.homeExpiringDays))
-      break
-    default:
-      result = nodes
-      break
-  }
-
-  return placeOfflineNodesLast(result)
+  return applyHomeQuickControl(nodes, control, getQuickControlContext())
 }
 
 function getQuickControlCount(nodes: NodeData[], control: HomeQuickControlKey): number {
-  switch (control) {
-    case 'favorite':
-      return nodes.reduce((count, node) => count + (appStore.isFavoriteNode(node.uuid) ? 1 : 0), 0)
-    case 'offline':
-      return nodes.reduce((count, node) => count + (!node.online && !isNodeInMaintenance(node) ? 1 : 0), 0)
-    case 'highLoad':
-      return nodes.reduce((count, node) => count + (isHighLoadNode(node, appStore.homeHighLoadThreshold) ? 1 : 0), 0)
-    case 'expiring':
-      return nodes.reduce((count, node) => count + (isExpiringNode(node, appStore.homeExpiringDays) ? 1 : 0), 0)
-    default:
-      return nodes.length
-  }
+  return countHomeQuickControl(nodes, control, getQuickControlContext())
 }
 
 const groupNodeList = computed(() => {
@@ -446,7 +399,7 @@ async function toggleHomeTool(key: Exclude<HomeToolKey, 'nodes'>) {
     return
   }
 
-  const permission = key === 'nodeCompare' ? null : homeToolPermissionMap[key]
+  const permission = isPrivateHomeTool(key) ? homeToolPermissionMap[key] : null
   if (permission) {
     const granted = await appStore.requireLoginPermission(permission, { force: true })
     if (!granted) {
@@ -510,13 +463,13 @@ const activeToolTitle = computed(() => {
 
 const nodeCardGridClass = computed(() => {
   if (appStore.opsDashboardEnabled) {
-    const pandaOpsSizeClass: Record<typeof appStore.nodeCardSize, string> = {
+    const transitCardSizeClass: Record<typeof appStore.nodeCardSize, string> = {
       mini: 'gap-3 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4',
       compact: 'gap-3 md:grid-cols-2 xl:grid-cols-3',
       comfortable: 'gap-4 lg:grid-cols-2 2xl:grid-cols-3',
       large: 'gap-5 xl:grid-cols-2',
     }
-    return ['grid grid-cols-1 md:auto-rows-fr', pandaOpsSizeClass[appStore.nodeCardSize]]
+    return ['grid grid-cols-1 md:auto-rows-fr', transitCardSizeClass[appStore.nodeCardSize]]
   }
 
   const sizeClass: Record<typeof appStore.nodeCardSize, string> = {
@@ -550,7 +503,7 @@ const nodeCardGridClass = computed(() => {
       :active="isViewActive"
     />
 
-    <PandaOpsDashboard v-if="appStore.opsDashboardEnabled && isViewActive" :nodes="nodesStore.visibleNodes" />
+    <TransitDashboard v-if="appStore.opsDashboardEnabled && isViewActive" :nodes="nodesStore.visibleNodes" />
 
     <div class="node-info p-3 pt-0 sm:p-4 sm:pt-0 flex flex-col gap-4 relative z-1 pointer-events-none" :class="!appStore.opsDashboardEnabled && !!appStore.hideGeneralCard && 'pt-4'">
       <div class="nodes min-w-0">
@@ -750,7 +703,7 @@ const nodeCardGridClass = computed(() => {
                     :min-height="deferredNodeCardHeight"
                     :class="appStore.opsDashboardEnabled && 'h-full'"
                   >
-                    <PandaOpsNodeCard
+                    <TransitNodeCard
                       v-if="appStore.opsDashboardEnabled && isViewActive"
                       :node="node"
                       @click="handleNodeClick(node)"
@@ -793,7 +746,7 @@ const nodeCardGridClass = computed(() => {
       :node-name="pingDialogNode.name"
       @update:open="!$event && (pingDialogNode = null)"
     />
-    <PandaOpsNodeControlDialog
+    <NodeControlDialog
       v-if="nodeControlDialogNode"
       :open="Boolean(nodeControlDialogNode)"
       :node="nodeControlDialogNode"

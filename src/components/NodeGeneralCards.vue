@@ -570,7 +570,7 @@ function getCardDefinition(key: GeneralCardKey): GeneralMetricCard {
       return {
         key: 'cpuCores',
         label: 'CPU 核心',
-        icon: 'tabler:chip',
+        icon: 'tabler:cpu',
         value: formatCount(totalCpuCores.value),
         unit: 'Core',
       }

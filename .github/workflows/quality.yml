@@ -32,6 +32,9 @@ jobs:
       - name: Lint
         run: bun run lint:check
 
+      - name: Check bundled icons
+        run: bun run icons:check
+
       - name: Type-check
         run: bun run type-check
 

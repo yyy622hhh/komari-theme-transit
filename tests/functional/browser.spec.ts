@@ -64,7 +64,7 @@ test('public home degrades cleanly when WebGL2 is unavailable', async ({ page })
 })
 
 test('admin entry keeps the supported Komari server route contract', async ({ page }) => {
-  await installKomariFixture(page, { authenticated: true, pandaOps: true })
+  await installKomariFixture(page, { authenticated: true, opsDashboard: true })
   await openHome(page)
 
   const adminEntry = page.getByRole('link', { name: '后台管理' })
@@ -89,7 +89,7 @@ test('authenticated keyboard ordering persists through the official RPC after re
       savedOrders.push(payload.params)
   })
 
-  await installKomariFixture(page, { authenticated: true, pandaOps: true })
+  await installKomariFixture(page, { authenticated: true, opsDashboard: true })
   await openHome(page)
   await page.getByRole('button', { name: '编辑首页顺序' }).click()
 

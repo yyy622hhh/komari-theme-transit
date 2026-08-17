@@ -7,11 +7,8 @@ export const SECURITY_CONFIG = {
   csv: {
     formulaPrefixes: ['=', '+', '-', '@'],
   },
-  export: {
-    secondaryPasswordSessionKey: 'komari-theme-export-secondary-password-verified',
-  },
 } as const
 
-export const PRIVATE_HOME_TOOL_KEYS = ['topology', 'providerValue', 'healthSummary', 'snapshotExport'] as const
+export const PRIVATE_HOME_TOOL_KEYS = ['serverList', 'topology', 'providerValue', 'healthSummary', 'snapshotExport', 'auditLog'] as const
 
 export type PrivateHomeToolKey = typeof PRIVATE_HOME_TOOL_KEYS[number]

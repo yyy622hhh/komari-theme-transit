@@ -9,54 +9,54 @@
 }
 
 /* Transit compact monitoring surface. */
-.panda-panel {
-  border: 1px solid var(--panda-border);
-  background: var(--panda-panel-bg);
-  box-shadow: var(--panda-panel-shadow);
+.transit-panel {
+  border: 1px solid var(--transit-border);
+  background: var(--transit-panel-bg);
+  box-shadow: var(--transit-panel-shadow);
   backdrop-filter: blur(18px) saturate(118%);
   -webkit-backdrop-filter: blur(18px) saturate(118%);
 }
 
-.panda-control {
-  border: 1px solid var(--panda-border) !important;
-  background: var(--panda-control-bg) !important;
+.transit-control {
+  border: 1px solid var(--transit-border) !important;
+  background: var(--transit-control-bg) !important;
   color: var(--muted-foreground);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
 }
 
-.panda-control:hover {
+.transit-control:hover {
   color: var(--foreground);
 }
 
-.panda-node-card {
-  border: 1px solid var(--panda-border);
-  background: var(--panda-card-bg);
-  box-shadow: var(--panda-card-shadow);
+.transit-node-card {
+  border: 1px solid var(--transit-border);
+  background: var(--transit-card-bg);
+  box-shadow: var(--transit-card-shadow);
   backdrop-filter: blur(16px) saturate(112%);
   -webkit-backdrop-filter: blur(16px) saturate(112%);
 }
 
-.panda-divider {
-  border-color: var(--panda-divider) !important;
+.transit-divider {
+  border-color: var(--transit-divider) !important;
 }
 
-.panda-dot-ring {
-  --tw-ring-color: var(--panda-dot-ring) !important;
+.transit-dot-ring {
+  --tw-ring-color: var(--transit-dot-ring) !important;
 }
 
-.panda-rail {
-  background-color: var(--panda-rail) !important;
+.transit-rail {
+  background-color: var(--transit-rail) !important;
 }
 
-.panda-hover-surface:hover {
-  background-color: var(--panda-hover-bg) !important;
+.transit-hover-surface:hover {
+  background-color: var(--transit-hover-bg) !important;
 }
 
 @media (prefers-reduced-transparency: reduce) {
-  .panda-panel,
-  .panda-control,
-  .panda-node-card {
+  .transit-panel,
+  .transit-control,
+  .transit-node-card {
     background: var(--card) !important;
     backdrop-filter: none !important;
     -webkit-backdrop-filter: none !important;
@@ -102,20 +102,20 @@
   --chart-5: oklch(0.769 0.188 70.08);
   --radius: 0.625rem;
   --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-  --panda-border: rgb(100 116 139 / 0.2);
-  --panda-divider: rgb(100 116 139 / 0.16);
-  --panda-panel-bg: rgb(248 250 252 / 0.78);
-  --panda-control-bg: rgb(248 250 252 / 0.72);
-  --panda-card-bg: rgb(248 250 252 / 0.9);
-  --panda-cell-bg: rgb(241 245 249 / 0.74);
-  --panda-hover-bg: rgb(15 23 42 / 0.025);
-  --panda-dot-ring: rgb(241 245 249 / 0.96);
-  --panda-rail: rgb(100 116 139 / 0.42);
-  --panda-text-primary: rgb(30 41 59);
-  --panda-text-secondary: rgb(71 85 105);
-  --panda-text-tertiary: rgb(100 116 139);
-  --panda-panel-shadow: inset 0 1px 0 rgb(255 255 255 / 0.72), 0 18px 50px -42px rgb(15 23 42 / 0.3);
-  --panda-card-shadow: inset 0 1px 0 rgb(255 255 255 / 0.78), 0 16px 38px -34px rgb(15 23 42 / 0.34);
+  --transit-border: rgb(100 116 139 / 0.2);
+  --transit-divider: rgb(100 116 139 / 0.16);
+  --transit-panel-bg: rgb(248 250 252 / 0.78);
+  --transit-control-bg: rgb(248 250 252 / 0.72);
+  --transit-card-bg: rgb(248 250 252 / 0.9);
+  --transit-cell-bg: rgb(241 245 249 / 0.74);
+  --transit-hover-bg: rgb(15 23 42 / 0.025);
+  --transit-dot-ring: rgb(241 245 249 / 0.96);
+  --transit-rail: rgb(100 116 139 / 0.42);
+  --transit-text-primary: rgb(30 41 59);
+  --transit-text-secondary: rgb(71 85 105);
+  --transit-text-tertiary: rgb(100 116 139);
+  --transit-panel-shadow: inset 0 1px 0 rgb(255 255 255 / 0.72), 0 18px 50px -42px rgb(15 23 42 / 0.3);
+  --transit-card-shadow: inset 0 1px 0 rgb(255 255 255 / 0.78), 0 16px 38px -34px rgb(15 23 42 / 0.34);
 }
 
 .dark {
@@ -155,20 +155,20 @@
   --chart-3: oklch(0.769 0.188 70.08);
   --chart-4: oklch(0.627 0.265 303.9);
   --chart-5: oklch(0.645 0.246 16.439);
-  --panda-border: rgb(71 85 105 / 0.46);
-  --panda-divider: rgb(255 255 255 / 0.055);
-  --panda-panel-bg: rgb(14 19 25 / 0.84);
-  --panda-control-bg: rgb(14 19 25 / 0.8);
-  --panda-card-bg: rgb(14 19 25 / 0.84);
-  --panda-cell-bg: rgb(255 255 255 / 0.018);
-  --panda-hover-bg: rgb(255 255 255 / 0.018);
-  --panda-dot-ring: rgb(16 24 32 / 0.98);
-  --panda-rail: rgb(71 85 105 / 0.65);
-  --panda-text-primary: rgb(226 232 240);
-  --panda-text-secondary: rgb(148 163 184);
-  --panda-text-tertiary: rgb(125 142 166);
-  --panda-panel-shadow: inset 0 1px 0 rgb(255 255 255 / 0.025), 0 18px 50px -42px rgb(0 0 0 / 0.72);
-  --panda-card-shadow: inset 0 1px 0 rgb(255 255 255 / 0.025), 0 18px 50px -42px rgb(0 0 0 / 0.95);
+  --transit-border: rgb(71 85 105 / 0.46);
+  --transit-divider: rgb(255 255 255 / 0.055);
+  --transit-panel-bg: rgb(14 19 25 / 0.84);
+  --transit-control-bg: rgb(14 19 25 / 0.8);
+  --transit-card-bg: rgb(14 19 25 / 0.84);
+  --transit-cell-bg: rgb(255 255 255 / 0.018);
+  --transit-hover-bg: rgb(255 255 255 / 0.018);
+  --transit-dot-ring: rgb(16 24 32 / 0.98);
+  --transit-rail: rgb(71 85 105 / 0.65);
+  --transit-text-primary: rgb(226 232 240);
+  --transit-text-secondary: rgb(148 163 184);
+  --transit-text-tertiary: rgb(125 142 166);
+  --transit-panel-shadow: inset 0 1px 0 rgb(255 255 255 / 0.025), 0 18px 50px -42px rgb(0 0 0 / 0.72);
+  --transit-card-shadow: inset 0 1px 0 rgb(255 255 255 / 0.025), 0 18px 50px -42px rgb(0 0 0 / 0.95);
 }
 
 @theme inline {

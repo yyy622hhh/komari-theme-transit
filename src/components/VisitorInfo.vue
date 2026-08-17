@@ -269,7 +269,7 @@ function getOsIcon(): string {
   if (windowsPattern.test(ua))
     return 'icon-park-outline:windows'
   if (macPattern.test(ua))
-    return 'icon-park-outline:mac'
+    return 'icon-park-outline:i-mac'
   if (androidPattern.test(ua))
     return 'icon-park-outline:android'
   if (iosPattern.test(ua))

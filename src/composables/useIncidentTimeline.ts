@@ -1,7 +1,7 @@
-import type { PandaOpsAlert } from '@/utils/pandaOpsAlert'
+import type { NodeAlert } from '@/utils/nodeAlert'
 import { computed, shallowRef } from 'vue'
 
-export type PandaOpsIncidentEventType
+export type IncidentEventType
   = | 'started'
     | 'recovered'
     | 'silenced'
@@ -9,14 +9,14 @@ export type PandaOpsIncidentEventType
     | 'maintenanceStarted'
     | 'maintenanceEnded'
 
-export interface PandaOpsIncidentEvent {
+export interface IncidentEvent {
   id: string
   nodeUuid: string
   nodeName: string
-  type: PandaOpsIncidentEventType
+  type: IncidentEventType
   alertKey?: string
   detail: string
-  severity?: PandaOpsAlert['severity']
+  severity?: NodeAlert['severity']
   timestamp: number
   durationMs?: number
 }
@@ -24,7 +24,7 @@ export interface PandaOpsIncidentEvent {
 const STORAGE_KEY = 'pandaOpsIncidentTimelineV1'
 const RETENTION_MS = 7 * 24 * 60 * 60 * 1_000
 const MAX_EVENTS = 200
-const events = shallowRef<PandaOpsIncidentEvent[]>([])
+const events = shallowRef<IncidentEvent[]>([])
 let initialized = false
 
 function initialize(): void {
@@ -36,7 +36,7 @@ function initialize(): void {
     if (Array.isArray(parsed)) {
       const cutoff = Date.now() - RETENTION_MS
       events.value = parsed
-        .filter((item): item is PandaOpsIncidentEvent => Boolean(item && typeof item === 'object' && typeof (item as PandaOpsIncidentEvent).timestamp === 'number'))
+        .filter((item): item is IncidentEvent => Boolean(item && typeof item === 'object' && typeof (item as IncidentEvent).timestamp === 'number'))
         .filter(item => item.timestamp >= cutoff)
         .slice(0, MAX_EVENTS)
     }
@@ -57,7 +57,7 @@ function persist(): void {
   }
 }
 
-function addEvent(event: Omit<PandaOpsIncidentEvent, 'id' | 'timestamp'> & { timestamp?: number }): void {
+function addEvent(event: Omit<IncidentEvent, 'id' | 'timestamp'> & { timestamp?: number }): void {
   initialize()
   const timestamp = event.timestamp ?? Date.now()
   const cutoff = timestamp - RETENTION_MS
@@ -69,12 +69,12 @@ function addEvent(event: Omit<PandaOpsIncidentEvent, 'id' | 'timestamp'> & { tim
   persist()
 }
 
-function latestAlertEvent(alertKey: string): PandaOpsIncidentEvent | undefined {
+function latestAlertEvent(alertKey: string): IncidentEvent | undefined {
   initialize()
   return events.value.find(item => item.alertKey === alertKey && (item.type === 'started' || item.type === 'recovered'))
 }
 
-export function recordPandaOpsAlertTransition(previous: PandaOpsAlert | null, next: PandaOpsAlert | null): void {
+export function recordAlertTransition(previous: NodeAlert | null, next: NodeAlert | null): void {
   initialize()
   if (previous?.key === next?.key)
     return
@@ -109,16 +109,16 @@ export function recordPandaOpsAlertTransition(previous: PandaOpsAlert | null, ne
   }
 }
 
-export function recordPandaOpsControlEvent(
+export function recordControlEvent(
   nodeUuid: string,
   nodeName: string,
-  type: Extract<PandaOpsIncidentEventType, 'silenced' | 'silenceEnded' | 'maintenanceStarted' | 'maintenanceEnded'>,
+  type: Extract<IncidentEventType, 'silenced' | 'silenceEnded' | 'maintenanceStarted' | 'maintenanceEnded'>,
   detail: string,
 ): void {
   addEvent({ nodeUuid, nodeName, type, detail })
 }
 
-export function usePandaOpsIncidentTimeline() {
+export function useIncidentTimeline() {
   initialize()
   return {
     events: computed(() => events.value),

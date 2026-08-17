@@ -38,6 +38,7 @@ bun run dev
 
 ```bash
 bun run lint:check
+bun run icons:check
 bun run type-check
 bun run test:unit
 bun run build-only

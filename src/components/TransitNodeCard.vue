@@ -5,7 +5,7 @@ import { computed } from 'vue'
 import NodeCardInsightPanel from '@/components/NodeCardInsightPanel.vue'
 import { ProgressThin } from '@/components/ui/progress-thin'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
-import { usePandaOpsNodeAlert } from '@/composables/usePandaOpsAlertState'
+import { useNodeAlert } from '@/composables/useNodeAlertState'
 import { useAppStore } from '@/stores/app'
 import { formatBytesPerSecondWithConfig, formatBytesWithConfig, formatDateTime, getStatus, getUptimeDays } from '@/utils/helper'
 import { getDiskPercentage, getMemoryPercentage, getTrafficUsed, getTrafficUsedPercentage, hasTrafficLimit } from '@/utils/nodeMetricsHelper'
@@ -17,7 +17,7 @@ import { formatPriceWithCycle, getDaysUntilExpired, getExpireStatus, parseTags }
 const props = defineProps<{ node: NodeData }>()
 const emit = defineEmits<{ click: [], manage: [] }>()
 const appStore = useAppStore()
-const nodeControl = computed(() => appStore.pandaOpsNodeControls[props.node.uuid])
+const nodeControl = computed(() => appStore.nodeControls[props.node.uuid])
 const isMaintenance = computed(() => Boolean(nodeControl.value?.maintenanceUntil))
 const isSilenced = computed(() => Boolean(nodeControl.value?.silenceUntil))
 
@@ -51,7 +51,7 @@ const expiryDate = computed(() => expiryStatus.value === 'unknown' || expiryStat
   ? ''
   : formatDateTime(props.node.expired_at, 'YYYY-MM-DD'))
 
-const primaryAlert = usePandaOpsNodeAlert(() => props.node.uuid)
+const primaryAlert = useNodeAlert(() => props.node.uuid)
 const visibleAlert = computed(() => isMaintenance.value ? null : primaryAlert.value)
 const formatBytes = (value: number) => formatBytesWithConfig(value, appStore.byteDecimals)
 const formatSpeed = (value: number) => formatBytesPerSecondWithConfig(value, appStore.byteDecimals)
@@ -76,8 +76,8 @@ const statusEdgeTone = computed(() => {
 
 <template>
   <article
-    :data-panda-node-card-size="appStore.nodeCardSize"
-    class="panda-node-card group relative h-full min-w-0 cursor-pointer overflow-hidden rounded-2xl p-3.5 transition duration-200 hover:-translate-y-px hover:border-emerald-400/25"
+    :data-transit-node-card-size="appStore.nodeCardSize"
+    class="transit-node-card group relative h-full min-w-0 cursor-pointer overflow-hidden rounded-2xl p-3.5 transition duration-200 hover:-translate-y-px hover:border-emerald-400/25"
     :class="!node.online ? 'opacity-75' : ''"
   >
     <button
@@ -95,7 +95,7 @@ const statusEdgeTone = computed(() => {
       :class="statusEdgeTone"
     />
 
-    <header class="panda-node-card__header pointer-events-none relative z-1 min-h-[2.65rem]">
+    <header class="transit-node-card__header pointer-events-none relative z-1 min-h-[2.65rem]">
       <div class="flex min-w-0 items-start justify-between gap-3">
         <div class="flex min-w-0 flex-1 items-start gap-2">
           <span class="size-2.5 shrink-0 rounded-full" :class="isMaintenance ? 'bg-amber-400' : node.online ? 'bg-emerald-400' : 'bg-rose-400'" />
@@ -160,7 +160,7 @@ const statusEdgeTone = computed(() => {
       </div>
     </header>
 
-    <div data-node-resource-grid class="panda-divider pointer-events-none relative z-1 mt-3 grid grid-cols-3 gap-3 border-y py-2.5">
+    <div data-node-resource-grid class="transit-divider pointer-events-none relative z-1 mt-3 grid grid-cols-3 gap-3 border-y py-2.5">
       <div>
         <div class="flex items-center justify-between gap-2 text-[10px]">
           <span class="text-slate-500">CPU</span>
@@ -219,7 +219,7 @@ const statusEdgeTone = computed(() => {
     </div>
 
     <footer v-if="tags.length" class="pointer-events-none relative z-1 mt-2.5 flex min-w-0 gap-1 overflow-hidden">
-      <span v-for="tag in tags" :key="tag" class="panda-divider shrink-0 rounded-full border px-2 py-0.5 text-[9px] text-slate-500">
+      <span v-for="tag in tags" :key="tag" class="transit-divider shrink-0 rounded-full border px-2 py-0.5 text-[9px] text-slate-500">
         {{ tag }}
       </span>
     </footer>
@@ -238,14 +238,14 @@ const statusEdgeTone = computed(() => {
 </template>
 
 <style scoped>
-.panda-node-card__header {
+.transit-node-card__header {
   background: transparent !important;
   border-bottom: 0 !important;
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
 }
 
-.panda-node-card {
+.transit-node-card {
   container-type: inline-size;
 }
 
@@ -262,9 +262,9 @@ const statusEdgeTone = computed(() => {
 }
 
 .node-card-cell {
-  border: 1px solid var(--panda-divider);
+  border: 1px solid var(--transit-divider);
   border-radius: 0.65rem;
-  background: var(--panda-cell-bg);
+  background: var(--transit-cell-bg);
 }
 
 @container (min-width: 22rem) {
@@ -288,7 +288,7 @@ const statusEdgeTone = computed(() => {
 }
 
 @container (max-width: 21rem) {
-  .panda-node-card__header > div:first-child {
+  .transit-node-card__header > div:first-child {
     gap: 0.5rem;
   }
 
@@ -305,23 +305,23 @@ const statusEdgeTone = computed(() => {
   }
 }
 
-.panda-node-card[data-panda-node-card-size='mini'] {
+.transit-node-card[data-transit-node-card-size='mini'] {
   padding: 0.75rem;
 }
 
-.panda-node-card[data-panda-node-card-size='mini'] [data-node-resource-grid] {
+.transit-node-card[data-transit-node-card-size='mini'] [data-node-resource-grid] {
   gap: 0.55rem;
 }
 
-.panda-node-card[data-panda-node-card-size='mini'] footer {
+.transit-node-card[data-transit-node-card-size='mini'] footer {
   display: none;
 }
 
-.panda-node-card[data-panda-node-card-size='comfortable'] {
+.transit-node-card[data-transit-node-card-size='comfortable'] {
   padding: 1rem;
 }
 
-.panda-node-card[data-panda-node-card-size='large'] {
+.transit-node-card[data-transit-node-card-size='large'] {
   padding: 1.1rem;
 }
 </style>

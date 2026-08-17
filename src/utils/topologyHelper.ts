@@ -1,3 +1,5 @@
+import { formatCityNameZh } from '@/utils/cityNameHelper'
+
 export interface TopologyNodeConfig {
   name: string
   region: string
@@ -39,6 +41,7 @@ export interface TopologyQuickNode {
 const TOPOLOGY_PROBE_SEPARATOR_PATTERN = /[\s\-_—–·]+/g
 const TOPOLOGY_NODE_RESERVED_PATTERN = /[|;]/
 const TOPOLOGY_METRIC_RESERVED_PATTERN = /@|;|\|\|/
+const CJK_UNIFIED_IDEOGRAPH_REGEX = /\p{Script=Han}/u
 
 export const TOPOLOGY_LIMITS = Object.freeze({
   maxRoutes: 50,
@@ -160,7 +163,7 @@ function quickNodeRank(node: TopologyQuickNode): number {
   return 1
 }
 
-function getQuickTopologyNodes<T extends TopologyQuickNode>(nodes: readonly T[]): T[] {
+export function listQuickTopologyNodes<T extends TopologyQuickNode>(nodes: readonly T[]): T[] {
   const nameCounts = new Map<string, number>()
   for (const node of nodes) {
     const name = node.name.trim().toLowerCase()
@@ -180,7 +183,7 @@ function getQuickTopologyNodes<T extends TopologyQuickNode>(nodes: readonly T[])
 }
 
 export function getQuickTopologySourceNode<T extends TopologyQuickNode>(nodes: readonly T[]): T | null {
-  return getQuickTopologyNodes(nodes)[0] ?? null
+  return listQuickTopologyNodes(nodes)[0] ?? null
 }
 
 export function findUniqueTopologyNode<T extends Pick<TopologyQuickNode, 'name'>>(nodes: readonly T[], name: string): T | undefined {
@@ -231,21 +234,158 @@ export function pickQuickTopologyTaskName(taskNames: readonly string[], probe: T
     ?? probe.taskFilter
 }
 
-export function buildQuickTopologyRoute(nodes: readonly TopologyQuickNode[], taskNames: readonly string[] = [], sourceUuid = ''): TopologyRouteConfig | null {
-  const candidates = getQuickTopologyNodes(nodes)
-  const source = sourceUuid
-    ? candidates.find(node => node.uuid === sourceUuid)
+function namesLooselyMatch(left: string, right: string): boolean {
+  if (!left || !right)
+    return false
+  if (left === right)
+    return true
+  const shorter = left.length <= right.length ? left : right
+  const longer = left.length <= right.length ? right : left
+  if (CJK_UNIFIED_IDEOGRAPH_REGEX.test(shorter))
+    return shorter.length >= 3 ? longer.includes(shorter) : shorter.length === 2 && longer.startsWith(shorter)
+  return shorter.length >= 4 && longer.includes(shorter)
+}
+
+function hopMatchAliases(value: string): string[] {
+  const aliases = new Set<string>()
+  const normalized = normalizePingTaskName(value)
+  if (normalized)
+    aliases.add(normalized)
+  const cityZh = formatCityNameZh(value)
+  if (cityZh)
+    aliases.add(normalizePingTaskName(cityZh))
+  return [...aliases]
+}
+
+export function pickQuickHopTaskName(
+  taskNames: readonly string[],
+  targetName: string,
+  excludeTask = '',
+): string {
+  const excluded = normalizePingTaskName(excludeTask)
+  const targetAliases = hopMatchAliases(targetName)
+  if (!targetAliases.length)
+    return ''
+
+  const usable = normalizeQuickTopologyTaskNames(taskNames)
+    .filter(task => normalizePingTaskName(task) !== excluded)
+
+  return usable.find(task => hopMatchAliases(task).some(alias => targetAliases.includes(alias)))
+    ?? usable.find(task => hopMatchAliases(task).some(alias => targetAliases.some(target => namesLooselyMatch(alias, target))))
+    ?? ''
+}
+
+export interface QuickTopologyRouteOptions {
+  sourceUuid?: string
+  landingUuid?: string | null
+  sourceTasks?: readonly string[]
+  hopTask?: string
+}
+
+export function nextQuickLandingUuid(
+  sourceUuid: string,
+  selectedLandingUuid: string,
+  candidateUuids: readonly string[],
+  initialize = false,
+  unusedLandingUuids: readonly string[] = [],
+): string {
+  const landings = candidateUuids.filter(uuid => uuid && uuid !== sourceUuid)
+  const preferred = unusedLandingUuids.filter(uuid => landings.includes(uuid))
+  if (!selectedLandingUuid)
+    return initialize ? (preferred[0] ?? landings[0] ?? '') : ''
+  if (landings.includes(selectedLandingUuid))
+    return selectedLandingUuid
+  return preferred[0] ?? landings[0] ?? ''
+}
+
+export function getTopologyRouteEndpoints(route: Pick<TopologyRouteConfig, 'nodes'>): { source: string, landing: string } {
+  return {
+    source: route.nodes[1]?.name.trim().toLowerCase() ?? '',
+    landing: route.nodes[2]?.name.trim().toLowerCase() ?? '',
+  }
+}
+
+export function findDuplicateTopologyRouteIndex(
+  routes: readonly Pick<TopologyRouteConfig, 'nodes'>[],
+  sourceName: string,
+  landingName = '',
+): number {
+  const source = sourceName.trim().toLowerCase()
+  const landing = landingName.trim().toLowerCase()
+  if (!source)
+    return -1
+  return routes.findIndex((route) => {
+    const ends = getTopologyRouteEndpoints(route)
+    return ends.source === source && ends.landing === landing
+  })
+}
+
+export function listUnusedQuickLandingUuids(
+  routes: readonly Pick<TopologyRouteConfig, 'nodes'>[],
+  sourceName: string,
+  candidates: readonly TopologyQuickNode[],
+  sourceUuid = '',
+): string[] {
+  return candidates.flatMap((node) => {
+    const uuid = node.uuid?.trim()
+    if (!uuid || uuid === sourceUuid)
+      return []
+    return findDuplicateTopologyRouteIndex(routes, sourceName, node.name) < 0 ? [uuid] : []
+  })
+}
+
+function isQuickTopologyRouteOptions(value: unknown): value is QuickTopologyRouteOptions {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function resolveQuickTopologyLanding<T extends TopologyQuickNode>(
+  candidates: readonly T[],
+  source: T,
+  landingUuid?: string | null,
+): T | undefined | null {
+  if (landingUuid === null || landingUuid === '')
+    return undefined
+
+  if (typeof landingUuid === 'string') {
+    const landing = candidates.find(node => node.uuid === landingUuid)
+    if (!landing || landing === source)
+      return null
+    return landing
+  }
+
+  const sourceName = source.name.trim().toLowerCase()
+  return candidates.find(node => node !== source && node.name.trim().toLowerCase() !== sourceName)
+}
+
+export function buildQuickTopologyRoute(
+  nodes: readonly TopologyQuickNode[],
+  taskNamesOrOptions: readonly string[] | QuickTopologyRouteOptions = [],
+  sourceUuid = '',
+): TopologyRouteConfig | null {
+  const options = isQuickTopologyRouteOptions(taskNamesOrOptions)
+    ? taskNamesOrOptions
+    : { sourceTasks: taskNamesOrOptions, sourceUuid }
+  const candidates = listQuickTopologyNodes(nodes)
+  const source = options.sourceUuid
+    ? candidates.find(node => node.uuid === options.sourceUuid)
     : candidates[0]
   if (!source)
     return null
 
+  const landing = resolveQuickTopologyLanding(candidates, source, options.landingUuid)
+  if (landing === null)
+    return null
+
   const configuredNames = new Set(candidates.map(node => node.name.trim().toLowerCase()))
-  const usableTaskNames = normalizeQuickTopologyTaskNames(taskNames)
+  const usableTaskNames = normalizeQuickTopologyTaskNames(options.sourceTasks ?? [])
   const probe = findQuickTopologyTaskProbe(usableTaskNames)
-  const taskFilter = probe ? pickQuickTopologyTaskName(usableTaskNames, probe) : usableTaskNames[0] ?? ''
+  const entryTask = probe ? pickQuickTopologyTaskName(usableTaskNames, probe) : usableTaskNames[0] ?? ''
+  const hopTask = landing
+    ? (options.hopTask === undefined
+        ? pickQuickHopTaskName(usableTaskNames, landing.name, entryTask)
+        : normalizeQuickTopologyTaskNames([options.hopTask]).find(task => task !== entryTask) ?? '')
+    : ''
   const entryLabel = probe?.label ?? '自定义入口'
-  const sourceName = source.name.trim().toLowerCase()
-  const landing = candidates.find(node => node !== source && node.name.trim().toLowerCase() !== sourceName)
 
   return createTopologyRoute(
     [
@@ -254,8 +394,14 @@ export function buildQuickTopologyRoute(nodes: readonly TopologyQuickNode[], tas
       { name: landing?.name.trim() ?? '', region: landing?.region?.trim() ?? '', role: '落地机' },
     ],
     [
-      { live: Boolean(taskFilter), nodeName: taskFilter ? source.name.trim() : '', taskFilter, fallbackLatency: null, fallbackLoss: null },
-      { live: false, nodeName: '', taskFilter: '', fallbackLatency: null, fallbackLoss: null },
+      { live: Boolean(entryTask), nodeName: entryTask ? source.name.trim() : '', taskFilter: entryTask, fallbackLatency: null, fallbackLoss: null },
+      {
+        live: Boolean(hopTask),
+        nodeName: hopTask ? source.name.trim() : '',
+        taskFilter: hopTask,
+        fallbackLatency: null,
+        fallbackLoss: null,
+      },
     ],
   )
 }
@@ -295,7 +441,9 @@ export function parseTopologyRoutes(routeValue: string, metricValue: string): To
     if (parseErrors.length)
       route.parseErrors = parseErrors
     return route
-  }).filter(route => route.nodes.some(node => node.name.trim()))
+  }).filter((route, index) => route.nodes.some(node => node.name.trim())
+    || Boolean(metricGroups[index]?.trim())
+    || Boolean(route.parseErrors?.length))
 
   if (globalErrors.length) {
     const firstRoute = parsedRoutes[0] ?? createTopologyRoute(
@@ -358,6 +506,7 @@ export function validateTopologyRoutes(routes: TopologyRouteConfig[]): string[] 
   if (!routes.length)
     return []
 
+  const seenEndpoints = new Map<string, number>()
   return routes.flatMap((route, routeIndex) => {
     const errors: string[] = []
     const routeLabel = `第 ${routeIndex + 1} 条线路`
@@ -381,6 +530,16 @@ export function validateTopologyRoutes(routes: TopologyRouteConfig[]): string[] 
       errors.push(`${routeLabel}地区不能超过 ${TOPOLOGY_LIMITS.regionLength} 个字符`)
     if (nodes.some(node => node.role.length > TOPOLOGY_LIMITS.roleLength))
       errors.push(`${routeLabel}角色不能超过 ${TOPOLOGY_LIMITS.roleLength} 个字符`)
+
+    const endpoints = getTopologyRouteEndpoints(route)
+    if (route.enabled && endpoints.source) {
+      const endpointKey = `${endpoints.source}\u0000${endpoints.landing}`
+      const duplicateOf = seenEndpoints.get(endpointKey)
+      if (duplicateOf !== undefined)
+        errors.push(`${routeLabel}与第 ${duplicateOf + 1} 条线路使用了相同的线路机和落地机`)
+      else
+        seenEndpoints.set(endpointKey, routeIndex)
+    }
 
     const segmentCount = Math.max(1, lastConfiguredIndex)
     route.metrics.slice(0, segmentCount).forEach((metric, metricIndex) => {
@@ -437,16 +596,33 @@ function isLegacyTopologyMetricBoundary(value: string | undefined): boolean {
   return trimmed === '' || trimmed === '-' || Number.isFinite(Number(trimmed))
 }
 
+function isKnownLegacyProbeParts(city: string | undefined, carrier: string | undefined): boolean {
+  const normalizedCity = normalizePingTaskName(city?.trim() ?? '')
+  const normalizedCarrier = normalizePingTaskName(carrier?.trim() ?? '')
+  if (!normalizedCity || !normalizedCarrier)
+    return false
+
+  return TOPOLOGY_PROBE_OPTIONS.some((option) => {
+    const carriers = [option.carrier]
+    const prefixes = [option.city, option.label.slice(0, -option.carrier.length), option.taskFilter.slice(0, -option.carrier.length)]
+    return carriers.some(value => normalizePingTaskName(value) === normalizedCarrier)
+      && prefixes.some(value => normalizePingTaskName(value) === normalizedCity)
+  })
+}
+
 export function parseTopologyMetric(value: string): TopologyMetricConfig {
   const normalized = value.trim()
   if (!normalized.startsWith('live@')) {
-    const [latency, loss] = normalized.split(',')
+    const parts = normalized.split(',')
+    const [latency, loss] = parts
+    const parseErrors = parts.length > 2 ? ['静态指标包含非法“,”分隔符'] : []
     return {
       live: false,
       nodeName: '',
       taskFilter: '',
       fallbackLatency: parseNumber(latency),
       fallbackLoss: parseNumber(loss),
+      ...(parseErrors.length ? { parseErrors } : {}),
     }
   }
 
@@ -457,7 +633,7 @@ export function parseTopologyMetric(value: string): TopologyMetricConfig {
   const legacyFormat = parts.length === 6
     && isLegacyTopologyMetricBoundary(parts[4])
     && isLegacyTopologyMetricBoundary(parts[5])
-    && Boolean(findTopologyProbeKey(legacyTaskFilter))
+    && isKnownLegacyProbeParts(parts[2], parts[3])
   if (parts.length !== 5 && !legacyFormat)
     parseErrors.push('实时指标包含非法“@”分隔符')
   const nodeName = parts[1]?.trim() ?? ''

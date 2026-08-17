@@ -2,14 +2,18 @@ import { describe, expect, test } from 'bun:test'
 import {
   buildQuickTopologyRoute,
   createTopologyRoute,
+  findDuplicateTopologyRouteIndex,
   findTopologyProbeKey,
   findUniqueTopologyNode,
   formatTopologyMetricForProbe,
   formatTopologyTelemetryLabel,
   getQuickTopologySourceNode,
   getTopologyProbeStorageKey,
+  listUnusedQuickLandingUuids,
+  nextQuickLandingUuid,
   parseTopologyMetric,
   parseTopologyRoutes,
+  pickQuickHopTaskName,
   pickQuickTopologyTaskName,
   serializeTopologyRoutes,
   splitTopologyGroups,
@@ -252,6 +256,98 @@ describe('quick topology configuration', () => {
     expect(pickQuickTopologyTaskName(['上海移动备用', '探测任务'])).toBe('上海移动备用')
     expect(buildQuickTopologyRoute([])).toBeNull()
   })
+
+  test('binds the second hop only when a source task matches the landing node', () => {
+    const route = buildQuickTopologyRoute([
+      { uuid: 'relay', name: '线路机-东京', region: 'JP', online: true },
+      { uuid: 'exit', name: '落地机-洛杉矶', region: 'US', online: true },
+    ], {
+      sourceUuid: 'relay',
+      landingUuid: 'exit',
+      sourceTasks: ['北京电信', '落地机-洛杉矶', '备用探测'],
+    })
+
+    expect(route?.nodes.map(node => node.name)).toEqual(['北京电信', '线路机-东京', '落地机-洛杉矶'])
+    expect(route?.metrics[0]).toMatchObject({ live: true, nodeName: '线路机-东京', taskFilter: '北京电信' })
+    expect(route?.metrics[1]).toMatchObject({ live: true, nodeName: '线路机-东京', taskFilter: '落地机-洛杉矶' })
+    expect(validateTopologyRoutes(route ? [route] : [])).toEqual([])
+    expect(pickQuickHopTaskName(['北京电信', 'Relay-to-落地机-洛杉矶'], '落地机-洛杉矶', '北京电信')).toBe('Relay-to-落地机-洛杉矶')
+    expect(pickQuickHopTaskName(['北京电信', 'Tokyo'], '东京-高负载', '北京电信')).toBe('Tokyo')
+    expect(pickQuickHopTaskName(['北京电信', '香港'], '香港边缘节点-超长名称布局测试', '北京电信')).toBe('香港')
+  })
+
+  test('keeps a two-node draft when the landing is left empty', () => {
+    const route = buildQuickTopologyRoute([
+      { uuid: 'relay', name: '线路机-东京', region: 'JP', online: true },
+      { uuid: 'exit', name: '落地机-洛杉矶', region: 'US', online: true },
+    ], {
+      sourceUuid: 'relay',
+      landingUuid: '',
+      sourceTasks: ['北京电信'],
+    })
+
+    expect(route?.nodes.map(node => node.name)).toEqual(['北京电信', '线路机-东京', ''])
+    expect(route?.metrics[1]).toMatchObject({ live: false, taskFilter: '' })
+    expect(validateTopologyRoutes(route ? [route] : [])).toEqual([])
+  })
+
+  test('keeps an explicitly empty landing selection empty until initialized', () => {
+    expect(nextQuickLandingUuid('relay', '', ['relay', 'exit'], true)).toBe('exit')
+    expect(nextQuickLandingUuid('relay', '', ['relay', 'exit'], false)).toBe('')
+    expect(nextQuickLandingUuid('relay', 'gone', ['relay', 'exit'], false)).toBe('exit')
+    expect(nextQuickLandingUuid('relay', '', ['relay', 'used', 'free'], true, ['free'])).toBe('free')
+    expect(listUnusedQuickLandingUuids(
+      [{ nodes: [{ name: '入口', region: 'CN', role: '入口' }, { name: '线路机-东京', region: 'JP', role: '线路机' }, { name: '落地机-洛杉矶', region: 'US', role: '落地机' }] }],
+      '线路机-东京',
+      [
+        { uuid: 'relay', name: '线路机-东京' },
+        { uuid: 'used', name: '落地机-洛杉矶' },
+        { uuid: 'free', name: '落地机-新加坡' },
+      ],
+      'relay',
+    )).toEqual(['free'])
+  })
+
+  test('uses an explicit hop task instead of guessing the landing name', () => {
+    const route = buildQuickTopologyRoute([
+      { uuid: 'relay', name: '线路机-东京', region: 'JP', online: true },
+      { uuid: 'exit', name: '落地机-洛杉矶', region: 'US', online: true },
+    ], {
+      sourceUuid: 'relay',
+      landingUuid: 'exit',
+      sourceTasks: ['北京电信', 'to-us'],
+      hopTask: 'to-us',
+    })
+
+    expect(route?.metrics[1]).toMatchObject({ live: true, nodeName: '线路机-东京', taskFilter: 'to-us' })
+  })
+
+  test('detects a duplicate relay and landing pair', () => {
+    const route = buildQuickTopologyRoute([
+      { uuid: 'relay', name: '线路机-东京', online: true },
+      { uuid: 'exit', name: '落地机-洛杉矶', online: true },
+    ], { sourceUuid: 'relay', landingUuid: 'exit', sourceTasks: ['北京电信'] })
+
+    expect(findDuplicateTopologyRouteIndex(route ? [route] : [], '线路机-东京', '落地机-洛杉矶')).toBe(0)
+    expect(findDuplicateTopologyRouteIndex(route ? [route] : [], '线路机-东京', '')).toBe(-1)
+  })
+
+  test('does not invent a second hop from an unrelated leftover task', () => {
+    const route = buildQuickTopologyRoute([
+      { uuid: 'relay', name: '线路机-东京', region: 'JP', online: true },
+      { uuid: 'exit', name: '落地机-洛杉矶', region: 'US', online: true },
+    ], {
+      sourceUuid: 'relay',
+      landingUuid: 'exit',
+      sourceTasks: ['北京电信', '上海移动'],
+    })
+
+    expect(route?.metrics[1]).toMatchObject({ live: false, taskFilter: '' })
+    expect(pickQuickHopTaskName(['北京电信', '节点'], '香港边缘节点-超长名称布局测试', '北京电信')).toBe('')
+    expect(buildQuickTopologyRoute([
+      { uuid: 'relay', name: '线路机-东京', online: true },
+    ], { sourceUuid: 'relay', landingUuid: 'missing' })).toBeNull()
+  })
 })
 
 describe('topology configuration validation', () => {
@@ -311,6 +407,29 @@ describe('topology configuration validation', () => {
       parseErrors: ['实时指标包含非法“@”分隔符'],
     })
     expect(validateTopologyRoutes(route ? [route] : [])).toContain('第 1 条线路第 1 段实时指标包含非法“@”分隔符')
+    for (const rawMetric of ['live@B@北京电@信@10@0', 'live@B@北@京电信@10@0']) {
+      expect(parseTopologyMetric(rawMetric).parseErrors).toEqual(['实时指标包含非法“@”分隔符'])
+    }
+  })
+
+  test('keeps orphan and malformed static metrics visible so save is blocked', () => {
+    const orphanRoutes = parseTopologyRoutes('', 'live@B@task@with@10@0')
+    const staticMetric = parseTopologyMetric('10,0,99')
+
+    expect(orphanRoutes).toHaveLength(1)
+    expect(validateTopologyRoutes(orphanRoutes)).toContain('第 1 条线路第 1 段实时指标包含非法“@”分隔符')
+    expect(staticMetric.parseErrors).toEqual(['静态指标包含非法“,”分隔符'])
+    expect(validateTopologyRoutes(parseTopologyRoutes('入口|CN|入口;线路机|JP|线路机', '10,0,99')))
+      .toContain('第 1 条线路第 1 段静态指标包含非法“,”分隔符')
+  })
+
+  test('rejects duplicate route endpoints regardless of how they were added', () => {
+    const routes = parseTopologyRoutes(
+      '入口一|CN|入口;线路机|JP|线路机;落地机|US|落地机||入口二|CN|入口;线路机|JP|线路机;落地机|US|落地机',
+      '10,0;20,0||11,0;21,0',
+    )
+
+    expect(validateTopologyRoutes(routes)).toContain('第 2 条线路与第 1 条线路使用了相同的线路机和落地机')
   })
 
   test('keeps explicit legacy live metrics only when the numeric fallback boundary is unambiguous', () => {

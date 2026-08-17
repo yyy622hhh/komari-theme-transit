@@ -3,7 +3,7 @@ import type { NodeData } from '@/stores/nodes'
 import type { CurrencyCode } from '@/utils/financeHelper'
 import { computed, onMounted, ref } from 'vue'
 import NetworkTopology from '@/components/NetworkTopology.vue'
-import PandaOpsAlertStrip from '@/components/PandaOpsAlertStrip.vue'
+import TransitAlertStrip from '@/components/TransitAlertStrip.vue'
 import { useDailyExchangeRates } from '@/composables/useDailyExchangeRates'
 import { useAppStore } from '@/stores/app'
 import * as financeHelper from '@/utils/financeHelper'
@@ -17,8 +17,8 @@ const excludeFreeNodes = ref(true)
 
 const showPrice = computed(() => appStore.isLoggedIn || !appStore.hidePriceWhenLoggedOut)
 const { rates: exchangeRates } = useDailyExchangeRates(showPrice)
-const maintenanceNodes = computed(() => props.nodes.filter(node => appStore.pandaOpsNodeControls[node.uuid]?.maintenanceUntil))
-const serviceNodes = computed(() => props.nodes.filter(node => !appStore.pandaOpsNodeControls[node.uuid]?.maintenanceUntil))
+const maintenanceNodes = computed(() => props.nodes.filter(node => appStore.nodeControls[node.uuid]?.maintenanceUntil))
+const serviceNodes = computed(() => props.nodes.filter(node => !appStore.nodeControls[node.uuid]?.maintenanceUntil))
 const onlineNodes = computed(() => serviceNodes.value.filter(node => node.online))
 
 const totals = computed(() => {
@@ -59,8 +59,8 @@ onMounted(() => {
 <template>
   <section id="asset-summary" class="relative z-1 scroll-mt-20 px-4 pb-3 pt-3">
     <div class="mx-auto max-w-[1560px] space-y-3">
-      <div class="panda-panel telemetry-scroll rounded-2xl">
-        <div class="panda-telemetry-grid grid min-w-[840px] grid-cols-[0.82fr_1.28fr_1.28fr_1fr_1.18fr_1.5fr] divide-x">
+      <div class="transit-panel telemetry-scroll rounded-2xl">
+        <div class="transit-telemetry-grid grid min-w-[840px] grid-cols-[0.82fr_1.28fr_1.28fr_1fr_1.18fr_1.5fr] divide-x">
           <div class="telemetry-item">
             <span>在线</span>
             <strong>{{ onlineNodes.length }} / {{ serviceNodes.length }} <em v-if="maintenanceNodes.length">维护 {{ maintenanceNodes.length }}</em></strong>
@@ -91,7 +91,7 @@ onMounted(() => {
         </div>
       </div>
 
-      <PandaOpsAlertStrip :nodes="nodes" />
+      <TransitAlertStrip :nodes="nodes" />
 
       <NetworkTopology v-if="appStore.topologyEnabled" embedded :nodes="nodes" />
     </div>
@@ -108,8 +108,8 @@ onMounted(() => {
   display: none;
 }
 
-.panda-telemetry-grid > :not(:last-child) {
-  border-color: var(--panda-divider);
+.transit-telemetry-grid > :not(:last-child) {
+  border-color: var(--transit-divider);
 }
 
 .telemetry-item {
@@ -121,7 +121,7 @@ onMounted(() => {
   padding: 0.75rem 1rem;
   white-space: nowrap;
   font-size: 0.72rem;
-  color: var(--panda-text-secondary);
+  color: var(--transit-text-secondary);
 }
 
 @media (max-width: 640px) {
@@ -129,21 +129,21 @@ onMounted(() => {
     overflow: hidden;
   }
 
-  .panda-telemetry-grid {
+  .transit-telemetry-grid {
     min-width: 0;
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
-  .panda-telemetry-grid > * {
+  .transit-telemetry-grid > * {
     border-inline-start-width: 0 !important;
   }
 
-  .panda-telemetry-grid > :not(:nth-child(3n + 1)) {
-    border-inline-start: 1px solid var(--panda-divider) !important;
+  .transit-telemetry-grid > :not(:nth-child(3n + 1)) {
+    border-inline-start: 1px solid var(--transit-divider) !important;
   }
 
-  .panda-telemetry-grid > :nth-child(n + 4) {
-    border-top: 1px solid var(--panda-divider);
+  .transit-telemetry-grid > :nth-child(n + 4) {
+    border-top: 1px solid var(--transit-divider);
   }
 
   .telemetry-item {
@@ -165,7 +165,7 @@ onMounted(() => {
 }
 
 .telemetry-item strong {
-  color: var(--panda-text-primary);
+  color: var(--transit-text-primary);
   font-size: 0.79rem;
   font-style: normal;
   font-weight: 600;
@@ -173,7 +173,7 @@ onMounted(() => {
 }
 
 .telemetry-item em {
-  color: var(--panda-text-tertiary);
+  color: var(--transit-text-tertiary);
   font-style: normal;
   font-weight: 500;
 }

@@ -32,7 +32,7 @@ const props = defineProps<ToasterProps>()
     </template>
     <template #loading-icon>
       <div>
-        <Icon icon="lucide:loader-2" class="size-4 animate-spin" />
+        <Icon icon="tabler:loader-2" class="size-4 animate-spin" />
       </div>
     </template>
     <template #close-icon>

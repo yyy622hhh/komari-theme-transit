@@ -1,19 +1,19 @@
 <script setup lang="ts">
 import type { NodeData } from '@/stores/nodes'
 import type { NodeCardPanelMode } from '@/utils/nodeCardPanel'
-import type { PandaOpsNodeControl } from '@/utils/pandaOpsNodeControl'
+import type { NodeControl } from '@/utils/nodeControl'
 import { Icon } from '@iconify/vue'
 import { computed, ref, watch } from 'vue'
 import { AppDialog } from '@/components/ui/app-dialog'
 import { Button } from '@/components/ui/button'
-import { recordPandaOpsControlEvent } from '@/composables/usePandaOpsIncidentTimeline'
+import { recordControlEvent } from '@/composables/useIncidentTimeline'
 import { loadPingTaskNamesForNode } from '@/services/metrics.service'
 import { saveNodeCardPanelConfigs } from '@/services/node-card-panel.service'
-import { savePandaOpsNodeControls } from '@/services/pandaOpsControl.service'
+import { saveNodeControls } from '@/services/node-control.service'
 import { useAppStore } from '@/stores/app'
 import { formatDateTime } from '@/utils/helper'
 import { NODE_CARD_PANEL_OPTIONS, nodeCardPanelModeLabel, updateNodeCardPanelConfig } from '@/utils/nodeCardPanel'
-import { formatNodeControlRemaining, updatePandaOpsNodeControl } from '@/utils/pandaOpsNodeControl'
+import { formatNodeControlRemaining, updateNodeControl } from '@/utils/nodeControl'
 
 const props = defineProps<{ open: boolean, node: NodeData | null }>()
 const emit = defineEmits<{ 'update:open': [open: boolean] }>()
@@ -30,8 +30,8 @@ const isOpen = computed({
   get: () => props.open,
   set: value => emit('update:open', value),
 })
-const control = computed<PandaOpsNodeControl>(() => props.node
-  ? appStore.pandaOpsNodeControls[props.node.uuid] ?? {}
+const control = computed<NodeControl>(() => props.node
+  ? appStore.nodeControls[props.node.uuid] ?? {}
   : {})
 const inheritedPanelLabel = computed(() => nodeCardPanelModeLabel(appStore.nodeCardPanelDefault))
 
@@ -122,24 +122,24 @@ async function savePanel(): Promise<void> {
   }
 }
 
-async function updateControl(key: keyof PandaOpsNodeControl, durationMinutes?: number): Promise<void> {
+async function updateControl(key: keyof NodeControl, durationMinutes?: number): Promise<void> {
   const node = props.node
   const publicSettings = appStore.publicSettings
   if (!node || !publicSettings)
     return
 
   const until = durationMinutes ? Date.now() + durationMinutes * 60_000 : undefined
-  const nextControls = updatePandaOpsNodeControl(appStore.pandaOpsNodeControls, node.uuid, key, until)
+  const nextControls = updateNodeControl(appStore.nodeControls, node.uuid, key, until)
   saving.value = key === 'maintenanceUntil' ? 'maintenance' : 'silence'
   try {
-    const payload = await savePandaOpsNodeControls({
+    const payload = await saveNodeControls({
       theme: publicSettings.theme,
       controls: nextControls,
     })
     appStore.publicSettings = { ...publicSettings, theme_settings: payload }
 
     if (key === 'maintenanceUntil') {
-      recordPandaOpsControlEvent(
+      recordControlEvent(
         node.uuid,
         node.name,
         until ? 'maintenanceStarted' : 'maintenanceEnded',
@@ -148,7 +148,7 @@ async function updateControl(key: keyof PandaOpsNodeControl, durationMinutes?: n
       window.$message?.success(until ? '维护状态已启用。' : '维护状态已结束。')
     }
     else {
-      recordPandaOpsControlEvent(
+      recordControlEvent(
         node.uuid,
         node.name,
         until ? 'silenced' : 'silenceEnded',
@@ -173,7 +173,7 @@ async function updateControl(key: keyof PandaOpsNodeControl, durationMinutes?: n
     description="配置节点卡片观测面板、临时维护和告警静默。"
     content-class="max-w-lg"
   >
-    <div v-if="node" class="space-y-3" data-panda-node-control-dialog>
+    <div v-if="node" class="space-y-3" data-transit-node-control-dialog>
       <section class="rounded-xl border border-border/65 bg-background/40 p-3" data-node-card-panel-settings>
         <div class="flex items-start gap-3">
           <Icon icon="tabler:layout-dashboard" :width="16" class="mt-0.5 shrink-0 text-emerald-600 dark:text-emerald-300" />

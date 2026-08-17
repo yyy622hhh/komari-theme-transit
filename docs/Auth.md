@@ -27,16 +27,18 @@ Sensitive actions call `requirePermission()` / `appStore.requireLoginPermission(
 - `auditLog` — Komari administrator audit log reads.
 - `diskPrediction` — disk-prediction history loading.
 - `providerGeoLookup` — detail/list provider geo metadata lookups.
+- `nodeCardPanel` — per-node and grouped observation-panel writes.
 
 ## Protected surfaces
 
 - Home advanced tools: topology, provider value, health summary, snapshot export.
-- Snapshot export: login verification plus optional export secondary password.
+- Snapshot export: login verification before composing or downloading a snapshot.
 - Health summary generation.
 - Disk prediction history loading.
 - Provider geo lookup for sensitive metadata.
 - Server-list tools and `admin:orderClients` writes.
 - Administrator audit log reads.
+- Per-node and grouped observation-panel writes.
 
 ## Public behavior
 

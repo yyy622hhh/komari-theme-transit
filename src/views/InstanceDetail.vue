@@ -2,7 +2,7 @@
 import type { DetailMetricCardKey } from '@/stores/app'
 import type { CurrencyCode } from '@/utils/financeHelper'
 import { Icon } from '@iconify/vue'
-import { computed, defineAsyncComponent, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ComponentErrorBoundary from '@/components/ComponentErrorBoundary.vue'
 import { Badge } from '@/components/ui/badge'
@@ -14,9 +14,10 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useDailyExchangeRates } from '@/composables/useDailyExchangeRates'
 import { useNodeProviderMetadata } from '@/composables/useNodeProviderMetadata'
 import { LOAD_RECORD_MAX_COUNT } from '@/constants/load'
-import { loadNodeLoadRecords } from '@/services/history.service'
+import { abortNodeLoadRecords, loadNodeLoadRecords } from '@/services/history.service'
 import { useAppStore } from '@/stores/app'
 import { useNodesStore } from '@/stores/nodes'
+import { createAsyncGeneration } from '@/utils/asyncGeneration'
 import { formatCityNameZh } from '@/utils/cityNameHelper'
 import { getCpuBenchmarkRating, getPassMarkCpuLookupUrl } from '@/utils/cpuBenchmark'
 import * as financeHelper from '@/utils/financeHelper'
@@ -36,9 +37,6 @@ const appStore = useAppStore()
 const nodesStore = useNodesStore()
 const financeCurrency = ref<CurrencyCode>('CNY')
 
-// 近一天网速峰值（B/s）
-const peakNetOut = ref(0)
-const peakNetIn = ref(0)
 const activeDetailSection = ref<'overview' | 'load' | 'ping'>('overview')
 const data = computed(() => nodesStore.visibleNodesByUuid.get(String(route.params.id)))
 const detailNodes = computed(() => nodesStore.visibleNodes)
@@ -47,8 +45,23 @@ const isFavoriteNode = computed(() => data.value ? appStore.isFavoriteNode(data.
 const showPrice = computed(() => appStore.privateFeaturesAllowed || !appStore.hidePriceWhenLoggedOut)
 const needsExchangeRates = computed(() => showPrice.value && appStore.detailMetricCardOrder.includes('remainingValue'))
 const { rates: exchangeRates } = useDailyExchangeRates(needsExchangeRates)
+const TRAFFIC_PEAK_HOURS = 24
+const trafficPeakRequests = createAsyncGeneration()
+const peakNetOut = ref(0)
+const peakNetIn = ref(0)
 
-let trafficPeakSeq = 0
+function applyTrafficPeaks(records: Array<{ net_in?: number, net_out?: number }>): void {
+  let up = 0
+  let down = 0
+  for (const record of records) {
+    if (typeof record.net_out === 'number' && record.net_out > up)
+      up = record.net_out
+    if (typeof record.net_in === 'number' && record.net_in > down)
+      down = record.net_in
+  }
+  peakNetOut.value = up
+  peakNetIn.value = down
+}
 
 const { getNodeProviderMetadata } = useNodeProviderMetadata({
   nodes: () => data.value ? [data.value] : [],
@@ -58,53 +71,50 @@ const { getNodeProviderMetadata } = useNodeProviderMetadata({
   geoPermission: 'providerGeoLookup',
 })
 
-async function loadTrafficPeakRecords(uuid: string): Promise<Array<{ net_in?: number, net_out?: number }>> {
-  if (!appStore.privateFeaturesAllowed)
-    return []
-
-  try {
-    return await loadNodeLoadRecords(uuid, 24, LOAD_RECORD_MAX_COUNT)
-  }
-  catch {
-    return []
-  }
-}
-
-// 拉取近一天负载记录，统计网速峰值（上/下行各自取最大瞬时值）
-async function fetchTrafficPeak(uuid: string): Promise<void> {
-  const seq = ++trafficPeakSeq
-  peakNetOut.value = 0
-  peakNetIn.value = 0
-
-  const records = await loadTrafficPeakRecords(uuid)
-  if (seq !== trafficPeakSeq || data.value?.uuid !== uuid)
-    return
-
-  let up = 0
-  let down = 0
-  for (const r of records) {
-    if (typeof r.net_out === 'number' && r.net_out > up)
-      up = r.net_out
-    if (typeof r.net_in === 'number' && r.net_in > down)
-      down = r.net_in
-  }
-  peakNetOut.value = up
-  peakNetIn.value = down
-}
-
 onMounted(() => {
   window.scrollTo({ top: 0, behavior: 'instant' })
   financeCurrency.value = financeHelper.getStoredFinanceCurrency()
 })
 
-// 当节点数据加载后尝试获取厂商信息
-// 注：节点 IP 通常不直接暴露，这里用节点 uuid 作为 fallback 标识
-// 如果 data.value 有 ip 字段则直接用，否则跳过
-watch(data, (node) => {
+onBeforeUnmount(() => {
+  trafficPeakRequests.dispose()
+})
+
+watch(data, () => {
   activeDetailSection.value = 'overview'
-  if (node)
-    void fetchTrafficPeak(node.uuid)
 }, { immediate: true })
+
+watch(
+  () => ({
+    uuid: data.value?.uuid ?? '',
+    allowed: appStore.privateFeaturesAllowed,
+  }),
+  async ({ uuid, allowed }, _previous, onCleanup) => {
+    const generation = trafficPeakRequests.begin()
+    onCleanup(() => {
+      trafficPeakRequests.invalidate()
+      if (uuid)
+        abortNodeLoadRecords(uuid, TRAFFIC_PEAK_HOURS, LOAD_RECORD_MAX_COUNT)
+    })
+
+    peakNetOut.value = 0
+    peakNetIn.value = 0
+    if (!allowed || !uuid)
+      return
+
+    try {
+      const records = await loadNodeLoadRecords(uuid, TRAFFIC_PEAK_HOURS, LOAD_RECORD_MAX_COUNT)
+      if (!trafficPeakRequests.isCurrent(generation))
+        return
+      applyTrafficPeaks(records)
+    }
+    catch {
+      if (trafficPeakRequests.isCurrent(generation))
+        applyTrafficPeaks([])
+    }
+  },
+  { immediate: true },
+)
 
 const cpuBenchmarkUrl = computed(() => getPassMarkCpuLookupUrl(data.value?.cpu_name ?? ''))
 const cpuBenchmarkRating = computed(() => getCpuBenchmarkRating(data.value?.cpu_name ?? ''))

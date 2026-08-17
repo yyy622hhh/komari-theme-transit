@@ -7,7 +7,7 @@ import { Icon } from '@iconify/vue'
 import { useMediaQuery, useStorageAsync } from '@vueuse/core'
 import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import PandaOpsIncidentTimelineDialog from '@/components/PandaOpsIncidentTimelineDialog.vue'
+import IncidentTimelineDialog from '@/components/IncidentTimelineDialog.vue'
 import TopologyEdgeMetric from '@/components/TopologyEdgeMetric.vue'
 import TopologyManagerDialog from '@/components/TopologyManagerDialog.vue'
 import TopologyProbeSelect from '@/components/TopologyProbeSelect.vue'
@@ -371,8 +371,8 @@ function routeRankingLabel(route: RouteRow): string {
     class="relative z-1 scroll-mt-20 pointer-events-auto"
     aria-labelledby="topology-title"
   >
-    <div class="panda-panel overflow-hidden rounded-2xl">
-      <header class="panda-divider flex min-h-12 items-center justify-between gap-3 border-b px-4 py-2 sm:px-5">
+    <div class="transit-panel overflow-hidden rounded-2xl">
+      <header class="transit-divider flex min-h-12 items-center justify-between gap-3 border-b px-4 py-2 sm:px-5">
         <div class="flex items-center gap-2">
           <Icon icon="tabler:route" :width="17" class="text-emerald-400" />
           <h2 id="topology-title" class="text-sm font-semibold">
@@ -386,8 +386,8 @@ function routeRankingLabel(route: RouteRow): string {
           <span class="size-1.5 rounded-full" :class="healthSummary.dot" />
           <button
             type="button"
-            data-panda-incident-timeline-button
-            class="panda-divider ml-1 inline-flex h-7 items-center gap-1 rounded-md border px-2 text-slate-600 transition-colors hover:border-emerald-500/30 hover:text-slate-900 dark:text-slate-400 dark:hover:border-emerald-400/25 dark:hover:text-slate-200"
+            data-transit-incident-timeline-button
+            class="transit-divider ml-1 inline-flex h-7 items-center gap-1 rounded-md border px-2 text-slate-600 transition-colors hover:border-emerald-500/30 hover:text-slate-900 dark:text-slate-400 dark:hover:border-emerald-400/25 dark:hover:text-slate-200"
             aria-label="查看异常时间线"
             @click="timelineOpen = true"
           >
@@ -397,7 +397,7 @@ function routeRankingLabel(route: RouteRow): string {
           <button
             v-if="appStore.privateFeaturesAllowed"
             type="button"
-            class="panda-divider ml-1 inline-flex h-7 items-center gap-1 rounded-md border px-2 text-slate-600 transition-colors hover:border-emerald-500/30 hover:text-slate-900 dark:text-slate-400 dark:hover:border-emerald-400/25 dark:hover:text-slate-200"
+            class="transit-divider ml-1 inline-flex h-7 items-center gap-1 rounded-md border px-2 text-slate-600 transition-colors hover:border-emerald-500/30 hover:text-slate-900 dark:text-slate-400 dark:hover:border-emerald-400/25 dark:hover:text-slate-200"
             @click="managerOpen = true"
           >
             <Icon icon="tabler:settings" :width="13" />管理
@@ -408,13 +408,13 @@ function routeRankingLabel(route: RouteRow): string {
       <nav
         v-if="directions.length > 1"
         aria-label="线路方向"
-        class="panda-divider topology-direction-scroll flex min-w-0 gap-1 overflow-x-auto border-b px-3 py-2 sm:px-4"
+        class="transit-divider topology-direction-scroll flex min-w-0 gap-1 overflow-x-auto border-b px-3 py-2 sm:px-4"
       >
         <button
           type="button"
           data-topology-direction
           class="shrink-0 rounded-md border px-2.5 py-1 text-[10px] transition-colors"
-          :class="activeDirection === 'all' ? 'border-emerald-500/30 bg-emerald-500/[0.07] text-emerald-700 dark:border-emerald-400/25 dark:bg-emerald-400/[0.055] dark:text-emerald-300' : 'panda-divider text-slate-600 hover:text-slate-900 dark:text-slate-500 dark:hover:text-slate-300'"
+          :class="activeDirection === 'all' ? 'border-emerald-500/30 bg-emerald-500/[0.07] text-emerald-700 dark:border-emerald-400/25 dark:bg-emerald-400/[0.055] dark:text-emerald-300' : 'transit-divider text-slate-600 hover:text-slate-900 dark:text-slate-500 dark:hover:text-slate-300'"
           :aria-pressed="activeDirection === 'all'"
           @click="activeDirection = 'all'"
         >
@@ -426,7 +426,7 @@ function routeRankingLabel(route: RouteRow): string {
           type="button"
           data-topology-direction
           class="shrink-0 rounded-md border px-2.5 py-1 text-[10px] transition-colors"
-          :class="activeDirection === direction.key ? 'border-emerald-500/30 bg-emerald-500/[0.07] text-emerald-700 dark:border-emerald-400/25 dark:bg-emerald-400/[0.055] dark:text-emerald-300' : 'panda-divider text-slate-600 hover:text-slate-900 dark:text-slate-500 dark:hover:text-slate-300'"
+          :class="activeDirection === direction.key ? 'border-emerald-500/30 bg-emerald-500/[0.07] text-emerald-700 dark:border-emerald-400/25 dark:bg-emerald-400/[0.055] dark:text-emerald-300' : 'transit-divider text-slate-600 hover:text-slate-900 dark:text-slate-500 dark:hover:text-slate-300'"
           :aria-pressed="activeDirection === direction.key"
           @click="activeDirection = direction.key"
         >
@@ -439,7 +439,7 @@ function routeRankingLabel(route: RouteRow): string {
           <article
             v-for="route in visibleRoutes"
             :key="route.key"
-            class="panda-divider panda-hover-surface group grid min-h-16 items-center gap-3 border-b px-2 transition-colors last:border-b-0"
+            class="transit-divider transit-hover-surface group grid min-h-16 items-center gap-3 border-b px-2 transition-colors last:border-b-0"
             :class="route.nodes[2] ? 'grid-cols-[144px_minmax(190px,1fr)_178px_minmax(190px,1fr)_190px]' : 'grid-cols-[144px_minmax(190px,1fr)_190px]'"
           >
             <div class="min-w-0">
@@ -493,7 +493,7 @@ function routeRankingLabel(route: RouteRow): string {
               :disabled="!route.nodes[1]?.node"
               @click="route.nodes[1] && openNode(route.nodes[1])"
             >
-              <span class="panda-dot-ring size-1.5 shrink-0 rounded-full ring-4" :class="!route.nodes[1]?.node ? 'bg-amber-400' : route.nodes[1].node.online ? 'bg-emerald-400' : 'bg-rose-400'" />
+              <span class="transit-dot-ring size-1.5 shrink-0 rounded-full ring-4" :class="!route.nodes[1]?.node ? 'bg-amber-400' : route.nodes[1].node.online ? 'bg-emerald-400' : 'bg-rose-400'" />
               <img
                 v-if="route.nodes[1]?.region"
                 :src="`/images/flags/${getRegionCode(route.nodes[1].region)}.svg`"
@@ -524,7 +524,7 @@ function routeRankingLabel(route: RouteRow): string {
                 :disabled="!route.nodes[2]?.node"
                 @click="route.nodes[2] && openNode(route.nodes[2])"
               >
-                <span class="panda-dot-ring size-1.5 shrink-0 rounded-full ring-4" :class="!route.nodes[2]?.node ? 'bg-amber-400' : route.nodes[2].node.online ? 'bg-emerald-400' : 'bg-rose-400'" />
+                <span class="transit-dot-ring size-1.5 shrink-0 rounded-full ring-4" :class="!route.nodes[2]?.node ? 'bg-amber-400' : route.nodes[2].node.online ? 'bg-emerald-400' : 'bg-rose-400'" />
                 <img
                   v-if="route.nodes[2]?.region"
                   :src="`/images/flags/${getRegionCode(route.nodes[2].region)}.svg`"
@@ -546,7 +546,7 @@ function routeRankingLabel(route: RouteRow): string {
           v-for="route in visibleRoutes"
           :key="route.key"
           data-topology-mobile-route
-          class="panda-divider border-b py-3 last:border-b-0"
+          class="transit-divider border-b py-3 last:border-b-0"
         >
           <div class="grid grid-cols-[22px_minmax(0,1fr)_auto] items-center gap-2">
             <span class="grid place-items-center">
@@ -555,7 +555,7 @@ function routeRankingLabel(route: RouteRow): string {
                 :data-status="getRouteHealth(route)"
                 role="img"
                 :aria-label="`线路状态：${routeStatusLabel(route)}`"
-                class="panda-dot-ring size-2 rounded-full ring-4"
+                class="transit-dot-ring size-2 rounded-full ring-4"
                 :class="routeDotClass(route)"
               />
             </span>
@@ -583,7 +583,7 @@ function routeRankingLabel(route: RouteRow): string {
           </div>
 
           <div class="grid grid-cols-[22px_minmax(0,1fr)] gap-2">
-            <span class="flex justify-center"><span class="panda-rail h-full w-px" /></span>
+            <span class="flex justify-center"><span class="transit-rail h-full w-px" /></span>
             <TopologyEdgeMetric
               mobile
               :metric="route.metrics[0] || '-,-'"
@@ -605,7 +605,7 @@ function routeRankingLabel(route: RouteRow): string {
             @click="route.nodes[1] && openNode(route.nodes[1])"
           >
             <span class="grid place-items-center">
-              <span class="panda-dot-ring size-1.5 rounded-full ring-4" :class="!route.nodes[1]?.node ? 'bg-amber-400' : route.nodes[1].node.online ? 'bg-emerald-400' : 'bg-rose-400'" />
+              <span class="transit-dot-ring size-1.5 rounded-full ring-4" :class="!route.nodes[1]?.node ? 'bg-amber-400' : route.nodes[1].node.online ? 'bg-emerald-400' : 'bg-rose-400'" />
             </span>
             <span class="flex min-w-0 items-center gap-2.5">
               <img
@@ -623,7 +623,7 @@ function routeRankingLabel(route: RouteRow): string {
 
           <template v-if="route.nodes[2]">
             <div class="grid grid-cols-[22px_minmax(0,1fr)] gap-2">
-              <span class="flex justify-center"><span class="panda-rail h-full w-px" /></span>
+              <span class="flex justify-center"><span class="transit-rail h-full w-px" /></span>
               <TopologyEdgeMetric
                 mobile
                 :metric="route.metrics[1] || '-,-'"
@@ -645,7 +645,7 @@ function routeRankingLabel(route: RouteRow): string {
               @click="route.nodes[2] && openNode(route.nodes[2])"
             >
               <span class="grid place-items-center">
-                <span class="panda-dot-ring size-1.5 rounded-full ring-4" :class="!route.nodes[2]?.node ? 'bg-amber-400' : route.nodes[2].node.online ? 'bg-emerald-400' : 'bg-rose-400'" />
+                <span class="transit-dot-ring size-1.5 rounded-full ring-4" :class="!route.nodes[2]?.node ? 'bg-amber-400' : route.nodes[2].node.online ? 'bg-emerald-400' : 'bg-rose-400'" />
               </span>
               <span class="flex min-w-0 items-center gap-2.5">
                 <img
@@ -684,7 +684,7 @@ function routeRankingLabel(route: RouteRow): string {
     class="relative z-1 scroll-mt-20 pointer-events-auto"
     aria-labelledby="topology-empty-title"
   >
-    <div class="panda-panel flex flex-col gap-3 rounded-2xl px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+    <div class="transit-panel flex flex-col gap-3 rounded-2xl px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
       <div class="flex min-w-0 items-start gap-3">
         <span class="grid size-9 shrink-0 place-items-center rounded-lg border border-emerald-500/20 bg-emerald-500/[0.07] text-emerald-600 dark:text-emerald-300">
           <Icon icon="tabler:route-square-2" :width="18" />
@@ -694,7 +694,7 @@ function routeRankingLabel(route: RouteRow): string {
             还没有配置线路
           </h2>
           <p class="mt-1 text-xs leading-5 text-slate-600 dark:text-slate-400">
-            选择入口、线路机和可选落地机，使用实时 Ping 任务或静态基线创建第一条网络拓扑。
+            选择线路机和落地机后快速生成第一条拓扑，也可手动绑定实时 Ping 任务或静态基线。
           </p>
         </div>
       </div>
@@ -708,7 +708,7 @@ function routeRankingLabel(route: RouteRow): string {
       </button>
     </div>
   </section>
-  <PandaOpsIncidentTimelineDialog v-model:open="timelineOpen" />
+  <IncidentTimelineDialog v-model:open="timelineOpen" />
   <TopologyManagerDialog v-model:open="managerOpen" :nodes="nodes" />
   <TopologyRouteDetailDialog v-model:open="detailOpen" :route="selectedRoute" :nodes="nodes" />
 </template>

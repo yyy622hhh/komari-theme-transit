@@ -23,21 +23,21 @@ async function getAccessibilityViolations(page: Parameters<typeof installKomariF
 }
 
 test('public home has no serious accessibility violations', async ({ page }) => {
-  await installKomariFixture(page, { pandaOps: true })
+  await installKomariFixture(page, { opsDashboard: true })
   await openReadyPage(page)
   await expectNoSeriousAccessibilityViolations(page)
   expect(await getAccessibilityViolations(page)).toEqual([])
 })
 
 test('authenticated detail view has no serious accessibility violations', async ({ page }) => {
-  await installKomariFixture(page, { authenticated: true, pandaOps: true })
+  await installKomariFixture(page, { authenticated: true, opsDashboard: true })
   await openReadyPage(page, '/instance/00000000-0000-4000-8000-000000000001')
   await expectNoSeriousAccessibilityViolations(page)
   expect(await getAccessibilityViolations(page)).toEqual([])
 })
 
 test('authenticated server list has no serious accessibility violations', async ({ page }) => {
-  await installKomariFixture(page, { authenticated: true, pandaOps: true })
+  await installKomariFixture(page, { authenticated: true, opsDashboard: true })
   await openReadyPage(page)
   await page.getByRole('button', { name: '显示首页工具' }).click()
   await page.getByRole('button', { name: /服务器：/ }).click()
@@ -58,14 +58,14 @@ test('high-contrast public home has no serious accessibility violations', async 
   await session.send('Emulation.setEmulatedMedia', {
     features: [{ name: 'prefers-contrast', value: 'more' }],
   })
-  await installKomariFixture(page, { colorVisionFriendly: true, pandaOps: true, visitorInfoEnabled: false })
+  await installKomariFixture(page, { colorVisionFriendly: true, opsDashboard: true, visitorInfoEnabled: false })
   await openReadyPage(page)
   await expectNoSeriousAccessibilityViolations(page)
 })
 
 test('authenticated mobile tools and dialogs have no accessibility violations', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
-  await installKomariFixture(page, { authenticated: true, pandaOps: true })
+  await installKomariFixture(page, { authenticated: true, opsDashboard: true })
   await openReadyPage(page)
 
   await page.getByRole('button', { name: '显示首页工具' }).click()
@@ -84,7 +84,7 @@ test('authenticated mobile tools and dialogs have no accessibility violations', 
 })
 
 test('keyboard sorting surfaces have no accessibility violations', async ({ page }) => {
-  await installKomariFixture(page, { authenticated: true, pandaOps: true })
+  await installKomariFixture(page, { authenticated: true, opsDashboard: true })
   await openReadyPage(page)
   await page.getByRole('button', { name: '编辑首页顺序' }).click()
   expect(await getAccessibilityViolations(page)).toEqual([])
@@ -93,7 +93,7 @@ test('keyboard sorting surfaces have no accessibility violations', async ({ page
 })
 
 test('all interactive controls expose an accessible name', async ({ page }) => {
-  await installKomariFixture(page, { authenticated: true, pandaOps: true })
+  await installKomariFixture(page, { authenticated: true, opsDashboard: true })
   await openReadyPage(page)
 
   async function expectNamedControls(scope = page.locator('body')): Promise<void> {
@@ -128,7 +128,7 @@ test('forced colors keeps focus and selected controls visually distinguishable',
   await session.send('Emulation.setEmulatedMedia', {
     features: [{ name: 'forced-colors', value: 'active' }],
   })
-  await installKomariFixture(page, { authenticated: true, pandaOps: true })
+  await installKomariFixture(page, { authenticated: true, opsDashboard: true })
   await openReadyPage(page)
 
   const toolsButton = page.getByRole('button', { name: '显示首页工具' })

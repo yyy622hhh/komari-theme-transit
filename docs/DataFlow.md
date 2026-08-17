@@ -83,7 +83,7 @@ Komari 1.4 uses the `/settings` endpoint. Permission, validation and server erro
 ## Node card insight panels
 
 ```text
-PandaOpsNodeControlDialog / ServerListPanel
+NodeControlDialog / ServerListPanel
   -> node-card-panel.service.ts
   -> ThemeSettingsService
   -> AuthService forced verification
@@ -99,7 +99,6 @@ Per-node overrides are keyed by node UUID and stored as the `nodeCardPanels` JSO
 ```text
 SnapshotExportPanel
   -> AuthService permission check
-  -> optional export secondary password
   -> Provider metadata lookup with snapshot export permission
   -> SnapshotService
   -> CSV helper / JSON download

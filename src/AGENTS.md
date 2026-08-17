@@ -14,7 +14,7 @@ Do not bypass this chain unless you are editing bootstrap/transport glue that al
 
 ## Where code belongs
 
-- `main.ts` — bootstrap only: create Vue app, install Pinia/router, load styles, set `window.$message`, run `setupIconify()`, mount App.
+- `main.ts` — bootstrap only: create Vue app, install Pinia/router, load styles, set `window.$message`, register bundled icons, mount App.
 - `App.vue` — app shell: layout, `<Toaster>`, `Provider`, `initApp()` / `destroyInitManager()`, `KeepAlive` for `HomeView`.
 - `router/` — exactly two public lazy routes: `/` and `/instance/:id`. Do not add broad router guards.
 - `views/` — route-level orchestration only.
@@ -28,7 +28,7 @@ Do not bypass this chain unless you are editing bootstrap/transport glue that al
 
 ## Stores
 
-- [stores/app.ts](stores/app.ts) owns public settings, normalized theme settings, login/auth state, layout flags, formatting preferences, theme mode, persisted UI state, and permission helpers. Its public type-only contract lives in `stores/app.types.ts`.
+- [stores/app.ts](stores/app.ts) owns public settings, login/auth state, layout flags, formatting preferences, theme mode, persisted UI state, and permission helpers. Preset tables and hosted-setting parsers live in `stores/app.settings.ts`. Its public type-only contract lives in `stores/app.types.ts`.
 - [stores/nodes.ts](stores/nodes.ts) owns normalized nodes, visible nodes, groups, WebSocket state, and live updates.
 
 Rules:
@@ -49,6 +49,7 @@ Protected paths include:
 - Snapshot export and export-specific provider metadata.
 - Disk-prediction history loading.
 - Provider geo lookup.
+- Per-node and grouped card-panel writes.
 
 Public node monitoring, including Ping latency/loss history, must remain available without login.
 
@@ -84,7 +85,7 @@ Cache/request keys must include every dimension that changes the result, especia
 - If a primitive is missing, follow the existing pattern: reka-ui + class-variance-authority + `cn()`.
 - Do not introduce Naive UI, UnoCSS, SCSS, or a new component library.
 - Component styling should use Tailwind utilities and design tokens from `styles/main.css`.
-- Use `@iconify/vue` for all icons. Lucide icons use the `lucide:` prefix.
+- Use `@iconify/vue` for all icons. Lucide icons use the `lucide:` prefix. Icons must be discoverable as `prefix:name` string literals so `bun run icons:generate` can pack them; do not fetch `api.iconify.design` at runtime.
 - Only app global is `window.$message`; do not assume `$dialog`, `$notification`, `$loadingBar`, or `$modal`.
 
 ## Views and async components

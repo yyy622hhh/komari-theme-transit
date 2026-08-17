@@ -1,16 +1,16 @@
 import type { CarrierPingDisplay } from '@/composables/useNodeCarrierPingDisplay'
 import type { NodeData } from '@/stores/nodes'
-import { PANDA_OPS_ALERT_THRESHOLDS } from '@/constants/pandaOps'
+import { OPS_ALERT_THRESHOLDS } from '@/constants/ops'
 import { getDiskPercentage, getMemoryPercentage, getTrafficUsedPercentage, hasTrafficLimit } from '@/utils/nodeMetricsHelper'
 
-export type PandaOpsAlertSeverity = 'warning' | 'critical'
+export type NodeAlertSeverity = 'warning' | 'critical'
 
-export interface PandaOpsAlert {
+export interface NodeAlert {
   key: string
   nodeUuid: string
   nodeName: string
   detail: string
-  severity: PandaOpsAlertSeverity
+  severity: NodeAlertSeverity
   icon: string
   score: number
 }
@@ -23,7 +23,7 @@ function metricAlert(
   warningAt: number,
   criticalAt: number,
   icon: string,
-): PandaOpsAlert | null {
+): NodeAlert | null {
   if (!Number.isFinite(value) || value < warningAt)
     return null
   const critical = value >= criticalAt
@@ -38,7 +38,7 @@ function metricAlert(
   }
 }
 
-export function getRealtimeNodeAlerts(node: NodeData): PandaOpsAlert[] {
+export function getRealtimeNodeAlerts(node: NodeData): NodeAlert[] {
   if (!node.online) {
     return [{
       key: `${node.uuid}:offline`,
@@ -52,13 +52,13 @@ export function getRealtimeNodeAlerts(node: NodeData): PandaOpsAlert[] {
   }
 
   const alerts = [
-    metricAlert(node, 'cpu', 'CPU', node.cpu, PANDA_OPS_ALERT_THRESHOLDS.cpu.warning, PANDA_OPS_ALERT_THRESHOLDS.cpu.critical, 'tabler:cpu'),
-    metricAlert(node, 'memory', '内存', getMemoryPercentage(node), PANDA_OPS_ALERT_THRESHOLDS.memory.warning, PANDA_OPS_ALERT_THRESHOLDS.memory.critical, 'tabler:device-sd-card'),
-    metricAlert(node, 'disk', '磁盘', getDiskPercentage(node), PANDA_OPS_ALERT_THRESHOLDS.disk.warning, PANDA_OPS_ALERT_THRESHOLDS.disk.critical, 'tabler:server-2'),
+    metricAlert(node, 'cpu', 'CPU', node.cpu, OPS_ALERT_THRESHOLDS.cpu.warning, OPS_ALERT_THRESHOLDS.cpu.critical, 'tabler:cpu'),
+    metricAlert(node, 'memory', '内存', getMemoryPercentage(node), OPS_ALERT_THRESHOLDS.memory.warning, OPS_ALERT_THRESHOLDS.memory.critical, 'tabler:device-sd-card'),
+    metricAlert(node, 'disk', '磁盘', getDiskPercentage(node), OPS_ALERT_THRESHOLDS.disk.warning, OPS_ALERT_THRESHOLDS.disk.critical, 'tabler:server-2'),
     hasTrafficLimit(node)
-      ? metricAlert(node, 'traffic', '流量额度', getTrafficUsedPercentage(node), PANDA_OPS_ALERT_THRESHOLDS.traffic.warning, PANDA_OPS_ALERT_THRESHOLDS.traffic.critical, 'tabler:arrows-transfer-up-down')
+      ? metricAlert(node, 'traffic', '流量额度', getTrafficUsedPercentage(node), OPS_ALERT_THRESHOLDS.traffic.warning, OPS_ALERT_THRESHOLDS.traffic.critical, 'tabler:arrows-transfer-up-down')
       : null,
-  ].filter((alert): alert is PandaOpsAlert => Boolean(alert))
+  ].filter((alert): alert is NodeAlert => Boolean(alert))
 
   return alerts.sort((left, right) => right.score - left.score)
 }
@@ -75,7 +75,7 @@ export function getCarrierNodeAlert(
   node: NodeData,
   carriers: CarrierPingDisplay[],
   scopeLabel: string,
-): PandaOpsAlert | null {
+): NodeAlert | null {
   if (!node.online)
     return null
 
@@ -85,28 +85,28 @@ export function getCarrierNodeAlert(
       return []
     const loss = Number.parseFloat(carrier.lossDisplay)
     const latency = Number.parseFloat(carrier.latencyDisplay)
-    const result: PandaOpsAlert[] = []
+    const result: NodeAlert[] = []
 
-    if (Number.isFinite(loss) && loss > PANDA_OPS_ALERT_THRESHOLDS.carrierLoss.warning) {
+    if (Number.isFinite(loss) && loss > OPS_ALERT_THRESHOLDS.carrierLoss.warning) {
       result.push({
         key: `${node.uuid}:carrier:${carrier.key}:loss`,
         nodeUuid: node.uuid,
         nodeName: node.name,
         detail: `${prefix}${carrier.label}丢包 ${loss.toFixed(1)}%`,
-        severity: loss >= PANDA_OPS_ALERT_THRESHOLDS.carrierLoss.critical ? 'critical' : 'warning',
+        severity: loss >= OPS_ALERT_THRESHOLDS.carrierLoss.critical ? 'critical' : 'warning',
         icon: 'tabler:wave-sine',
-        score: (loss >= PANDA_OPS_ALERT_THRESHOLDS.carrierLoss.critical ? 240 : 140) + loss,
+        score: (loss >= OPS_ALERT_THRESHOLDS.carrierLoss.critical ? 240 : 140) + loss,
       })
     }
-    else if (Number.isFinite(latency) && latency > PANDA_OPS_ALERT_THRESHOLDS.carrierLatency.warning) {
+    else if (Number.isFinite(latency) && latency > OPS_ALERT_THRESHOLDS.carrierLatency.warning) {
       result.push({
         key: `${node.uuid}:carrier:${carrier.key}:latency`,
         nodeUuid: node.uuid,
         nodeName: node.name,
         detail: `${prefix}${carrier.label}延迟 ${Math.round(latency)} ms`,
-        severity: latency >= PANDA_OPS_ALERT_THRESHOLDS.carrierLatency.critical ? 'critical' : 'warning',
+        severity: latency >= OPS_ALERT_THRESHOLDS.carrierLatency.critical ? 'critical' : 'warning',
         icon: 'tabler:clock-exclamation',
-        score: (latency >= PANDA_OPS_ALERT_THRESHOLDS.carrierLatency.critical ? 220 : 120) + latency / 10,
+        score: (latency >= OPS_ALERT_THRESHOLDS.carrierLatency.critical ? 220 : 120) + latency / 10,
       })
     }
 
@@ -120,7 +120,7 @@ export function getPrimaryNodeAlert(
   node: NodeData,
   carriers: CarrierPingDisplay[] = [],
   scopeLabel = '',
-): PandaOpsAlert | null {
+): NodeAlert | null {
   const alerts = [...getRealtimeNodeAlerts(node)]
   const carrierAlert = getCarrierNodeAlert(node, carriers, scopeLabel)
   if (carrierAlert)

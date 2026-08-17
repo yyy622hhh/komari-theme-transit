@@ -32,7 +32,9 @@
     "test:visual:update": "bun run build-only && playwright test --update-snapshots",
     "lint": "eslint . --fix --cache",
     "lint:eslint": "eslint . --fix --cache",
-    "lint:check": "eslint ."
+    "lint:check": "eslint .",
+    "icons:generate": "bun scripts/generate-icon-collection.ts",
+    "icons:check": "bun scripts/generate-icon-collection.ts --check"
   },
   "dependencies": {
     "@iconify/vue": "^4.3.0",

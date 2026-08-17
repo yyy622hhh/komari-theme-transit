@@ -11,15 +11,21 @@ import './styles/main.css'
 
 window.$message = message
 
-setupIconify().catch((err) => {
-  logAppWarning('Iconify initialization failed', err)
-})
+async function bootstrap(): Promise<void> {
+  try {
+    await setupIconify()
+  }
+  catch (error) {
+    logAppWarning('Iconify initialization failed', error)
+  }
 
-const pinia = createPinia()
-const app = createApp(App)
-installGlobalErrorHandler(app)
+  const pinia = createPinia()
+  const app = createApp(App)
+  installGlobalErrorHandler(app)
 
-app.use(pinia)
-app.use(router)
+  app.use(pinia)
+  app.use(router)
+  app.mount('#app')
+}
 
-app.mount('#app')
+void bootstrap()

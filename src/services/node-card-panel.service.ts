@@ -11,7 +11,7 @@ export async function saveNodeCardPanelConfigs(options: SaveNodeCardPanelConfigs
   return saveManagedThemeSettings({
     theme: options.theme,
     patch: { nodeCardPanels: serializeNodeCardPanelConfigs(options.configs) },
-    permission: 'nodeTopology',
+    permission: 'nodeCardPanel',
     requestKey: `node-card-panels:${options.theme}`,
   })
 }

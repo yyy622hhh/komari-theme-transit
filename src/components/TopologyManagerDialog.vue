@@ -8,10 +8,11 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useTopologyManager } from '@/composables/useTopologyManager'
 import { loadPingTaskNamesForNode } from '@/services/metrics.service'
-import { findUniqueTopologyNode, TOPOLOGY_LIMITS } from '@/utils/topologyHelper'
+import { findUniqueTopologyNode, listUnusedQuickLandingUuids, nextQuickLandingUuid, TOPOLOGY_LIMITS } from '@/utils/topologyHelper'
 
 const props = defineProps<{ nodes: NodeData[], open: boolean }>()
 const emit = defineEmits<{ 'update:open': [open: boolean] }>()
+const QUICK_HOP_AUTO = '__auto__'
 const manager = reactive(useTopologyManager(() => props.nodes))
 const taskOptions = ref<Record<string, string[]>>({})
 const taskLoading = ref<Record<string, boolean>>({})
@@ -19,8 +20,38 @@ const taskErrors = ref<Record<string, string>>({})
 interface TaskLoadResult { tasks: string[], error: string }
 const taskRequests = new Map<string, Promise<TaskLoadResult>>()
 const quickConfiguring = ref(false)
+const quickSourceUuid = ref('')
+const quickLandingUuid = ref('')
+const quickHopTask = ref(QUICK_HOP_AUTO)
 let quickConfigurationRun = 0
 let dialogSession = 0
+
+const quickLandingOptions = computed(() => manager.quickNodes.filter(node => node.uuid !== quickSourceUuid.value))
+const quickSourceName = computed(() => manager.quickNodes.find(node => node.uuid === quickSourceUuid.value)?.name ?? '')
+const quickHopTaskOptions = computed(() => nodeTasks(quickSourceName.value))
+
+function unusedQuickLandingUuids(): string[] {
+  return listUnusedQuickLandingUuids(
+    manager.routes,
+    quickSourceName.value,
+    manager.quickNodes,
+    quickSourceUuid.value,
+  )
+}
+
+function syncQuickSelections(initialize = false): void {
+  const sources = manager.quickNodes
+  if (!sources.some(node => node.uuid === quickSourceUuid.value))
+    quickSourceUuid.value = sources[0]?.uuid ?? ''
+  const landingUuids = sources.map(node => node.uuid).filter((uuid): uuid is string => Boolean(uuid))
+  quickLandingUuid.value = nextQuickLandingUuid(
+    quickSourceUuid.value,
+    quickLandingUuid.value,
+    landingUuids,
+    initialize,
+    unusedQuickLandingUuids(),
+  )
+}
 
 const isOpen = computed({
   get: () => props.open,
@@ -31,13 +62,23 @@ watch(() => props.open, (value) => {
   dialogSession += 1
   if (value) {
     manager.reset()
-    const sourceNames = manager.routes.flatMap(route => route.metrics.map(metric => metric.nodeName)).filter(Boolean)
+    quickHopTask.value = QUICK_HOP_AUTO
+    syncQuickSelections(true)
+    const sourceNames = [
+      ...manager.routes.flatMap(route => route.metrics.map(metric => metric.nodeName)),
+      quickSourceName.value,
+    ].filter(Boolean)
     void Promise.all(Array.from(new Set(sourceNames), loadTasks))
   }
   else {
     cancelQuickConfiguration()
   }
 }, { immediate: true })
+
+watch(() => manager.quickNodes.map(node => node.uuid).join('|'), () => {
+  if (props.open)
+    syncQuickSelections()
+})
 
 onScopeDispose(() => {
   dialogSession += 1
@@ -136,16 +177,47 @@ async function save(): Promise<void> {
   }
 }
 
+function onQuickSourceChange(): void {
+  const landingName = manager.quickNodes.find(node => node.uuid === quickLandingUuid.value)?.name ?? ''
+  if (quickLandingUuid.value === quickSourceUuid.value || manager.findDuplicateRoute(quickSourceName.value, landingName) >= 0)
+    quickLandingUuid.value = ''
+  if (!quickLandingUuid.value)
+    syncQuickSelections(true)
+  if (quickHopTask.value !== QUICK_HOP_AUTO && !quickHopTaskOptions.value.includes(quickHopTask.value))
+    quickHopTask.value = QUICK_HOP_AUTO
+  if (quickSourceName.value)
+    void loadTasks(quickSourceName.value)
+}
+
+function focusTopologyRoute(routeId: number): void {
+  const routeElement = document.querySelector<HTMLElement>(`[data-topology-route-id="${routeId}"]`)
+  routeElement?.querySelector<HTMLElement>('input, select')?.focus({ preventScroll: true })
+  routeElement?.scrollIntoView({ block: 'nearest' })
+}
+
 async function addQuickRoute(): Promise<void> {
   if (quickConfiguring.value)
     return
-  const source = manager.quickSourceNode
-  if (!source) {
-    window.$message?.error('当前没有可用于拓扑的节点。')
+  const source = manager.quickNodes.find(node => node.uuid === quickSourceUuid.value) ?? manager.quickSourceNode
+  if (!source?.uuid) {
+    window.$message?.error('请先选择一台线路机。')
+    return
+  }
+
+  const landingName = manager.quickNodes.find(node => node.uuid === quickLandingUuid.value)?.name ?? ''
+  const duplicateIndex = manager.findDuplicateRoute(source.name, landingName)
+  if (duplicateIndex >= 0) {
+    const existing = manager.routes[duplicateIndex]
+    window.$message?.warning('已有相同线路机和落地机的线路，请直接编辑。')
+    if (existing)
+      await nextTick().then(() => focusTopologyRoute(existing.id))
     return
   }
 
   const runId = ++quickConfigurationRun
+  const selectedSourceUuid = source.uuid
+  const selectedLandingUuid = quickLandingUuid.value
+  const selectedHopTask = quickHopTask.value
   quickConfiguring.value = true
   try {
     const result = await loadTasks(source.name)
@@ -155,16 +227,32 @@ async function addQuickRoute(): Promise<void> {
       window.$message?.error(result.error)
       return
     }
-    const route = manager.addQuickRoute(result.tasks, source.uuid)
-    if (!route) {
-      window.$message?.error('来源节点已变化，请重新生成。')
+    const latestSource = manager.quickNodes.find(node => node.uuid === selectedSourceUuid)
+    const latestLandingName = manager.quickNodes.find(node => node.uuid === selectedLandingUuid)?.name ?? ''
+    if (!latestSource || manager.findDuplicateRoute(latestSource.name, latestLandingName) >= 0) {
+      window.$message?.warning('节点或线路已变化，请重新选择后生成。')
       return
     }
+    const route = manager.addQuickRoute(result.tasks, selectedSourceUuid, {
+      landingUuid: selectedLandingUuid || null,
+      hopTask: selectedHopTask === QUICK_HOP_AUTO ? undefined : selectedHopTask,
+    })
+    if (!route) {
+      window.$message?.error('所选节点已变化，请重新选择后生成。')
+      return
+    }
+    if (selectedLandingUuid) {
+      quickLandingUuid.value = ''
+      syncQuickSelections(true)
+    }
     await nextTick()
-    const routeElement = document.querySelector<HTMLElement>(`[data-topology-route-id="${route.id}"]`)
-    routeElement?.querySelector<HTMLElement>('input')?.focus({ preventScroll: true })
-    routeElement?.scrollIntoView({ block: 'nearest' })
-    window.$message?.success('已生成一条拓扑草稿，确认后保存。')
+    focusTopologyRoute(route.id)
+    const hopBound = Boolean(route.nodes[2]?.name.trim() && route.metrics[1]?.live && route.metrics[1]?.taskFilter)
+    window.$message?.success(
+      hopBound || !route.nodes[2]?.name.trim()
+        ? '已生成拓扑草稿，确认后保存。'
+        : '已生成拓扑草稿。第 2 段未自动绑定，请在下方选择线路机上的 Ping 任务。',
+    )
   }
   finally {
     if (runId === quickConfigurationRun)
@@ -183,22 +271,78 @@ function updateFallback(metric: { fallbackLatency: number | null, fallbackLoss: 
   <AppDialog
     v-model:open="isOpen"
     title="拓扑管理"
-    description="添加、排序线路，并为每一段选择实时 Ping 任务或静态基线。"
+    description="选择线路机和落地机后快速生成，或手动编辑每一段的实时 Ping 任务和静态基线。"
     content-class="max-w-6xl"
   >
     <fieldset class="min-w-0 space-y-4" :disabled="manager.saving">
-      <div class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/60 bg-background/45 px-3 py-2">
-        <div class="text-xs text-muted-foreground">
-          修改会保存到 Komari 主题设置，所有设备同步生效。
+      <div class="space-y-3 rounded-lg border border-border/60 bg-background/45 px-3 py-2">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div class="text-xs text-muted-foreground">
+            选择线路机和可选落地机后快速生成。实时数据由线路机发出 Ping；图画成入口 → 线路机，不等于入口网络正向打过来。修改会保存到 Komari 主题设置。
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <Button size="sm" variant="outline" :disabled="quickConfiguring || !manager.quickConfigurationAvailable" :aria-busy="quickConfiguring" @click="addQuickRoute">
+              <Icon :icon="quickConfiguring ? 'tabler:loader-2' : 'tabler:sparkles'" :class="quickConfiguring && 'animate-spin'" />
+              {{ quickConfiguring ? '生成中' : '快速生成' }}
+            </Button>
+            <Button size="sm" variant="outline" :disabled="quickConfiguring || !manager.canAddRoute" @click="manager.addRoute">
+              <Icon icon="tabler:plus" />添加线路
+            </Button>
+          </div>
         </div>
-        <div class="flex flex-wrap gap-2">
-          <Button size="sm" variant="outline" :disabled="quickConfiguring || !manager.quickConfigurationAvailable" :aria-busy="quickConfiguring" @click="addQuickRoute">
-            <Icon :icon="quickConfiguring ? 'tabler:loader-2' : 'tabler:sparkles'" :class="quickConfiguring && 'animate-spin'" />
-            {{ quickConfiguring ? '生成中' : '快速生成' }}
-          </Button>
-          <Button size="sm" variant="outline" :disabled="!manager.canAddRoute" @click="manager.addRoute">
-            <Icon icon="tabler:plus" />添加线路
-          </Button>
+        <div v-if="manager.canAddRoute" class="grid gap-2 sm:grid-cols-3">
+          <label class="space-y-1 text-[11px] text-muted-foreground">
+            线路机
+            <select
+              v-model="quickSourceUuid"
+              :disabled="quickConfiguring"
+              aria-label="快速生成线路机"
+              class="h-9 w-full rounded-md border border-input bg-background px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring"
+              @change="onQuickSourceChange"
+            >
+              <option v-if="!manager.quickNodes.length" value="">
+                没有可用节点
+              </option>
+              <option v-for="option in manager.quickNodes" :key="option.uuid" :value="option.uuid">
+                {{ option.name }}
+              </option>
+            </select>
+          </label>
+          <label class="space-y-1 text-[11px] text-muted-foreground">
+            落地机（可选）
+            <select
+              v-model="quickLandingUuid"
+              :disabled="quickConfiguring"
+              aria-label="快速生成落地机"
+              class="h-9 w-full rounded-md border border-input bg-background px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <option value="">
+                仅入口到线路机
+              </option>
+              <option v-for="option in quickLandingOptions" :key="option.uuid" :value="option.uuid">
+                {{ option.name }}
+              </option>
+            </select>
+          </label>
+          <label class="space-y-1 text-[11px] text-muted-foreground">
+            第 2 段任务
+            <select
+              v-model="quickHopTask"
+              :disabled="quickConfiguring || !quickLandingUuid"
+              aria-label="快速生成第 2 段 Ping 任务"
+              class="h-9 w-full rounded-md border border-input bg-background px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+            >
+              <option :value="QUICK_HOP_AUTO">
+                自动匹配落地机
+              </option>
+              <option value="">
+                不绑定，稍后手选
+              </option>
+              <option v-for="task in quickHopTaskOptions" :key="task" :value="task">
+                {{ task }}
+              </option>
+            </select>
+          </label>
         </div>
       </div>
       <span class="sr-only" aria-live="polite">{{ quickConfiguring ? '正在快速生成拓扑草稿' : '' }}</span>
@@ -377,8 +521,8 @@ function updateFallback(metric: { fallbackLatency: number | null, fallbackLoss: 
         </div>
       </article>
 
-      <div v-if="!manager.routes.length" class="rounded-xl border border-dashed border-border py-12 text-center text-sm text-muted-foreground">
-        还没有线路，点击“添加线路”开始配置。
+      <div v-if="!manager.routes.length" class="rounded-xl border border-dashed border-border px-4 py-12 text-center text-sm text-muted-foreground">
+        还没有线路。选择线路机和落地机后点击“快速生成”，或手动添加线路。
       </div>
 
       <footer class="sticky bottom-0 flex flex-wrap justify-end gap-2 border-t border-border/60 bg-card/95 pt-3 backdrop-blur-xl" :aria-busy="manager.saving">

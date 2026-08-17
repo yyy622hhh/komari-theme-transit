@@ -33,21 +33,21 @@ export interface VisualFixtureOptions {
   expiryThresholds?: boolean
   missingCpuMetricHistory?: boolean
   pingTaskOrdering?: boolean
-  pandaOps?: boolean
+  opsDashboard?: boolean
   authenticated?: boolean
-  pandaOpsMissingNode?: boolean
-  pandaOpsNoRecentTask?: boolean
-  pandaOpsComparableRoutes?: boolean
-  pandaOpsCustomFirstMetric?: boolean
-  pandaOpsKnownEntryCustomTask?: boolean
-  pandaOpsOverlappingTask?: boolean
-  pandaOpsStaticFirstMetric?: boolean
-  pandaOpsTwoNodeRoute?: boolean
-  pandaOpsTrailingEmptyNode?: boolean
-  pandaOpsExternalOfflineSource?: boolean
-  pandaOpsLegacyPingFallback?: boolean
-  pandaOpsSevereLoss?: boolean
-  pandaOpsMetricDelayMs?: number
+  opsMissingNode?: boolean
+  opsNoRecentTask?: boolean
+  opsComparableRoutes?: boolean
+  opsCustomFirstMetric?: boolean
+  opsKnownEntryCustomTask?: boolean
+  opsOverlappingTask?: boolean
+  opsStaticFirstMetric?: boolean
+  opsTwoNodeRoute?: boolean
+  opsTrailingEmptyNode?: boolean
+  opsExternalOfflineSource?: boolean
+  opsLegacyPingFallback?: boolean
+  opsSevereLoss?: boolean
+  opsMetricDelayMs?: number
   quickTopologyCustomTask?: boolean
   quickTopologyPresetConflict?: boolean
   quickTopologyTaskFailure?: boolean
@@ -297,7 +297,7 @@ async function handleRpc(
     : typeof payload.params?.entity_id === 'string'
       ? payload.params.entity_id
       : uuidFor(0)
-  if ((options.quickTopologyTaskFailure || options.pandaOpsLegacyPingFallback)
+  if ((options.quickTopologyTaskFailure || options.opsLegacyPingFallback)
     && (payload.method === 'public:getPublicPingTasks' || payload.method === 'public:getPingMetricStats')) {
     await route.fulfill({
       contentType: 'application/json',
@@ -305,15 +305,15 @@ async function handleRpc(
     })
     return
   }
-  if (options.pandaOpsMetricDelayMs && (payload.method === 'public:queryMetrics' || payload.method === 'public:getPingMetricStats'))
-    await new Promise(resolve => setTimeout(resolve, options.pandaOpsMetricDelayMs))
+  if (options.opsMetricDelayMs && (payload.method === 'public:queryMetrics' || payload.method === 'public:getPingMetricStats'))
+    await new Promise(resolve => setTimeout(resolve, options.opsMetricDelayMs))
   const pingTasks = options.pingTaskOrdering
     ? [
         { id: 30, name: '浙江移动', interval: 60, loss: 0, weight: 0 },
         { id: 10, name: '浙江联通', interval: 60, loss: 0, weight: 1 },
         { id: 20, name: '浙江电信', interval: 60, loss: 0, weight: 2 },
       ]
-    : options.pandaOps
+    : options.opsDashboard
       ? [
           { id: 1, name: 'Tokyo', interval: 60, loss: 3.2, weight: 1 },
           { id: 11, name: '北京联通', interval: 60, loss: 0, weight: 2 },
@@ -322,7 +322,7 @@ async function handleRpc(
           { id: 18, name: 'PandaOps-Local-Hop', interval: 30, loss: 0, weight: 5 },
         ]
       : [{ id: 1, name: 'Tokyo', interval: 60, loss: 3.2, weight: 1 }]
-  if (options.pandaOpsNoRecentTask) {
+  if (options.opsNoRecentTask) {
     pingTasks.push({
       id: 99,
       name: 'Configured-No-Recent-Sample',
@@ -333,7 +333,7 @@ async function handleRpc(
       clients: [uuidFor(2)],
     })
   }
-  if (options.pandaOpsOverlappingTask) {
+  if (options.opsOverlappingTask) {
     pingTasks.push({
       id: 112,
       name: '北京电信-备用',
@@ -343,7 +343,7 @@ async function handleRpc(
       clients: [uuid],
     })
   }
-  if (options.pandaOpsCustomFirstMetric || options.pandaOpsKnownEntryCustomTask) {
+  if (options.opsCustomFirstMetric || options.opsKnownEntryCustomTask) {
     pingTasks.push({
       id: 77,
       name: 'Relay-JP-to-Exit-US',
@@ -380,7 +380,7 @@ async function handleRpc(
     task_id: task.id,
     client: uuid,
     time: new Date(Date.parse(FIXED_NOW) - (47 - index) * 75_000).toISOString(),
-    value: options.pandaOpsSevereLoss && task.name === '北京电信'
+    value: options.opsSevereLoss && task.name === '北京电信'
       ? -1
       : uuid !== uuidFor(1) && index % 17 === 0
         ? -1
@@ -555,28 +555,28 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
       name: '北京电信',
     })
   }
-  const defaultTopologyRoute = `北京电信|CN|入口;主控-洛杉矶|US|线路机;${options.pandaOpsMissingNode ? '未纳管-西雅图' : '香港边缘节点-超长名称布局测试'}|${options.pandaOpsMissingNode ? 'US' : 'HK'}|落地机||北京电信|CN|入口;东京-高负载|JP|线路机;${options.pandaOpsComparableRoutes ? '香港边缘节点-超长名称布局测试-10|HK' : '新加坡-A100|SG'}|落地机`
-  const defaultTopologyMetrics = options.pandaOpsComparableRoutes
+  const defaultTopologyRoute = `北京电信|CN|入口;主控-洛杉矶|US|线路机;${options.opsMissingNode ? '未纳管-西雅图' : '香港边缘节点-超长名称布局测试'}|${options.opsMissingNode ? 'US' : 'HK'}|落地机||北京电信|CN|入口;东京-高负载|JP|线路机;${options.opsComparableRoutes ? '香港边缘节点-超长名称布局测试-10|HK' : '新加坡-A100|SG'}|落地机`
+  const defaultTopologyMetrics = options.opsComparableRoutes
     ? 'live@主控-洛杉矶@北京电信@51@0;live@主控-洛杉矶@PandaOps-Local-Hop@84@0||live@东京-高负载@Tokyo@72@0;live@东京-高负载@PandaOps-Local-Hop@1.1@0'
     : 'live@主控-洛杉矶@北京电信@51@0;84,0||live@东京-高负载@Tokyo@72@0;live@东京-高负载@PandaOps-Local-Hop@1.1@0'
-  let topologyRoute = options.pandaOpsTwoNodeRoute
+  let topologyRoute = options.opsTwoNodeRoute
     ? '北京电信|CN|入口;主控-洛杉矶|US|落地机||北京电信|CN|入口;东京-高负载|JP|线路机;新加坡-A100|SG|落地机'
-    : options.pandaOpsCustomFirstMetric
+    : options.opsCustomFirstMetric
       ? defaultTopologyRoute.replace('北京电信|CN|入口', '自定义入口|CN|入口')
       : defaultTopologyRoute
-  if (options.pandaOpsTrailingEmptyNode) {
+  if (options.opsTrailingEmptyNode) {
     const [firstRoute = '', ...remainingRoutes] = topologyRoute.split('||')
     topologyRoute = `${firstRoute.split(';').slice(0, 2).join(';')};||${remainingRoutes.join('||')}`
   }
 
-  let topologyMetrics = options.pandaOpsStaticFirstMetric
+  let topologyMetrics = options.opsStaticFirstMetric
     ? defaultTopologyMetrics.replace(FIRST_TOPOLOGY_METRIC_PATTERN, '51,0')
-    : options.pandaOpsCustomFirstMetric || options.pandaOpsKnownEntryCustomTask
+    : options.opsCustomFirstMetric || options.opsKnownEntryCustomTask
       ? defaultTopologyMetrics.replace(FIRST_TOPOLOGY_METRIC_PATTERN, 'live@主控-洛杉矶@Relay-JP-to-Exit-US@72@0')
-      : options.pandaOpsTwoNodeRoute
+      : options.opsTwoNodeRoute
         ? `51,0||${defaultTopologyMetrics.split('||')[1] ?? ''}`
         : defaultTopologyMetrics
-  if (options.pandaOpsExternalOfflineSource)
+  if (options.opsExternalOfflineSource)
     topologyMetrics = topologyMetrics.replace('live@主控-洛杉矶@北京电信', 'live@伦敦-离线归档@北京电信')
 
   let settings: Record<string, unknown> = {
@@ -600,14 +600,14 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
     homeQuickControlsEnabled: true,
     homeQuickControlPreset: '完整',
     homeToolsEnabled: true,
-    opsDashboardEnabled: options.pandaOps ?? false,
-    topologyEnabled: options.pandaOps ?? false,
+    opsDashboardEnabled: options.opsDashboard ?? false,
+    topologyEnabled: options.opsDashboard ?? false,
     carrierPingRegion: 'all',
     nodeCardPanels: options.nodeCardPanels ? JSON.stringify(options.nodeCardPanels) : undefined,
-    topologyRoute: options.pandaOps && !options.emptyTopology
+    topologyRoute: options.opsDashboard && !options.emptyTopology
       ? topologyRoute
       : '',
-    topologyMetrics: options.pandaOps && !options.emptyTopology
+    topologyMetrics: options.opsDashboard && !options.emptyTopology
       ? topologyMetrics
       : '',
   }
@@ -648,7 +648,7 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
         record_preserve_time: 720,
         ping_record_preserve_time: 720,
         sitename: 'Komari Visual Lab',
-        theme: options.pandaOps ? 'Transit' : 'Glassmorphism',
+        theme: options.opsDashboard ? 'Transit' : 'Glassmorphism',
         theme_settings: structuredClone(settings),
         ...(options.visitorAuditSupported ? { visitor_audit_enabled: false } : {}),
       },

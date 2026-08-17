@@ -4,7 +4,7 @@ Root-scope development guide for `komari-theme-transit`.
 
 ## Snapshot
 
-- Updated: 2026-08-14
+- Updated: 2026-08-17
 - Branch: `main`
 - App: Vue 3 + Vite + reka-ui + Tailwind CSS v4 theme for Komari Monitor
 - Package manager: `bun` 1.3.14 with a committed lockfile

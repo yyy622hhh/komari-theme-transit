@@ -1,15 +1,15 @@
 <script setup lang="ts">
-import type { PandaOpsIncidentEvent } from '@/composables/usePandaOpsIncidentTimeline'
+import type { IncidentEvent } from '@/composables/useIncidentTimeline'
 import { Icon } from '@iconify/vue'
 import { computed, ref } from 'vue'
 import { AppDialog } from '@/components/ui/app-dialog'
-import { usePandaOpsIncidentTimeline } from '@/composables/usePandaOpsIncidentTimeline'
+import { useIncidentTimeline } from '@/composables/useIncidentTimeline'
 import { formatDateTime } from '@/utils/helper'
 
 const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{ 'update:open': [open: boolean] }>()
 const range = ref<'today' | 'week'>('today')
-const timeline = usePandaOpsIncidentTimeline()
+const timeline = useIncidentTimeline()
 const rangeOptions = [
   { value: 'today' as const, label: '今天' },
   { value: 'week' as const, label: '7 天' },
@@ -22,17 +22,17 @@ const isOpen = computed({
 
 const visibleEvents = computed(() => (range.value === 'today' ? timeline.todayEvents.value : timeline.events.value).slice(0, 80))
 
-function eventIcon(event: PandaOpsIncidentEvent): string {
+function eventIcon(event: IncidentEvent): string {
   if (event.type === 'started')
     return event.severity === 'critical' ? 'tabler:alert-triangle' : 'tabler:wave-sine'
   if (event.type === 'recovered')
     return 'tabler:circle-check'
   if (event.type === 'silenced' || event.type === 'silenceEnded')
     return event.type === 'silenced' ? 'tabler:bell-off' : 'tabler:bell'
-  return event.type === 'maintenanceStarted' ? 'tabler:tools' : 'tabler:tool-off'
+  return event.type === 'maintenanceStarted' ? 'tabler:tools' : 'tabler:tools-off'
 }
 
-function eventTone(event: PandaOpsIncidentEvent): string {
+function eventTone(event: IncidentEvent): string {
   if (event.type === 'started')
     return event.severity === 'critical' ? 'text-rose-600 dark:text-rose-400' : 'text-amber-700 dark:text-amber-300'
   if (event.type === 'recovered' || event.type === 'maintenanceEnded' || event.type === 'silenceEnded')
@@ -57,7 +57,7 @@ function durationText(durationMs?: number): string {
     description="记录本浏览器观察到的告警、恢复、静默和维护事件。"
     content-class="max-w-2xl"
   >
-    <div class="space-y-3" data-panda-incident-timeline>
+    <div class="space-y-3" data-transit-incident-timeline>
       <div class="flex items-center justify-between gap-3">
         <div class="text-[11px] text-muted-foreground">
           自动保留最近 7 天，最多 200 条
@@ -81,7 +81,7 @@ function durationText(durationMs?: number): string {
           <article
             v-for="event in visibleEvents"
             :key="event.id"
-            data-panda-incident-event
+            data-transit-incident-event
             class="relative pb-4 last:pb-0"
           >
             <span class="absolute -left-[29px] top-0 grid size-4 place-items-center rounded-full bg-card ring-2 ring-card">

@@ -199,8 +199,8 @@ function lossTone(loss: string): string {
 
 <style scoped>
 .node-card-insight {
-  border: 1px solid var(--panda-divider);
+  border: 1px solid var(--transit-divider);
   border-radius: 0.65rem;
-  background: var(--panda-cell-bg);
+  background: var(--transit-cell-bg);
 }
 </style>
