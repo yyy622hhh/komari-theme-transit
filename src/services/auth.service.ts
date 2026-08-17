@@ -40,6 +40,23 @@ let authSession: AuthSession = {
 }
 let verifyPromise: Promise<AuthSession> | null = null
 let authSessionRevision = 0
+const authSessionListeners = new Set<(session: AuthSession) => void>()
+
+function publishAuthSession(): void {
+  for (const listener of authSessionListeners) {
+    try {
+      listener(authSession)
+    }
+    catch {
+    }
+  }
+}
+
+function updateAuthSession(session: AuthSession): AuthSession {
+  authSession = session
+  publishAuthSession()
+  return authSession
+}
 
 function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -59,6 +76,11 @@ export function getAuthSession(): AuthSession {
   return authSession
 }
 
+export function subscribeAuthSession(listener: (session: AuthSession) => void): () => void {
+  authSessionListeners.add(listener)
+  return () => authSessionListeners.delete(listener)
+}
+
 export function isAuthenticated(): boolean {
   return authSession.authenticated
 }
@@ -70,13 +92,12 @@ export function getCurrentUser(): MeInfo | null {
 export function setAuthSessionFromLogin(loggedIn: boolean, user: MeInfo | null = null): AuthSession {
   authSessionRevision += 1
   verifyPromise = null
-  authSession = {
+  return updateAuthSession({
     status: loggedIn ? 'authenticated' : 'guest',
     authenticated: loggedIn,
     user: loggedIn ? user : null,
     lastVerifiedAt: Date.now(),
-  }
-  return authSession
+  })
 }
 
 export async function verifyLogin(options: VerifyLoginOptions = {}): Promise<AuthSession> {
@@ -93,20 +114,18 @@ export async function verifyLogin(options: VerifyLoginOptions = {}): Promise<Aut
     if (revision !== authSessionRevision)
       return authSession
 
-    authSession = createSessionFromMe(user)
-    return authSession
+    return updateAuthSession(createSessionFromMe(user))
   }).catch((error) => {
     if (revision !== authSessionRevision)
       return authSession
 
-    authSession = {
+    return updateAuthSession({
       status: 'error',
       authenticated: false,
       user: null,
       lastVerifiedAt: Date.now(),
       errorMessage: getErrorMessage(error),
-    }
-    return authSession
+    })
   }).finally(() => {
     if (verifyPromise === pendingVerification)
       verifyPromise = null

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { setAuthSessionFromLogin } from '../../src/services/auth.service'
-import { saveManagedThemeSettings } from '../../src/services/theme-settings.service'
+import { createThemeSettingsSnapshot, saveManagedThemeSettings } from '../../src/services/theme-settings.service'
 
 const originalFetch = globalThis.fetch
 
@@ -190,6 +190,125 @@ describe('managed theme settings compatibility', () => {
     ])
   })
 
+  test('rejects a stale topology editor before posting over another session', async () => {
+    const calls: string[] = []
+    const persisted = { topologyRoute: 'new-route', topologyMetrics: '20,0' }
+    globalThis.fetch = (async (input) => {
+      const url = String(input)
+      calls.push(url)
+      if (url.endsWith('/api/me'))
+        return jsonResponse({ logged_in: true, username: 'admin' })
+      if (url.endsWith('/api/public'))
+        return jsonResponse({ status: 'success', message: '', data: { theme: 'Transit', theme_settings: persisted } })
+      return jsonResponse({ message: 'stale editor must not post' }, 500)
+    }) as typeof fetch
+    setAuthSessionFromLogin(true, { logged_in: true, username: 'admin' })
+
+    await expect(saveManagedThemeSettings({
+      theme: 'Transit',
+      patch: { topologyRoute: 'local-route', topologyMetrics: '10,0' },
+      expected: { topologyRoute: 'old-route', topologyMetrics: '10,0' },
+      permission: 'nodeTopology',
+      requestKey: 'save:stale-topology',
+    })).rejects.toThrow('其他会话修改')
+    expect(calls.some(url => url.includes('/api/admin/theme/settings'))).toBe(false)
+  })
+
+  test('rejects a stale topology editor when missing fields were added by another session', async () => {
+    const calls: string[] = []
+    const expected = createThemeSettingsSnapshot({}, ['topologyRoute', 'topologyMetrics'])
+    const persisted = { topologyRoute: 'new-route', topologyMetrics: '20,0' }
+    globalThis.fetch = (async (input) => {
+      const url = String(input)
+      calls.push(url)
+      if (url.endsWith('/api/me'))
+        return jsonResponse({ logged_in: true, username: 'admin' })
+      if (url.endsWith('/api/public'))
+        return jsonResponse({ status: 'success', message: '', data: { theme: 'Transit', theme_settings: persisted } })
+      return jsonResponse({ message: 'stale editor must not post' }, 500)
+    }) as typeof fetch
+    setAuthSessionFromLogin(true, { logged_in: true, username: 'admin' })
+
+    await expect(saveManagedThemeSettings({
+      theme: 'Transit',
+      patch: { topologyRoute: 'local-route', topologyMetrics: '10,0' },
+      expected,
+      permission: 'nodeTopology',
+      requestKey: 'save:stale-topology-missing',
+    })).rejects.toThrow('其他会话修改')
+    expect(calls.some(url => url.includes('/api/admin/theme/settings'))).toBe(false)
+  })
+
+  test('distinguishes absent topology fields from empty string values', async () => {
+    globalThis.fetch = (async (input) => {
+      const url = String(input)
+      if (url.endsWith('/api/me'))
+        return jsonResponse({ logged_in: true, username: 'admin' })
+      if (url.endsWith('/api/public'))
+        return jsonResponse({ status: 'success', message: '', data: { theme: 'Transit', theme_settings: {} } })
+      return jsonResponse({ message: 'empty values must not match missing fields' }, 500)
+    }) as typeof fetch
+    setAuthSessionFromLogin(true, { logged_in: true, username: 'admin' })
+
+    await expect(saveManagedThemeSettings({
+      theme: 'Transit',
+      patch: { topologyRoute: 'local-route', topologyMetrics: '10,0' },
+      expected: { topologyRoute: '', topologyMetrics: '' },
+      permission: 'nodeTopology',
+      requestKey: 'save:stale-empty-vs-missing',
+    })).rejects.toThrow('其他会话修改')
+  })
+
+  test('does not confuse sentinel-like string values with missing fields', async () => {
+    const sentinelLikeRoute = '__transit_expected_missing__'
+    let persisted: Record<string, unknown> = { topologyRoute: sentinelLikeRoute, topologyMetrics: '' }
+    globalThis.fetch = (async (input, init) => {
+      const url = String(input)
+      if (url.endsWith('/api/me'))
+        return jsonResponse({ logged_in: true, username: 'admin' })
+      if (url.endsWith('/api/public'))
+        return jsonResponse({ status: 'success', message: '', data: { theme: 'Transit', theme_settings: persisted } })
+      if (url.includes('/api/admin/theme/settings')) {
+        persisted = JSON.parse(String(init?.body)) as Record<string, unknown>
+        return jsonResponse({ status: 'success', data: null })
+      }
+      return jsonResponse({ message: 'unexpected endpoint' }, 500)
+    }) as typeof fetch
+    setAuthSessionFromLogin(true, { logged_in: true, username: 'admin' })
+
+    await expect(saveManagedThemeSettings({
+      theme: 'Transit',
+      patch: { topologyRoute: 'local-route', topologyMetrics: '10,0' },
+      expected: { topologyRoute: sentinelLikeRoute, topologyMetrics: '' },
+      permission: 'nodeTopology',
+      requestKey: 'save:sentinel-string-value',
+    })).resolves.toMatchObject({ topologyRoute: 'local-route', topologyMetrics: '10,0' })
+  })
+
+  test('returns the final persisted server snapshot after verification', async () => {
+    let persisted: Record<string, unknown> = { serverRevision: 1 }
+    globalThis.fetch = (async (input, init) => {
+      const url = String(input)
+      if (url.endsWith('/api/me'))
+        return jsonResponse({ logged_in: true, username: 'admin' })
+      if (url.endsWith('/api/public'))
+        return jsonResponse({ status: 'success', message: '', data: { theme: 'Transit', theme_settings: persisted } })
+      if (url.includes('/api/admin/theme/settings')) {
+        persisted = { ...(JSON.parse(String(init?.body)) as Record<string, unknown>), serverRevision: 2 }
+        return jsonResponse({ status: 'success', data: null })
+      }
+      return jsonResponse({ message: 'unexpected endpoint' }, 500)
+    }) as typeof fetch
+    setAuthSessionFromLogin(true, { logged_in: true, username: 'admin' })
+
+    await expect(saveManagedThemeSettings({
+      theme: 'Transit',
+      patch: { topologyEnabled: true },
+      permission: 'nodeTopology',
+      requestKey: 'save:final-snapshot',
+    })).resolves.toEqual({ serverRevision: 2, topologyEnabled: true })
+  })
+
   test('continues the same-theme queue after an earlier save fails', async () => {
     let settings: Record<string, unknown> = { preserved: true }
     let saveAttempt = 0
@@ -294,5 +413,26 @@ describe('managed theme settings compatibility', () => {
       requestKey: 'save:not-persisted',
     })).rejects.toThrow('服务器未保留')
     expect(publicReadCount).toBe(2)
+  })
+
+  test('rejects a topology save when final verification lacks route fields', async () => {
+    globalThis.fetch = (async (input) => {
+      const url = String(input)
+      if (url.endsWith('/api/me'))
+        return jsonResponse({ logged_in: true, username: 'admin' })
+      if (url.endsWith('/api/public'))
+        return jsonResponse({ status: 'success', message: '', data: { theme: 'Transit', theme_settings: { topologyEnabled: true } } })
+      if (url.includes('/api/admin/theme/settings'))
+        return jsonResponse({ status: 'success', data: null })
+      return jsonResponse({ message: 'unexpected endpoint' }, 500)
+    }) as typeof fetch
+    setAuthSessionFromLogin(true, { logged_in: true, username: 'admin' })
+
+    await expect(saveManagedThemeSettings({
+      theme: 'Transit',
+      patch: { topologyEnabled: true, topologyRoute: 'local-route', topologyMetrics: '10,0' },
+      permission: 'nodeTopology',
+      requestKey: 'save:topology-not-persisted',
+    })).rejects.toThrow('服务器未保留')
   })
 })

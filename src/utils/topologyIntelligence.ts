@@ -1,4 +1,4 @@
-import type { TopologySegmentTelemetry } from '@/utils/topologyHealth'
+import type { TopologyRouteHealth, TopologySegmentTelemetry } from '@/utils/topologyHealth'
 
 export interface TopologyReliabilityWindow {
   hours: 24 | 168
@@ -48,6 +48,7 @@ export interface TopologyRouteRankingInput {
   key: string
   directionKey: string
   healthScore: number
+  status: TopologyRouteHealth
   reliability: TopologyRouteReliability
 }
 
@@ -130,12 +131,15 @@ function aggregateWindow(
 
   const windows = snapshots.map(snapshot => snapshot[key])
   const complete = snapshots.length === expectedSegments && windows.every(window => window.hasData)
+  const hasEndToEndPercentiles = complete && expectedSegments === 1
   return {
     hours,
     availability: complete ? Math.min(...windows.map(window => window.availability ?? 0)) : null,
     avgLatency: complete ? sumNullable(windows.map(window => window.avgLatency)) : null,
-    p50Latency: complete ? sumNullable(windows.map(window => window.p50Latency)) : null,
-    p95Latency: complete ? sumNullable(windows.map(window => window.p95Latency)) : null,
+    // Segment percentiles cannot be added into an end-to-end percentile without
+    // time-correlated samples. Keep them only for a single-segment route.
+    p50Latency: hasEndToEndPercentiles ? windows[0]?.p50Latency ?? null : null,
+    p95Latency: hasEndToEndPercentiles ? windows[0]?.p95Latency ?? null : null,
     sampleCount: complete ? Math.min(...windows.map(window => window.sampleCount)) : 0,
     hasData: complete,
     stale: windows.some(window => window.stale),
@@ -152,13 +156,19 @@ export function aggregateTopologyRouteReliability(
   const totalSegments = Math.max(currentSegments.length, historicalSegments.length)
   const day = aggregateWindow(snapshots, 'day', totalSegments)
   const week = aggregateWindow(snapshots, 'week', totalSegments)
-  const currentLatency = currentSegments.length && currentSegments.every(segment => segment?.latency !== null && segment?.latency !== undefined)
+  const currentLatency = currentSegments.length && currentSegments.every(segment => segment
+    && (segment.status === 'healthy' || segment.status === 'warning')
+    && !segment.stale
+    && segment.latency !== null)
     ? currentSegments.reduce((sum, segment) => sum + (segment?.latency ?? 0), 0)
     : null
+  const adaptiveHistory = day.p50Latency === null && day.avgLatency !== null
+    ? { ...day, p50Latency: day.avgLatency }
+    : day
   return {
     day,
     week,
-    adaptive: calculateAdaptiveBaseline(currentLatency, day),
+    adaptive: calculateAdaptiveBaseline(currentLatency, adaptiveHistory),
     completeSegments: snapshots.filter(snapshot => snapshot.day.hasData).length,
     totalSegments,
   }
@@ -174,6 +184,10 @@ function rankingScore(input: TopologyRouteRankingInput, fastestLatency: number |
   return Math.max(0, Math.min(100, input.healthScore * (0.35 + (1 - historyWeight) * 0.45)
     + availabilityScore * 0.45 * historyWeight
     + latencyScore * 0.2 * historyWeight))
+}
+
+function recommendationEligible(input: TopologyRouteRankingInput): boolean {
+  return (input.status === 'healthy' || input.status === 'warning') && input.healthScore >= 55
 }
 
 function recommendationReason(best: TopologyRouteRankingInput, runnerUp?: TopologyRouteRankingInput): string {
@@ -210,16 +224,18 @@ export function rankTopologyRoutes(inputs: TopologyRouteRankingInput[]): Record<
       .filter((value): value is number => value !== null && value > 0)
     const fastestLatency = validLatencies.length ? Math.min(...validLatencies) : null
     const ranked = group
-      .map(input => ({ input, score: rankingScore(input, fastestLatency) }))
-      .sort((left, right) => right.score - left.score || left.input.key.localeCompare(right.input.key))
+      .map(input => ({ input, score: rankingScore(input, fastestLatency), eligible: recommendationEligible(input) }))
+      .sort((left, right) => Number(right.eligible) - Number(left.eligible)
+        || right.score - left.score
+        || left.input.key.localeCompare(right.input.key))
 
     ranked.forEach((item, index) => {
       result[item.input.key] = {
         rank: index + 1,
         total: ranked.length,
-        recommended: ranked.length > 1 && index === 0,
+        recommended: ranked.length > 1 && index === 0 && item.eligible,
         compositeScore: Math.round(item.score),
-        reason: index === 0 ? recommendationReason(item.input, ranked[1]?.input) : '',
+        reason: index === 0 && item.eligible ? recommendationReason(item.input, ranked[1]?.input) : '',
         hasHistoricalData: item.input.reliability.day.hasData,
       }
     })

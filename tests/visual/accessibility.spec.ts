@@ -75,7 +75,11 @@ test('authenticated mobile tools and dialogs have no accessibility violations', 
 
   await page.getByRole('button', { name: /网络：/ }).click()
   await page.getByRole('button', { name: '管理', exact: true }).click()
-  await expect(page.getByRole('dialog', { name: '拓扑管理' })).toBeVisible()
+  const topologyDialog = page.getByRole('dialog', { name: '拓扑管理' })
+  await expect(topologyDialog).toBeVisible()
+  expect(await getAccessibilityViolations(page)).toEqual([])
+  await topologyDialog.getByRole('button', { name: '快速生成' }).click()
+  await expect(topologyDialog.locator('[data-topology-route-id]')).toHaveCount(3)
   expect(await getAccessibilityViolations(page)).toEqual([])
 })
 

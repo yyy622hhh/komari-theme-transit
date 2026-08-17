@@ -9,6 +9,20 @@ export interface TopologySegmentTelemetry {
   stale: boolean
 }
 
+export interface TopologySegmentHealthInput {
+  live: boolean
+  sourceExists: boolean
+  sourceOnline?: boolean
+  loading: boolean
+  error: unknown
+  stale: boolean
+  hasData: boolean
+  avgLoss: number
+  avgVolatility: number
+  fallbackLatency: number | null
+  fallbackLoss: number | null
+}
+
 export interface TopologyHealthDeduction {
   key: string
   label: string
@@ -42,10 +56,10 @@ function latencyPenalty(latency: number): number {
 }
 
 function scoreLabel(score: number, states: TopologyRouteHealth[]): TopologyRouteScore['label'] {
-  if (states.every(state => state === 'pending'))
-    return '待数据'
   if (states.includes('offline') || states.includes('error') || score < 55)
     return '异常'
+  if (states.includes('pending'))
+    return '待数据'
   if (states.includes('warning') || score < 75)
     return '波动'
   if (score < 90)
@@ -61,6 +75,27 @@ function scoreTone(label: TopologyRouteScore['label']): TopologyRouteScore['tone
   if (label === '待数据')
     return 'pending'
   return 'critical'
+}
+
+export function resolveTopologySegmentHealth(input: TopologySegmentHealthInput): TopologyRouteHealth {
+  if (!input.live) {
+    if (input.fallbackLatency === null && input.fallbackLoss === null)
+      return 'pending'
+    if ((input.fallbackLoss ?? 0) >= 20)
+      return 'error'
+    return (input.fallbackLoss ?? 0) > 3 ? 'warning' : 'healthy'
+  }
+  if (!input.sourceExists || input.error)
+    return 'error'
+  if (input.sourceOnline === false)
+    return 'offline'
+  if (input.stale)
+    return 'pending'
+  if (input.loading || !input.hasData)
+    return 'pending'
+  if (input.avgLoss >= 20)
+    return 'error'
+  return input.avgLoss > 3 || input.avgVolatility > 1.8 ? 'warning' : 'healthy'
 }
 
 export function calculateTopologyRouteScore(options: RouteScoreOptions): TopologyRouteScore {
@@ -98,6 +133,11 @@ export function calculateTopologyRouteScore(options: RouteScoreOptions): Topolog
       return 100
     }
     if (segment.status === 'error') {
+      if (segment.loss !== null && segment.loss >= 20) {
+        const points = Math.round(Math.min(100, segment.loss * 4))
+        deductions.push({ key: `${index}:loss-critical`, label: `${label}严重丢包 ${segment.loss.toFixed(1)}%`, points })
+        return points
+      }
       deductions.push({ key: `${index}:error`, label: `${label}读取失败`, points: 55 })
       return 55
     }

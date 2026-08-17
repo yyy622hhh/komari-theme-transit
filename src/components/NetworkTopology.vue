@@ -19,6 +19,7 @@ import { getRegionCode } from '@/utils/regionHelper'
 import { calculateTopologyRouteScore } from '@/utils/topologyHealth'
 import {
   findTopologyProbeKey,
+  findUniqueTopologyNode,
   formatTopologyMetricForProbe,
   getTopologyProbe,
   getTopologyProbeStorageKey,
@@ -63,7 +64,7 @@ const probeSelections = useStorageAsync<Record<string, string>>('pandaTopologyPr
 const managerOpen = ref(false)
 const timelineOpen = ref(false)
 const detailOpen = ref(false)
-const selectedRoute = ref<TopologyRouteDetail | null>(null)
+const selectedRouteKey = ref<string | null>(null)
 const routeSegmentHealth = ref<Record<string, Record<number, TopologyRouteHealth>>>({})
 const routeSegmentMetrics = ref<Record<string, Record<number, TopologySegmentTelemetry>>>({})
 const routeSegmentReliability = ref<Record<string, Record<number, TopologySegmentReliabilitySnapshot>>>({})
@@ -76,7 +77,7 @@ const routeGroups = computed(() => splitTopologyGroups(appStore.topologyRoute, t
 const metricGroups = computed(() => splitTopologyGroups(appStore.topologyMetrics, true))
 
 function findNode(name: string): NodeData | undefined {
-  return props.nodes.find(node => node.name.trim().toLowerCase() === name.trim().toLowerCase())
+  return findUniqueTopologyNode(props.nodes, name)
 }
 
 const DIRECTION_LABELS: Record<string, string> = {
@@ -112,6 +113,8 @@ const routes = computed<RouteRow[]>(() => routeGroups.value.map((group, routeInd
       node,
     }
   })
+  while (nodes.length && !nodes.at(-1)?.name.trim())
+    nodes.pop()
   const metrics = (metricGroups.value[routeIndex] || '')
     .split(';')
     .map(metric => metric.trim())
@@ -183,11 +186,16 @@ function getRouteHealth(route: RouteRow): TopologyRouteHealth {
     return 'error'
   const expectedSegments = Math.max(1, route.nodes.length - 1)
   const states = Array.from({ length: expectedSegments }, (_, index) => routeSegmentHealth.value[route.key]?.[index] ?? 'pending')
-  for (const status of ['offline', 'error', 'warning', 'pending'] as const) {
+  for (const status of ['offline', 'error', 'pending'] as const) {
     if (states.includes(status))
       return status
   }
-  return 'healthy'
+  const scoreTone = getRouteScore(route).tone
+  if (scoreTone === 'critical')
+    return 'error'
+  if (states.includes('warning') || scoreTone === 'warning')
+    return 'warning'
+  return scoreTone === 'pending' ? 'pending' : 'healthy'
 }
 
 function updateRouteSegmentHealth(routeKey: string, segmentIndex: number, status: TopologyRouteHealth): void {
@@ -251,8 +259,29 @@ const routeRankings = computed<Record<string, TopologyRouteRanking>>(() => rankT
   key: route.key,
   directionKey: route.directionKey,
   healthScore: getRouteScore(route).score,
+  status: getRouteHealth(route),
   reliability: getRouteReliability(route),
 }))))
+
+const selectedRoute = computed<TopologyRouteDetail | null>(() => {
+  const route = routes.value.find(item => item.key === selectedRouteKey.value)
+  if (!route)
+    return null
+  return {
+    key: route.key,
+    nodeNames: route.nodes.map(node => node.name),
+    metrics: route.metrics,
+    score: getRouteScore(route),
+    reliability: getRouteReliability(route),
+    ranking: routeRankings.value[route.key],
+    directionLabel: route.directionLabel,
+  }
+})
+
+watch(selectedRoute, (route) => {
+  if (detailOpen.value && !route)
+    detailOpen.value = false
+})
 
 const healthCounts = computed(() => routes.value.reduce((counts, route) => {
   counts[getRouteHealth(route)] += 1
@@ -274,6 +303,19 @@ const healthSummary = computed(() => {
     dot: counts.offline || counts.error ? 'bg-rose-400' : counts.warning || counts.pending ? 'bg-amber-400' : 'bg-emerald-400',
   }
 })
+
+function routeStatusLabel(route: RouteRow): string {
+  const status = getRouteHealth(route)
+  if (status === 'offline')
+    return '失联'
+  if (status === 'error')
+    return '异常'
+  if (status === 'pending')
+    return '待数据'
+  if (status === 'warning')
+    return '波动'
+  return '正常'
+}
 
 function routeDotClass(route: RouteRow): string {
   const status = getRouteHealth(route)
@@ -299,15 +341,7 @@ function updateProbe(route: RouteRow, value: string) {
 }
 
 function openRouteDetail(route: RouteRow): void {
-  selectedRoute.value = {
-    key: route.key,
-    nodeNames: route.nodes.map(node => node.name),
-    metrics: route.metrics,
-    score: getRouteScore(route),
-    reliability: getRouteReliability(route),
-    ranking: routeRankings.value[route.key],
-    directionLabel: route.directionLabel,
-  }
+  selectedRouteKey.value = route.key
   detailOpen.value = true
 }
 
@@ -348,7 +382,7 @@ function routeRankingLabel(route: RouteRow): string {
         <div class="flex items-center gap-2 text-[10px] text-slate-600 dark:text-slate-400 sm:text-[11px]">
           <span>{{ routes.length }} 条线路</span>
           <span class="text-slate-400 dark:text-slate-700">·</span>
-          <span>{{ healthSummary.label }}</span>
+          <span role="status" aria-live="polite" aria-atomic="true">{{ healthSummary.label }}</span>
           <span class="size-1.5 rounded-full" :class="healthSummary.dot" />
           <button
             type="button"
@@ -413,6 +447,8 @@ function routeRankingLabel(route: RouteRow): string {
                 <span
                   data-topology-route-status
                   :data-status="getRouteHealth(route)"
+                  role="img"
+                  :aria-label="`线路状态：${routeStatusLabel(route)}`"
                   class="size-2 shrink-0 rounded-full"
                   :class="routeDotClass(route)"
                 />
@@ -430,7 +466,7 @@ function routeRankingLabel(route: RouteRow): string {
                 :data-topology-route-ranking="routeRankingLabel(route) || undefined"
                 class="ml-4 mt-0.5 whitespace-nowrap text-[9px] font-medium tabular-nums transition-colors hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500/60"
                 :class="routeScoreClass(route)"
-                :aria-label="`线路健康评分 ${getRouteScore(route).score} 分，${getRouteScore(route).label}${routeRankingLabel(route) ? `，${routeRankingLabel(route)}` : ''}，查看详情`"
+                :aria-label="`线路状态：${routeStatusLabel(route)}，线路健康评分 ${getRouteScore(route).score} 分，${getRouteScore(route).label}${routeRankingLabel(route) ? `，${routeRankingLabel(route)}` : ''}，查看详情`"
                 @click="openRouteDetail(route)"
               >
                 {{ getRouteScore(route).score }} 分 {{ getRouteScore(route).label }}
@@ -517,6 +553,8 @@ function routeRankingLabel(route: RouteRow): string {
               <span
                 data-topology-route-status
                 :data-status="getRouteHealth(route)"
+                role="img"
+                :aria-label="`线路状态：${routeStatusLabel(route)}`"
                 class="panda-dot-ring size-2 rounded-full ring-4"
                 :class="routeDotClass(route)"
               />
@@ -534,7 +572,7 @@ function routeRankingLabel(route: RouteRow): string {
               :data-topology-route-ranking="routeRankingLabel(route) || undefined"
               class="whitespace-nowrap text-[9px] font-medium tabular-nums focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500/60"
               :class="routeScoreClass(route)"
-              :aria-label="`线路健康评分 ${getRouteScore(route).score} 分，${getRouteScore(route).label}${routeRankingLabel(route) ? `，${routeRankingLabel(route)}` : ''}，查看详情`"
+              :aria-label="`线路状态：${routeStatusLabel(route)}，线路健康评分 ${getRouteScore(route).score} 分，${getRouteScore(route).label}${routeRankingLabel(route) ? `，${routeRankingLabel(route)}` : ''}，查看详情`"
               @click="openRouteDetail(route)"
             >
               {{ getRouteScore(route).score }} {{ getRouteScore(route).label }}
@@ -656,7 +694,7 @@ function routeRankingLabel(route: RouteRow): string {
             还没有配置线路
           </h2>
           <p class="mt-1 text-xs leading-5 text-slate-600 dark:text-slate-400">
-            选择入口、线路机、落地机和 Ping 任务，创建第一条实时网络拓扑。
+            选择入口、线路机和可选落地机，使用实时 Ping 任务或静态基线创建第一条网络拓扑。
           </p>
         </div>
       </div>

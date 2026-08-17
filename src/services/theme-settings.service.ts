@@ -7,11 +7,20 @@ import { validateServerThemeSettings, validateThemeSettings } from '@/utils/them
 interface SaveThemeSettingsOptions {
   theme: string
   patch: Record<string, unknown>
+  expected?: Record<string, unknown>
   permission: PermissionKey
   requestKey: string
 }
 
 const themeSaveTails = new Map<string, Promise<void>>()
+const EXPECTED_MISSING = Symbol('transit expected missing theme setting')
+
+export function createThemeSettingsSnapshot(settings: Record<string, unknown>, keys: string[]): Record<string, unknown> {
+  return Object.fromEntries(keys.map(key => [
+    key,
+    Object.hasOwn(settings, key) ? settings[key] : EXPECTED_MISSING,
+  ]))
+}
 
 function stableJson(value: unknown): string {
   if (Array.isArray(value))
@@ -26,9 +35,12 @@ function stableJson(value: unknown): string {
 }
 
 function persistedPatchMatches(settings: Record<string, unknown>, patch: Record<string, unknown>): boolean {
-  return Object.entries(patch).every(([key, value]) => (
-    Object.hasOwn(settings, key) && stableJson(settings[key]) === stableJson(value)
-  ))
+  return Object.entries(patch).every(([key, value]) => {
+    const exists = Object.hasOwn(settings, key)
+    if (value === EXPECTED_MISSING)
+      return !exists
+    return exists && stableJson(settings[key]) === stableJson(value)
+  })
 }
 
 async function withCrossTabThemeLock<T>(theme: string, save: () => Promise<T>): Promise<T> {
@@ -96,8 +108,11 @@ export async function saveManagedThemeSettings(options: SaveThemeSettingsOptions
       const current = await getSharedApi().getPublicSettings(signal)
       if (current.theme !== options.theme)
         throw new Error('当前主题已改变，请刷新页面后重试。')
+      const currentSettings = validateServerThemeSettings(current.theme_settings)
+      if (options.expected && !persistedPatchMatches(currentSettings, options.expected))
+        throw new Error('拓扑配置已被其他会话修改，请重新打开管理器后再保存。')
       savedSettings = {
-        ...validateServerThemeSettings(current.theme_settings),
+        ...currentSettings,
         ...patch,
       }
       savedSettings = validateThemeSettings(savedSettings)
@@ -127,8 +142,10 @@ export async function saveManagedThemeSettings(options: SaveThemeSettingsOptions
     }, { retryAttempts: 0 })
 
     const persisted = await getSharedApi().getPublicSettings()
-    if (persisted.theme !== options.theme || !persistedPatchMatches(validateServerThemeSettings(persisted.theme_settings), patch))
+    const persistedSettings = validateServerThemeSettings(persisted.theme_settings)
+    if (persisted.theme !== options.theme || !persistedPatchMatches(persistedSettings, patch))
       throw new Error('服务器未保留本次主题配置，请刷新后重试。')
+    savedSettings = persistedSettings
   }))
 
   return savedSettings

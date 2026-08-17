@@ -21,8 +21,8 @@ import type { MeInfo, PublicSettings } from '@/utils/api'
 import type { ByteDecimalsConfig } from '@/utils/helper'
 import { useNow, useStorageAsync } from '@vueuse/core'
 import { defineStore } from 'pinia'
-import { computed, ref, watch } from 'vue'
-import { getAuthSession, requirePermission, setAuthSessionFromLogin, verifyLogin } from '@/services/auth.service'
+import { computed, onScopeDispose, ref, watch } from 'vue'
+import { getAuthSession, requirePermission, setAuthSessionFromLogin, subscribeAuthSession, verifyLogin } from '@/services/auth.service'
 import { isNodeCardPanelDefaultMode, parseNodeCardPanelConfigs } from '@/utils/nodeCardPanel'
 import { parsePandaOpsNodeControls } from '@/utils/pandaOpsNodeControl'
 import { normalizeThemeSettings, resolveThemeBackgroundSource } from '@/utils/themeSettings'
@@ -761,6 +761,11 @@ const useAppStore = defineStore('app', () => {
   const isLoggedIn = ref<boolean>(getAuthSession().authenticated)
   const authStatus = ref(getAuthSession().status)
   const privateFeaturesAllowed = computed(() => authStatus.value === 'authenticated')
+  const unsubscribeAuthSession = subscribeAuthSession((session) => {
+    isLoggedIn.value = session.authenticated
+    authStatus.value = session.status
+  })
+  onScopeDispose(unsubscribeAuthSession)
   const connectionError = ref<boolean>(false)
   const homeAdvancedToolsVisible = ref(false)
   const favoriteNodeIdSet = computed(() => new Set(

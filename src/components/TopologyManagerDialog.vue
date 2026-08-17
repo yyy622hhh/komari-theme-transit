@@ -2,12 +2,13 @@
 import type { NodeData } from '@/stores/nodes'
 import type { TopologyRouteConfig } from '@/utils/topologyHelper'
 import { Icon } from '@iconify/vue'
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onScopeDispose, reactive, ref, watch } from 'vue'
 import { AppDialog } from '@/components/ui/app-dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useTopologyManager } from '@/composables/useTopologyManager'
 import { loadPingTaskNamesForNode } from '@/services/metrics.service'
+import { findUniqueTopologyNode, TOPOLOGY_LIMITS } from '@/utils/topologyHelper'
 
 const props = defineProps<{ nodes: NodeData[], open: boolean }>()
 const emit = defineEmits<{ 'update:open': [open: boolean] }>()
@@ -15,6 +16,11 @@ const manager = reactive(useTopologyManager(() => props.nodes))
 const taskOptions = ref<Record<string, string[]>>({})
 const taskLoading = ref<Record<string, boolean>>({})
 const taskErrors = ref<Record<string, string>>({})
+interface TaskLoadResult { tasks: string[], error: string }
+const taskRequests = new Map<string, Promise<TaskLoadResult>>()
+const quickConfiguring = ref(false)
+let quickConfigurationRun = 0
+let dialogSession = 0
 
 const isOpen = computed({
   get: () => props.open,
@@ -22,44 +28,80 @@ const isOpen = computed({
 })
 
 watch(() => props.open, (value) => {
+  dialogSession += 1
   if (value) {
     manager.reset()
     const sourceNames = manager.routes.flatMap(route => route.metrics.map(metric => metric.nodeName)).filter(Boolean)
     void Promise.all(Array.from(new Set(sourceNames), loadTasks))
   }
+  else {
+    cancelQuickConfiguration()
+  }
 }, { immediate: true })
 
-async function loadTasks(nodeName: string): Promise<void> {
-  const node = props.nodes.find(item => item.name === nodeName)
-  if (!node || taskLoading.value[node.uuid])
-    return
+onScopeDispose(() => {
+  dialogSession += 1
+  cancelQuickConfiguration()
+})
+
+function cancelQuickConfiguration(): void {
+  quickConfigurationRun += 1
+  quickConfiguring.value = false
+}
+
+function reset(): void {
+  cancelQuickConfiguration()
+  manager.reset()
+}
+
+async function loadTasks(nodeName: string): Promise<TaskLoadResult> {
+  const node = findUniqueTopologyNode(props.nodes, nodeName)
+  if (!node && manager.isAmbiguousNodeName(nodeName))
+    return { tasks: [], error: '节点名称重复，无法唯一读取 Ping 任务。' }
+  if (!node)
+    return { tasks: [], error: '' }
+  const pending = taskRequests.get(node.uuid)
+  if (pending)
+    return pending
   taskLoading.value = { ...taskLoading.value, [node.uuid]: true }
   taskErrors.value = { ...taskErrors.value, [node.uuid]: '' }
-  try {
-    taskOptions.value = { ...taskOptions.value, [node.uuid]: await loadPingTaskNamesForNode(node.uuid) }
-  }
-  catch (error) {
-    taskErrors.value = {
-      ...taskErrors.value,
-      [node.uuid]: error instanceof Error ? error.message : '无法读取 Ping 任务。',
+
+  const request = (async () => {
+    try {
+      const tasks = await loadPingTaskNamesForNode(node.uuid)
+      taskOptions.value = { ...taskOptions.value, [node.uuid]: tasks }
+      return { tasks, error: '' }
     }
-  }
-  finally {
-    taskLoading.value = { ...taskLoading.value, [node.uuid]: false }
-  }
+    catch (error) {
+      const message = error instanceof Error ? error.message : '无法读取 Ping 任务。'
+      taskErrors.value = {
+        ...taskErrors.value,
+        [node.uuid]: message,
+      }
+      return { tasks: [], error: message }
+    }
+    finally {
+      taskLoading.value = { ...taskLoading.value, [node.uuid]: false }
+      taskRequests.delete(node.uuid)
+    }
+  })()
+  taskRequests.set(node.uuid, request)
+  return request
 }
 
 function nodeTasks(nodeName: string): string[] {
-  const node = props.nodes.find(item => item.name === nodeName)
+  const node = findUniqueTopologyNode(props.nodes, nodeName)
   return node ? taskOptions.value[node.uuid] ?? [] : []
 }
 
 function nodeTaskState(nodeName: string): { uuid: string, loading: boolean, error: string } {
-  const uuid = props.nodes.find(item => item.name === nodeName)?.uuid ?? ''
+  const uuid = findUniqueTopologyNode(props.nodes, nodeName)?.uuid ?? ''
   return {
     uuid,
     loading: Boolean(uuid && taskLoading.value[uuid]),
-    error: uuid ? taskErrors.value[uuid] ?? '' : '',
+    error: manager.isAmbiguousNodeName(nodeName)
+      ? '节点名称重复，无法唯一读取 Ping 任务。'
+      : uuid ? taskErrors.value[uuid] ?? '' : '',
   }
 }
 
@@ -72,14 +114,61 @@ function selectRouteNode(route: TopologyRouteConfig, index: number, nodeName: st
 }
 
 async function save(): Promise<void> {
+  const session = dialogSession
   try {
-    if (await manager.save()) {
+    const result = await manager.save()
+    if (session !== dialogSession || !props.open) {
+      if (props.open)
+        manager.reset()
+      return
+    }
+    if (result === 'saved') {
       window.$message?.success('拓扑配置已保存。')
       isOpen.value = false
     }
+    else if (result === 'changed') {
+      window.$message?.warning('提交时的配置已保存，当前修改尚未保存。')
+    }
   }
   catch (error) {
-    window.$message?.error(error instanceof Error ? error.message : '拓扑保存失败。')
+    if (session === dialogSession && props.open)
+      window.$message?.error(error instanceof Error ? error.message : '拓扑保存失败。')
+  }
+}
+
+async function addQuickRoute(): Promise<void> {
+  if (quickConfiguring.value)
+    return
+  const source = manager.quickSourceNode
+  if (!source) {
+    window.$message?.error('当前没有可用于拓扑的节点。')
+    return
+  }
+
+  const runId = ++quickConfigurationRun
+  quickConfiguring.value = true
+  try {
+    const result = await loadTasks(source.name)
+    if (runId !== quickConfigurationRun || !props.open)
+      return
+    if (result.error) {
+      window.$message?.error(result.error)
+      return
+    }
+    const route = manager.addQuickRoute(result.tasks, source.uuid)
+    if (!route) {
+      window.$message?.error('来源节点已变化，请重新生成。')
+      return
+    }
+    await nextTick()
+    const routeElement = document.querySelector<HTMLElement>(`[data-topology-route-id="${route.id}"]`)
+    routeElement?.querySelector<HTMLElement>('input')?.focus({ preventScroll: true })
+    routeElement?.scrollIntoView({ block: 'nearest' })
+    window.$message?.success('已生成一条拓扑草稿，确认后保存。')
+  }
+  finally {
+    if (runId === quickConfigurationRun)
+      quickConfiguring.value = false
   }
 }
 
@@ -97,15 +186,22 @@ function updateFallback(metric: { fallbackLatency: number | null, fallbackLoss: 
     description="添加、排序线路，并为每一段选择实时 Ping 任务或静态基线。"
     content-class="max-w-6xl"
   >
-    <div class="space-y-4">
+    <fieldset class="min-w-0 space-y-4" :disabled="manager.saving">
       <div class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/60 bg-background/45 px-3 py-2">
         <div class="text-xs text-muted-foreground">
           修改会保存到 Komari 主题设置，所有设备同步生效。
         </div>
-        <Button size="sm" variant="outline" @click="manager.addRoute">
-          <Icon icon="tabler:plus" />添加线路
-        </Button>
+        <div class="flex flex-wrap gap-2">
+          <Button size="sm" variant="outline" :disabled="quickConfiguring || !manager.quickConfigurationAvailable" :aria-busy="quickConfiguring" @click="addQuickRoute">
+            <Icon :icon="quickConfiguring ? 'tabler:loader-2' : 'tabler:sparkles'" :class="quickConfiguring && 'animate-spin'" />
+            {{ quickConfiguring ? '生成中' : '快速生成' }}
+          </Button>
+          <Button size="sm" variant="outline" :disabled="!manager.canAddRoute" @click="manager.addRoute">
+            <Icon icon="tabler:plus" />添加线路
+          </Button>
+        </div>
       </div>
+      <span class="sr-only" aria-live="polite">{{ quickConfiguring ? '正在快速生成拓扑草稿' : '' }}</span>
 
       <div v-if="manager.validationErrors.length" role="alert" class="rounded-lg border border-destructive/30 bg-destructive/8 px-3 py-2 text-xs text-destructive">
         <div v-for="error in manager.validationErrors" :key="error">
@@ -116,6 +212,7 @@ function updateFallback(metric: { fallbackLatency: number | null, fallbackLoss: 
       <article
         v-for="(route, routeIndex) in manager.routes"
         :key="route.id"
+        :data-topology-route-id="route.id"
         class="rounded-xl border border-border/65 bg-background/40 p-3 sm:p-4"
       >
         <header class="mb-3 flex items-center justify-between gap-3">
@@ -146,6 +243,7 @@ function updateFallback(metric: { fallbackLatency: number | null, fallbackLoss: 
             <Input
               v-if="nodeIndex === 0"
               v-model="node.name"
+              :maxlength="TOPOLOGY_LIMITS.nodeNameLength"
               :aria-label="`第 ${routeIndex + 1} 条线路入口名称`"
               placeholder="北京电信"
             />
@@ -159,11 +257,19 @@ function updateFallback(metric: { fallbackLatency: number | null, fallbackLoss: 
               <option value="">
                 选择节点
               </option>
-              <option v-for="option in props.nodes" :key="option.uuid" :value="option.name">
-                {{ option.name }}
+              <option v-for="option in props.nodes" :key="option.uuid" :value="option.name" :disabled="manager.isAmbiguousNodeName(option.name)">
+                {{ option.name }}{{ manager.isAmbiguousNodeName(option.name) ? `（重名，${option.region || option.uuid.slice(-8)}，不可用）` : '' }}
               </option>
             </select>
-            <Input v-model="node.role" :aria-label="`第 ${routeIndex + 1} 条线路${nodeIndex === 0 ? '入口' : nodeIndex === 1 ? '线路机' : '落地机'}角色`" placeholder="角色" class="h-8 text-xs" />
+            <Input
+              v-if="nodeIndex === 0"
+              v-model="node.region"
+              :maxlength="TOPOLOGY_LIMITS.regionLength"
+              :aria-label="`第 ${routeIndex + 1} 条线路入口地区`"
+              placeholder="地区代码（可选）"
+              class="h-8 text-xs"
+            />
+            <Input v-model="node.role" :maxlength="TOPOLOGY_LIMITS.roleLength" :aria-label="`第 ${routeIndex + 1} 条线路${nodeIndex === 0 ? '入口' : nodeIndex === 1 ? '线路机' : '落地机'}角色`" placeholder="角色" class="h-8 text-xs" />
           </div>
 
           <div
@@ -198,8 +304,8 @@ function updateFallback(metric: { fallbackLatency: number | null, fallbackLoss: 
                 <option value="">
                   探测来源节点
                 </option>
-                <option v-for="option in props.nodes" :key="option.uuid" :value="option.name">
-                  {{ option.name }}
+                <option v-for="option in props.nodes" :key="option.uuid" :value="option.name" :disabled="manager.isAmbiguousNodeName(option.name)">
+                  {{ option.name }}{{ manager.isAmbiguousNodeName(option.name) ? `（重名，${option.region || option.uuid.slice(-8)}，不可用）` : '' }}
                 </option>
               </select>
               <select
@@ -221,6 +327,7 @@ function updateFallback(metric: { fallbackLatency: number | null, fallbackLoss: 
               <input
                 v-else
                 v-model="metric.taskFilter"
+                :maxlength="TOPOLOGY_LIMITS.taskNameLength"
                 :aria-label="`第 ${routeIndex + 1} 条线路第 ${metricIndex + 1} 段 Ping 任务`"
                 class="h-8 w-full rounded-md border border-input bg-background px-2 text-xs outline-none focus:border-ring"
                 placeholder="Ping 任务名称"
@@ -275,14 +382,14 @@ function updateFallback(metric: { fallbackLatency: number | null, fallbackLoss: 
       </div>
 
       <footer class="sticky bottom-0 flex flex-wrap justify-end gap-2 border-t border-border/60 bg-card/95 pt-3 backdrop-blur-xl" :aria-busy="manager.saving">
-        <Button variant="outline" :disabled="manager.saving" @click="manager.reset">
+        <Button variant="outline" :disabled="manager.saving" @click="reset">
           恢复已保存配置
         </Button>
-        <Button :disabled="manager.saving || !manager.dirty || manager.validationErrors.length > 0" @click="save">
+        <Button :disabled="manager.saving || quickConfiguring || !manager.dirty || manager.validationErrors.length > 0" @click="save">
           <Icon :icon="manager.saving ? 'tabler:loader-2' : 'tabler:device-floppy'" :class="manager.saving && 'animate-spin'" />
           {{ manager.saving ? '保存中' : '保存并应用' }}
         </Button>
       </footer>
-    </div>
+    </fieldset>
   </AppDialog>
 </template>

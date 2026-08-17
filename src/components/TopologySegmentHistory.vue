@@ -1,9 +1,14 @@
 <script setup lang="ts">
 import type { NodeData } from '@/stores/nodes'
+import type { TelemetrySample } from '@/types/telemetry'
+import type { TopologyRouteHealth } from '@/utils/topologyHealth'
 import type { TopologyReliabilityWindow } from '@/utils/topologyIntelligence'
 import { computed } from 'vue'
+import TelemetrySampleStrip from '@/components/TelemetrySampleStrip.vue'
 import { useNodePingStats } from '@/composables/useNodePingStats'
-import { formatTopologyLatency, formatTopologyLoss, formatTopologyTelemetryLabel, parseTopologyMetric } from '@/utils/topologyHelper'
+import { formatDateTime } from '@/utils/helper'
+import { resolveTopologySegmentHealth } from '@/utils/topologyHealth'
+import { findUniqueTopologyNode, formatTopologyLatency, formatTopologyLoss, formatTopologyTelemetryLabel, parseTopologyMetric } from '@/utils/topologyHelper'
 import { calculateAdaptiveBaseline } from '@/utils/topologyIntelligence'
 
 const props = defineProps<{
@@ -16,13 +21,13 @@ const props = defineProps<{
 
 const config = computed(() => parseTopologyMetric(props.metric))
 const telemetryLabel = computed(() => formatTopologyTelemetryLabel(props.metric, props.sourceLabel, props.targetLabel))
-const sourceNode = computed(() => props.nodes.find(node => node.name.trim().toLowerCase() === config.value.nodeName.toLowerCase()))
+const sourceNode = computed(() => findUniqueTopologyNode(props.nodes, config.value.nodeName))
 const ping = useNodePingStats(
   () => sourceNode.value?.uuid ?? '',
   {
     hours: () => props.hours,
     maxCount: 240,
-    enabled: () => config.value.live && Boolean(sourceNode.value),
+    enabled: () => config.value.live && sourceNode.value?.online !== false && Boolean(sourceNode.value),
     taskNameFilter: () => config.value.taskFilter,
     taskNameMatch: 'exact',
   },
@@ -33,7 +38,7 @@ const currentPing = useNodePingStats(
   {
     hours: 1,
     maxCount: 240,
-    enabled: () => config.value.live && Boolean(sourceNode.value),
+    enabled: () => config.value.live && sourceNode.value?.online !== false && Boolean(sourceNode.value),
     taskNameFilter: () => config.value.taskFilter,
     taskNameMatch: 'exact',
   },
@@ -44,7 +49,7 @@ const baselinePing = useNodePingStats(
   {
     hours: 24,
     maxCount: 240,
-    enabled: () => config.value.live && Boolean(sourceNode.value),
+    enabled: () => config.value.live && sourceNode.value?.online !== false && Boolean(sourceNode.value),
     taskNameFilter: () => config.value.taskFilter,
     taskNameMatch: 'exact',
   },
@@ -55,6 +60,19 @@ const latency = computed(() => hasLiveData.value ? ping.avgLatency.value : confi
 const loss = computed(() => hasLiveData.value ? ping.avgLoss.value : config.value.fallbackLoss)
 const history = computed(() => ping.history.value.slice(-20))
 const maximumLatency = computed(() => Math.max(...history.value.map(point => point.latency ?? 0), 1))
+const health = computed<TopologyRouteHealth>(() => resolveTopologySegmentHealth({
+  live: config.value.live,
+  sourceExists: Boolean(sourceNode.value),
+  sourceOnline: sourceNode.value?.online,
+  loading: ping.loading.value,
+  error: ping.error.value,
+  stale: ping.stale.value,
+  hasData: ping.hasData.value,
+  avgLoss: ping.avgLoss.value,
+  avgVolatility: ping.avgVolatility.value,
+  fallbackLatency: config.value.fallbackLatency,
+  fallbackLoss: config.value.fallbackLoss,
+}))
 const baselineWindow = computed<TopologyReliabilityWindow>(() => ({
   hours: 24,
   availability: baselinePing.hasData.value ? baselinePing.availability.value : null,
@@ -72,6 +90,17 @@ const adaptive = computed(() => calculateAdaptiveBaseline(
   baselineWindow.value,
 ))
 const status = computed(() => {
+  if (health.value === 'offline')
+    return { label: '探测来源节点已离线', tone: 'text-rose-600 dark:text-rose-400', dot: 'bg-rose-400' }
+  if (health.value === 'error') {
+    if (config.value.live && !sourceNode.value)
+      return { label: '探测节点未找到', tone: 'text-rose-600 dark:text-rose-400', dot: 'bg-rose-400' }
+    if (ping.error.value)
+      return { label: '实时任务读取失败', tone: 'text-rose-600 dark:text-rose-400', dot: 'bg-rose-400' }
+    if ((loss.value ?? 0) >= 20)
+      return { label: '严重丢包', tone: 'text-rose-600 dark:text-rose-400', dot: 'bg-rose-400' }
+    return { label: '异常', tone: 'text-rose-600 dark:text-rose-400', dot: 'bg-rose-400' }
+  }
   if (ping.loading.value)
     return { label: '读取中', tone: 'text-slate-500 dark:text-slate-400', dot: 'bg-slate-500' }
   if (config.value.live && ping.stale.value)
@@ -83,10 +112,10 @@ const status = computed(() => {
   return { label: '实时稳定', tone: 'text-emerald-700 dark:text-emerald-300', dot: 'bg-emerald-400' }
 })
 
-function pointHeight(latency: number | null): string {
+function sampleHeight(latency: number | null): number {
   if (latency === null)
-    return '12%'
-  return `${Math.max(16, latency / maximumLatency.value * 100)}%`
+    return 5
+  return Math.round(Math.min(9, Math.max(5, 5 + latency / maximumLatency.value * 4)))
 }
 
 function formatAvailability(value: number | null): string {
@@ -109,6 +138,23 @@ const adaptiveTone = computed(() => {
     return 'text-emerald-700 dark:text-emerald-300'
   return 'text-muted-foreground'
 })
+
+const sampleBars = computed<TelemetrySample[]>(() => history.value.map((point, index) => {
+  const latencyText = point.latency === null ? '无响应' : formatTopologyLatency(point.latency)
+  const lossText = `丢包 ${formatTopologyLoss(point.loss)}`
+  const critical = point.latency === null || (point.loss ?? 0) >= 20
+  const warning = !critical && ((point.loss ?? 0) > 3 || (point.latency !== null && point.latency > maximumLatency.value * 0.82))
+  return {
+    key: `${point.time}-${index}`,
+    height: sampleHeight(point.latency),
+    tone: critical ? 'critical' : warning ? 'warning' : 'healthy',
+    toneClass: critical ? 'bg-rose-400 opacity-75' : warning ? 'bg-amber-400' : 'bg-emerald-400',
+    valueText: latencyText,
+    secondaryText: lossText,
+    timeText: formatDateTime(point.time, props.hours === 1 ? 'HH:mm:ss' : 'MM-DD HH:mm'),
+    ariaLabel: `${telemetryLabel.value}，${latencyText}，${lossText}，${formatDateTime(point.time)}`,
+  }
+}))
 </script>
 
 <template>
@@ -175,14 +221,13 @@ const adaptiveTone = computed(() => {
         <span>延迟走势</span>
         <span>{{ hours === 1 ? '最近 1 小时' : hours === 24 ? '最近 24 小时' : '最近 7 天' }}</span>
       </div>
-      <div v-if="history.length" class="flex h-14 items-end gap-1 rounded-lg bg-card/35 px-2 py-2" aria-label="延迟历史柱状图">
-        <span
-          v-for="(point, index) in history"
-          :key="`${point.time}-${index}`"
-          class="min-w-0 flex-1 rounded-[2px] bg-emerald-400/65"
-          :class="point.loss !== null && point.loss > 3 ? '!bg-amber-400/80' : ''"
-          :style="{ height: pointHeight(point.latency) }"
-          :title="`${new Date(point.time).toLocaleString()} · ${formatTopologyLatency(point.latency)} / ${formatTopologyLoss(point.loss)}`"
+      <div v-if="sampleBars.length" class="flex h-14 items-end rounded-lg bg-card/35 px-2 py-2">
+        <TelemetrySampleStrip
+          :samples="sampleBars"
+          :label="telemetryLabel"
+          kind="topology"
+          variant="bars"
+          class="h-full"
         />
       </div>
       <div v-else class="flex h-14 items-center justify-center rounded-lg border border-dashed border-border/60 text-[11px] text-muted-foreground">

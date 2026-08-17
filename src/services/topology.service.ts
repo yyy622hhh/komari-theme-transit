@@ -5,6 +5,7 @@ import { serializeTopologyRoutes, validateTopologyRoutes } from '@/utils/topolog
 interface SaveTopologyOptions {
   theme: string
   routes: TopologyRouteConfig[]
+  expected?: Record<string, unknown>
 }
 
 function getSaveKey(theme: string): string {
@@ -17,8 +18,6 @@ export async function saveTopologyConfiguration(options: SaveTopologyOptions): P
     throw new Error(validationErrors[0])
 
   const serialized = serializeTopologyRoutes(options.routes)
-  if (!serialized.topologyRoute)
-    throw new Error('至少保留一条包含入口和目标节点的线路。')
 
   const patch = {
     topologyEnabled: true,
@@ -28,6 +27,7 @@ export async function saveTopologyConfiguration(options: SaveTopologyOptions): P
   return saveManagedThemeSettings({
     theme: options.theme,
     patch,
+    expected: options.expected,
     permission: 'nodeTopology',
     requestKey: getSaveKey(options.theme),
   })

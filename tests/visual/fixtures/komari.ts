@@ -43,6 +43,16 @@ export interface VisualFixtureOptions {
   pandaOpsOverlappingTask?: boolean
   pandaOpsStaticFirstMetric?: boolean
   pandaOpsTwoNodeRoute?: boolean
+  pandaOpsTrailingEmptyNode?: boolean
+  pandaOpsExternalOfflineSource?: boolean
+  pandaOpsLegacyPingFallback?: boolean
+  pandaOpsSevereLoss?: boolean
+  pandaOpsMetricDelayMs?: number
+  quickTopologyCustomTask?: boolean
+  quickTopologyPresetConflict?: boolean
+  quickTopologyTaskFailure?: boolean
+  quickTopologyTaskDelayMs?: number
+  themeSaveDelayMs?: number
   emptyTopology?: boolean
   visitorInfoEnabled?: boolean
   visitorAuditClientEnabled?: boolean
@@ -282,7 +292,21 @@ async function handleRpc(
   options: VisualFixtureOptions = {},
 ): Promise<void> {
   const payload = route.request().postDataJSON() as { id: unknown, method: string, params?: Record<string, unknown> }
-  const uuid = typeof payload.params?.uuid === 'string' ? payload.params.uuid : uuidFor(0)
+  const uuid = typeof payload.params?.uuid === 'string'
+    ? payload.params.uuid
+    : typeof payload.params?.entity_id === 'string'
+      ? payload.params.entity_id
+      : uuidFor(0)
+  if ((options.quickTopologyTaskFailure || options.pandaOpsLegacyPingFallback)
+    && (payload.method === 'public:getPublicPingTasks' || payload.method === 'public:getPingMetricStats')) {
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify(jsonRpcError(payload.id, -32000, 'visual Ping task failure')),
+    })
+    return
+  }
+  if (options.pandaOpsMetricDelayMs && (payload.method === 'public:queryMetrics' || payload.method === 'public:getPingMetricStats'))
+    await new Promise(resolve => setTimeout(resolve, options.pandaOpsMetricDelayMs))
   const pingTasks = options.pingTaskOrdering
     ? [
         { id: 30, name: '浙江移动', interval: 60, loss: 0, weight: 0 },
@@ -329,6 +353,26 @@ async function handleRpc(
       clients: [uuid],
     })
   }
+  if (options.quickTopologyCustomTask) {
+    pingTasks.push({
+      id: 88,
+      name: 'Relay-Custom-Hop',
+      interval: 60,
+      loss: 0,
+      weight: 88,
+      clients: [uuidFor(0)],
+    })
+  }
+  if (options.quickTopologyPresetConflict) {
+    pingTasks.push({
+      id: 89,
+      name: '北京电信',
+      interval: 60,
+      loss: 0,
+      weight: 89,
+      clients: [uuidFor(0)],
+    })
+  }
   const metricPingTasks = options.pingTaskOrdering
     ? [pingTasks[2]!, pingTasks[0]!, pingTasks[1]!]
     : pingTasks
@@ -336,13 +380,15 @@ async function handleRpc(
     task_id: task.id,
     client: uuid,
     time: new Date(Date.parse(FIXED_NOW) - (47 - index) * 75_000).toISOString(),
-    value: uuid !== uuidFor(1) && index % 17 === 0
+    value: options.pandaOpsSevereLoss && task.name === '北京电信'
       ? -1
-      : options.nodeCardWorstCase
-        ? 9_876 + index * 13 + task.id
-        : task.name === 'PandaOps-Local-Hop'
-          ? 1.1 + Math.sin(index / 4) * 0.15
-          : 76 + index + task.id,
+      : uuid !== uuidFor(1) && index % 17 === 0
+        ? -1
+        : options.nodeCardWorstCase
+          ? 9_876 + index * 13 + task.id
+          : task.name === 'PandaOps-Local-Hop'
+            ? 1.1 + Math.sin(index / 4) * 0.15
+            : 76 + index + task.id,
   })))
   let result: unknown
 
@@ -385,6 +431,8 @@ async function handleRpc(
       result = { count: 48, records: pingRecords, tasks: pingTasks }
       break
     case 'public:getPublicPingTasks':
+      if (options.quickTopologyTaskDelayMs)
+        await new Promise(resolve => setTimeout(resolve, options.quickTopologyTaskDelayMs))
       result = pingTasks
       break
     case 'public:listMetricDefinitions':
@@ -502,22 +550,34 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
       expired_at: null,
     })
   }
+  if (options.quickTopologyPresetConflict) {
+    Object.assign(clientFixtures[uuidFor(0)]!, {
+      name: '北京电信',
+    })
+  }
   const defaultTopologyRoute = `北京电信|CN|入口;主控-洛杉矶|US|线路机;${options.pandaOpsMissingNode ? '未纳管-西雅图' : '香港边缘节点-超长名称布局测试'}|${options.pandaOpsMissingNode ? 'US' : 'HK'}|落地机||北京电信|CN|入口;东京-高负载|JP|线路机;${options.pandaOpsComparableRoutes ? '香港边缘节点-超长名称布局测试-10|HK' : '新加坡-A100|SG'}|落地机`
   const defaultTopologyMetrics = options.pandaOpsComparableRoutes
     ? 'live@主控-洛杉矶@北京电信@51@0;live@主控-洛杉矶@PandaOps-Local-Hop@84@0||live@东京-高负载@Tokyo@72@0;live@东京-高负载@PandaOps-Local-Hop@1.1@0'
     : 'live@主控-洛杉矶@北京电信@51@0;84,0||live@东京-高负载@Tokyo@72@0;live@东京-高负载@PandaOps-Local-Hop@1.1@0'
-  const topologyRoute = options.pandaOpsTwoNodeRoute
+  let topologyRoute = options.pandaOpsTwoNodeRoute
     ? '北京电信|CN|入口;主控-洛杉矶|US|落地机||北京电信|CN|入口;东京-高负载|JP|线路机;新加坡-A100|SG|落地机'
     : options.pandaOpsCustomFirstMetric
       ? defaultTopologyRoute.replace('北京电信|CN|入口', '自定义入口|CN|入口')
       : defaultTopologyRoute
-  const topologyMetrics = options.pandaOpsStaticFirstMetric
+  if (options.pandaOpsTrailingEmptyNode) {
+    const [firstRoute = '', ...remainingRoutes] = topologyRoute.split('||')
+    topologyRoute = `${firstRoute.split(';').slice(0, 2).join(';')};||${remainingRoutes.join('||')}`
+  }
+
+  let topologyMetrics = options.pandaOpsStaticFirstMetric
     ? defaultTopologyMetrics.replace(FIRST_TOPOLOGY_METRIC_PATTERN, '51,0')
     : options.pandaOpsCustomFirstMetric || options.pandaOpsKnownEntryCustomTask
       ? defaultTopologyMetrics.replace(FIRST_TOPOLOGY_METRIC_PATTERN, 'live@主控-洛杉矶@Relay-JP-to-Exit-US@72@0')
       : options.pandaOpsTwoNodeRoute
         ? `51,0||${defaultTopologyMetrics.split('||')[1] ?? ''}`
         : defaultTopologyMetrics
+  if (options.pandaOpsExternalOfflineSource)
+    topologyMetrics = topologyMetrics.replace('live@主控-洛杉矶@北京电信', 'live@伦敦-离线归档@北京电信')
 
   let settings: Record<string, unknown> = {
     alertEnabled: options.announcementEscaping ?? false,
@@ -625,6 +685,8 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
   }))
   await page.route('**/api/admin/theme/settings?theme=*', async (route) => {
     const body = route.request().postDataJSON() as Record<string, unknown> | null
+    if (options.themeSaveDelayMs)
+      await new Promise(resolve => setTimeout(resolve, options.themeSaveDelayMs))
     if (body)
       settings = structuredClone(body)
     return route.fulfill({

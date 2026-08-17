@@ -74,7 +74,7 @@ function baselineTone(reliability: TopologyRouteReliability): string {
       <section data-topology-score-detail class="grid gap-3 rounded-xl border border-border/60 bg-background/35 p-3.5 sm:grid-cols-[120px_1fr]">
         <div class="flex items-baseline gap-2 sm:block">
           <strong class="text-3xl font-semibold tabular-nums" :class="scoreTone(route.score)">{{ route.score.score }}</strong>
-          <span class="text-xs font-medium" :class="scoreTone(route.score)">{{ route.score.label }}</span>
+          <span data-topology-detail-score-label class="text-xs font-medium" :class="scoreTone(route.score)">{{ route.score.label }}</span>
           <div class="mt-1 hidden text-[10px] text-muted-foreground sm:block">
             线路健康评分
           </div>
@@ -132,7 +132,7 @@ function baselineTone(reliability: TopologyRouteReliability): string {
               {{ formatLatency(route.reliability.day.p95Latency) }}
             </div>
             <div class="truncate text-[9px] text-muted-foreground">
-              高位延迟参考
+              {{ route.reliability.day.p95Latency !== null ? '高位延迟参考' : route.reliability.day.hasData && route.reliability.totalSegments > 1 ? '需端到端样本' : '高位延迟参考' }}
             </div>
           </div>
           <div class="min-w-0">
@@ -153,13 +153,14 @@ function baselineTone(reliability: TopologyRouteReliability): string {
         <div class="text-xs text-muted-foreground">
           实时数据由探测来源节点执行绑定的 Ping 任务；上方视觉线路不代表反向探测。没有样本时显示备用基线。
         </div>
-        <div class="flex shrink-0 rounded-md border border-border/60 bg-background/45 p-0.5">
+        <div class="flex shrink-0 rounded-md border border-border/60 bg-background/45 p-0.5" role="group" aria-label="线路历史时间范围">
           <button
             v-for="period in [{ value: 1, label: '1h' }, { value: 24, label: '24h' }, { value: 168, label: '7d' }]"
             :key="period.value"
             type="button"
             class="h-7 rounded px-2.5 text-[11px] text-muted-foreground transition-colors"
             :class="hours === period.value ? 'bg-card text-foreground shadow-sm' : 'hover:text-foreground'"
+            :aria-pressed="hours === period.value"
             @click="hours = period.value"
           >
             {{ period.label }}

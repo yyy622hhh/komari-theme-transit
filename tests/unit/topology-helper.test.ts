@@ -1,13 +1,19 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  buildQuickTopologyRoute,
   createTopologyRoute,
   findTopologyProbeKey,
+  findUniqueTopologyNode,
   formatTopologyMetricForProbe,
   formatTopologyTelemetryLabel,
+  getQuickTopologySourceNode,
   getTopologyProbeStorageKey,
+  parseTopologyMetric,
   parseTopologyRoutes,
+  pickQuickTopologyTaskName,
   serializeTopologyRoutes,
   splitTopologyGroups,
+  TOPOLOGY_LIMITS,
   validateTopologyRoutes,
 } from '@/utils/topologyHelper'
 
@@ -80,6 +86,16 @@ describe('topology route and metric alignment', () => {
     })
   })
 
+  test('serializes empty node fields without colliding with route separators', () => {
+    const [route] = parseTopologyRoutes('入口|-|入口;目标|US|线路机', '15,0')
+
+    expect(route?.nodes[0]).toMatchObject({ name: '入口', region: '', role: '入口' })
+    expect(serializeTopologyRoutes(route ? [route] : [])).toEqual({
+      topologyRoute: '入口|-|入口;目标|US|线路机',
+      topologyMetrics: '15,0',
+    })
+  })
+
   test('preserves an empty middle node slot instead of shifting the landing node forward', () => {
     const routes = parseTopologyRoutes('入口|CN|入口;;落地|US|落地机', '-,-;84,0')
 
@@ -121,7 +137,132 @@ describe('topology probe overrides', () => {
   })
 })
 
+describe('quick topology configuration', () => {
+  test('prefers online nodes and exact probe task names for the first route', () => {
+    const route = buildQuickTopologyRoute([
+      { name: '离线东京', region: 'JP', online: false },
+      { name: '在线新加坡', region: 'SG', online: true },
+      { name: '在线洛杉矶', region: 'US', online: true },
+    ], ['自定义任务', '北京-电信'])
+
+    expect(route?.nodes.map(node => node.name)).toEqual(['北京电信', '在线新加坡', '在线洛杉矶'])
+    expect(route?.metrics[0]).toMatchObject({
+      live: true,
+      nodeName: '在线新加坡',
+      taskFilter: '北京-电信',
+    })
+    expect(validateTopologyRoutes(route ? [route] : [])).toEqual([])
+  })
+
+  test('generates a valid static draft when no Ping task is available', () => {
+    const route = buildQuickTopologyRoute([{ name: '边缘节点', region: 'HK', online: true }])
+
+    expect(route?.nodes.map(node => node.name)).toEqual(['自定义入口', '边缘节点', ''])
+    expect(serializeTopologyRoutes(route ? [route] : [])).toEqual({
+      topologyRoute: '自定义入口|-|入口;边缘节点|HK|线路机',
+      topologyMetrics: '-,-',
+    })
+    expect(validateTopologyRoutes(route ? [route] : [])).toEqual([])
+  })
+
+  test('uses a custom entry label for non-preset Ping tasks', () => {
+    const route = buildQuickTopologyRoute([{ name: '北京电信', region: 'CN', online: true }], ['my-ping'])
+
+    expect(route?.nodes[0]?.name).toBe('自定义入口')
+    expect(route?.metrics[0]?.taskFilter).toBe('my-ping')
+    expect(validateTopologyRoutes(route ? [route] : [])).toEqual([])
+  })
+
+  test('keeps preset entry semantics aligned when the preset label is also a node name', () => {
+    const route = buildQuickTopologyRoute([{ name: '北京电信', region: 'CN', online: true }], ['北京电信'])
+
+    expect(route?.nodes[0]?.name).toBe('北京电信入口')
+    expect(route?.metrics[0]?.taskFilter).toBe('北京电信')
+    expect(validateTopologyRoutes(route ? [route] : [])).toEqual([])
+  })
+
+  test('locks quick generation to the selected source after async task loading', () => {
+    const route = buildQuickTopologyRoute([
+      { uuid: 'node-a', name: 'source-a', region: 'US', online: true },
+      { uuid: 'node-b', name: 'source-b', region: 'JP', online: true },
+    ], ['Tokyo'], 'node-b')
+
+    expect(route?.nodes[1]?.name).toBe('source-b')
+    expect(route?.metrics[0]).toMatchObject({ nodeName: 'source-b', taskFilter: 'Tokyo' })
+  })
+
+  test('locks sources by UUID when names are reused or normalize alike', () => {
+    expect(buildQuickTopologyRoute([
+      { uuid: 'node-a', name: 'edge-us', online: true },
+      { uuid: 'node-b', name: 'edge us', online: true },
+    ], ['Tokyo'], 'node-b')?.nodes.slice(1).map(node => node.name)).toEqual(['edge us', 'edge-us'])
+
+    expect(buildQuickTopologyRoute([
+      { uuid: 'replacement', name: 'same-name', online: true },
+    ], ['Tokyo'], 'removed-node')).toBeNull()
+  })
+
+  test('skips names and tasks that cannot be serialized', () => {
+    const route = buildQuickTopologyRoute([
+      { uuid: 'invalid', name: 'bad|source', online: true },
+      { uuid: 'safe', name: 'safe-source', region: 'US', online: true },
+    ], ['bad@task', 'safe-task'])
+
+    expect(route?.nodes[1]?.name).toBe('safe-source')
+    expect(route?.metrics[0]?.taskFilter).toBe('safe-task')
+    expect(validateTopologyRoutes(route ? [route] : [])).toEqual([])
+  })
+
+  test('keeps generated entry labels unique across large node sets', () => {
+    const conflictingNodes = [
+      { uuid: 'source', name: 'source', online: true },
+      { name: '北京电信', online: true },
+      { name: '北京电信入口', online: true },
+      ...Array.from({ length: 99 }, (_, index) => ({ name: `北京电信入口${index + 2}`, online: true })),
+    ]
+    const route = buildQuickTopologyRoute(conflictingNodes, ['北京电信'], 'source')
+
+    expect(route?.nodes[0]?.name).toBe('北京电信入口101')
+    expect(validateTopologyRoutes(route ? [route] : [])).toEqual([])
+  })
+
+  test('does not offer an offline node as a quick topology source', () => {
+    expect(getQuickTopologySourceNode([
+      { name: 'offline-a', online: false },
+      { name: 'offline-b', online: false },
+    ])).toBeNull()
+    expect(buildQuickTopologyRoute([{ name: 'offline-a', online: false }])).toBeNull()
+  })
+
+  test('does not auto-configure an ambiguous duplicate node name', () => {
+    const nodes = [
+      { uuid: 'node-a', name: 'edge', region: 'US', online: true },
+      { uuid: 'node-b', name: 'edge', region: 'JP', online: true },
+    ]
+
+    expect(findUniqueTopologyNode(nodes, 'edge')).toBeUndefined()
+    expect(getQuickTopologySourceNode(nodes)).toBeNull()
+  })
+
+  test('exposes the quick source node and task picker separately', () => {
+    expect(getQuickTopologySourceNode([
+      { name: 'offline', online: false },
+      { name: 'online', online: true },
+    ])?.name).toBe('online')
+    expect(pickQuickTopologyTaskName(['上海移动备用', '探测任务'])).toBe('上海移动备用')
+    expect(buildQuickTopologyRoute([])).toBeNull()
+  })
+})
+
 describe('topology configuration validation', () => {
+  test('allows an empty route list so operators can clear topology settings', () => {
+    expect(validateTopologyRoutes([])).toEqual([])
+    expect(serializeTopologyRoutes([])).toEqual({
+      topologyRoute: '',
+      topologyMetrics: '',
+    })
+  })
+
   test('rejects gaps, reserved delimiters and invalid fallback ranges', () => {
     const route = createTopologyRoute(
       [
@@ -142,5 +283,85 @@ describe('topology configuration validation', () => {
       '第 1 条线路第 1 段备用延迟不能小于 0',
       '第 1 条线路第 1 段备用丢包必须在 0 到 100 之间',
     ])
+  })
+
+  test('rejects hidden extra nodes and metrics instead of truncating them on save', () => {
+    const [route] = parseTopologyRoutes(
+      '入口|CN|入口;线路机|US|线路机;落地机|HK|落地机;额外节点|JP|节点',
+      '10,0;20,0;30,0',
+    )
+
+    expect(validateTopologyRoutes(route ? [route] : [])).toContain('第 1 条线路最多支持三个节点，高级配置包含未显示的额外节点')
+    expect(validateTopologyRoutes(route ? [route] : [])).toContain('第 1 条线路最多支持两段指标，高级配置包含未显示的额外指标')
+  })
+
+  test('rejects live metrics with unexpected extra separators instead of rewriting task names', () => {
+    const metric = parseTopologyMetric('live@B@task@with@10@0')
+    const [route] = parseTopologyRoutes(
+      'A|CN|入口;B|JP|线路机',
+      'live@B@task@with@10@0',
+    )
+
+    expect(metric).toMatchObject({
+      live: true,
+      nodeName: 'B',
+      taskFilter: 'task',
+      fallbackLatency: null,
+      fallbackLoss: 10,
+      parseErrors: ['实时指标包含非法“@”分隔符'],
+    })
+    expect(validateTopologyRoutes(route ? [route] : [])).toContain('第 1 条线路第 1 段实时指标包含非法“@”分隔符')
+  })
+
+  test('keeps explicit legacy live metrics only when the numeric fallback boundary is unambiguous', () => {
+    const metric = parseTopologyMetric('live@Relay@北京@电信@72@0')
+    expect(metric).toMatchObject({
+      live: true,
+      nodeName: 'Relay',
+      taskFilter: '北京电信',
+      fallbackLatency: 72,
+      fallbackLoss: 0,
+    })
+    expect(metric.parseErrors).toBeUndefined()
+  })
+
+  test('keeps legacy live metrics with empty fallback baselines', () => {
+    const metric = parseTopologyMetric('live@Relay@北京@电信@-@-')
+    expect(metric).toMatchObject({
+      live: true,
+      nodeName: 'Relay',
+      taskFilter: '北京电信',
+      fallbackLatency: null,
+      fallbackLoss: null,
+    })
+    expect(metric.parseErrors).toBeUndefined()
+    expect(validateTopologyRoutes(parseTopologyRoutes(
+      '入口|CN|入口;Relay|JP|线路机',
+      'live@Relay@北京@电信@-@-',
+    ))).toEqual([])
+  })
+
+  test('bounds oversized route groups before allocating editor rows', () => {
+    const routes = parseTopologyRoutes('||'.repeat(TOPOLOGY_LIMITS.maxRoutes + 10), '')
+
+    expect(routes).toHaveLength(1)
+    expect(validateTopologyRoutes(routes)).toContain(`第 1 条线路拓扑线路不能超过 ${TOPOLOGY_LIMITS.maxRoutes} 条`)
+  })
+
+  test('rejects product-level field limits and non-numeric suffixes', () => {
+    const route = createTopologyRoute([
+      { name: 'a'.repeat(TOPOLOGY_LIMITS.nodeNameLength + 1), region: 'CN', role: '入口' },
+      { name: 'target', region: 'US', role: '线路机' },
+    ], [{
+      live: true,
+      nodeName: 'target',
+      taskFilter: 't'.repeat(TOPOLOGY_LIMITS.taskNameLength + 1),
+      fallbackLatency: null,
+      fallbackLoss: null,
+    }])
+
+    expect(validateTopologyRoutes([route])).toContain(`第 1 条线路节点名称不能超过 ${TOPOLOGY_LIMITS.nodeNameLength} 个字符`)
+    expect(validateTopologyRoutes([route])).toContain(`第 1 条线路第 1 段Ping 任务不能超过 ${TOPOLOGY_LIMITS.taskNameLength} 个字符`)
+    expect(parseTopologyMetric('12ms,5pct')).toMatchObject({ fallbackLatency: null, fallbackLoss: null })
   })
 })

@@ -7,7 +7,7 @@ import { CACHE_CONFIG } from '@/constants/cache'
 import { PING_RECORD_MAX_COUNT } from '@/constants/load'
 import { PANDA_OPS_PING_STALE_AFTER_MS } from '@/constants/pandaOps'
 import { SharedCache } from '@/services/cache.service'
-import { abortPingRecords, loadPingRecords } from '@/services/history.service'
+import { abortPingRecords, loadPingRecordsWithTasks } from '@/services/history.service'
 import { loadPingMetricStats, loadPublicPingTasks, partitionMetricEntityIds, queryMetrics } from '@/services/metrics.service'
 import { isPingMetric, normalizeMetricSeriesList, PING_LATENCY_METRIC, PING_LOSS_METRIC, pingTaskId } from '@/utils/metricSeries'
 import { buildNodePingStats, createEmptyNodePingStats, matchesPingTaskName, normalizeExactPingTaskName, normalizePingTaskFilter } from '@/utils/pingStats'
@@ -515,7 +515,13 @@ async function loadSharedPingRecords(entry: SharedPingRecordsEntry, hours: numbe
         entry.data.value = { ...metricState, taskNamesById }
       }
       else {
-        const records = await loadPingRecords(hours, maxCount, nodeUuid)
+        const { records, tasks } = await loadPingRecordsWithTasks(hours, maxCount, nodeUuid)
+        for (const task of tasks) {
+          const name = task.name.trim()
+          const taskId = normalizeTaskId(String(task.id))
+          if (name && !taskNamesById.has(taskId))
+            taskNamesById.set(taskId, name)
+        }
         if (entry.subscribers === 0)
           return
         entry.data.value = {

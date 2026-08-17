@@ -6,7 +6,8 @@ import { computed, watch } from 'vue'
 import TopologyEdgeSamples from '@/components/TopologyEdgeSamples.vue'
 import { useNodePingStats } from '@/composables/useNodePingStats'
 import { formatDateTime } from '@/utils/helper'
-import { formatTopologyLatency, formatTopologyLoss, formatTopologyTelemetryLabel, parseTopologyMetric } from '@/utils/topologyHelper'
+import { resolveTopologySegmentHealth } from '@/utils/topologyHealth'
+import { findUniqueTopologyNode, formatTopologyLatency, formatTopologyLoss, formatTopologyTelemetryLabel, parseTopologyMetric } from '@/utils/topologyHelper'
 
 const props = defineProps<{
   metric: string
@@ -23,12 +24,12 @@ const emit = defineEmits<{
 }>()
 const config = computed(() => parseTopologyMetric(props.metric))
 const telemetryLabel = computed(() => formatTopologyTelemetryLabel(props.metric, props.sourceLabel, props.targetLabel))
-const sourceNode = computed(() => props.nodes.find(node => node.name.trim().toLowerCase() === config.value.nodeName.toLowerCase()))
+const sourceNode = computed(() => findUniqueTopologyNode(props.nodes, config.value.nodeName))
 const ping = useNodePingStats(
   () => sourceNode.value?.uuid ?? '',
   {
     hours: 1,
-    enabled: () => config.value.live && Boolean(sourceNode.value),
+    enabled: () => config.value.live && sourceNode.value?.online !== false && Boolean(sourceNode.value),
     taskNameFilter: () => config.value.taskFilter,
     taskNameMatch: 'exact',
   },
@@ -41,6 +42,8 @@ const sourceState = computed(() => {
     return { label: '静态基线', line: 'bg-slate-400/70 dark:bg-slate-500/55' }
   if (!sourceNode.value)
     return { label: '探测节点未找到', line: 'bg-rose-400/55' }
+  if (!sourceNode.value.online)
+    return { label: '探测来源节点已离线', line: 'bg-rose-400/55' }
   if (ping.loading.value)
     return { label: '正在读取实时任务', line: 'bg-amber-400/55' }
   if (ping.error.value)
@@ -60,18 +63,19 @@ const lossTone = computed(() => {
 })
 
 const health = computed<TopologyRouteHealth>(() => {
-  if (!config.value.live) {
-    if (config.value.fallbackLatency === null && config.value.fallbackLoss === null)
-      return 'pending'
-    return (config.value.fallbackLoss ?? 0) > 3 ? 'warning' : 'healthy'
-  }
-  if (!sourceNode.value || ping.error.value)
-    return 'error'
-  if (ping.stale.value)
-    return 'pending'
-  if (ping.loading.value || !ping.hasData.value)
-    return 'pending'
-  return ping.avgLoss.value > 3 || ping.avgVolatility.value > 1.8 ? 'warning' : 'healthy'
+  return resolveTopologySegmentHealth({
+    live: config.value.live,
+    sourceExists: Boolean(sourceNode.value),
+    sourceOnline: sourceNode.value?.online,
+    loading: ping.loading.value,
+    error: ping.error.value,
+    stale: ping.stale.value,
+    hasData: ping.hasData.value,
+    avgLoss: ping.avgLoss.value,
+    avgVolatility: ping.avgVolatility.value,
+    fallbackLatency: config.value.fallbackLatency,
+    fallbackLoss: config.value.fallbackLoss,
+  })
 })
 
 watch(health, value => emit('statusChange', value), { immediate: true })
@@ -112,16 +116,16 @@ const sampleBars = computed<TelemetrySample[]>(() => {
     .filter((value): value is number => value !== null && Number.isFinite(value))
   const baseline = median(validLatencies)
   return points.map((point, index) => {
-    const alert = (point.loss !== null && point.loss > 3)
-      || (point.latency !== null && baseline > 0 && point.latency > baseline * 1.18)
-    const unavailable = point.latency === null
-    const latencyText = unavailable ? '无响应' : `${Math.round(point.latency ?? 0)} ms`
+    const critical = point.latency === null || (point.loss ?? 0) >= 20
+    const warning = !critical && ((point.loss ?? 0) > 3
+      || (point.latency !== null && baseline > 0 && point.latency > baseline * 1.18))
+    const latencyText = point.latency === null ? '无响应' : `${Math.round(point.latency)} ms`
     const lossText = `丢包 ${formatTopologyLoss(point.loss)}`
     return {
       key: `${props.segmentIndex}-${point.time}-${index}`,
       height: sampleHeight(point.latency, baseline),
-      tone: unavailable ? 'critical' : alert ? 'warning' : 'healthy',
-      toneClass: unavailable ? 'bg-rose-400 opacity-75' : alert ? 'bg-amber-400' : 'bg-emerald-400',
+      tone: critical ? 'critical' : warning ? 'warning' : 'healthy',
+      toneClass: critical ? 'bg-rose-400 opacity-75' : warning ? 'bg-amber-400' : 'bg-emerald-400',
       valueText: latencyText,
       secondaryText: lossText,
       timeText: formatDateTime(point.time, 'HH:mm:ss'),

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { getAuthSession, requirePermission, setAuthSessionFromLogin, verifyLogin } from '../../src/services/auth.service'
+import { getAuthSession, requirePermission, setAuthSessionFromLogin, subscribeAuthSession, verifyLogin } from '../../src/services/auth.service'
 
 function deferred<T>() {
   let resolve!: (value: T) => void
@@ -58,6 +58,21 @@ describe('auth session verification', () => {
     expect(permission.session.status).toBe('guest')
     expect(permission.session.authenticated).toBe(false)
     expect(permission.reason).toContain('serverList')
+  })
+
+  test('notifies store subscribers when forced verification expires a session', async () => {
+    const statuses: string[] = []
+    const unsubscribe = subscribeAuthSession(session => statuses.push(session.status))
+    globalThis.fetch = (async () => meResponse(false)) as typeof fetch
+    setAuthSessionFromLogin(true, { logged_in: true, username: 'admin' })
+
+    try {
+      await requirePermission('nodeTopology', { force: true })
+      expect(statuses).toEqual(['authenticated', 'guest'])
+    }
+    finally {
+      unsubscribe()
+    }
   })
 
   test('treats verification failures as unauthenticated instead of preserving stale access', async () => {
