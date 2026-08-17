@@ -1,19 +1,45 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test'
+import { afterEach, describe, expect, test } from 'bun:test'
+import { setAuthSessionFromLogin } from '../../src/services/auth.service'
+import { saveTopologyConfiguration } from '../../src/services/topology.service'
 
-const saveManagedThemeSettings = mock(async (options: { patch: Record<string, unknown> }) => options.patch)
+const originalFetch = globalThis.fetch
 
-mock.module('../../src/services/theme-settings.service', () => ({
-  saveManagedThemeSettings,
-}))
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  })
+}
 
-const { saveTopologyConfiguration } = await import('../../src/services/topology.service')
-
-beforeEach(() => {
-  saveManagedThemeSettings.mockClear()
+afterEach(() => {
+  globalThis.fetch = originalFetch
+  setAuthSessionFromLogin(false)
 })
 
 describe('topology service', () => {
   test('persists clearing all routes as empty topology settings without hiding the manager entry', async () => {
+    let persisted: Record<string, unknown> = {
+      topologyEnabled: true,
+      topologyRoute: '入口|CN|入口;线路|JP|线路机',
+      topologyMetrics: '10,0',
+    }
+    let postedBody: Record<string, unknown> | null = null
+
+    globalThis.fetch = (async (input, init) => {
+      const url = String(input)
+      if (url.endsWith('/api/me'))
+        return jsonResponse({ logged_in: true, username: 'admin' })
+      if (url.endsWith('/api/public'))
+        return jsonResponse({ status: 'success', message: '', data: { theme: 'Transit', theme_settings: persisted } })
+      if (url.includes('/api/admin/theme/settings?theme=Transit')) {
+        postedBody = JSON.parse(String(init?.body)) as Record<string, unknown>
+        persisted = postedBody
+        return jsonResponse({ status: 'success', data: null })
+      }
+      return jsonResponse({ message: 'unexpected endpoint' }, 500)
+    }) as typeof fetch
+    setAuthSessionFromLogin(true, { logged_in: true, username: 'admin' })
+
     await expect(saveTopologyConfiguration({
       theme: 'Transit',
       routes: [],
@@ -24,19 +50,10 @@ describe('topology service', () => {
       topologyMetrics: '',
     })
 
-    expect(saveManagedThemeSettings.mock.calls).toHaveLength(1)
-    expect(saveManagedThemeSettings.mock.calls[0]?.[0]).toMatchObject({
-      theme: 'Transit',
-      patch: {
-        topologyEnabled: true,
-        topologyRoute: '',
-        topologyMetrics: '',
-      },
-      expected: {
-        topologyRoute: '入口|CN|入口;线路|JP|线路机',
-        topologyMetrics: '10,0',
-      },
-      permission: 'nodeTopology',
+    expect(postedBody).toEqual({
+      topologyEnabled: true,
+      topologyRoute: '',
+      topologyMetrics: '',
     })
   })
 })
