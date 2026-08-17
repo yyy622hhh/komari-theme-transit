@@ -284,6 +284,53 @@ export interface QuickTopologyRouteOptions {
   sourceTasks?: readonly string[]
   entryTask?: string
   hopTask?: string
+  probeKey?: string
+}
+
+export function getTopologyRouteProbeKey(route: Pick<TopologyRouteConfig, 'nodes' | 'metrics'>): string {
+  return findTopologyProbeKey(route.nodes[0]?.name ?? '', route.metrics[0]?.taskFilter ?? '') ?? ''
+}
+
+export function shouldAutoApplyTopologyProbe(route: Pick<TopologyRouteConfig, 'nodes' | 'metrics'>): boolean {
+  const firstTask = route.metrics[0]?.taskFilter.trim() ?? ''
+  if (!firstTask)
+    return Boolean(findTopologyProbeKey(route.nodes[0]?.name ?? ''))
+  return Boolean(findTopologyProbeKey(firstTask))
+}
+
+export function applyTopologyProbeToRoute(
+  route: TopologyRouteConfig,
+  probeKey: string,
+  sourceName: string,
+  taskNames: readonly string[] = [],
+  reservedNodeNames: readonly string[] = [],
+): TopologyProbeOption {
+  const probe = getTopologyProbe(probeKey)
+  const reserved = new Set(
+    reservedNodeNames
+      .map(name => name.trim().toLowerCase())
+      .filter(name => name && name !== route.nodes[0]?.name.trim().toLowerCase()),
+  )
+  const entryTask = pickQuickTopologyTaskName(taskNames, probe)
+  const entry = route.nodes[0] ?? { name: '', region: 'CN', role: '入口' }
+  entry.name = makeUniqueQuickEntryLabel(probe.label, reserved)
+  entry.region = 'CN'
+  entry.role = '入口'
+  route.nodes[0] = entry
+  const first = route.metrics[0] ?? {
+    live: false,
+    nodeName: '',
+    taskFilter: '',
+    fallbackLatency: null,
+    fallbackLoss: null,
+  }
+  route.metrics[0] = {
+    ...first,
+    live: Boolean(entryTask),
+    nodeName: entryTask ? sourceName.trim() : '',
+    taskFilter: entryTask,
+  }
+  return probe
 }
 
 export function nextQuickLandingUuid(
@@ -382,13 +429,14 @@ export function buildQuickTopologyRoute(
 
   const configuredNames = new Set(candidates.map(node => node.name.trim().toLowerCase()))
   const usableTaskNames = normalizeQuickTopologyTaskNames(options.sourceTasks ?? [])
-  const autoProbe = findQuickTopologyTaskProbe(usableTaskNames)
+  const requestedProbe = options.probeKey ? getTopologyProbe(options.probeKey) : null
+  const autoProbe = requestedProbe ?? findQuickTopologyTaskProbe(usableTaskNames)
   const explicitEntryTask = options.entryTask === undefined
     ? undefined
     : normalizeQuickTopologyTaskNames([options.entryTask]).find(task => usableTaskNames.includes(task)) ?? ''
   const entryTask = explicitEntryTask ?? (autoProbe ? pickQuickTopologyTaskName(usableTaskNames, autoProbe) : '')
-  const probeKey = findTopologyProbeKey(entryTask)
-  const probe = probeKey ? getTopologyProbe(probeKey) : null
+  const probeKey = findTopologyProbeKey(entryTask) ?? requestedProbe?.key
+  const probe = probeKey ? getTopologyProbe(probeKey) : requestedProbe
   const hopTask = landing
     ? (options.hopTask === undefined
         ? pickQuickHopTaskName(usableTaskNames, landing.name, entryTask)

@@ -77,8 +77,9 @@ test('authenticated mobile tools and dialogs have no accessibility violations', 
   await page.getByRole('button', { name: '管理', exact: true }).click()
   const topologyDialog = page.getByRole('dialog', { name: '拓扑管理' })
   await expect(topologyDialog).toBeVisible()
+  await expect(topologyDialog.locator('[data-topology-ready="true"]')).toBeVisible({ timeout: 15_000 })
   expect(await getAccessibilityViolations(page)).toEqual([])
-  await topologyDialog.getByRole('button', { name: '快速生成' }).click()
+  await topologyDialog.getByRole('button', { name: '添加线路' }).click()
   await expect(topologyDialog.locator('[data-topology-route-id]')).toHaveCount(3)
   expect(await getAccessibilityViolations(page)).toEqual([])
 })
@@ -120,7 +121,9 @@ test('all interactive controls expose an accessible name', async ({ page }) => {
   }
   await page.getByRole('button', { name: /网络：/ }).click()
   await page.getByRole('button', { name: '管理', exact: true }).click()
-  await expectNamedControls(page.getByRole('dialog', { name: '拓扑管理' }))
+  const topologyDialog = page.getByRole('dialog', { name: '拓扑管理' })
+  await expect(topologyDialog.locator('[data-topology-ready="true"]')).toBeVisible({ timeout: 15_000 })
+  await expectNamedControls(topologyDialog)
 })
 
 test('forced colors keeps focus and selected controls visually distinguishable', async ({ page }) => {

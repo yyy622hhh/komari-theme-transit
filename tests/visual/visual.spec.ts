@@ -36,6 +36,17 @@ const STABLE_STYLE = `
   .earth-globe-canvas { opacity: 0 !important; }
 `
 
+async function openTopologyManager(page: Page, trigger: 'manage' | 'empty' = 'manage'): Promise<Locator> {
+  if (trigger === 'empty')
+    await page.getByRole('button', { name: '配置第一条线路' }).click()
+  else
+    await page.getByRole('button', { name: '管理', exact: true }).click()
+  const dialog = page.getByRole('dialog', { name: '拓扑管理' })
+  await expect(dialog).toBeVisible()
+  await expect(dialog.locator('[data-topology-ready="true"]')).toBeVisible({ timeout: 15_000 })
+  return dialog
+}
+
 async function openStablePage(page: Page, path = '/'): Promise<void> {
   await page.goto(path)
   // Full visual runs can briefly saturate Chromium while lazy chunks and test
@@ -598,17 +609,15 @@ test('Transit mobile topology manager remains contained and scrollable', async (
   await installKomariFixture(page, { opsDashboard: true, authenticated: true })
   await openStablePage(page)
 
-  await page.getByRole('button', { name: '管理', exact: true }).click()
-  const dialog = page.getByRole('dialog', { name: '拓扑管理' })
-  await expect(dialog).toBeVisible()
+  const dialog = await openTopologyManager(page)
   await expect.poll(() => dialog.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
   const scrollArea = dialog.locator('> div').last()
   await expect.poll(() => scrollArea.evaluate(element => element.scrollHeight > element.clientHeight)).toBe(true)
   await expect(dialog.getByRole('button', { name: '保存并应用' })).toBeVisible()
-  await dialog.getByRole('button', { name: '快速生成' }).click()
+  await dialog.getByRole('button', { name: '添加线路' }).click()
   const generatedRoute = dialog.locator('[data-topology-route-id]').last()
   await expect(generatedRoute).toBeInViewport()
-  await expect(generatedRoute.getByLabel('第 3 条线路入口名称')).toBeFocused()
+  await expect(generatedRoute.getByLabel('第 3 条线路入口探测')).toBeFocused()
   await expect.poll(() => dialog.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
   await expect(page.locator('html')).toHaveJSProperty('scrollWidth', await page.locator('html').evaluate(element => element.clientWidth))
 })
@@ -760,10 +769,9 @@ test('Transit renders and edits a two-node topology with a trailing empty slot w
 
   const desktopRoutes = page.locator('.topology-scroll article')
   await expect(desktopRoutes.first().locator('[data-topology-current-metric]')).toHaveCount(1)
-  await page.getByRole('button', { name: '管理', exact: true }).click()
-  const dialog = page.getByRole('dialog', { name: '拓扑管理' })
-  await expect(dialog.getByLabel('第 1 条线路落地机节点')).toBeVisible()
-  await expect(dialog.getByLabel('第 1 条线路第 2 段指标模式')).toBeVisible()
+  const dialog = await openTopologyManager(page)
+  await expect(dialog.getByLabel('第 1 条线路落地机')).toBeVisible()
+  await expect(dialog.getByLabel('第 1 条线路落地机')).toHaveValue('')
 })
 
 test('Transit empty topology guides an authenticated operator into the manager', async ({ page }) => {
@@ -786,19 +794,18 @@ test('Transit topology manager keeps the entry static and creates the selected h
   })
   await openStablePage(page)
 
-  await page.getByRole('button', { name: '配置第一条线路' }).click()
-  const dialog = page.getByRole('dialog', { name: '拓扑管理' })
-  await dialog.getByRole('button', { name: '快速生成' }).click()
-  await expect(dialog.getByLabel('第 1 条线路入口名称')).toHaveValue('自定义入口')
-  await expect(dialog.getByLabel('第 1 条线路线路机节点')).toHaveValue('主控-洛杉矶')
-  await expect(dialog.getByLabel('第 1 条线路落地机节点')).toHaveValue('香港边缘节点-超长名称布局测试')
-  await expect(dialog.getByLabel('第 1 条线路第 1 段指标模式')).toHaveValue('baseline')
-
-  await dialog.getByRole('button', { name: '保存并应用' }).click()
-  await expect(dialog).toBeHidden()
+  const dialog = await openTopologyManager(page, 'empty')
+  await dialog.getByRole('button', { name: '添加线路' }).click()
+  const route = dialog.locator('[data-topology-route-id]').first()
+  await expect(dialog.getByLabel('第 1 条线路入口探测')).toHaveValue('beijing-telecom')
+  await expect(dialog.getByLabel('第 1 条线路线路机')).toHaveValue('主控-洛杉矶')
+  await expect(dialog.getByLabel('第 1 条线路落地机')).toHaveValue('香港边缘节点-超长名称布局测试')
+  await expect(route).toHaveAttribute('data-topology-entry-task', '')
+  await expect(route).toHaveAttribute('data-topology-hop-task', 'Transit-主控-洛杉矶-to-香港边缘节点-超长名称布局测试')
+  await expect(dialog).toBeVisible()
   await expect.poll(() => saves.length).toBe(1)
   expect(saves[0]).toMatchObject({
-    topologyRoute: '自定义入口|-|入口;主控-洛杉矶|US|线路机;香港边缘节点-超长名称布局测试|HK|落地机',
+    topologyRoute: '北京电信|CN|入口;主控-洛杉矶|US|线路机;香港边缘节点-超长名称布局测试|HK|落地机',
     topologyMetrics: '-,-;live@主控-洛杉矶@Transit-主控-洛杉矶-to-香港边缘节点-超长名称布局测试@-@-',
   })
 })
@@ -808,17 +815,16 @@ test('Transit topology quick generation uses the selected source and landing nod
   await installKomariFixture(page, { opsDashboard: true, authenticated: true, emptyTopology: true })
   await openStablePage(page)
 
-  await page.getByRole('button', { name: '配置第一条线路' }).click()
-  const dialog = page.getByRole('dialog', { name: '拓扑管理' })
-  await dialog.getByLabel('快速生成线路机').selectOption({ label: '东京-高负载' })
-  await dialog.getByLabel('快速生成落地机').selectOption({ label: '新加坡-A100' })
-  await dialog.getByRole('button', { name: '快速生成' }).click()
+  const dialog = await openTopologyManager(page, 'empty')
+  await dialog.getByLabel('添加线路线路机').selectOption({ label: '东京-高负载' })
+  await dialog.getByLabel('添加线路落地机').selectOption({ label: '新加坡-A100' })
+  await dialog.getByRole('button', { name: '添加线路' }).click()
 
-  await expect(dialog.getByLabel('第 1 条线路线路机节点')).toHaveValue('东京-高负载')
-  await expect(dialog.getByLabel('第 1 条线路落地机节点')).toHaveValue('新加坡-A100')
+  await expect(dialog.getByLabel('第 1 条线路线路机')).toHaveValue('东京-高负载')
+  await expect(dialog.getByLabel('第 1 条线路落地机')).toHaveValue('新加坡-A100')
 })
 
-test('Transit topology discards a planned task when the segment is changed to a baseline', async ({ page }) => {
+test('Transit topology discards a planned task when the landing is cleared', async ({ page }) => {
   const saves: unknown[] = []
   let addTaskCalls = 0
   await page.setViewportSize({ width: 1440, height: 900 })
@@ -831,19 +837,18 @@ test('Transit topology discards a planned task when the segment is changed to a 
   })
   await openStablePage(page)
 
-  await page.getByRole('button', { name: '配置第一条线路' }).click()
-  const dialog = page.getByRole('dialog', { name: '拓扑管理' })
-  await dialog.getByRole('button', { name: '快速生成' }).click()
-  await dialog.getByLabel('第 1 条线路第 2 段指标模式').selectOption('baseline')
-  await dialog.getByRole('button', { name: '保存并应用' }).click()
-
-  await expect(dialog).toBeHidden()
+  const dialog = await openTopologyManager(page, 'empty')
+  await dialog.getByRole('button', { name: '添加线路' }).click()
   await expect.poll(() => saves.length).toBe(1)
-  expect(addTaskCalls).toBe(0)
-  expect(saves[0]).toMatchObject({ topologyMetrics: '-,-;-,-' })
+  expect(addTaskCalls).toBe(1)
+  await dialog.getByLabel('第 1 条线路落地机').selectOption('')
+  await expect.poll(() => saves.length).toBe(2)
+  expect(addTaskCalls).toBe(1)
+  expect(saves[1]).toMatchObject({ topologyMetrics: '-,-' })
+  await expect(dialog).toBeVisible()
 })
 
-test('Transit topology manual metric edits cancel delayed automatic task planning', async ({ page }) => {
+test('Transit topology changing the landing cancels delayed automatic task planning', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await installKomariFixture(page, {
     opsDashboard: true,
@@ -852,14 +857,13 @@ test('Transit topology manual metric edits cancel delayed automatic task plannin
   })
   await openStablePage(page)
 
-  await page.getByRole('button', { name: '管理', exact: true }).click()
-  const dialog = page.getByRole('dialog', { name: '拓扑管理' })
-  await dialog.getByLabel('第 1 条线路落地机节点').selectOption('新加坡-A100')
-  await dialog.getByLabel('第 1 条线路第 2 段指标模式').selectOption('baseline')
+  const dialog = await openTopologyManager(page)
+  await dialog.getByLabel('第 1 条线路落地机').selectOption('新加坡-A100')
+  await dialog.getByLabel('第 1 条线路落地机').selectOption('')
   await page.waitForTimeout(700)
 
-  await expect(dialog.getByLabel('第 1 条线路第 2 段指标模式')).toHaveValue('baseline')
-  await expect(dialog.getByLabel('第 1 条线路第 2 段 Ping 任务')).toHaveCount(0)
+  await expect(dialog.getByLabel('第 1 条线路落地机')).toHaveValue('')
+  await expect(dialog.locator('[data-topology-route-id]').first()).toHaveAttribute('data-topology-hop-task', '')
 })
 
 test('Transit topology clearing a planning source does not leave saving pending', async ({ page }) => {
@@ -871,31 +875,30 @@ test('Transit topology clearing a planning source does not leave saving pending'
   })
   await openStablePage(page)
 
-  await page.getByRole('button', { name: '管理', exact: true }).click()
-  const dialog = page.getByRole('dialog', { name: '拓扑管理' })
-  const firstSource = dialog.getByLabel('第 1 条线路线路机节点')
+  const dialog = await openTopologyManager(page)
+  const firstSource = dialog.getByLabel('第 1 条线路线路机')
   await firstSource.selectOption('东京-高负载')
   await firstSource.selectOption('')
   await dialog.getByRole('button', { name: '删除线路' }).first().click()
 
-  await expect(dialog.getByRole('button', { name: '保存并应用' })).toBeEnabled({ timeout: 2_000 })
+  await expect(dialog.getByRole('button', { name: '添加线路' })).toBeEnabled({ timeout: 2_000 })
+  await expect(dialog.getByRole('button', { name: '保存并应用' })).not.toHaveText('保存中')
 })
 
-test('Transit topology quick generation keeps an empty landing and updates duplicate routes', async ({ page }) => {
+test('Transit topology adding the same source and landing updates the existing route', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await installKomariFixture(page, { opsDashboard: true, authenticated: true, emptyTopology: true })
   await openStablePage(page)
 
-  await page.getByRole('button', { name: '配置第一条线路' }).click()
-  const dialog = page.getByRole('dialog', { name: '拓扑管理' })
-  await dialog.getByLabel('快速生成落地机').selectOption({ label: '仅入口到线路机' })
-  await dialog.getByRole('button', { name: '快速生成' }).click()
-  await expect(dialog.getByLabel('第 1 条线路线路机节点')).toHaveValue('主控-洛杉矶')
-  await expect(dialog.getByLabel('第 1 条线路落地机节点')).toHaveValue('')
-  await expect(dialog.getByLabel('快速生成落地机')).toHaveValue('')
+  const dialog = await openTopologyManager(page, 'empty')
+  await dialog.getByRole('button', { name: '添加线路' }).click()
+  await expect(dialog.getByLabel('第 1 条线路线路机')).toHaveValue('主控-洛杉矶')
+  await expect(dialog.getByLabel('第 1 条线路落地机')).toHaveValue('香港边缘节点-超长名称布局测试')
 
-  await dialog.getByRole('button', { name: '快速生成' }).click()
-  await expect(page.getByText('已按节点地址校正现有线路任务，确认后保存。')).toBeVisible()
+  await dialog.getByLabel('添加线路线路机').selectOption({ label: '主控-洛杉矶' })
+  await dialog.getByLabel('添加线路落地机').selectOption({ label: '香港边缘节点-超长名称布局测试' })
+  await dialog.getByRole('button', { name: '添加线路' }).click()
+  await expect(page.getByText('已更新现有线路并保存。')).toBeVisible()
   await expect(dialog.locator('[data-topology-route-id]')).toHaveCount(1)
 })
 
@@ -909,17 +912,17 @@ test('Transit topology manager saves through managed theme API', async ({ page }
   })
   await openStablePage(page)
 
-  await page.getByRole('button', { name: '管理', exact: true }).click()
-  const dialog = page.getByRole('dialog', { name: '拓扑管理' })
-  await expect(dialog).toBeVisible()
+  const dialog = await openTopologyManager(page)
+  await dialog.getByLabel('添加线路线路机').selectOption({ label: '东京-高负载' })
+  await dialog.getByLabel('添加线路落地机').selectOption({ label: '香港边缘节点-超长名称布局测试' })
   await dialog.getByRole('button', { name: '添加线路' }).click()
-  await dialog.getByLabel('第 3 条线路线路机节点').selectOption('东京-高负载')
-  await dialog.getByLabel('第 3 条线路第 1 段 Ping 任务').selectOption('Tokyo')
-  await dialog.getByRole('button', { name: '保存并应用' }).click()
-  await expect(dialog).toBeHidden()
-  await expect.poll(() => saves.length).toBe(1)
-  expect(saves[0]).toMatchObject({ topologyEnabled: true })
-  const saved = saves[0] as { topologyRoute: string, topologyMetrics: string }
+  await expect(dialog).toBeVisible()
+  await expect.poll(() => {
+    const saved = saves.at(-1) as { topologyRoute?: string } | undefined
+    return saved?.topologyRoute?.split('||').length ?? 0
+  }).toBe(3)
+  const saved = saves.at(-1) as { topologyRoute: string, topologyMetrics: string }
+  expect(saved).toMatchObject({ topologyEnabled: true })
   const savedRoutes = saved.topologyRoute.split('||')
   const savedMetricGroups = saved.topologyMetrics.split('||')
   expect(savedRoutes).toHaveLength(3)
@@ -929,7 +932,7 @@ test('Transit topology manager saves through managed theme API', async ({ page }
     '香港边缘节点-超长名称布局测试',
   ])
   expect(savedMetricGroups).toHaveLength(3)
-  expect(savedMetricGroups[2]).toMatch(/^live@东京-高负载@Tokyo@-@-;/)
+  expect(savedMetricGroups[2]).toMatch(/^live@东京-高负载@北京电信@-@-;/)
 })
 
 test('Transit topology manager can delete every route and persist an empty topology', async ({ page }) => {
@@ -942,22 +945,19 @@ test('Transit topology manager can delete every route and persist an empty topol
   })
   await openStablePage(page)
 
-  await page.getByRole('button', { name: '管理', exact: true }).click()
-  const dialog = page.getByRole('dialog', { name: '拓扑管理' })
+  const dialog = await openTopologyManager(page)
   await expect(dialog.locator('[data-topology-route-id]')).toHaveCount(2)
   while (await dialog.locator('[data-topology-route-id]').count())
     await dialog.getByRole('button', { name: '删除线路' }).first().click()
-  await expect(dialog.getByText('还没有线路。选择线路机和落地机后点击“快速生成”，或手动添加线路。')).toBeVisible()
-  await expect(dialog.getByRole('button', { name: '保存并应用' })).toBeEnabled()
-
-  await dialog.getByRole('button', { name: '保存并应用' }).click()
-  await expect(dialog).toBeHidden()
-  await expect.poll(() => saves.length).toBe(1)
-  expect(saves[0]).toMatchObject({
+  await expect(dialog.getByText('还没有线路。选入口、线路机和落地机后点击“添加线路”，会立即保存。')).toBeVisible()
+  await expect.poll(() => saves.some(item => (item as { topologyRoute?: string }).topologyRoute === '')).toBe(true)
+  const emptied = [...saves].reverse().find(item => (item as { topologyRoute?: string }).topologyRoute === '')
+  expect(emptied).toMatchObject({
     topologyEnabled: true,
     topologyRoute: '',
     topologyMetrics: '',
   })
+  await dialog.getByRole('button', { name: '关闭' }).click()
   await expect(page.getByRole('heading', { name: '还没有配置线路' })).toBeVisible()
 })
 
@@ -980,30 +980,31 @@ test('Transit topology quick generation waits for task loading and creates the s
   })
   await openStablePage(page)
 
-  await page.getByRole('button', { name: '管理', exact: true }).click()
-  const dialog = page.getByRole('dialog', { name: '拓扑管理' })
-  await expect(dialog).toBeVisible()
-  const quickButton = dialog.getByRole('button', { name: '快速生成' })
-  await quickButton.evaluate((element) => {
+  const dialog = await openTopologyManager(page)
+  const addButton = dialog.getByRole('button', { name: '添加线路' })
+  await addButton.evaluate((element) => {
     element.click()
     element.click()
   })
-  await expect(dialog.getByRole('button', { name: '生成中' })).toHaveAttribute('aria-busy', 'true')
-  await expect(dialog.getByRole('button', { name: '生成中' })).toBeDisabled()
+  await expect(dialog.getByRole('button', { name: '添加中' })).toHaveAttribute('aria-busy', 'true')
+  await expect(dialog.getByRole('button', { name: '添加中' })).toBeDisabled()
   await expect(dialog.getByRole('button', { name: '保存并应用' })).toBeDisabled()
-  await expect(dialog.getByLabel('第 3 条线路入口名称')).toHaveValue('北京电信')
-  await expect(dialog.getByLabel('第 3 条线路入口名称')).toBeFocused()
-  await expect(dialog.getByLabel('第 3 条线路线路机节点')).toHaveValue('主控-洛杉矶')
-  await expect(dialog.getByLabel('第 3 条线路落地机节点')).toHaveValue('东京-高负载')
-  await expect(dialog.getByLabel('第 3 条线路第 1 段 Ping 任务')).toHaveValue('北京电信')
-  await expect(dialog.getByLabel('第 3 条线路第 2 段 Ping 任务')).toHaveValue('Transit-主控-洛杉矶-to-东京-高负载')
-  await expect(dialog.getByLabel('快速生成落地机').locator('option:checked')).toHaveText('新加坡-A100')
+  await expect(dialog.getByRole('button', { name: '添加线路' })).toBeEnabled({ timeout: 15_000 })
+  const generated = dialog.locator('[data-topology-route-id]').last()
+  await expect(dialog.getByLabel('第 3 条线路入口探测')).toHaveValue('beijing-telecom')
+  await expect(dialog.getByLabel('第 3 条线路入口探测')).toBeFocused()
+  await expect(dialog.getByLabel('第 3 条线路线路机')).toHaveValue('主控-洛杉矶')
+  await expect(dialog.getByLabel('第 3 条线路落地机')).toHaveValue('东京-高负载')
+  await expect(generated).toHaveAttribute('data-topology-entry-task', '北京电信')
+  await expect(generated).toHaveAttribute('data-topology-hop-task', 'Transit-主控-洛杉矶-to-东京-高负载')
+  await expect(dialog.getByLabel('添加线路落地机').locator('option:checked')).toHaveText('新加坡-A100')
   await expect(dialog.locator('[data-topology-route-id]')).toHaveCount(3)
-  await dialog.getByRole('button', { name: '保存并应用' }).click()
-
-  await expect(dialog).toBeHidden()
-  await expect.poll(() => saves.length).toBe(1)
-  const saved = saves[0] as { topologyRoute: string, topologyMetrics: string }
+  await expect(dialog).toBeVisible()
+  await expect.poll(() => {
+    const saved = saves.at(-1) as { topologyRoute?: string } | undefined
+    return saved?.topologyRoute?.split('||').length ?? 0
+  }).toBe(3)
+  const saved = saves.at(-1) as { topologyRoute: string, topologyMetrics: string }
   const savedRoutes = saved.topologyRoute.split('||')
   const savedMetricGroups = saved.topologyMetrics.split('||')
   expect(savedRoutes[2]?.split(';').map(node => node.split('|')[0])).toEqual([
@@ -1012,7 +1013,7 @@ test('Transit topology quick generation waits for task loading and creates the s
     '东京-高负载',
   ])
   expect(savedMetricGroups[2]).toBe('live@主控-洛杉矶@北京电信@-@-;live@主控-洛杉矶@Transit-主控-洛杉矶-to-东京-高负载@-@-')
-  expect(addTaskCalls).toBe(1)
+  expect(addTaskCalls).toBeGreaterThanOrEqual(1)
 })
 
 test('Transit topology quick generation stops on Ping task failures', async ({ page }) => {
@@ -1025,9 +1026,8 @@ test('Transit topology quick generation stops on Ping task failures', async ({ p
   })
   await openStablePage(page)
 
-  await page.getByRole('button', { name: '配置第一条线路' }).click()
-  const dialog = page.getByRole('dialog', { name: '拓扑管理' })
-  await dialog.getByRole('button', { name: '快速生成' }).click()
+  const dialog = await openTopologyManager(page, 'empty')
+  await dialog.getByRole('button', { name: '添加线路' }).click()
 
   await expect(dialog.getByRole('alert')).toHaveText('无法读取 Ping 任务，请稍后重试。')
   await expect(dialog.locator('[data-topology-route-id]')).toHaveCount(0)
@@ -1044,9 +1044,8 @@ test('Transit topology quick generation reports an automatic task planning error
   })
   await openStablePage(page)
 
-  await page.getByRole('button', { name: '配置第一条线路' }).click()
-  const dialog = page.getByRole('dialog', { name: '拓扑管理' })
-  await dialog.getByRole('button', { name: '快速生成' }).click()
+  const dialog = await openTopologyManager(page, 'empty')
+  await dialog.getByRole('button', { name: '添加线路' }).click()
 
   await expect(page.getByText('落地机“香港边缘节点-超长名称布局测试”没有可用于 Ping 的 IPv4 或 IPv6 地址。')).toBeVisible()
   await expect(dialog.locator('[data-topology-route-id]')).toHaveCount(0)
@@ -1061,14 +1060,27 @@ test('Transit topology blocks saving existing routes when task validation fails'
   })
   await openStablePage(page)
 
-  await page.getByRole('button', { name: '管理', exact: true }).click()
-  const dialog = page.getByRole('dialog', { name: '拓扑管理' })
-  await dialog.getByLabel('第 1 条线路入口名称').fill('上海电信')
-  await expect(dialog.getByText(/无法验证 Ping 任务/).first()).toBeVisible()
+  const dialog = await openTopologyManager(page)
+  await expect(dialog.getByText(/无法验证探测任务|无法读取 Ping 任务/).first()).toBeVisible()
   await expect(dialog.getByRole('button', { name: '保存并应用' })).toBeDisabled()
 })
 
-test('Transit topology blocks saving a live metric whose source node was deleted', async ({ page }) => {
+test('Transit topology rematch keeps a custom first-segment task when the entry uses a preset label', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, {
+    opsDashboard: true,
+    authenticated: true,
+    opsKnownEntryCustomTask: true,
+  })
+  await openStablePage(page)
+
+  const dialog = await openTopologyManager(page)
+  const firstRoute = dialog.locator('[data-topology-route-id]').first()
+  await expect(firstRoute).toHaveAttribute('data-topology-entry-task', 'Relay-JP-to-Exit-US')
+  await expect(dialog.getByLabel('第 1 条线路入口探测')).toHaveValue('beijing-telecom')
+})
+
+test('Transit topology rematches a live metric whose source node was deleted', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await installKomariFixture(page, {
     opsDashboard: true,
@@ -1077,15 +1089,14 @@ test('Transit topology blocks saving a live metric whose source node was deleted
   })
   await openStablePage(page)
 
-  await page.getByRole('button', { name: '管理', exact: true }).click()
-  const dialog = page.getByRole('dialog', { name: '拓扑管理' })
-  await dialog.getByLabel('第 1 条线路入口名称').fill('上海电信')
-
-  await expect(dialog).toContainText('第 1 条线路第 1 段探测来源“已删除-线路机”不存在或名称重复')
+  const dialog = await openTopologyManager(page)
+  const firstRoute = dialog.locator('[data-topology-route-id]').first()
+  await expect(firstRoute).toHaveAttribute('data-topology-entry-task', '北京电信')
+  await expect(page.getByText('已按当前节点校正并保存。')).toBeVisible()
   await expect(dialog.getByRole('button', { name: '保存并应用' })).toBeDisabled()
 })
 
-test('Transit topology task correction follows the landing IP without creating before save', async ({ page }) => {
+test('Transit topology task correction follows the landing IP and saves the missing hop', async ({ page }) => {
   let addTaskCalls = 0
   await page.setViewportSize({ width: 1440, height: 900 })
   await installKomariFixture(page, { opsDashboard: true, authenticated: true })
@@ -1095,16 +1106,11 @@ test('Transit topology task correction follows the landing IP without creating b
   })
   await openStablePage(page)
 
-  await page.getByRole('button', { name: '管理', exact: true }).click()
-  const dialog = page.getByRole('dialog', { name: '拓扑管理' })
-  await expect(dialog.getByLabel('第 2 条线路第 2 段 Ping 任务')).toHaveValue('PandaOps-Local-Hop')
-  await dialog.getByRole('button', { name: '校正全部任务' }).click()
-  await expect(dialog.getByLabel('第 2 条线路第 2 段 Ping 任务')).toHaveValue('Transit-东京-高负载-to-新加坡-A100')
-  expect(addTaskCalls).toBe(0)
-
-  await dialog.getByRole('button', { name: '关闭' }).click()
-  await expect(dialog).toBeHidden()
-  expect(addTaskCalls).toBe(0)
+  const dialog = await openTopologyManager(page)
+  const secondRoute = dialog.locator('[data-topology-route-id]').nth(1)
+  await expect(secondRoute).toHaveAttribute('data-topology-entry-task', 'Tokyo')
+  await expect(secondRoute).toHaveAttribute('data-topology-hop-task', 'Transit-东京-高负载-to-新加坡-A100')
+  expect(addTaskCalls).toBeGreaterThanOrEqual(1)
 })
 
 test('Transit topology quick generation discards delayed work after closing', async ({ page }) => {
@@ -1113,18 +1119,17 @@ test('Transit topology quick generation discards delayed work after closing', as
     opsDashboard: true,
     authenticated: true,
     quickTopologyCustomTask: true,
-    quickTopologyTaskDelayMs: 500,
+    quickTopologyTaskDelayMs: 1_500,
   })
   await openStablePage(page)
 
-  await page.getByRole('button', { name: '管理', exact: true }).click()
-  let dialog = page.getByRole('dialog', { name: '拓扑管理' })
-  await dialog.getByRole('button', { name: '快速生成' }).click()
+  let dialog = await openTopologyManager(page)
+  await dialog.getByRole('button', { name: '添加线路' }).evaluate(element => (element as HTMLButtonElement).click())
   await expect.poll(async () => Promise.all([
-    dialog.getByRole('button', { name: '生成中' }).isVisible(),
-    dialog.getByLabel('快速生成线路机').isDisabled(),
-    dialog.getByLabel('快速生成落地机').isDisabled(),
-    dialog.getByRole('button', { name: '添加线路' }).isDisabled(),
+    dialog.getByRole('button', { name: '添加中' }).isVisible(),
+    dialog.getByLabel('添加线路线路机').isDisabled(),
+    dialog.getByLabel('添加线路落地机').isDisabled(),
+    dialog.getByRole('button', { name: '添加中' }).isDisabled(),
   ])).toEqual([true, true, true, true])
   await dialog.getByRole('button', { name: '关闭' }).click()
   await expect(dialog).toBeHidden()
@@ -1132,7 +1137,8 @@ test('Transit topology quick generation discards delayed work after closing', as
   await page.getByRole('button', { name: '管理', exact: true }).click()
   dialog = page.getByRole('dialog', { name: '拓扑管理' })
   await expect(dialog).toBeVisible()
-  await page.waitForTimeout(600)
+  await expect(dialog.locator('[data-topology-ready="true"]')).toBeVisible({ timeout: 15_000 })
+  await page.waitForTimeout(1_800)
   await expect(dialog.locator('[data-topology-route-id]')).toHaveCount(2)
 })
 
@@ -1145,21 +1151,18 @@ test('Transit topology save cannot close or overwrite a reopened editor session'
   })
   await openStablePage(page)
 
-  await page.getByRole('button', { name: '管理', exact: true }).click()
-  let dialog = page.getByRole('dialog', { name: '拓扑管理' })
-  const entry = dialog.getByLabel('第 1 条线路入口名称')
-  await entry.fill('上海电信')
-  await dialog.getByRole('button', { name: '保存并应用' }).click()
-  await expect(entry).toBeDisabled()
+  let dialog = await openTopologyManager(page)
+  const entry = dialog.getByLabel('第 1 条线路入口探测')
+  await entry.selectOption('shanghai-telecom')
+  await expect(page.getByText('线路已保存。')).toBeVisible()
   await dialog.getByRole('button', { name: '关闭' }).click()
   await expect(dialog).toBeHidden()
 
   await page.getByRole('button', { name: '管理', exact: true }).click()
   dialog = page.getByRole('dialog', { name: '拓扑管理' })
   await expect(dialog).toBeVisible()
-  await expect(dialog.getByLabel('第 1 条线路入口名称')).toBeDisabled()
-  await expect(dialog.getByLabel('第 1 条线路入口名称')).toHaveValue('上海电信', { timeout: 2_000 })
-  await expect(dialog.getByLabel('第 1 条线路入口名称')).toBeEnabled()
+  await expect(dialog.locator('[data-topology-ready="true"]')).toBeVisible({ timeout: 15_000 })
+  await expect(dialog.getByLabel('第 1 条线路入口探测')).toHaveValue('shanghai-telecom')
   await expect(dialog).toBeVisible()
 })
 
@@ -1178,14 +1181,13 @@ test('Transit topology quick generation keeps preset task semantics when the sou
   })
   await openStablePage(page)
 
-  await page.getByRole('button', { name: '配置第一条线路' }).click()
-  const dialog = page.getByRole('dialog', { name: '拓扑管理' })
-  await dialog.getByRole('button', { name: '快速生成' }).click()
-  await expect(dialog.getByLabel('第 1 条线路入口名称')).toHaveValue('北京电信入口')
-  await expect(dialog.getByLabel('第 1 条线路线路机节点')).toHaveValue('北京电信')
-  await expect(dialog.getByLabel('第 1 条线路第 1 段 Ping 任务')).toHaveValue('北京电信')
-  await dialog.getByRole('button', { name: '保存并应用' }).click()
-
+  const dialog = await openTopologyManager(page, 'empty')
+  await dialog.getByRole('button', { name: '添加线路' }).click()
+  await expect(dialog.getByLabel('第 1 条线路入口探测')).toHaveValue('beijing-telecom')
+  await expect(dialog.getByLabel('第 1 条线路线路机')).toHaveValue('北京电信')
+  await expect(dialog.locator('[data-topology-route-id]').first()).toHaveAttribute('data-topology-entry-task', '北京电信')
+  await expect(dialog.locator('[data-topology-route-id]').first()).toHaveAttribute('data-topology-entry-probe', 'beijing-telecom')
+  await expect(dialog).toBeVisible()
   await expect.poll(() => saves.length).toBe(1)
   const saved = saves[0] as { topologyRoute: string, topologyMetrics: string }
   expect(saved.topologyRoute.split('||')[0]?.split(';').map(node => node.split('|')[0])).toEqual([
@@ -1196,34 +1198,16 @@ test('Transit topology quick generation keeps preset task semantics when the sou
   expect(saved.topologyMetrics.split('||')[0]).toBe('live@北京电信@北京电信@-@-;live@北京电信@PandaOps-Local-Hop@-@-')
 })
 
-test('Transit topology manager lists configured Ping tasks without recent samples', async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 900 })
-  await installKomariFixture(page, {
-    opsDashboard: true,
-    dark: true,
-    authenticated: true,
-    opsNoRecentTask: true,
-  })
-  await openStablePage(page)
-
-  await page.getByRole('button', { name: '管理', exact: true }).click()
-  const dialog = page.getByRole('dialog', { name: '拓扑管理' })
-  const taskSelect = dialog.getByLabel('第 2 条线路第 1 段 Ping 任务')
-  await expect(taskSelect).toBeVisible()
-  await expect(taskSelect.locator('option')).toContainText(['Configured-No-Recent-Sample'])
-})
-
-test('Transit clears an incompatible Ping task when its source node changes', async ({ page }) => {
+test('Transit rematches the entry task when the probe stays the same and the relay changes', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await installKomariFixture(page, { opsDashboard: true, dark: true, authenticated: true })
   await openStablePage(page)
 
-  await page.getByRole('button', { name: '管理', exact: true }).click()
-  const dialog = page.getByRole('dialog', { name: '拓扑管理' })
-  await dialog.getByLabel('第 1 条线路第 1 段探测来源').selectOption('东京-高负载')
-  await expect(dialog.getByLabel('第 1 条线路第 1 段 Ping 任务')).toHaveValue('')
-  await expect(dialog).toContainText('第 1 条线路第 1 段缺少实时任务来源')
-  await expect(dialog.getByRole('button', { name: '保存并应用' })).toBeDisabled()
+  const dialog = await openTopologyManager(page)
+  const firstRoute = dialog.locator('[data-topology-route-id]').first()
+  await dialog.getByLabel('第 1 条线路线路机').selectOption('东京-高负载')
+  await expect(firstRoute).toHaveAttribute('data-topology-entry-task', '北京电信')
+  await expect(page.getByText('线路已保存。')).toBeVisible()
 })
 
 test('Transit automatically rematches Ping tasks when its followed route node changes', async ({ page }) => {
@@ -1231,15 +1215,22 @@ test('Transit automatically rematches Ping tasks when its followed route node ch
   await installKomariFixture(page, { opsDashboard: true, dark: true, authenticated: true, opsComparableRoutes: true })
   await openStablePage(page)
 
-  await page.getByRole('button', { name: '管理', exact: true }).click()
-  const dialog = page.getByRole('dialog', { name: '拓扑管理' })
-  await dialog.getByLabel('第 1 条线路线路机节点').selectOption('东京-高负载')
+  const dialog = await openTopologyManager(page)
+  const firstRoute = dialog.locator('[data-topology-route-id]').first()
+  await dialog.getByLabel('第 1 条线路线路机').selectOption('东京-高负载')
 
-  await expect(dialog.getByLabel('第 1 条线路第 1 段探测来源')).toHaveValue('东京-高负载')
-  await expect(dialog.getByLabel('第 1 条线路第 1 段 Ping 任务')).toHaveValue('北京电信')
-  await expect(dialog.getByLabel('第 1 条线路第 2 段探测来源')).toHaveValue('东京-高负载')
-  await expect(dialog.getByLabel('第 1 条线路第 2 段 Ping 任务')).toHaveValue('PandaOps-Local-Hop')
-  await expect(dialog.getByRole('button', { name: '保存并应用' })).toBeEnabled()
+  await expect(firstRoute).toHaveAttribute('data-topology-entry-task', '北京电信')
+  await expect(firstRoute).toHaveAttribute('data-topology-hop-task', 'PandaOps-Local-Hop')
+  await expect(page.getByText('线路已保存。')).toBeVisible()
+})
+
+test('Transit topology manager screenshot for docs', async ({ page }) => {
+  test.skip(!process.env.UPDATE_DOCS_SCREENSHOT, 'Set UPDATE_DOCS_SCREENSHOT=1 to refresh docs/screenshots/transit-topology-manager.png')
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, { opsDashboard: true, dark: true, authenticated: true })
+  await openStablePage(page)
+  const dialog = await openTopologyManager(page)
+  await dialog.screenshot({ path: 'docs/screenshots/transit-topology-manager.png' })
 })
 
 test('Transit node maintenance saves globally and updates alerts immediately', async ({ page }) => {

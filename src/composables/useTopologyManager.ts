@@ -5,11 +5,7 @@ import { computed, ref, toValue } from 'vue'
 import { assertManagedThemeSettingsCurrent, createThemeSettingsSnapshot, withManagedThemeSettingsLock } from '@/services/theme-settings.service'
 import { saveTopologyConfiguration } from '@/services/topology.service'
 import { useAppStore } from '@/stores/app'
-import { buildQuickTopologyRoute, createTopologyRoute, findDuplicateTopologyRouteIndex, findUniqueTopologyNode, getQuickTopologySourceNode, getTopologyProbe, listQuickTopologyNodes, parseTopologyRoutes, TOPOLOGY_LIMITS, validateTopologyRoutes } from '@/utils/topologyHelper'
-
-function defaultMetric(nodeName = '', taskFilter = ''): TopologyMetricConfig {
-  return { live: Boolean(nodeName && taskFilter), nodeName, taskFilter, fallbackLatency: null, fallbackLoss: null }
-}
+import { buildQuickTopologyRoute, findDuplicateTopologyRouteIndex, findUniqueTopologyNode, getQuickTopologySourceNode, listQuickTopologyNodes, parseTopologyRoutes, TOPOLOGY_LIMITS, validateTopologyRoutes } from '@/utils/topologyHelper'
 
 function nodeConfig(node?: NodeData, role = '节点'): TopologyNodeConfig {
   return { name: node?.name ?? '', region: node?.region ?? '', role }
@@ -62,23 +58,6 @@ export function useTopologyManager(nodes: MaybeRefOrGetter<NodeData[]>) {
     return duplicateNodeNames.value.has(name.trim().toLowerCase())
   }
 
-  function addRoute(): void {
-    if (!canAddRoute.value)
-      return
-    const candidates = listQuickTopologyNodes(availableNodes.value)
-    const first = candidates[0]
-    const second = candidates[1]
-    const defaultProbe = getTopologyProbe('')
-    routes.value.push(createTopologyRoute(
-      [
-        { name: defaultProbe.label, region: 'CN', role: '入口' },
-        nodeConfig(first, '线路机'),
-        nodeConfig(second, '落地机'),
-      ],
-      [defaultMetric(first?.name ?? '', first ? defaultProbe.taskFilter : ''), defaultMetric()],
-    ))
-  }
-
   function findDuplicateRoute(sourceName: string, landingName = ''): number {
     return findDuplicateTopologyRouteIndex(routes.value, sourceName, landingName)
   }
@@ -86,7 +65,7 @@ export function useTopologyManager(nodes: MaybeRefOrGetter<NodeData[]>) {
   function addQuickRoute(
     taskNames: string[] = [],
     sourceUuid = '',
-    options: { landingUuid?: string | null, entryTask?: string, hopTask?: string } = {},
+    options: { landingUuid?: string | null, entryTask?: string, hopTask?: string, probeKey?: string } = {},
   ): { route: TopologyRouteConfig, created: boolean } | null {
     const route = buildQuickTopologyRoute(availableNodes.value, {
       sourceTasks: taskNames,
@@ -94,6 +73,7 @@ export function useTopologyManager(nodes: MaybeRefOrGetter<NodeData[]>) {
       landingUuid: options.landingUuid,
       entryTask: options.entryTask,
       hopTask: options.hopTask,
+      probeKey: options.probeKey,
     })
     if (!route)
       return null
@@ -152,15 +132,6 @@ export function useTopologyManager(nodes: MaybeRefOrGetter<NodeData[]>) {
       if (previousName !== nextName)
         route.metrics[1].taskFilter = ''
     }
-  }
-
-  function selectMetricSource(metric: TopologyMetricConfig, nodeName: string): void {
-    if (nodeName && isAmbiguousNodeName(nodeName))
-      return
-    if (metric.nodeName === nodeName)
-      return
-    metric.nodeName = nodeName
-    metric.taskFilter = ''
   }
 
   function setMetricMode(metric: TopologyMetricConfig, live: boolean): void {
@@ -235,12 +206,10 @@ export function useTopologyManager(nodes: MaybeRefOrGetter<NodeData[]>) {
     isAmbiguousNodeName,
     findDuplicateRoute,
     reset,
-    addRoute,
     addQuickRoute,
     removeRoute,
     moveRoute,
     selectNode,
-    selectMetricSource,
     setMetricMode,
     preflightSave,
     withSaveLock,

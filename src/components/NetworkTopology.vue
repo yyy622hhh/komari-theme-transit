@@ -713,7 +713,7 @@ function routeRankingLabel(route: RouteRow): string {
             还没有配置线路
           </h2>
           <p class="mt-1 text-xs leading-5 text-slate-600 dark:text-slate-400">
-            选择线路机和落地机后快速生成第一条拓扑，也可手动绑定实时 Ping 任务或静态基线。
+            选入口、线路机和落地机即可添加第一条线路。添加和修改都会立即保存，并自动创建探测任务。
           </p>
         </div>
       </div>

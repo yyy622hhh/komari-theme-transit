@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  applyTopologyProbeToRoute,
   buildQuickTopologyRoute,
   createTopologyRoute,
   findDuplicateTopologyRouteIndex,
@@ -10,6 +11,7 @@ import {
   getQuickTopologySourceNode,
   getTopologyProbe,
   getTopologyProbeStorageKey,
+  getTopologyRouteProbeKey,
   listUnusedQuickLandingUuids,
   nextQuickLandingUuid,
   parseTopologyMetric,
@@ -17,6 +19,7 @@ import {
   pickQuickHopTaskName,
   pickQuickTopologyTaskName,
   serializeTopologyRoutes,
+  shouldAutoApplyTopologyProbe,
   splitTopologyGroups,
   TOPOLOGY_LIMITS,
   validateTopologyRoutes,
@@ -157,6 +160,54 @@ describe('quick topology configuration', () => {
       taskFilter: '北京-电信',
     })
     expect(validateTopologyRoutes(route ? [route] : [])).toEqual([])
+  })
+
+  test('uses an explicit probe even when the source has no matching Ping task', () => {
+    const route = buildQuickTopologyRoute(
+      [
+        { uuid: 'relay', name: 'Riven-JP', region: 'JP', online: true },
+        { uuid: 'exit', name: 'V.PS-SG', region: 'SG', online: true },
+      ],
+      { sourceUuid: 'relay', landingUuid: 'exit', sourceTasks: [], probeKey: 'beijing-unicom' },
+    )
+
+    expect(route?.nodes.map(node => node.name)).toEqual(['北京联通', 'Riven-JP', 'V.PS-SG'])
+    expect(route?.metrics[0]).toMatchObject({ live: false, taskFilter: '' })
+    expect(getTopologyRouteProbeKey(route!)).toBe('beijing-unicom')
+    expect(validateTopologyRoutes(route ? [route] : [])).toEqual([])
+  })
+
+  test('rewrites a route entry to the selected probe and unique matching task', () => {
+    const route = createTopologyRoute(
+      [{ name: '自定义入口', region: '', role: '入口' }, { name: 'Riven-JP', region: 'JP', role: '线路机' }],
+      [{ live: false, nodeName: '', taskFilter: '', fallbackLatency: null, fallbackLoss: null }],
+    )
+
+    applyTopologyProbeToRoute(route, 'beijing-telecom', 'Riven-JP', ['北京电信', '北京联通'], ['北京电信'])
+
+    expect(route.nodes[0]?.name).toBe('北京电信入口')
+    expect(route.metrics[0]).toMatchObject({
+      live: true,
+      nodeName: 'Riven-JP',
+      taskFilter: '北京电信',
+    })
+  })
+
+  test('does not auto-apply a probe when the first segment already uses a custom task', () => {
+    const custom = createTopologyRoute(
+      [{ name: '北京电信', region: 'CN', role: '入口' }, { name: 'Riven-JP', region: 'JP', role: '线路机' }],
+      [{ live: true, nodeName: 'Riven-JP', taskFilter: 'Tokyo', fallbackLatency: 72, fallbackLoss: 0 }],
+    )
+    expect(getTopologyRouteProbeKey(custom)).toBe('beijing-telecom')
+    expect(shouldAutoApplyTopologyProbe(custom)).toBe(false)
+    expect(shouldAutoApplyTopologyProbe(createTopologyRoute(
+      [{ name: '北京电信', region: 'CN', role: '入口' }],
+      [{ live: true, nodeName: 'Riven-JP', taskFilter: '北京电信', fallbackLatency: null, fallbackLoss: null }],
+    ))).toBe(true)
+    expect(shouldAutoApplyTopologyProbe(createTopologyRoute(
+      [{ name: '北京电信', region: 'CN', role: '入口' }],
+      [{ live: false, nodeName: '', taskFilter: '', fallbackLatency: null, fallbackLoss: null }],
+    ))).toBe(true)
   })
 
   test('generates a valid static draft when no Ping task is available', () => {

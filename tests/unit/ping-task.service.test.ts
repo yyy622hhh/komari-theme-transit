@@ -14,15 +14,24 @@ afterEach(() => {
 })
 
 describe('topology Ping task management', () => {
-  test('matches an assigned task by source UUID and target address', () => {
+  test('matches an assigned ICMP task by source UUID and target address', () => {
     const tasks: AdminPingTask[] = [
       { id: 1, name: 'wrong-source', clients: ['other'], type: 'icmp', target: target.ipv4, interval: 30 },
-      { id: 2, name: 'right', clients: [source.uuid], type: 'tcp', target: `${target.ipv4}:22`, interval: 30 },
+      { id: 2, name: 'ssh-check', clients: [source.uuid], type: 'tcp', target: `${target.ipv4}:22`, interval: 30 },
+      { id: 3, name: 'right', clients: [source.uuid], type: 'icmp', target: target.ipv4, interval: 30 },
     ]
 
     expect(topologyPingTargets(target)).toEqual([target.ipv4, target.ipv6])
     expect(pingTaskTargetHost(`${target.ipv4}:22`)).toBe(target.ipv4)
     expect(findTopologyPingTask(tasks, source.uuid, target)?.name).toBe('right')
+  })
+
+  test('does not reuse a TCP or HTTP check as the topology hop', () => {
+    const tasks: AdminPingTask[] = [
+      { id: 2, name: 'ssh-check', clients: [source.uuid], type: 'tcp', target: `${target.ipv4}:22`, interval: 30 },
+      { id: 3, name: 'health-check', clients: [source.uuid], type: 'http', target: `http://${target.ipv4}/health`, interval: 30 },
+    ]
+    expect(findTopologyPingTask(tasks, source.uuid, target)).toBeUndefined()
   })
 
   test('does not reuse a duplicate task name on the same source', () => {
@@ -132,6 +141,91 @@ describe('topology Ping task management', () => {
       expect(first.task.name).toBe('Transit-Relay-JP-to-Exit-SG')
       expect(second.task.name).toBe(first.task.name)
       expect(addCalls).toBe(1)
+    }
+    finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  test('an aborted waiter does not fail a shared in-flight ensure', async () => {
+    const originalFetch = globalThis.fetch
+    const tasks: AdminPingTask[] = []
+    let addCalls = 0
+    let releaseAdd: (() => void) | undefined
+    const holdAdd = new Promise<void>((resolve) => {
+      releaseAdd = resolve
+    })
+    let sawAdd = false
+    let resolveAddStarted: (() => void) | undefined
+    const addStarted = new Promise<void>((resolve) => {
+      resolveAddStarted = resolve
+    })
+    globalThis.fetch = mock(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (!init?.body)
+        return new Response(JSON.stringify({ logged_in: true, username: 'admin' }))
+      const request = JSON.parse(String(init.body)) as { id: number, method: string, params?: AdminPingTask }
+      if (request.method === 'admin:getAllPingTasks') {
+        return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: tasks }), {
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      if (request.method === 'admin:addPingTask') {
+        addCalls += 1
+        sawAdd = true
+        resolveAddStarted?.()
+        await holdAdd
+        tasks.push({ ...request.params!, id: 12 })
+        return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id }), {
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      throw new Error(`Unexpected RPC method: ${request.method}`)
+    }) as typeof fetch
+
+    try {
+      const controller = new AbortController()
+      const first = ensureTopologyPingTask(source, target, controller.signal)
+      await addStarted
+      expect(sawAdd).toBe(true)
+      const second = ensureTopologyPingTask(source, target)
+      controller.abort()
+      releaseAdd?.()
+      await expect(first).rejects.toMatchObject({ name: 'AbortError' })
+      await expect(second).resolves.toMatchObject({ task: { name: 'Transit-Relay-JP-to-Exit-SG' } })
+      expect(addCalls).toBe(1)
+    }
+    finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  test('an aborted caller does not fail a later ensure of the same hop', async () => {
+    const originalFetch = globalThis.fetch
+    const tasks: AdminPingTask[] = []
+    globalThis.fetch = mock(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (!init?.body)
+        return new Response(JSON.stringify({ logged_in: true, username: 'admin' }))
+      const request = JSON.parse(String(init.body)) as { id: number, method: string, params?: AdminPingTask }
+      if (request.method === 'admin:getAllPingTasks') {
+        return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: tasks }), {
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      if (request.method === 'admin:addPingTask') {
+        tasks.push({ ...request.params!, id: 11 })
+        return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id }), {
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      throw new Error(`Unexpected RPC method: ${request.method}`)
+    }) as typeof fetch
+
+    try {
+      const controller = new AbortController()
+      controller.abort()
+      await expect(ensureTopologyPingTask(source, target, controller.signal)).rejects.toMatchObject({ name: 'AbortError' })
+      const created = await ensureTopologyPingTask(source, target)
+      expect(created.task.name).toBe('Transit-Relay-JP-to-Exit-SG')
     }
     finally {
       globalThis.fetch = originalFetch

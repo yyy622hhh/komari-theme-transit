@@ -30,6 +30,7 @@ const IPV4_PORT_PATTERN = /^((?:\d{1,3}\.){3}\d{1,3}):\d+$/
 const TASK_NAME_RESERVED_PATTERN = /[@;|]+/g
 const WHITESPACE_PATTERN = /\s+/g
 const SUPPORTED_PING_TASK_TYPES = new Set(['icmp', 'tcp', 'http'])
+const TOPOLOGY_HOP_TASK_TYPES = new Set(['icmp'])
 
 function validIpv4(value: string): boolean {
   if (!IPV4_PATTERN.test(value))
@@ -115,10 +116,9 @@ export function findTopologyPingTask(
     return undefined
   const assignedTasks = tasks.filter(task => isPingTaskAssignedToSource(task, sourceUuid))
   return assignedTasks
-    .filter(task => SUPPORTED_PING_TASK_TYPES.has(task.type.toLowerCase()) && targetHosts.has(pingTaskTargetHost(task.target)))
+    .filter(task => TOPOLOGY_HOP_TASK_TYPES.has(task.type.toLowerCase()) && targetHosts.has(pingTaskTargetHost(task.target)))
     .filter(candidate => assignedTasks.filter(task => task.name === candidate.name).length === 1)
-    .sort((left, right) => Number(right.type === 'icmp') - Number(left.type === 'icmp')
-      || (left.weight ?? Number.MAX_SAFE_INTEGER) - (right.weight ?? Number.MAX_SAFE_INTEGER)
+    .sort((left, right) => (left.weight ?? Number.MAX_SAFE_INTEGER) - (right.weight ?? Number.MAX_SAFE_INTEGER)
       || (left.id ?? Number.MAX_SAFE_INTEGER) - (right.id ?? Number.MAX_SAFE_INTEGER))[0]
 }
 
@@ -224,53 +224,66 @@ export async function planTopologyPingTask(
   }
 }
 
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError'
+}
+
 export async function ensureTopologyPingTask(
   source: TopologyPingEndpoint,
   target: TopologyPingEndpoint,
   signal?: AbortSignal,
 ): Promise<{ task: AdminPingTask, created: boolean }> {
+  throwIfAborted(signal)
   const requestKey = `${source.uuid}:${target.uuid}:${topologyPingTargets(target).join(',')}`
   const pending = ensureRequests.get(requestKey)
-  if (pending)
-    return pending
+  if (pending) {
+    try {
+      const result = await pending
+      throwIfAborted(signal)
+      return result
+    }
+    catch (error) {
+      if (signal?.aborted || !isAbortError(error))
+        throw error
+    }
+  }
 
   const request = withCrossTabPingLock(requestKey, async () => {
-    throwIfAborted(signal)
     if (!source.uuid.trim() || !target.uuid.trim())
       throw new Error('线路机或落地机已失效，请重新选择。')
     if (!topologyPingTargets(target).length)
       throw new Error(`落地机“${target.name}”没有可用于 Ping 的 IPv4 或 IPv6 地址。`)
     await assertPingTaskPermission()
-    throwIfAborted(signal)
-    let tasks = await fetchAdminPingTasks(signal)
+    let tasks = await fetchAdminPingTasks()
     const existing = findTopologyPingTask(tasks, source.uuid, target)
     if (existing)
       return { task: existing, created: false }
 
     try {
-      throwIfAborted(signal)
-      await createTopologyPingTask(source, target, tasks, signal)
+      await createTopologyPingTask(source, target, tasks)
     }
     catch (error) {
-      if (signal?.aborted)
-        throw error
       if (isRpcPermissionError(error))
         handlePingPermissionError(error)
       // A second tab may have created the same source/target task concurrently.
-      tasks = await fetchAdminPingTasks(signal)
+      tasks = await fetchAdminPingTasks()
       const concurrent = findTopologyPingTask(tasks, source.uuid, target)
       if (concurrent)
         return { task: concurrent, created: false }
       throw error
     }
 
-    throwIfAborted(signal)
-    tasks = await fetchAdminPingTasks(signal)
+    tasks = await fetchAdminPingTasks()
     const created = findTopologyPingTask(tasks, source.uuid, target)
     if (!created)
       throw new Error('Ping 任务已提交，但服务器未返回对应任务，请稍后重试。')
     return { task: created, created: true }
-  }).finally(() => ensureRequests.delete(requestKey))
+  }).finally(() => {
+    if (ensureRequests.get(requestKey) === request)
+      ensureRequests.delete(requestKey)
+  })
   ensureRequests.set(requestKey, request)
-  return request
+  const result = await request
+  throwIfAborted(signal)
+  return result
 }

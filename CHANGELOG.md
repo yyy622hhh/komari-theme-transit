@@ -4,6 +4,24 @@
 
 ## [Unreleased]
 
+## [1.0.33] - 2026-08-18
+
+### Changed
+
+- 拓扑管理器改为只选入口、线路机和落地机。添加、修改、排序和删除都会立即保存，并自动创建或复用 ICMP 探测任务。
+- 打开管理器时按线路机和落地机地址自动校正旧线路并保存；入口已绑自定义任务时不会改写。
+
+### Fixed
+
+- 关闭管理器会作废未完成的主题写入；一条线路匹配失败不再挡住其他线路保存。
+- 拓扑自动保存改为排队写入，避免后一次保存取消前一次，或关闭重开时覆盖未完成的提交。
+- 自定义入口任务不再被打开校正改写成预设探测；TCP/HTTP 探测不会被当成线路 hop。
+- 待创建任务改为按全部节点查找，关闭或中止不会把共享的 Ping 任务创建请求带失败。
+
+### Testing
+
+- 扩展傻瓜式拓扑管理、自动保存、自定义入口保留和 hop 自动创建的视觉回归。
+
 ## [1.0.32] - 2026-08-17
 
 ### Added
@@ -454,7 +472,8 @@
 - 亮暗主题、桌面/移动布局和 Transit 风格内嵌 Komari 管理端。
 - Playwright 视觉与交互回归、自动构建和 GitHub Release 发布流程。
 
-[Unreleased]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.32...HEAD
+[Unreleased]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.33...HEAD
+[1.0.33]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.32...v1.0.33
 [1.0.32]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.31...v1.0.32
 [1.0.31]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.30...v1.0.31
 [1.0.30]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.29...v1.0.30
