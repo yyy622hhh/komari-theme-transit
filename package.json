@@ -37,7 +37,7 @@
     "icons:check": "bun scripts/generate-icon-collection.ts --check"
   },
   "dependencies": {
-    "@iconify/vue": "^4.3.0",
+    "@iconify/vue": "^5.0.1",
     "@vueuse/core": "^14.2.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -45,11 +45,11 @@
     "dayjs": "^1.11.19",
     "echarts": "^6.0.0",
     "globe.gl": "^2.46.1",
-    "pinia": "^3.0.4",
+    "pinia": "^4.0.2",
     "reka-ui": "^2.6.1",
     "sortablejs": "^1.15.7",
     "tailwind-merge": "^3.4.0",
-    "three": "^0.184.0",
+    "three": "^0.185.1",
     "vue": "^3.5.28",
     "vue-echarts": "^8.0.1",
     "vue-router": "^5.0.2",
