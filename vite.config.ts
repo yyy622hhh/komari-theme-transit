@@ -13,7 +13,9 @@ import vueDevTools from 'vite-plugin-vue-devtools'
 
 const require = createRequire(import.meta.url)
 const fs = require('node:fs')
-const archiver = require('archiver')
+// archiver@8 dropped the callable factory export in favor of format-specific
+// classes; ZipArchive keeps the same stream/event API the code below relies on.
+const { ZipArchive } = require('archiver')
 
 interface ThemeManifest {
   preview?: unknown
@@ -130,7 +132,7 @@ function komariThemeZip(): Plugin {
       }
 
       const output = fs.createWriteStream(outputPath)
-      const archive = archiver('zip', { zlib: { level: 9 } })
+      const archive = new ZipArchive({ zlib: { level: 9 } })
 
       return new Promise((resolve, reject) => {
         output.on('close', () => {
