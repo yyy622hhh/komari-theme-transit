@@ -32,7 +32,6 @@ export interface TopologyHopProbe {
 
 export const DEFAULT_TOPOLOGY_HOP_PROBE: TopologyHopProbe = Object.freeze({ type: 'icmp' })
 
-const ensureRequests = new Map<string, Promise<{ task: AdminPingTask, created: boolean }>>()
 const IPV4_PATTERN = /^(?:\d{1,3}\.){3}\d{1,3}$/
 const STRIP_IP_BRACKETS_PATTERN = /^\[|\]$/g
 const HTTP_TARGET_PATTERN = /^https?:\/\//i
@@ -410,55 +409,39 @@ export async function ensureTopologyPingTask(
   const probe = normalizeTopologyHopProbe(options.probe)
   throwIfAborted(signal)
   const requestKey = `${source.uuid}:${target.uuid}:${topologyPingTargets(target).join(',')}:${describeTopologyHopProbe(probe)}`
-  const pending = ensureRequests.get(requestKey)
-  if (pending) {
-    try {
-      const result = await pending
-      throwIfAborted(signal)
-      return result
-    }
-    catch (error) {
-      if (signal?.aborted || !isAbortError(error))
-        throw error
-    }
-  }
-
-  const request = withCrossTabPingLock(requestKey, async () => {
+  return withCrossTabPingLock(requestKey, async () => {
     if (!source.uuid.trim() || !target.uuid.trim())
       throw new Error('线路机或落地机已失效，请重新选择。')
     if (!topologyPingTargets(target).length)
       throw new Error(`落地机“${target.name}”没有可用于 Ping 的 IPv4 或 IPv6 地址。`)
+    throwIfAborted(signal)
     await assertPingTaskPermission()
-    let tasks = await fetchAdminPingTasks()
+    throwIfAborted(signal)
+    let tasks = await fetchAdminPingTasks(signal)
     const existing = findTopologyPingTask(tasks, source.uuid, target, probe)
     if (existing)
       return { task: existing, created: false }
 
     try {
-      await createTopologyPingTask(source, target, tasks, probe)
+      await createTopologyPingTask(source, target, tasks, probe, signal)
     }
     catch (error) {
+      if (signal?.aborted || isAbortError(error))
+        throw error
       if (isRpcPermissionError(error))
         handlePingPermissionError(error)
       // A second tab may have created the same source/target task concurrently.
-      tasks = await fetchAdminPingTasks()
+      tasks = await fetchAdminPingTasks(signal)
       const concurrent = findTopologyPingTask(tasks, source.uuid, target, probe)
       if (concurrent)
         return { task: concurrent, created: false }
       throw error
     }
 
-    tasks = await fetchAdminPingTasks()
+    tasks = await fetchAdminPingTasks(signal)
     const created = findTopologyPingTask(tasks, source.uuid, target, probe)
     if (!created)
       throw new Error('Ping 任务已提交，但服务器未返回对应任务，请稍后重试。')
     return { task: created, created: true }
-  }).finally(() => {
-    if (ensureRequests.get(requestKey) === request)
-      ensureRequests.delete(requestKey)
   })
-  ensureRequests.set(requestKey, request)
-  const result = await request
-  throwIfAborted(signal)
-  return result
 }

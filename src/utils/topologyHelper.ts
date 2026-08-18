@@ -704,7 +704,9 @@ export function parseTopologyMetric(value: string): TopologyMetricConfig {
 }
 
 export function formatTopologyLatency(value: number | null): string {
-  return value === null ? '-' : `${Math.round(value)}ms`
+  if (value === null)
+    return '-'
+  return value > 0 && value < 1 ? '<1ms' : `${Math.round(value)}ms`
 }
 
 export function formatTopologyLoss(value: number | null): string {

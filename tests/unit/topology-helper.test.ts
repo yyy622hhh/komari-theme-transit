@@ -6,6 +6,7 @@ import {
   findDuplicateTopologyRouteIndex,
   findTopologyProbeKey,
   findUniqueTopologyNode,
+  formatTopologyLatency,
   formatTopologyMetricForProbe,
   formatTopologyTelemetryLabel,
   getQuickTopologySourceNode,
@@ -539,5 +540,9 @@ describe('topology configuration validation', () => {
     expect(validateTopologyRoutes([route])).toContain(`第 1 条线路节点名称不能超过 ${TOPOLOGY_LIMITS.nodeNameLength} 个字符`)
     expect(validateTopologyRoutes([route])).toContain(`第 1 条线路第 1 段Ping 任务不能超过 ${TOPOLOGY_LIMITS.taskNameLength} 个字符`)
     expect(parseTopologyMetric('12ms,5pct')).toMatchObject({ fallbackLatency: null, fallbackLoss: null })
+  })
+
+  test('keeps valid sub-millisecond topology latency visible', () => {
+    expect(formatTopologyLatency(0.1875)).toBe('<1ms')
   })
 })

@@ -13,6 +13,7 @@ import TopologyManagerDialog from '@/components/TopologyManagerDialog.vue'
 import TopologyProbeSelect from '@/components/TopologyProbeSelect.vue'
 import TopologyRouteDetailDialog from '@/components/TopologyRouteDetailDialog.vue'
 import TopologySegmentReliabilityObserver from '@/components/TopologySegmentReliabilityObserver.vue'
+import { useTopologyProbeRepair } from '@/composables/useTopologyProbeRepair'
 import { useAppStore } from '@/stores/app'
 import { getNodeRole } from '@/utils/nodeRoleHelper'
 import { getRegionCode } from '@/utils/regionHelper'
@@ -70,6 +71,7 @@ const routeSegmentMetrics = ref<Record<string, Record<number, TopologySegmentTel
 const routeSegmentReliability = ref<Record<string, Record<number, TopologySegmentReliabilitySnapshot>>>({})
 const activeDirection = ref('all')
 const isDesktop = useMediaQuery('(min-width: 768px)')
+useTopologyProbeRepair(() => props.nodes, managerOpen)
 
 const routeGroups = computed(() => splitTopologyGroups(appStore.topologyRoute, true))
 // Metric groups map to route groups by index. Empty groups must remain in the

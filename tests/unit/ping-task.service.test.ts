@@ -232,6 +232,53 @@ describe('topology Ping task management', () => {
     }
   })
 
+  test('propagates cancellation to an in-flight Ping task creation', async () => {
+    const originalFetch = globalThis.fetch
+    const tasks: AdminPingTask[] = []
+    let addCalls = 0
+    let addAborted = false
+    let resolveAddStarted: (() => void) | undefined
+    const addStarted = new Promise<void>((resolve) => {
+      resolveAddStarted = resolve
+    })
+    globalThis.fetch = mock(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (!init?.body)
+        return new Response(JSON.stringify({ logged_in: true, username: 'admin' }))
+      const request = JSON.parse(String(init.body)) as { id: number, method: string }
+      if (request.method === 'admin:getAllPingTasks') {
+        return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: tasks }), {
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      if (request.method === 'admin:addPingTask') {
+        addCalls += 1
+        resolveAddStarted?.()
+        return new Promise<Response>((_resolve, reject) => {
+          init.signal?.addEventListener('abort', () => {
+            addAborted = true
+            reject(new DOMException('Aborted', 'AbortError'))
+          }, { once: true })
+        })
+      }
+      throw new Error(`Unexpected RPC method: ${request.method}`)
+    }) as typeof fetch
+
+    try {
+      const controller = new AbortController()
+      const creating = ensureTopologyPingTask(source, target, { signal: controller.signal })
+      await addStarted
+      controller.abort()
+
+      await expect(creating).rejects.toMatchObject({ name: 'AbortError' })
+      expect(addCalls).toBe(1)
+      expect(addAborted).toBe(true)
+      expect(tasks).toEqual([])
+    }
+    finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
   test('builds hop targets and names per probe type', () => {
     expect(buildTopologyHopTarget(target)).toBe(target.ipv4)
     expect(buildTopologyHopTarget(target, { type: 'tcp', port: 443 })).toBe(`${target.ipv4}:443`)

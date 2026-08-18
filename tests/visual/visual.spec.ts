@@ -487,6 +487,19 @@ test('Transit desktop topology and cards remain contained', async ({ page }) => 
   const healthyCard = page.getByRole('button', { name: '查看节点 香港边缘节点-超长名称布局测试 详情' }).locator('xpath=..')
   await expect(healthyCard.locator('[data-node-status-edge]')).toHaveClass(/bg-emerald-500\/85/)
   await expect(healthyCard.locator('[data-node-alert-edge]')).toHaveCount(0)
+  await expect.poll(() => healthyCard.evaluate((card) => {
+    const edge = card.querySelector<HTMLElement>('[data-node-status-edge]')
+    if (!edge)
+      return Number.POSITIVE_INFINITY
+    return Math.abs(edge.getBoundingClientRect().left - card.getBoundingClientRect().left)
+  })).toBeLessThanOrEqual(0.5)
+  await expect.poll(() => healthyCard.evaluate((card) => {
+    const name = card.querySelector<HTMLElement>('[data-node-name]')
+    const content = card.querySelector<HTMLElement>('[data-node-resource-grid]')
+    if (!name || !content)
+      return Number.POSITIVE_INFINITY
+    return Math.abs(name.getBoundingClientRect().left - content.getBoundingClientRect().left)
+  })).toBeLessThanOrEqual(0.5)
   const carrierSample = nodeCardSurface.locator('[data-carrier-sample][aria-label*="ms"]').first()
   await carrierSample.hover()
   const carrierTooltip = page.locator('[data-carrier-sample-tooltip]')
@@ -871,6 +884,55 @@ test('Transit topology switches the hop probe once ICMP is proven dead', async (
   await expect.poll(() => addedTasks.some(task => task.type === 'tcp' && task.target === '192.0.2.11:443')).toBe(true)
   // 换下来的是操作者自己建的任务（名字不属于主题命名空间），绝不能顺手删掉。
   expect(deletedTaskIds).toEqual([])
+})
+
+test('Transit topology repairs a dead hop after the manager is closed', async ({ page }) => {
+  const addedTasks: Array<Record<string, unknown>> = []
+  const saves: unknown[] = []
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, {
+    opsDashboard: true,
+    authenticated: true,
+    opsComparableRoutes: true,
+    topologyProbeStats: [{ task_id: 18, total: 48, valid: 0 }],
+  })
+  page.on('request', (request) => {
+    if (request.method() !== 'POST')
+      return
+    if (request.url().endsWith('/api/rpc2') && request.postDataJSON().method === 'admin:addPingTask')
+      addedTasks.push(request.postDataJSON().params as Record<string, unknown>)
+    if (request.url().includes('/api/admin/theme/settings?theme=Transit'))
+      saves.push(request.postDataJSON())
+  })
+
+  await page.clock.install()
+  await openStablePage(page)
+  await expect(page.locator('.topology-scroll article').first()).toBeVisible()
+  await page.clock.fastForward(60_000)
+
+  await expect.poll(() => addedTasks.some(task => task.type === 'tcp' && task.target === '192.0.2.11:443')).toBe(true)
+  await expect.poll(() => saves.length).toBeGreaterThan(0)
+})
+
+test('Transit background hop repair preserves explicitly static segments', async ({ page }) => {
+  const saves: Array<Record<string, unknown>> = []
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, {
+    opsDashboard: true,
+    authenticated: true,
+    topologyProbeStats: [{ task_id: 18, total: 48, valid: 0 }],
+  })
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && request.url().includes('/api/admin/theme/settings?theme=Transit'))
+      saves.push(request.postDataJSON() as Record<string, unknown>)
+  })
+
+  await page.clock.install()
+  await openStablePage(page)
+  await page.clock.fastForward(60_000)
+
+  await expect.poll(() => saves.length).toBeGreaterThan(0)
+  expect(saves.at(-1)?.topologyMetrics).toContain(';84,0||')
 })
 
 test('Transit topology never deletes a pre-existing task based on its name alone', async ({ page }) => {
@@ -1968,7 +2030,9 @@ test('logged-out public routes do not call private HTTP or RPC endpoints', async
   })
 
   await installKomariFixture(page, { hidePriceWhenLoggedOut: true, opsDashboard: true, visitorInfoEnabled: false })
+  await page.clock.install()
   await openStablePage(page)
+  await page.clock.fastForward(60_000)
   await page.getByRole('button', { name: '查看节点 主控-洛杉矶 详情' }).click()
   await expect(page).toHaveURL('/instance/00000000-0000-4000-8000-000000000001')
   await expect(page.getByText('硬件信息')).toBeVisible()

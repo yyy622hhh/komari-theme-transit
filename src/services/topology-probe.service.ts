@@ -1,7 +1,8 @@
 import type { AdminPingTask, TopologyHopProbe, TopologyPingEndpoint } from '@/services/ping-task.service'
 import type { PingMetricTaskStats } from '@/utils/rpc'
 import { OPS_TOPOLOGY_HOP_PROBE, OPS_TOPOLOGY_HOP_PROBE_LADDER } from '@/constants/ops'
-import { loadPingMetricStats } from '@/services/metrics.service'
+import { loadPingRecordsWithTasks } from '@/services/history.service'
+import { loadPingMetricStats, partitionMetricEntityIds } from '@/services/metrics.service'
 import {
   DEFAULT_TOPOLOGY_HOP_PROBE,
   draftTopologyPingTask,
@@ -12,6 +13,7 @@ import {
   listTopologyPingTasks,
   loadAdminPingTasks,
   normalizeTopologyHopProbe,
+  pingTaskTargetHost,
   topologyHopProbeFromTask,
   topologyHopTaskNameCandidates,
   topologyPingTargets,
@@ -30,6 +32,8 @@ export interface SourceProbeProfile {
   tasks: AdminPingTask[]
   samplesByTaskId: Map<string, HopTaskSamples>
   samplesByTaskName: Map<string, HopTaskSamples>
+  /** Aggregated evidence only for learning which landing probes work elsewhere. */
+  observedSamplesByTaskId: Map<string, HopTaskSamples>
 }
 
 export interface HopTaskPlan {
@@ -59,29 +63,78 @@ function readSamples(stat: PingMetricTaskStats): HopTaskSamples {
   }
 }
 
+function taskNamesById(tasks: readonly AdminPingTask[]): Map<string, string> {
+  const names = new Map<string, string>()
+  for (const task of tasks) {
+    const taskId = String(task.id ?? '').trim()
+    const name = task.name.trim()
+    if (taskId && name)
+      names.set(taskId, name)
+  }
+  return names
+}
+
 /** 拉齐这台线路机上所有任务的类型、目标和最近采样情况。 */
 export async function loadSourceProbeProfile(sourceUuid: string): Promise<SourceProbeProfile> {
-  const [tasks, stats] = await Promise.all([
-    loadAdminPingTasks(),
-    loadPingMetricStats({
-      entity_ids: [sourceUuid],
-      hours: OPS_TOPOLOGY_HOP_PROBE.lookbackHours,
-    }).catch(() => null),
-  ])
+  const tasks = await loadAdminPingTasks()
+  const entityIds = [...new Set([
+    sourceUuid,
+    ...tasks.flatMap(task => task.clients ?? []),
+  ].map(uuid => uuid.trim()).filter(Boolean))]
+  const statsResponses = await Promise.all(partitionMetricEntityIds(entityIds).map(batch => loadPingMetricStats({
+    entity_ids: batch,
+    hours: OPS_TOPOLOGY_HOP_PROBE.lookbackHours,
+  }).catch(() => null)))
+  const legacyRecords = statsResponses.every(response => response === null)
+    ? (await loadPingRecordsWithTasks(OPS_TOPOLOGY_HOP_PROBE.lookbackHours).catch(() => null))?.records ?? []
+    : []
 
   const samplesByTaskId = new Map<string, HopTaskSamples>()
   const samplesByTaskName = new Map<string, HopTaskSamples>()
-  for (const stat of stats?.stats ?? []) {
-    if (stat.entity_id !== sourceUuid)
+  const observedSamplesByTaskId = new Map<string, HopTaskSamples>()
+  const mergeSamples = (target: Map<string, HopTaskSamples>, key: string, samples: HopTaskSamples): void => {
+    const previous = target.get(key)
+    target.set(key, previous
+      ? { total: previous.total + samples.total, valid: previous.valid + samples.valid }
+      : samples)
+  }
+  for (const stat of statsResponses.flatMap(response => response?.stats ?? [])) {
+    const taskId = String(stat.task_id).trim()
+    if (!taskId)
       continue
     const samples = readSamples(stat)
-    samplesByTaskId.set(String(stat.task_id).trim(), samples)
+    mergeSamples(observedSamplesByTaskId, taskId, samples)
+    if (stat.entity_id !== sourceUuid)
+      continue
+    mergeSamples(samplesByTaskId, taskId, samples)
     const name = stat.name?.trim()
     if (name)
-      samplesByTaskName.set(name, samples)
+      mergeSamples(samplesByTaskName, name, samples)
   }
 
-  return { sourceUuid, tasks, samplesByTaskId, samplesByTaskName }
+  if (legacyRecords.length) {
+    const knownEntityIds = new Set(entityIds)
+    const taskNames = taskNamesById(tasks)
+    for (const record of legacyRecords) {
+      const entityId = record.client?.trim() ?? ''
+      const taskId = String(record.task_id ?? '').trim()
+      if (!knownEntityIds.has(entityId) || !taskId)
+        continue
+      const samples = {
+        total: 1,
+        valid: Number.isFinite(record.value) && record.value >= 0 ? 1 : 0,
+      }
+      mergeSamples(observedSamplesByTaskId, taskId, samples)
+      if (entityId !== sourceUuid)
+        continue
+      mergeSamples(samplesByTaskId, taskId, samples)
+      const name = taskNames.get(taskId)
+      if (name)
+        mergeSamples(samplesByTaskName, name, samples)
+    }
+  }
+
+  return { sourceUuid, tasks, samplesByTaskId, samplesByTaskName, observedSamplesByTaskId }
 }
 
 export function getHopTaskSamples(profile: SourceProbeProfile, task: Pick<AdminPingTask, 'id' | 'name'>): HopTaskSamples | null {
@@ -161,6 +214,38 @@ function nextLadderProbe(
   return null
 }
 
+function getObservedTaskSamples(
+  profile: SourceProbeProfile,
+  task: Pick<AdminPingTask, 'id'>,
+): HopTaskSamples | null {
+  const taskId = String(task.id ?? '').trim()
+  return taskId ? profile.observedSamplesByTaskId.get(taskId) ?? null : null
+}
+
+/**
+ * 找出其他来源访问同一落地地址时已经实际成功过的探测方式。
+ *
+ * 这里只学习协议和端口，不能把跨来源样本用于当前来源的健康判定。
+ */
+function healthyLandingProbes(
+  profile: SourceProbeProfile,
+  landing: TopologyPingEndpoint,
+): TopologyHopProbe[] {
+  const targetHosts = new Set(topologyPingTargets(landing))
+  const probes: TopologyHopProbe[] = []
+  for (const task of profile.tasks) {
+    if (!targetHosts.has(pingTaskTargetHost(task.target)))
+      continue
+    if ((getObservedTaskSamples(profile, task)?.valid ?? 0) <= 0)
+      continue
+    const probe = topologyHopProbeFromTask(task)
+    if (!probe || probes.some(existing => isSameTopologyHopProbe(existing, probe)))
+      continue
+    probes.push(probe)
+  }
+  return probes
+}
+
 /**
  * 计划第 2 段该用哪个任务——只读，不发写请求。
  *
@@ -216,6 +301,44 @@ export async function planWorkingHopTask(
     ?? findTopologyPingTask(profile.tasks, source.uuid, landing)
 
   const retire = (selectedTaskName: string) => collectRetiredTasks(profile, source, landing, hopTasks, selectedTaskName)
+  const planForTask = (
+    task: AdminPingTask,
+    probe: TopologyHopProbe,
+    switchedFrom: TopologyHopProbe | null,
+  ): HopTaskPlan => ({
+    task,
+    probe,
+    verdict: assessHopTask(profile, task),
+    needsCreation: false,
+    exhausted: false,
+    switchedFrom,
+    targetAddress,
+    retiredTasks: retire(task.name),
+  })
+  const planForProbe = (
+    probe: TopologyHopProbe,
+    switchedFrom: TopologyHopProbe | null,
+  ): HopTaskPlan | null => {
+    const reused = findTopologyPingTask(profile.tasks, source.uuid, landing, probe)
+    if (reused && assessHopTask(profile, reused) === 'dead')
+      return null
+    if (reused)
+      return planForTask(reused, probe, switchedFrom)
+    const task = draftTopologyPingTask(source, landing, probe, profile.tasks)
+    return {
+      task,
+      probe,
+      verdict: 'pending',
+      needsCreation: true,
+      exhausted: false,
+      switchedFrom,
+      targetAddress,
+      retiredTasks: retire(task.name),
+    }
+  }
+  const existingHealthy = (excludedName = ''): AdminPingTask | undefined => hopTasks.find(task => (
+    task.name.trim() !== excludedName.trim() && assessHopTask(profile, task) === 'healthy'
+  ))
 
   if (bound) {
     const boundProbe = topologyHopProbeFromTask(bound) ?? DEFAULT_TOPOLOGY_HOP_PROBE
@@ -233,6 +356,18 @@ export async function planWorkingHopTask(
       }
     }
 
+    const healthyTask = existingHealthy(bound.name)
+    if (healthyTask) {
+      const healthyProbe = topologyHopProbeFromTask(healthyTask) ?? DEFAULT_TOPOLOGY_HOP_PROBE
+      return planForTask(healthyTask, healthyProbe, boundProbe)
+    }
+
+    for (const provenProbe of healthyLandingProbes(profile, landing)) {
+      const provenPlan = planForProbe(provenProbe, boundProbe)
+      if (provenPlan)
+        return provenPlan
+    }
+
     const nextProbe = nextLadderProbe(profile, boundProbe, hopTasks)
     if (!nextProbe) {
       return {
@@ -248,18 +383,19 @@ export async function planWorkingHopTask(
         retiredTasks: [],
       }
     }
-    const reused = findTopologyPingTask(profile.tasks, source.uuid, landing, nextProbe)
-    const task = reused ?? draftTopologyPingTask(source, landing, nextProbe, profile.tasks)
-    return {
-      task,
-      probe: nextProbe,
-      verdict: reused ? assessHopTask(profile, reused) : 'pending',
-      needsCreation: !reused,
-      exhausted: false,
-      switchedFrom: boundProbe,
-      targetAddress,
-      retiredTasks: retire(task.name),
-    }
+    return planForProbe(nextProbe, boundProbe)!
+  }
+
+  const healthyTask = existingHealthy()
+  if (healthyTask) {
+    const healthyProbe = topologyHopProbeFromTask(healthyTask) ?? DEFAULT_TOPOLOGY_HOP_PROBE
+    return planForTask(healthyTask, healthyProbe, null)
+  }
+
+  for (const provenProbe of healthyLandingProbes(profile, landing)) {
+    const provenPlan = planForProbe(provenProbe, null)
+    if (provenPlan)
+      return provenPlan
   }
 
   const initialProbe = chooseInitialHopProbe(profile)

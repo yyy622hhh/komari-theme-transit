@@ -13,13 +13,25 @@ const source = { uuid: 'relay-uuid', name: 'Relay-JP', ipv4: '192.0.2.10' }
 const landing = { uuid: 'exit-uuid', name: 'Exit-SG', ipv4: '203.0.113.20' }
 
 interface StatFixture {
+  entity_id?: string
   task_id: string
   name?: string
   total: number
   valid: number
 }
 
-function mockKomari(tasks: AdminPingTask[], stats: StatFixture[]): () => void {
+interface LegacyRecordFixture {
+  client: string
+  task_id: number
+  time: string
+  value: number
+}
+
+function mockKomari(
+  tasks: AdminPingTask[],
+  stats: StatFixture[],
+  options: { metricStatsUnsupported?: boolean, legacyRecords?: LegacyRecordFixture[] } = {},
+): () => void {
   const originalFetch = globalThis.fetch
   globalThis.fetch = mock(async (_input: RequestInfo | URL, init?: RequestInit) => {
     if (!init?.body)
@@ -28,13 +40,20 @@ function mockKomari(tasks: AdminPingTask[], stats: StatFixture[]): () => void {
     if (request.method === 'admin:getAllPingTasks')
       return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: tasks }), { headers: { 'Content-Type': 'application/json' } })
     if (request.method === 'public:getPingMetricStats') {
+      if (options.metricStatsUnsupported) {
+        return new Response(JSON.stringify({
+          jsonrpc: '2.0',
+          id: request.id,
+          error: { code: -32601, message: 'method not found' },
+        }), { headers: { 'Content-Type': 'application/json' } })
+      }
       return new Response(JSON.stringify({
         jsonrpc: '2.0',
         id: request.id,
         result: {
           count: stats.length,
           stats: stats.map(stat => ({
-            entity_id: source.uuid,
+            entity_id: stat.entity_id ?? source.uuid,
             task_id: stat.task_id,
             name: stat.name,
             total: stat.total,
@@ -43,6 +62,13 @@ function mockKomari(tasks: AdminPingTask[], stats: StatFixture[]): () => void {
             loss_approximate: false,
           })),
         },
+      }), { headers: { 'Content-Type': 'application/json' } })
+    }
+    if (request.method === 'common:getRecords') {
+      return new Response(JSON.stringify({
+        jsonrpc: '2.0',
+        id: request.id,
+        result: { records: options.legacyRecords ?? [], tasks: [] },
       }), { headers: { 'Content-Type': 'application/json' } })
     }
     if (request.method === 'admin:addPingTask') {
@@ -191,6 +217,33 @@ describe('topology hop task planning', () => {
     }
   })
 
+  test('uses legacy Ping records when metric statistics are unavailable', async () => {
+    const taskName = 'Transit-Relay-JP-to-Exit-SG'
+    const restore = mockKomari(
+      [{ id: 7, name: taskName, clients: [source.uuid], type: 'icmp', target: landing.ipv4, interval: 30 }],
+      [],
+      {
+        metricStatsUnsupported: true,
+        legacyRecords: [1, 2, 3].map(index => ({
+          client: source.uuid,
+          task_id: 7,
+          time: `2026-08-18T00:0${index}:00.000Z`,
+          value: -1,
+        })),
+      },
+    )
+    try {
+      const planned = await planWorkingHopTask(source, landing, taskName)
+      expect(planned.switchedFrom).toEqual({ type: 'icmp' })
+      expect(planned.probe).toEqual({ type: 'tcp', port: 443 })
+      expect(planned.verdict).toBe('pending')
+      expect(planned.needsCreation).toBe(true)
+    }
+    finally {
+      restore()
+    }
+  })
+
   test('keeps a healthy bound task instead of re-deriving it from the address', async () => {
     const restore = mockKomari(
       [
@@ -208,6 +261,111 @@ describe('topology hop task planning', () => {
       expect(planned.verdict).toBe('healthy')
       expect(planned.needsCreation).toBe(false)
       expect(planned.switchedFrom).toBeNull()
+    }
+    finally {
+      restore()
+    }
+  })
+
+  test('switches a dead binding to another healthy task for the same source and landing', async () => {
+    const restore = mockKomari(
+      [
+        { id: 7, name: 'Transit-Relay-JP-to-Exit-SG-tcp-80', clients: [source.uuid], type: 'tcp', target: `${landing.ipv4}:80`, interval: 30 },
+        { id: 8, name: 'working-custom-task', clients: [source.uuid], type: 'tcp', target: `${landing.ipv4}:20002`, interval: 30 },
+      ],
+      [
+        { task_id: '7', total: 40, valid: 0 },
+        { task_id: '8', total: 40, valid: 40 },
+      ],
+    )
+    try {
+      const planned = await planWorkingHopTask(source, landing, 'Transit-Relay-JP-to-Exit-SG-tcp-80')
+      expect(planned.task.name).toBe('working-custom-task')
+      expect(planned.probe).toEqual({ type: 'tcp', port: 20002 })
+      expect(planned.verdict).toBe('healthy')
+      expect(planned.needsCreation).toBe(false)
+      expect(planned.switchedFrom).toEqual({ type: 'tcp', port: 80 })
+    }
+    finally {
+      restore()
+    }
+  })
+
+  test('keeps the exact healthy task when two landing tasks use the same probe', async () => {
+    const restore = mockKomari(
+      [
+        { id: 7, weight: 1, name: 'dead-port-80', clients: [source.uuid], type: 'tcp', target: `${landing.ipv4}:80`, interval: 30 },
+        { id: 8, weight: 2, name: 'healthy-port-80', clients: [source.uuid], type: 'tcp', target: `${landing.ipv4}:80`, interval: 30 },
+      ],
+      [
+        { task_id: '7', total: 40, valid: 0 },
+        { task_id: '8', total: 40, valid: 40 },
+      ],
+    )
+    try {
+      const planned = await planWorkingHopTask(source, landing, 'dead-port-80')
+      expect(planned.task.name).toBe('healthy-port-80')
+      expect(planned.probe).toEqual({ type: 'tcp', port: 80 })
+      expect(planned.verdict).toBe('healthy')
+      expect(planned.needsCreation).toBe(false)
+    }
+    finally {
+      restore()
+    }
+  })
+
+  test('tries a landing port proven healthy from another source before the fixed ladder', async () => {
+    const otherSource = 'other-relay-uuid'
+    const restore = mockKomari(
+      [
+        { id: 7, name: 'Transit-Relay-JP-to-Exit-SG-tcp-80', clients: [source.uuid], type: 'tcp', target: `${landing.ipv4}:80`, interval: 30 },
+        { id: 18, name: 'known-working-landing-port', clients: [otherSource], type: 'tcp', target: `${landing.ipv4}:20002`, interval: 30 },
+      ],
+      [
+        { entity_id: source.uuid, task_id: '7', total: 40, valid: 0 },
+        { entity_id: otherSource, task_id: '18', total: 40, valid: 39 },
+      ],
+    )
+    try {
+      const planned = await planWorkingHopTask(source, landing, 'Transit-Relay-JP-to-Exit-SG-tcp-80')
+      expect(planned.probe).toEqual({ type: 'tcp', port: 20002 })
+      expect(planned.task).toMatchObject({
+        name: 'Transit-Relay-JP-to-Exit-SG-tcp-20002',
+        target: `${landing.ipv4}:20002`,
+        clients: [source.uuid],
+      })
+      expect(planned.verdict).toBe('pending')
+      expect(planned.needsCreation).toBe(true)
+    }
+    finally {
+      restore()
+    }
+  })
+
+  test('never uses another source samples to mark the current source healthy', async () => {
+    const otherSource = 'other-relay-uuid'
+    const restore = mockKomari(
+      [{
+        id: 18,
+        name: 'shared-landing-port',
+        clients: [source.uuid, otherSource],
+        type: 'tcp',
+        target: `${landing.ipv4}:20002`,
+        interval: 30,
+      }],
+      [
+        { entity_id: source.uuid, task_id: '18', total: 40, valid: 0 },
+        { entity_id: otherSource, task_id: '18', total: 40, valid: 39 },
+      ],
+    )
+    try {
+      const profile = await loadSourceProbeProfile(source.uuid)
+      expect(assessHopTask(profile, { id: 18, name: 'shared-landing-port' })).toBe('dead')
+
+      const planned = await planWorkingHopTask(source, landing, 'shared-landing-port')
+      expect(planned.probe).toEqual({ type: 'icmp' })
+      expect(planned.verdict).toBe('pending')
+      expect(planned.needsCreation).toBe(true)
     }
     finally {
       restore()

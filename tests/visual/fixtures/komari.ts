@@ -61,7 +61,7 @@ export interface VisualFixtureOptions {
    * 自动挑选与自愈：`valid > 0` 代表这种探测方式通，`total > 0 && valid === 0`
    * 代表打不通。
    */
-  topologyProbeStats?: Array<{ task_id: string | number, name?: string, total: number, valid: number }>
+  topologyProbeStats?: Array<{ entity_id?: string, task_id: string | number, name?: string, total: number, valid: number }>
   /** 把第 1 条线路的 hop 任务改成主题自己会生成的名字，用来验证换下来的任务会被清理。 */
   topologyGeneratedHopName?: boolean
   themeSaveDelayMs?: number
@@ -466,17 +466,19 @@ async function handleRpc(
             const requestedEntityIds = Array.isArray(payload.params?.entity_ids)
               ? payload.params.entity_ids.map(String)
               : [uuid]
-            const stats = requestedEntityIds.flatMap(entityId => options.topologyProbeStats!.map(stat => ({
-              entity_id: entityId,
-              task_id: String(stat.task_id),
-              name: stat.name,
-              total: stat.total,
-              valid: stat.valid,
-              loss: stat.valid > 0 ? 0 : 100,
-              loss_approximate: false,
-              avg: stat.valid > 0 ? 80 : undefined,
-              latest: stat.valid > 0 ? 82 : undefined,
-            })))
+            const stats = requestedEntityIds.flatMap(entityId => options.topologyProbeStats!
+              .filter(stat => !stat.entity_id || stat.entity_id === entityId)
+              .map(stat => ({
+                entity_id: stat.entity_id ?? entityId,
+                task_id: String(stat.task_id),
+                name: stat.name,
+                total: stat.total,
+                valid: stat.valid,
+                loss: stat.valid > 0 ? 0 : 100,
+                loss_approximate: false,
+                avg: stat.valid > 0 ? 80 : undefined,
+                latest: stat.valid > 0 ? 82 : undefined,
+              })))
             return { start: FIXED_NOW, end: FIXED_NOW, interval_seconds: 60, stats, count: stats.length }
           })()
         : options.pingTaskOrdering
