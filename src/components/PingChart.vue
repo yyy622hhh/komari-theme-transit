@@ -12,6 +12,7 @@ import { Spinner } from '@/components/ui/spinner'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { useMetricRangeSelection } from '@/composables/useMetricRangeSelection'
+import { useTouchTooltipMode } from '@/composables/useTouchTooltipMode'
 import { PING_RECORD_MAX_COUNT } from '@/constants/load'
 import { loadPingRecordsWithTasks } from '@/services/history.service'
 import { loadPingMetricStats, loadPublicPingTasks, queryMetrics } from '@/services/metrics.service'
@@ -105,46 +106,18 @@ const legacyCustomRangeFallback = ref(false)
 // 任务选择
 const selectedTaskIds = ref<number[]>([])
 const cutPeak = ref(false)
-const isTouchTooltipMode = ref(false)
-const activeTaskTooltipId = ref<number | null>(null)
-const smoothInfoTooltipOpen = ref(false)
+const {
+  isTouchTooltipMode,
+  activeTaskTooltipId,
+  smoothInfoTooltipOpen,
+  setTaskTooltipOpen,
+  toggleTaskTooltip,
+  toggleSmoothInfoTooltip,
+  reset: resetTouchTooltipMode,
+} = useTouchTooltipMode()
 
 const chartMargin = { top: 30, right: 24, bottom: 52, left: 56 }
-let coarsePointerMediaQuery: MediaQueryList | null = null
 let fetchRecordsSequence = 0
-
-function syncTouchTooltipMode() {
-  if (typeof window === 'undefined') {
-    isTouchTooltipMode.value = false
-    return
-  }
-
-  const hasCoarsePointer = window.matchMedia('(pointer: coarse)').matches
-  const hasTouchPoints = typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0
-  isTouchTooltipMode.value = hasCoarsePointer || hasTouchPoints
-}
-
-function setTaskTooltipOpen(taskId: number, open: boolean) {
-  activeTaskTooltipId.value = open ? taskId : activeTaskTooltipId.value === taskId ? null : activeTaskTooltipId.value
-}
-
-function toggleTaskTooltip(taskId: number) {
-  if (!isTouchTooltipMode.value)
-    return
-
-  activeTaskTooltipId.value = activeTaskTooltipId.value === taskId ? null : taskId
-  smoothInfoTooltipOpen.value = false
-}
-
-function toggleSmoothInfoTooltip() {
-  if (!isTouchTooltipMode.value)
-    return
-
-  smoothInfoTooltipOpen.value = !smoothInfoTooltipOpen.value
-  if (smoothInfoTooltipOpen.value) {
-    activeTaskTooltipId.value = null
-  }
-}
 
 function normalizeMetricTaskId(taskId: string): number {
   if (!taskId.trim())
@@ -661,16 +634,11 @@ watch(() => props.uuid, () => {
   remoteData.value = []
   tasks.value = []
   selectedTaskIds.value = []
-  activeTaskTooltipId.value = null
-  smoothInfoTooltipOpen.value = false
+  resetTouchTooltipMode()
   fetchRecords()
 })
 
 onMounted(() => {
-  syncTouchTooltipMode()
-  coarsePointerMediaQuery = window.matchMedia('(pointer: coarse)')
-  coarsePointerMediaQuery.addEventListener('change', syncTouchTooltipMode)
-
   const firstView = availableViews.value[0]
   if (firstView && !selectedView.value) {
     selectedView.value = firstView.label
@@ -683,8 +651,6 @@ onBeforeUnmount(() => {
   // has gone away. Shared requests stay deduplicated for other consumers, but
   // this instance can no longer publish their result.
   fetchRecordsSequence += 1
-  coarsePointerMediaQuery?.removeEventListener('change', syncTouchTooltipMode)
-  coarsePointerMediaQuery = null
 })
 </script>
 
