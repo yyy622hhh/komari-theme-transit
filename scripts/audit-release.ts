@@ -56,6 +56,12 @@ const sourcePreview = readFileSync(resolve(process.cwd(), 'docs/preview.png'))
 const digest = (content: Uint8Array) => createHash('sha256').update(content).digest('hex')
 const previewMatches = digest(packagedPreview) === digest(sourcePreview)
 
+const sourceVersion = typeof sourceManifest.version === 'string' ? sourceManifest.version : ''
+const changelogPath = resolve(process.cwd(), 'CHANGELOG.md')
+const changelogHasVersionEntry = sourceVersion.length > 0
+  && existsSync(changelogPath)
+  && new RegExp(`^## \\[${sourceVersion.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\]`, 'm').test(readFileSync(changelogPath, 'utf8'))
+
 if (
   unexpectedTopLevel.length
   || missingTopLevel.length
@@ -69,6 +75,7 @@ if (
   || invalidModes.length
   || invalidRequiredFiles.length
   || !previewMatches
+  || !changelogHasVersionEntry
 ) {
   throw new Error([
     `Release audit failed for ${zipName}`,
@@ -84,6 +91,7 @@ if (
     invalidModes.length ? `Unexpected archive modes: ${invalidModes.slice(0, 5).map(entry => `${entry.mode} ${entry.name}`).join(', ')}` : '',
     invalidRequiredFiles.length ? `Missing or invalid required files: ${invalidRequiredFiles.join(', ')}` : '',
     !previewMatches ? 'Packaged preview.png does not match docs/preview.png' : '',
+    !changelogHasVersionEntry ? `CHANGELOG.md is missing a "## [${sourceVersion || '<unknown>'}]" entry for the current komari-theme.json version` : '',
   ].filter(Boolean).join('\n'))
 }
 
