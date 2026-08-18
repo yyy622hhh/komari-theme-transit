@@ -22,7 +22,7 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value)
 }
 
-interface SharedPingRecordsState {
+export interface SharedPingRecordsState {
   recordsByClient: Map<string, PingRecord[]>
   source: 'metric' | 'legacy'
   metricStats?: PingMetricTaskStats[]
@@ -385,7 +385,12 @@ function buildMetricRecordsByClient(nodeUuid: string, stats: PingMetricTaskStats
   return buildRecordsByClient(syntheticRecords)
 }
 
-function buildPingMetricState(
+/**
+ * 决定这一批采样能不能信 Metric Store：只有当每个有精确（非近似）丢包统计的
+ * 任务都能在查询到的丢包时间序列里找到对应的点，才返回可用状态；否则返回
+ * null，调用方据此回退到旧版 `common:getRecords`。
+ */
+export function buildPingMetricState(
   nodeUuid: string,
   statsResponse: PingMetricStatsResponse | null,
   metricsResponse: MetricQueryResponse | null,
