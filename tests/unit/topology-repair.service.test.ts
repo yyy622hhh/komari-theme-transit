@@ -92,10 +92,14 @@ function createDeps(overrides: Partial<TopologyRepairDeps> & { manager: Topology
 }
 
 describe('canRunTopologyProbeRepair', () => {
-  const healthy = { disposed: false, managerOpen: false, privateFeaturesAllowed: true, topologyRoute: '北京电信|CN|入口' }
+  const healthy = { disposed: false, autoRepairEnabled: true, managerOpen: false, privateFeaturesAllowed: true, topologyRoute: '北京电信|CN|入口' }
 
   test('allows when every condition is satisfied', () => {
     expect(canRunTopologyProbeRepair(healthy)).toBe(true)
+  })
+
+  test('blocks when the site owner disabled unattended auto repair', () => {
+    expect(canRunTopologyProbeRepair({ ...healthy, autoRepairEnabled: false })).toBe(false)
   })
 
   test('blocks when the composable is disposed', () => {

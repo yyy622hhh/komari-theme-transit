@@ -1,6 +1,6 @@
 import type { TopologyRouteProbeState } from '../../src/composables/useTopologyRoutePlanner'
 import { describe, expect, test } from 'bun:test'
-import { formatTopologyRouteHint, isTopologyRouteHintDestructive } from '../../src/composables/useTopologyRoutePlanner'
+import { formatTopologyEntryHint, formatTopologyRouteHint, isTopologyRouteHintDestructive } from '../../src/composables/useTopologyRoutePlanner'
 
 function state(overrides: Partial<TopologyRouteProbeState> = {}): TopologyRouteProbeState {
   return {
@@ -98,5 +98,55 @@ describe('isTopologyRouteHintDestructive', () => {
 
   test('is not destructive otherwise', () => {
     expect(isTopologyRouteHintDestructive({ taskError: '', exhausted: false })).toBe(false)
+  })
+})
+
+describe('formatTopologyEntryHint', () => {
+  const preset = {
+    probeLabel: '北京电信',
+    expectedTaskName: '北京电信',
+    entryLabel: '北京电信',
+    sourceName: 'Relay-JP',
+    live: false,
+  }
+
+  test('stays silent until a source node is chosen', () => {
+    expect(formatTopologyEntryHint({ ...preset, sourceName: '' })).toBe('')
+    expect(formatTopologyEntryHint({ ...preset, sourceName: '   ' })).toBe('')
+  })
+
+  test('confirms the live binding without nagging', () => {
+    expect(formatTopologyEntryHint({ ...preset, live: true })).toBe('入口探测：北京电信 · 实时')
+  })
+
+  test('names the missing task and the fix when a preset entry has no matching task', () => {
+    const hint = formatTopologyEntryHint(preset)
+    expect(hint).toContain('Relay-JP')
+    expect(hint).toContain('北京电信')
+    expect(hint).toContain('静态基线')
+    // 必须给出可执行的下一步，而不只是陈述现状。
+    expect(hint).toContain('创建同名任务')
+  })
+
+  test('explains a custom entry that carries no live task', () => {
+    const hint = formatTopologyEntryHint({
+      probeLabel: '',
+      expectedTaskName: '',
+      entryLabel: '自建入口',
+      sourceName: 'Relay-JP',
+      live: false,
+    })
+    expect(hint).toContain('自建入口')
+    expect(hint).toContain('静态基线')
+  })
+
+  test('falls back to the entry label when a custom entry is live', () => {
+    expect(formatTopologyEntryHint({
+      probeLabel: '',
+      expectedTaskName: '',
+      entryLabel: '自建入口',
+      sourceName: 'Relay-JP',
+      live: true,
+    })).toBe('入口探测：自建入口 · 实时')
   })
 })

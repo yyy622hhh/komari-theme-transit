@@ -10,7 +10,7 @@ import {
   getConnectionCount,
   getKnownNodeDistribution,
   getNodeDistribution,
-  normalizeLatestConnections,
+  normalizeConnectionCounts,
 } from '../../src/utils/nodeMetricsHelper'
 
 function node(overrides: Partial<NodeData> & Pick<NodeData, 'uuid' | 'name'>): NodeData {
@@ -65,13 +65,13 @@ function node(overrides: Partial<NodeData> & Pick<NodeData, 'uuid' | 'name'>): N
 
 describe('Komari latest connection normalization', () => {
   test('separates TCP from a latest-status TCP + UDP total', () => {
-    const connections = normalizeLatestConnections(120, 20)
+    const connections = normalizeConnectionCounts(120, 20)
     expect(connections).toEqual({ tcp: 100, udp: 20 })
     expect(getConnectionCount({ connections: connections.tcp, connections_udp: connections.udp })).toBe(120)
   })
 
   test('clamps inconsistent backend values instead of exposing negative TCP counts', () => {
-    expect(normalizeLatestConnections(5, 20)).toEqual({ tcp: 0, udp: 20 })
+    expect(normalizeConnectionCounts(5, 20)).toEqual({ tcp: 0, udp: 20 })
   })
 })
 

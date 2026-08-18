@@ -81,3 +81,31 @@ describe('topology health scoring', () => {
     expect(score.deductions[0]).toMatchObject({ key: '0:loss-critical', points: 100 })
   })
 })
+
+describe('latency penalty monotonicity', () => {
+  function scoreForLatency(latency: number): number {
+    return calculateTopologyRouteScore({
+      segments: [segment({ latency, loss: 0, volatility: 0 })],
+      segmentLabels: ['入口'],
+      hasOfflineNode: false,
+      hasMissingNode: false,
+    }).score
+  }
+
+  test('never scores a worse latency higher across the whole range', () => {
+    let previous = Number.POSITIVE_INFINITY
+    for (let latency = 0; latency <= 700; latency += 0.5) {
+      const score = scoreForLatency(latency)
+      expect(score).toBeLessThanOrEqual(previous)
+      previous = score
+    }
+  })
+
+  test('stays continuous across the 250ms segment boundary', () => {
+    // 修复前：250ms 扣 40.4 分，250.5ms 只扣 40.05 分，延迟更差反而分更高。
+    expect(scoreForLatency(250)).toBeGreaterThanOrEqual(scoreForLatency(250.5))
+    // 分数取整，相邻 1ms 之间最多差 1 分；修复前这里会是负数（分数不降反升）。
+    expect(scoreForLatency(250) - scoreForLatency(251)).toBeLessThanOrEqual(1)
+    expect(scoreForLatency(250) - scoreForLatency(251)).toBeGreaterThanOrEqual(0)
+  })
+})

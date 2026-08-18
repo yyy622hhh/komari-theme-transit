@@ -8,7 +8,7 @@ import { ref, toValue } from 'vue'
 import { OPS_TOPOLOGY_HOP_PROBE_LADDER } from '@/constants/ops'
 import { describeTopologyHopProbe, normalizeTopologyHopProbe } from '@/services/ping-task.service'
 import { planWorkingHopTask } from '@/services/topology-probe.service'
-import { applyTopologyProbeToRoute, findTopologyProbeKey, findUniqueTopologyNode, getTopologyRouteProbeKey, shouldAutoApplyTopologyProbe } from '@/utils/topologyHelper'
+import { applyTopologyProbeToRoute, findTopologyProbeKey, findUniqueTopologyNode, getTopologyProbe, getTopologyRouteProbeKey, shouldAutoApplyTopologyProbe } from '@/utils/topologyHelper'
 
 export interface TopologyRouteProbeState {
   probe: TopologyHopProbe
@@ -78,6 +78,37 @@ export function formatTopologyRouteHint(input: TopologyRouteHintInput): string {
   if (state.verdict === 'dead')
     return `探测方式：${probeText} · 没有成功响应，正在自动换用其它方式。`
   return `探测方式：${probeText} · 正在等待首批采样`
+}
+
+export interface TopologyEntryHintInput {
+  /** 入口对应的预设探测名，例如「北京电信」；自定义入口为空。 */
+  probeLabel: string
+  /** 预设入口期望匹配的 Ping 任务名。 */
+  expectedTaskName: string
+  /** 入口在线路图上的显示名。 */
+  entryLabel: string
+  sourceName: string
+  /** 第 1 段是否已绑定实时任务。 */
+  live: boolean
+}
+
+/**
+ * 第 1 段（入口）的提示。
+ *
+ * 第 2 段一直有详细提示，第 1 段却什么都不说：线路机上没有同名 Ping 任务时，
+ * `buildQuickTopologyRoute` 会把 `metrics[0].live` 置为 false，线路照样创建并保存，
+ * 图上只剩「静态基线」和两个短横。操作者既不知道发生了什么，也不知道该去建任务。
+ */
+export function formatTopologyEntryHint(input: TopologyEntryHintInput): string {
+  if (!input.sourceName.trim())
+    return ''
+  if (input.live)
+    return `入口探测：${input.probeLabel || input.entryLabel} · 实时`
+  if (input.probeLabel) {
+    return `入口探测：线路机“${input.sourceName}”上没有名为“${input.expectedTaskName}”的 Ping 任务，`
+      + '该段暂显示静态基线。在 Komari 中为这台节点创建同名任务后会自动转为实时。'
+  }
+  return `入口探测：自定义入口“${input.entryLabel}”未绑定实时任务，该段显示静态基线。`
 }
 
 /** 提示是否需要用醒目色：任务错误或阶梯穷尽都算需要操作者注意。 */
@@ -281,6 +312,22 @@ export function useTopologyRoutePlanner(
     })
   }
 
+  function routeEntryHint(route: TopologyRouteConfig): string {
+    const probeKey = getTopologyRouteProbeKey(route)
+    const probe = probeKey ? getTopologyProbe(probeKey) : null
+    return formatTopologyEntryHint({
+      probeLabel: probe?.label ?? '',
+      expectedTaskName: probe?.taskFilter ?? '',
+      entryLabel: route.nodes[0]?.name.trim() ?? '',
+      sourceName: route.nodes[1]?.name.trim() ?? '',
+      live: Boolean(route.metrics[0]?.live && route.metrics[0].taskFilter.trim()),
+    })
+  }
+
+  function routeEntryHintTone(route: TopologyRouteConfig): boolean {
+    return !routeEntryHint(route).includes('· 实时')
+  }
+
   function routeHintTone(route: TopologyRouteConfig): boolean {
     return isTopologyRouteHintDestructive({
       taskError: routeTaskErrors.value[route.id] ?? '',
@@ -307,5 +354,7 @@ export function useTopologyRoutePlanner(
     routeHopTask,
     routeHint,
     routeHintTone,
+    routeEntryHint,
+    routeEntryHintTone,
   }
 }

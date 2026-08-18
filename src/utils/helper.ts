@@ -6,6 +6,25 @@ const LAST_BYTE_UNIT = BYTE_UNITS.at(-1)
 
 const SECONDS_PER_DAY = 86400
 
+/** 非有限值按 0 处理，与 `clampPercentage` / `formatMetricDecimal` 的约定一致。 */
+function normalizeBytes(bytes: number): number {
+  return Number.isFinite(bytes) ? bytes : 0
+}
+
+/**
+ * 字节数对应的单位下标，保证落在 {@link BYTE_UNITS} 范围内。
+ *
+ * 直接用 `Math.floor(Math.log(bytes) / Math.log(1024))` 会在两种输入上出错：
+ * `0 < bytes < 1` 得到负下标（0.5 B 被显示成「512 PB」），负数和非有限值得到
+ * NaN 下标（显示成「NaN PB」）。磁盘日增长是线性回归斜率，这两种值都真实可达。
+ */
+function byteUnitIndex(magnitude: number): number {
+  if (!(magnitude >= 1))
+    return 0
+  const index = Math.floor(Math.log(magnitude) / Math.log(1024))
+  return Math.min(Math.max(index, 0), BYTE_UNITS.length - 1)
+}
+
 /** 时间单位配置（秒为单位） */
 const TIME_UNITS = [
   { value: SECONDS_PER_DAY, label: '天' },
@@ -54,13 +73,14 @@ const DEFAULT_BYTE_DECIMALS: ByteDecimalsConfig = {
  * @returns 格式化后的字符串，如 "1.5 GB"
  */
 export function formatBytes(bytes: number, decimals = 1): string {
-  if (bytes === 0)
+  const value = normalizeBytes(bytes)
+  if (value === 0)
     return '0 B'
 
   const k = 1024
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  const i = byteUnitIndex(Math.abs(value))
   const unit = BYTE_UNITS[i] ?? LAST_BYTE_UNIT
-  return `${(bytes / k ** i).toFixed(decimals)} ${unit}`
+  return `${(value / k ** i).toFixed(decimals)} ${unit}`
 }
 
 /**
@@ -71,8 +91,9 @@ export function formatBytes(bytes: number, decimals = 1): string {
  */
 export function formatBytesWithConfig(bytes: number, config?: ByteDecimalsConfig): string {
   const mergedConfig = { ...DEFAULT_BYTE_DECIMALS, ...config }
+  const value = normalizeBytes(bytes)
 
-  if (bytes === 0) {
+  if (value === 0) {
     // 0 字节时，检查 B 是否被禁用
     if (mergedConfig.B === -1)
       return '0 KB'
@@ -80,7 +101,7 @@ export function formatBytesWithConfig(bytes: number, config?: ByteDecimalsConfig
   }
 
   const k = 1024
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  const i = byteUnitIndex(Math.abs(value))
 
   // 获取对应单位的精度配置
   const unitKey = BYTE_UNITS[i]
@@ -94,16 +115,16 @@ export function formatBytesWithConfig(bytes: number, config?: ByteDecimalsConfig
       const nextDecimals = (nextUnitKey === 'TB' || nextUnitKey === 'PB') ? mergedConfig.TB : mergedConfig[nextUnitKey as keyof ByteDecimalsConfig]
       if (nextDecimals !== -1) {
         const unit = BYTE_UNITS[j]
-        return `${(bytes / k ** j).toFixed(nextDecimals)} ${unit}`
+        return `${(value / k ** j).toFixed(nextDecimals)} ${unit}`
       }
     }
     // 所有单位都被禁用，使用默认行为
     const unit = BYTE_UNITS[i] ?? LAST_BYTE_UNIT
-    return `${(bytes / k ** i).toFixed(1)} ${unit}`
+    return `${(value / k ** i).toFixed(1)} ${unit}`
   }
 
   const unit = BYTE_UNITS[i] ?? LAST_BYTE_UNIT
-  return `${(bytes / k ** i).toFixed(decimals)} ${unit}`
+  return `${(value / k ** i).toFixed(decimals)} ${unit}`
 }
 
 /**
@@ -114,15 +135,16 @@ export function formatBytesWithConfig(bytes: number, config?: ByteDecimalsConfig
  */
 export function formatBytesSplit(bytes: number, config?: ByteDecimalsConfig): { value: string, unit: string } {
   const mergedConfig = { ...DEFAULT_BYTE_DECIMALS, ...config }
+  const bytesValue = normalizeBytes(bytes)
 
-  if (bytes === 0) {
+  if (bytesValue === 0) {
     if (mergedConfig.B === -1)
       return { value: '0', unit: 'KB' }
     return { value: '0', unit: 'B' }
   }
 
   const k = 1024
-  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  const i = byteUnitIndex(Math.abs(bytesValue))
 
   const unitKey = BYTE_UNITS[i]
   const decimals = (unitKey === 'TB' || unitKey === 'PB') ? mergedConfig.TB : mergedConfig[unitKey as keyof ByteDecimalsConfig]
@@ -133,15 +155,15 @@ export function formatBytesSplit(bytes: number, config?: ByteDecimalsConfig): { 
       const nextDecimals = (nextUnitKey === 'TB' || nextUnitKey === 'PB') ? mergedConfig.TB : mergedConfig[nextUnitKey as keyof ByteDecimalsConfig]
       if (nextDecimals !== -1) {
         const unit = BYTE_UNITS[j]
-        return { value: (bytes / k ** j).toFixed(nextDecimals), unit: `${unit}` }
+        return { value: (bytesValue / k ** j).toFixed(nextDecimals), unit: `${unit}` }
       }
     }
     const unit = BYTE_UNITS[i] ?? LAST_BYTE_UNIT
-    return { value: (bytes / k ** i).toFixed(1), unit: `${unit}` }
+    return { value: (bytesValue / k ** i).toFixed(1), unit: `${unit}` }
   }
 
   const unit = BYTE_UNITS[i] ?? LAST_BYTE_UNIT
-  return { value: (bytes / k ** i).toFixed(decimals), unit: `${unit}` }
+  return { value: (bytesValue / k ** i).toFixed(decimals), unit: `${unit}` }
 }
 
 /**

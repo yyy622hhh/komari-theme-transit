@@ -3,7 +3,7 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { parseNodeGroups } from '@/utils/groupHelper'
-import { normalizeLatestConnections } from '@/utils/nodeMetricsHelper'
+import { normalizeConnectionCounts } from '@/utils/nodeMetricsHelper'
 
 /** 流量限制类型 */
 export type TrafficLimitType = 'up' | 'down' | 'min' | 'max' | 'sum'
@@ -268,7 +268,7 @@ const useNodesStore = defineStore('nodes', () => {
       node.traffic_down = status.traffic_down
     if (node.process !== status.process)
       node.process = status.process
-    const { tcp: tcpConnections, udp: udpConnections } = normalizeLatestConnections(
+    const { tcp: tcpConnections, udp: udpConnections } = normalizeConnectionCounts(
       status.connections,
       status.connections_udp,
     )

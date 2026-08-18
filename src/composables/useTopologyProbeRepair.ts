@@ -31,6 +31,7 @@ export function useTopologyProbeRepair(
   function canRepair(): boolean {
     return canRunTopologyProbeRepair({
       disposed,
+      autoRepairEnabled: appStore.topologyAutoRepairEnabled,
       managerOpen: toValue(managerOpen),
       privateFeaturesAllowed: appStore.privateFeaturesAllowed,
       topologyRoute: appStore.topologyRoute,

@@ -49,7 +49,18 @@ const emit = defineEmits<{
             </button>
           </DialogClose>
         </div>
-        <div class="min-h-0 flex-1 overflow-y-auto p-4 sm:p-5">
+        <!--
+          可滚动区域必须能被键盘聚焦，否则只能用鼠标滚动（axe
+          scrollable-region-focusable，serious）。axe 也接受「区域内含可聚焦元素」，
+          但对话框正文在数据到位前可能一个可聚焦子元素都没有，于是这条违规会随渲染
+          时序间歇出现；把 tabindex 放在容器上才是与内容无关的稳定修法。
+        -->
+        <div
+          class="min-h-0 flex-1 overflow-y-auto p-4 sm:p-5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+          tabindex="0"
+          role="group"
+          :aria-label="title"
+        >
           <slot />
         </div>
       </DialogContent>

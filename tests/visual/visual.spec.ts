@@ -1220,7 +1220,7 @@ test('Transit topology quick generation stops on Ping task failures', async ({ p
   await expect(dialog.getByRole('button', { name: '保存并应用' })).toBeDisabled()
 })
 
-test('Transit topology quick generation reports an automatic task planning error', async ({ page }) => {
+test('Transit topology marks a landing without a public IP as unusable before it can be picked', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await installKomariFixture(page, {
     opsDashboard: true,
@@ -1231,10 +1231,59 @@ test('Transit topology quick generation reports an automatic task planning error
   await openStablePage(page)
 
   const dialog = await openTopologyManager(page, 'empty')
-  await dialog.getByRole('button', { name: '添加线路' }).click()
+  const landingSelect = dialog.getByLabel('添加线路落地机')
+  const unusable = landingSelect.getByRole('option', { name: '香港边缘节点-超长名称布局测试（无公网 IP，不可用）', exact: true })
 
-  await expect(page.getByText('落地机“香港边缘节点-超长名称布局测试”没有可用于 Ping 的 IPv4 或 IPv6 地址。')).toBeVisible()
-  await expect(dialog.locator('[data-topology-route-id]')).toHaveCount(0)
+  // 事前标注并禁用，而不是等到点了「添加线路」才弹红字报错。
+  // 断言属性而非 toBeDisabled()：Playwright 的 disabled 判定不覆盖 <option> 自身的属性。
+  await expect(unusable).toHaveAttribute('disabled', '')
+  // 默认选中项也不能落在这个禁用选项上，否则等于把同一个坑从默认值绕回来。
+  await expect(landingSelect).not.toHaveValue((await unusable.getAttribute('value')) ?? '')
+
+  await dialog.getByRole('button', { name: '添加线路' }).click()
+  await expect(dialog.locator('[data-topology-route-id]')).toHaveCount(1)
+  await expect(page.getByText(/没有可用于 Ping 的 IPv4 或 IPv6 地址/)).toHaveCount(0)
+})
+
+test('Transit topology still reports a planning error when an existing landing loses its address', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, {
+    opsDashboard: true,
+    authenticated: true,
+    // 默认拓扑第 1 条线路的落地机正是这台被清空 IP 的节点。
+    quickTopologyNoAddress: true,
+  })
+  await openStablePage(page)
+
+  const dialog = await openTopologyManager(page)
+  // 校验区汇总一条，出问题那条线路的 hop 提示行再说一次。
+  await expect(dialog.getByText(/没有可用于 Ping 的 IPv4 或 IPv6 地址/).first()).toBeVisible()
+  await expect(dialog.locator('[data-topology-hop-hint]').first())
+    .toHaveText('落地机“香港边缘节点-超长名称布局测试”没有可用于 Ping 的 IPv4 或 IPv6 地址。')
+  await expect(dialog.getByRole('button', { name: '保存并应用' })).toBeDisabled()
+})
+
+test('Transit topology can switch a custom entry to a preset and back without losing it', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, { opsDashboard: true, authenticated: true, opsCustomFirstMetric: true })
+  await openStablePage(page)
+
+  const dialog = await openTopologyManager(page)
+  const entrySelect = dialog.getByLabel('第 1 条线路入口探测')
+  await expect(entrySelect).toHaveValue('__custom_probe__')
+
+  // 切到预设会覆盖 nodes[0] 与 metrics[0]，且改动立刻自动保存。
+  await entrySelect.selectOption('beijing-unicom')
+  await expect(entrySelect).toHaveValue('beijing-unicom')
+
+  // 自定义项必须仍然留在下拉里，否则这一步就是不可逆的数据丢失。
+  const customOption = entrySelect.getByRole('option', { name: '自定义入口', exact: true })
+  await expect(customOption).toHaveCount(1)
+
+  await entrySelect.selectOption('__custom_probe__')
+  await expect(entrySelect).toHaveValue('__custom_probe__')
+  await expect(dialog.locator('[data-topology-route-id]').first())
+    .toHaveAttribute('data-topology-entry-task', 'Relay-JP-to-Exit-US')
 })
 
 test('Transit topology blocks saving existing routes when task validation fails', async ({ page }) => {

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { loadNodeLoadRecords } from '../../src/services/history.service'
+import { loadNodeLoadRecords, normalizeStatusRecord } from '../../src/services/history.service'
 import { resetSharedApi } from '../../src/utils/api'
+import { normalizeConnectionCounts } from '../../src/utils/nodeMetricsHelper'
 import { resetSharedRpc } from '../../src/utils/rpc'
 
 const originalFetch = globalThis.fetch
@@ -47,5 +48,34 @@ describe('loadNodeLoadRecords compatibility fallback', () => {
 
     await expect(loadNodeLoadRecords('permission-node', 1)).rejects.toMatchObject({ code: -32041 })
     expect(urls.some(url => url.includes('/records/load'))).toBe(false)
+  })
+})
+
+describe('normalizeStatusRecord connection counts', () => {
+  const base = { client: 'node-a', time: '2026-08-18T00:00:00.000Z' }
+
+  test('splits the reported total into TCP and UDP like the realtime path', () => {
+    const record = normalizeStatusRecord({ ...base, connections: 120, connections_udp: 20 })
+    expect(record?.connections).toBe(100)
+    expect(record?.connections_udp).toBe(20)
+  })
+
+  test('matches normalizeConnectionCounts so charts and cards cannot disagree', () => {
+    const raw = { connections: 341, connections_udp: 57 }
+    const record = normalizeStatusRecord({ ...base, ...raw })
+    const realtime = normalizeConnectionCounts(raw.connections, raw.connections_udp)
+    expect({ tcp: record?.connections, udp: record?.connections_udp }).toEqual(realtime)
+  })
+
+  test('never reports a negative TCP count when the backend is inconsistent', () => {
+    const record = normalizeStatusRecord({ ...base, connections: 5, connections_udp: 20 })
+    expect(record?.connections).toBe(0)
+    expect(record?.connections_udp).toBe(20)
+  })
+
+  test('treats missing connection fields as zero', () => {
+    const record = normalizeStatusRecord({ ...base })
+    expect(record?.connections).toBe(0)
+    expect(record?.connections_udp).toBe(0)
   })
 })

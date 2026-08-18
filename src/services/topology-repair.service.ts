@@ -42,6 +42,8 @@ export interface TopologyRepairDeps {
 export interface TopologyRepairAvailability {
   /** 组件已卸载，effect scope 已停止。 */
   disposed: boolean
+  /** 站长通过主题设置关掉了无人值守自愈；关掉后只剩对话框里的手动操作。 */
+  autoRepairEnabled: boolean
   /** 拓扑管理对话框正打开——操作者在手动编辑时，后台自愈让路。 */
   managerOpen: boolean
   /** 对应 appStore.privateFeaturesAllowed：只有已登录管理员才能触发写操作。 */
@@ -50,9 +52,10 @@ export interface TopologyRepairAvailability {
   topologyRoute: string
 }
 
-/** 是否可以跑一轮自愈。抽成纯函数，四个分支各自独立可测，不需要 Pinia。 */
+/** 是否可以跑一轮自愈。抽成纯函数，每个分支各自独立可测，不需要 Pinia。 */
 export function canRunTopologyProbeRepair(state: TopologyRepairAvailability): boolean {
   return !state.disposed
+    && state.autoRepairEnabled
     && !state.managerOpen
     && state.privateFeaturesAllowed
     && Boolean(state.topologyRoute.trim())

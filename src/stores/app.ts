@@ -209,6 +209,12 @@ const useAppStore = defineStore('app', () => {
 
   const topologyEnabled = computed<boolean>(() => readBooleanSetting(themeSettings.value, 'topologyEnabled', true))
 
+  /**
+   * 后台自愈是唯一一处无人值守就会写后端（建/删 Ping 任务、改拓扑绑定）的逻辑，
+   * 因此给站长一个显式开关；关闭后拓扑管理对话框里的手动操作不受影响。
+   */
+  const topologyAutoRepairEnabled = computed<boolean>(() => readBooleanSetting(themeSettings.value, 'topologyAutoRepairEnabled', true))
+
   const topologyRoute = computed<string>(() => readStringSetting(themeSettings.value, 'topologyRoute'))
 
   const topologyMetrics = computed<string>(() => readStringSetting(themeSettings.value, 'topologyMetrics'))
@@ -532,6 +538,7 @@ const useAppStore = defineStore('app', () => {
     visitorAuditClientEnabled,
     opsDashboardEnabled,
     topologyEnabled,
+    topologyAutoRepairEnabled,
     topologyRoute,
     topologyMetrics,
     nodeControls,

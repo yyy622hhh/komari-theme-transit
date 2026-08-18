@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { NodeData } from '@/stores/nodes'
-import type { TopologyRouteConfig } from '@/utils/topologyHelper'
+import type { TopologyMetricConfig, TopologyNodeConfig, TopologyQuickNode, TopologyRouteConfig } from '@/utils/topologyHelper'
 import { Icon } from '@iconify/vue'
 import { computed, nextTick, onScopeDispose, reactive, ref, watch } from 'vue'
 import { AppDialog } from '@/components/ui/app-dialog'
@@ -9,7 +9,7 @@ import { useTopologyManager } from '@/composables/useTopologyManager'
 import { useTopologyRoutePlanner } from '@/composables/useTopologyRoutePlanner'
 import { useTopologyTaskCatalog } from '@/composables/useTopologyTaskCatalog'
 import { OPS_TOPOLOGY_HOP_PROBE } from '@/constants/ops'
-import { deleteTopologyPingTasks, describeTopologyHopProbe, ensureTopologyPingTask } from '@/services/ping-task.service'
+import { deleteTopologyPingTasks, describeTopologyHopProbe, ensureTopologyPingTask, topologyPingTargets } from '@/services/ping-task.service'
 import { planWorkingHopTask } from '@/services/topology-probe.service'
 import { applyTopologyProbeToRoute, findUniqueTopologyNode, getTopologyRouteProbeKey, listUnusedQuickLandingUuids, nextQuickLandingUuid, TOPOLOGY_PROBE_OPTIONS } from '@/utils/topologyHelper'
 
@@ -56,7 +56,18 @@ const {
   routeHopTask,
   routeHint,
   routeHintTone,
+  routeEntryHint,
+  routeEntryHintTone,
 } = planner
+/**
+ * 切到预设入口之前，先把自定义入口整段存下来。
+ *
+ * `applyTopologyProbeToRoute` 会直接覆盖 `nodes[0]` 和 `metrics[0]`，而入口下拉
+ * 以前只在「当前就是自定义」时才渲染自定义项——一旦切走就再也切不回来，且改动
+ * 立刻自动保存，「恢复已保存配置」恢复的正是刚存下的那一份，等于手写的自定义
+ * 入口一次误触就永久丢失。存快照后这个操作才是可逆的。
+ */
+const customEntrySnapshots = ref<Record<number, { node: TopologyNodeConfig, metric: TopologyMetricConfig }>>({})
 const quickSourceUuid = ref('')
 const quickLandingUuid = ref('')
 const quickProbeKey = ref(DEFAULT_PROBE)
@@ -69,6 +80,8 @@ let saveTaskController: AbortController | null = null
 const persisting = ref(false)
 
 const quickLandingOptions = computed(() => manager.quickNodes.filter(node => node.uuid !== quickSourceUuid.value))
+/** 能作为落地机的候选：必须有可 Ping 的地址，否则不能拿来当默认选中项。 */
+const quickLandingCandidates = computed(() => quickLandingOptions.value.filter(node => topologyPingTargets(node).length > 0))
 const quickSourceName = computed(() => manager.quickNodes.find(node => node.uuid === quickSourceUuid.value)?.name ?? '')
 const quickTaskError = computed(() => quickSourceUuid.value ? taskErrors.value[quickSourceUuid.value] ?? '' : '')
 const taskBindingErrors = computed(() => manager.routes.flatMap((route, routeIndex) => route.metrics.flatMap((metric, metricIndex) => {
@@ -121,13 +134,17 @@ function syncQuickSelections(initialize = false): void {
   const sources = manager.quickNodes
   if (!sources.some(node => node.uuid === quickSourceUuid.value))
     quickSourceUuid.value = sources[0]?.uuid ?? ''
-  const landingUuids = sources.map(node => node.uuid).filter((uuid): uuid is string => Boolean(uuid))
+  // 只把「可 Ping」的节点交给默认选择，否则下拉会停在一个已置灰的选项上。
+  const pingableLandings = new Set(quickLandingCandidates.value.map(node => node.uuid))
+  const landingUuids = sources
+    .map(node => node.uuid)
+    .filter((uuid): uuid is string => Boolean(uuid) && pingableLandings.has(uuid))
   quickLandingUuid.value = nextQuickLandingUuid(
     quickSourceUuid.value,
     quickLandingUuid.value,
     landingUuids,
     initialize,
-    unusedQuickLandingUuids(),
+    unusedQuickLandingUuids().filter(uuid => pingableLandings.has(uuid)),
   )
 }
 
@@ -157,6 +174,7 @@ watch(() => props.open, (value) => {
     manager.reset()
     catalog.reset()
     planner.reset()
+    customEntrySnapshots.value = {}
     syncQuickSelections(true)
     startRecheckTimer()
     await rematchOpenRoutes(session)
@@ -222,6 +240,7 @@ function reset(): void {
     manager.reset()
     catalog.reset()
     planner.reset()
+    customEntrySnapshots.value = {}
     await rematchOpenRoutes(session)
   })()
 }
@@ -280,9 +299,45 @@ function selectRouteNode(route: TopologyRouteConfig, index: number, nodeName: st
     void planRouteTasksAndSave(route)
 }
 
-function selectRouteProbe(route: TopologyRouteConfig, probeKey: string): void {
-  if (!probeKey || probeKey === CUSTOM_PROBE)
+function rememberCustomEntry(route: TopologyRouteConfig): void {
+  const node = route.nodes[0]
+  const metric = route.metrics[0]
+  if (!node || !metric)
     return
+  customEntrySnapshots.value = {
+    ...customEntrySnapshots.value,
+    [route.id]: { node: { ...node }, metric: { ...metric } },
+  }
+}
+
+function restoreCustomEntry(route: TopologyRouteConfig): boolean {
+  const snapshot = customEntrySnapshots.value[route.id]
+  if (!snapshot)
+    return false
+  route.nodes[0] = { ...snapshot.node }
+  route.metrics[0] = { ...snapshot.metric }
+  return true
+}
+
+function customEntryLabel(route: TopologyRouteConfig): string {
+  return customEntrySnapshots.value[route.id]?.node.name.trim() || routeProbeLabel(route)
+}
+
+function hasCustomEntryOption(route: TopologyRouteConfig): boolean {
+  return routeProbeValue(route) === CUSTOM_PROBE || Boolean(customEntrySnapshots.value[route.id])
+}
+
+function selectRouteProbe(route: TopologyRouteConfig, probeKey: string): void {
+  if (!probeKey)
+    return
+  if (probeKey === CUSTOM_PROBE) {
+    if (!restoreCustomEntry(route))
+      return
+    void planRouteTasksAndSave(route)
+    return
+  }
+  if (routeProbeValue(route) === CUSTOM_PROBE)
+    rememberCustomEntry(route)
   const sourceName = route.nodes[1]?.name.trim() ?? ''
   const source = findUniqueTopologyNode(props.nodes, sourceName)
   applyTopologyProbeToRoute(
@@ -307,6 +362,9 @@ function removeRoute(index: number): void {
   clearRouteProbeState(route.id)
   clearRouteTaskError(route.id)
   clearRouteTaskPlanning(route.id)
+  const nextSnapshots = { ...customEntrySnapshots.value }
+  delete nextSnapshots[route.id]
+  customEntrySnapshots.value = nextSnapshots
   manager.removeRoute(index)
   void persistDraft('线路已删除。')
 }
@@ -540,11 +598,6 @@ async function addQuickRoute(): Promise<void> {
     window.$message?.error('请先选择一台线路机。')
     return
   }
-  if (!quickLandingUuid.value) {
-    window.$message?.error('请选择落地机。')
-    return
-  }
-
   const runId = ++quickConfigurationRun
   const selectedSourceUuid = source.uuid
   const selectedLandingUuid = quickLandingUuid.value
@@ -637,12 +690,22 @@ async function addQuickRoute(): Promise<void> {
 
 const selectClass = 'h-9 w-full rounded-md border border-input bg-background px-2 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring'
 
-function nodeOptionDisabled(optionName: string, otherName = ''): boolean {
-  return manager.isAmbiguousNodeName(optionName) || Boolean(otherName && optionName === otherName)
-}
-
-function nodeOptionLabel(optionName: string): string {
-  return manager.isAmbiguousNodeName(optionName) ? `${optionName}（重名，不可用）` : optionName
+/**
+ * 下拉选项的可用性与标注，线路机/落地机共用一套口径。
+ *
+ * 原则是「不能用的选项要在点下去之前就说清楚」：以前无公网 IP 的落地机可以照常
+ * 选中，直到点了「添加线路」才弹一句红字报错，而重名节点早就是预先置灰的。
+ */
+function nodeOption(option: TopologyQuickNode, role: 'source' | 'landing', otherName = ''): { disabled: boolean, label: string } {
+  const name = option.name
+  if (manager.isAmbiguousNodeName(name))
+    return { disabled: true, label: `${name}（重名，不可用）` }
+  // 落地机是被 Ping 的一方，没有可探测地址就建不出任务；线路机只负责发探测，不需要地址。
+  if (role === 'landing' && !topologyPingTargets(option).length)
+    return { disabled: true, label: `${name}（无公网 IP，不可用）` }
+  if (otherName && name === otherName)
+    return { disabled: true, label: name }
+  return { disabled: false, label: option.online === false ? `${name}（离线）` : name }
 }
 </script>
 
@@ -661,7 +724,8 @@ function nodeOptionLabel(optionName: string): string {
       <div class="space-y-3 rounded-lg border border-border/60 bg-background/45 px-3 py-3">
         <div class="flex flex-wrap items-start justify-between gap-2">
           <p class="max-w-prose text-xs text-muted-foreground">
-            入口只是线路图上的标签，例如北京电信或北京联通。实时数据由线路机发出 Ping。添加或修改线路都会立刻保存，探测任务按落地机地址自动创建或复用；探测方式也会自动挑选，打不通会自动换一种。本次管理会话创建后又被换下的任务会安全清理。
+            入口只是线路图上的标签，例如北京电信或北京联通。实时数据由线路机发出 Ping。添加或修改线路都会立刻保存，探测任务按落地机地址自动创建或复用；探测方式也会自动挑选，打不通会自动换一种。本次管理会话创建后又被换下的任务会安全清理。<br>
+            新建线路只列出在线节点（需要当场验证探测）；下方已有线路可以选到离线节点，方便节点掉线后继续修改。没有公网 IP 的节点不能作为落地机，会标注为不可用。
           </p>
           <Button
             size="sm"
@@ -707,8 +771,13 @@ function nodeOptionLabel(optionName: string): string {
               <option v-if="!manager.quickNodes.length" value="">
                 没有可用节点
               </option>
-              <option v-for="option in manager.quickNodes" :key="option.uuid" :value="option.uuid">
-                {{ option.name }}
+              <option
+                v-for="option in manager.quickNodes"
+                :key="option.uuid"
+                :value="option.uuid"
+                :disabled="nodeOption(option, 'source').disabled"
+              >
+                {{ nodeOption(option, 'source').label }}
               </option>
             </select>
           </label>
@@ -723,8 +792,13 @@ function nodeOptionLabel(optionName: string): string {
               <option value="">
                 选择落地机
               </option>
-              <option v-for="option in quickLandingOptions" :key="option.uuid" :value="option.uuid">
-                {{ option.name }}
+              <option
+                v-for="option in quickLandingOptions"
+                :key="option.uuid"
+                :value="option.uuid"
+                :disabled="nodeOption(option, 'landing').disabled"
+              >
+                {{ nodeOption(option, 'landing').label }}
               </option>
             </select>
           </label>
@@ -787,8 +861,8 @@ function nodeOptionLabel(optionName: string): string {
               :class="selectClass"
               @change="selectRouteProbe(route, ($event.target as HTMLSelectElement).value)"
             >
-              <option v-if="routeProbeValue(route) === CUSTOM_PROBE" :value="CUSTOM_PROBE">
-                {{ routeProbeLabel(route) }}
+              <option v-if="hasCustomEntryOption(route)" :value="CUSTOM_PROBE">
+                {{ customEntryLabel(route) }}
               </option>
               <optgroup v-for="city in PROBE_CITIES" :key="`${route.id}-${city}`" :label="city">
                 <option
@@ -817,9 +891,9 @@ function nodeOptionLabel(optionName: string): string {
                 v-for="option in props.nodes"
                 :key="option.uuid"
                 :value="option.name"
-                :disabled="nodeOptionDisabled(option.name, route.nodes[2]?.name)"
+                :disabled="nodeOption(option, 'source', route.nodes[2]?.name).disabled"
               >
-                {{ nodeOptionLabel(option.name) }}
+                {{ nodeOption(option, 'source', route.nodes[2]?.name).label }}
               </option>
             </select>
           </label>
@@ -839,17 +913,25 @@ function nodeOptionLabel(optionName: string): string {
                 v-for="option in props.nodes"
                 :key="option.uuid"
                 :value="option.name"
-                :disabled="nodeOptionDisabled(option.name, route.nodes[1]?.name)"
+                :disabled="nodeOption(option, 'landing', route.nodes[1]?.name).disabled"
               >
-                {{ nodeOptionLabel(option.name) }}
+                {{ nodeOption(option, 'landing', route.nodes[1]?.name).label }}
               </option>
             </select>
           </label>
         </div>
         <p
+          v-if="routeEntryHint(route)"
+          data-topology-entry-hint
+          class="mt-2 text-[11px]"
+          :class="routeEntryHintTone(route) ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'"
+        >
+          {{ routeEntryHint(route) }}
+        </p>
+        <p
           v-if="routeHint(route)"
           data-topology-hop-hint
-          class="mt-2 text-[11px]"
+          class="mt-1 text-[11px]"
           :class="routeHintTone(route) ? 'text-destructive' : 'text-muted-foreground'"
         >
           {{ routeHint(route) }}

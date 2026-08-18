@@ -22,8 +22,10 @@ export default defineConfig({
   expect: {
     toHaveScreenshot: {
       animations: 'disabled',
-      maxDiffPixelRatio: 0.05,
-      threshold: 0.25,
+      // 基线固定在 macOS Chromium 上生成，CI 也跑 macos-15，因此不需要为跨平台
+      // 字体栅格化留 5% 的余量——那个宽度足以放过整块卡片的配色或布局回归。
+      maxDiffPixelRatio: 0.01,
+      threshold: 0.2,
     },
   },
   use: {

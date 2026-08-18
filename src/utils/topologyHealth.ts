@@ -44,6 +44,14 @@ interface RouteScoreOptions {
   hasMissingNode: boolean
 }
 
+/**
+ * 分段线性的延迟扣分，必须单调不减：延迟更差绝不能扣得更少。
+ *
+ * 最后一段的起点要接住上一段在 250ms 的终点（25 + 70 × 0.22 = 40.4）。写成 40
+ * 会让 250ms 扣 40.4 分、250.5ms 反而只扣 40.05 分。
+ */
+const LATENCY_PENALTY_AT_250 = 25 + (250 - 180) * 0.22
+
 function latencyPenalty(latency: number): number {
   if (latency <= 80)
     return 0
@@ -53,7 +61,7 @@ function latencyPenalty(latency: number): number {
     return 10 + (latency - 120) / 4
   if (latency <= 250)
     return 25 + (latency - 180) * 0.22
-  return Math.min(55, 40 + (latency - 250) * 0.1)
+  return Math.min(55, LATENCY_PENALTY_AT_250 + (latency - 250) * 0.1)
 }
 
 function scoreLabel(score: number, states: TopologyRouteHealth[]): TopologyRouteScore['label'] {

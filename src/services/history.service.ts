@@ -1,6 +1,7 @@
 import type { PingRecord, PingTaskInfo, StatusRecord } from '@/utils/rpc'
 import { requestManager } from '@/services/request.service'
 import { ApiError, getSharedApi } from '@/utils/api'
+import { normalizeConnectionCounts } from '@/utils/nodeMetricsHelper'
 import { getSharedRpc, isRpcPermissionError, RpcError } from '@/utils/rpc'
 
 function numberOrZero(value: unknown): number {
@@ -90,6 +91,13 @@ export function normalizeStatusRecord(record: Partial<StatusRecord>): StatusReco
   if (!record.client || !record.time)
     return null
 
+  // 历史记录与 `/latest` 用的是同一份上报结构：`connections` 含 UDP，必须与实时
+  // 路径用同一个归一化，否则详情页折线图的 TCP 会把 UDP 重复算进去。
+  const connections = normalizeConnectionCounts(
+    numberOrZero(record.connections),
+    numberOrZero(record.connections_udp),
+  )
+
   return {
     client: record.client,
     time: record.time,
@@ -112,8 +120,8 @@ export function normalizeStatusRecord(record: Partial<StatusRecord>): StatusReco
     traffic_up: numberOrZero(record.traffic_up),
     traffic_down: numberOrZero(record.traffic_down),
     process: numberOrZero(record.process),
-    connections: numberOrZero(record.connections),
-    connections_udp: numberOrZero(record.connections_udp),
+    connections: connections.tcp,
+    connections_udp: connections.udp,
   }
 }
 

@@ -52,8 +52,18 @@ export function getConnectionCount(node: Pick<NodeData, 'connections' | 'connect
   return (node.connections || 0) + (node.connections_udp || 0)
 }
 
-/** Normalize Komari 1.4 latest status, where connections is TCP + UDP. */
-export function normalizeLatestConnections(connections: number, connectionsUdp: number): { tcp: number, udp: number } {
+/**
+ * 归一化 Komari 上报的连接数：`connections` 是 TCP + UDP 的合计，`connections_udp`
+ * 是其中的 UDP 部分，相减才得到 TCP。
+ *
+ * `NodeStatus`（`/latest` 实时状态）和 `StatusRecord`（`common:getRecords` 历史
+ * 记录）是同一份 agent 上报结构的两种投影，因此两条路径都必须过这里，否则实时
+ * 卡片和历史图表会对同一台机器给出不同的 TCP 数值。
+ *
+ * 例外是 `public:queryMetrics`：它的 `connections.tcp` / `connections.udp` 已经
+ * 是拆开的定义，不需要也不能再相减（见 utils/loadMetricRecords.ts）。
+ */
+export function normalizeConnectionCounts(connections: number, connectionsUdp: number): { tcp: number, udp: number } {
   const udp = Math.max(0, connectionsUdp || 0)
   return {
     tcp: Math.max(0, (connections || 0) - udp),

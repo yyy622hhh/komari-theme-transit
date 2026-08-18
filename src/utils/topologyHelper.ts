@@ -36,6 +36,8 @@ export interface TopologyQuickNode {
   name: string
   region?: string
   online?: boolean
+  ipv4?: string
+  ipv6?: string
 }
 
 const TOPOLOGY_PROBE_SEPARATOR_PATTERN = /[\s\-_—–·]+/g
@@ -163,6 +165,13 @@ function quickNodeRank(node: TopologyQuickNode): number {
   return 1
 }
 
+/**
+ * 新建线路时可选的候选节点。
+ *
+ * 排除离线节点是有意的：快速添加会当场规划并验证探测，离线节点给不出任何采样。
+ * 编辑已有线路的下拉走的是全量节点列表（离线的会标注「离线」），这样节点掉线后
+ * 仍然可以修线路。
+ */
 export function listQuickTopologyNodes<T extends TopologyQuickNode>(nodes: readonly T[]): T[] {
   const nameCounts = new Map<string, number>()
   for (const node of nodes) {
