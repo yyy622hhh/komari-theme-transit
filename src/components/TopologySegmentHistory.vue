@@ -8,7 +8,7 @@ import TelemetrySampleStrip from '@/components/TelemetrySampleStrip.vue'
 import { useNodePingStats } from '@/composables/useNodePingStats'
 import { formatDateTime } from '@/utils/helper'
 import { resolveTopologySegmentHealth } from '@/utils/topologyHealth'
-import { findUniqueTopologyNode, formatTopologyLatency, formatTopologyLoss, formatTopologyTelemetryLabel, parseTopologyMetric } from '@/utils/topologyHelper'
+import { calculateTopologyLatencyBaseline, findUniqueTopologyNode, formatTopologyLatency, formatTopologyLoss, formatTopologyTelemetryLabel, parseTopologyMetric, resolveTopologySampleTone } from '@/utils/topologyHelper'
 import { calculateAdaptiveBaseline } from '@/utils/topologyIntelligence'
 
 const props = defineProps<{
@@ -63,6 +63,7 @@ const latencyText = computed(() => hasLiveData.value && !ping.hasLatencyData.val
 const loss = computed(() => hasLiveData.value ? ping.avgLoss.value : config.value.fallbackLoss)
 const history = computed(() => ping.history.value.slice(-20))
 const maximumLatency = computed(() => Math.max(...history.value.map(point => point.latency ?? 0), 1))
+const baselineLatency = computed(() => calculateTopologyLatencyBaseline(history.value.map(point => point.latency)))
 const health = computed<TopologyRouteHealth>(() => resolveTopologySegmentHealth({
   live: config.value.live,
   sourceExists: Boolean(sourceNode.value),
@@ -148,13 +149,12 @@ const adaptiveTone = computed(() => {
 const sampleBars = computed<TelemetrySample[]>(() => history.value.map((point, index) => {
   const latencyText = point.latency === null ? '无响应' : formatTopologyLatency(point.latency)
   const lossText = `丢包 ${formatTopologyLoss(point.loss)}`
-  const critical = point.latency === null || (point.loss ?? 0) >= 20
-  const warning = !critical && ((point.loss ?? 0) > 3 || (point.latency !== null && point.latency > maximumLatency.value * 0.82))
+  const tone = resolveTopologySampleTone(point.latency, point.loss, baselineLatency.value)
   return {
     key: `${point.time}-${index}`,
     height: sampleHeight(point.latency),
-    tone: critical ? 'critical' : warning ? 'warning' : 'healthy',
-    toneClass: critical ? 'bg-rose-400 opacity-75' : warning ? 'bg-amber-400' : 'bg-emerald-400',
+    tone,
+    toneClass: tone === 'critical' ? 'bg-rose-400 opacity-75' : tone === 'warning' ? 'bg-amber-400' : 'bg-emerald-400',
     valueText: latencyText,
     secondaryText: lossText,
     timeText: formatDateTime(point.time, props.hours === 1 ? 'HH:mm:ss' : 'MM-DD HH:mm'),

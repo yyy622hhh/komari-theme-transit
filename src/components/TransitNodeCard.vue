@@ -65,19 +65,19 @@ const alertTone = computed(() => visibleAlert.value?.severity === 'critical'
   : 'text-amber-700 dark:text-amber-300')
 const statusEdgeTone = computed(() => {
   if (isMaintenance.value)
-    return 'bg-amber-500/90 dark:bg-amber-300/80'
+    return 'bg-amber-500 dark:bg-amber-300'
   if (visibleAlert.value?.severity === 'critical')
-    return 'bg-rose-500/85 dark:bg-rose-400/75'
+    return 'bg-rose-500 dark:bg-rose-400'
   if (visibleAlert.value)
-    return 'bg-amber-500/90 dark:bg-amber-300/80'
-  return 'bg-emerald-500/85 dark:bg-emerald-400/75'
+    return 'bg-amber-500 dark:bg-amber-300'
+  return 'bg-emerald-500 dark:bg-emerald-400'
 })
 </script>
 
 <template>
   <article
     :data-transit-node-card-size="appStore.nodeCardSize"
-    class="transit-node-card group relative h-full min-w-0 cursor-pointer overflow-hidden rounded-2xl p-3.5 transition duration-200 hover:-translate-y-px hover:border-emerald-400/25"
+    class="transit-node-card group relative h-full min-w-0 cursor-pointer overflow-hidden rounded-2xl p-3.5 pl-5 transition duration-200 hover:-translate-y-px hover:border-emerald-400/25"
     :class="!node.online ? 'opacity-75' : ''"
   >
     <button
@@ -91,7 +91,7 @@ const statusEdgeTone = computed(() => {
       v-if="node.online"
       data-node-status-edge
       :data-node-alert-edge="visibleAlert ? '' : undefined"
-      class="pointer-events-none absolute inset-y-3 -left-px z-1 w-0.5 rounded-r-full"
+      class="pointer-events-none absolute inset-y-3 -left-px z-1 w-[3px] rounded-r-full"
       :class="statusEdgeTone"
     />
 
@@ -307,6 +307,7 @@ const statusEdgeTone = computed(() => {
 
 .transit-node-card[data-transit-node-card-size='mini'] {
   padding: 0.75rem;
+  padding-left: 1.125rem;
 }
 
 .transit-node-card[data-transit-node-card-size='mini'] [data-node-resource-grid] {
@@ -319,9 +320,11 @@ const statusEdgeTone = computed(() => {
 
 .transit-node-card[data-transit-node-card-size='comfortable'] {
   padding: 1rem;
+  padding-left: 1.375rem;
 }
 
 .transit-node-card[data-transit-node-card-size='large'] {
   padding: 1.1rem;
+  padding-left: 1.475rem;
 }
 </style>

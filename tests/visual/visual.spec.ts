@@ -436,18 +436,21 @@ test('Transit desktop topology and cards remain contained', async ({ page }) => 
   await expect(segmentGroups).toHaveCount(3)
   for (const segment of await segmentGroups.all())
     await expect(segment.locator('[data-topology-sample]')).toHaveCount(10)
+  const healthySubMillisecondSamples = segmentGroups.nth(2).locator('[data-topology-sample][aria-label*="<1ms"][aria-label*="丢包 0.0%"]')
+  await expect.poll(() => healthySubMillisecondSamples.count()).toBeGreaterThan(0)
+  await expect.poll(() => healthySubMillisecondSamples.evaluateAll(samples => samples.every(sample => sample.firstElementChild?.classList.contains('bg-emerald-400')))).toBe(true)
   const averageRenderedHeight = async (groupIndex: number) => {
     const heights = await segmentGroups.nth(groupIndex).locator('[data-topology-sample]').evaluateAll(elements => elements.map(element => Number(element.getAttribute('data-topology-sample-height'))))
     return heights.reduce((sum, height) => sum + height, 0) / heights.length
   }
   expect(Math.abs(await averageRenderedHeight(1) - await averageRenderedHeight(2))).toBeLessThan(2)
-  await expect(segmentGroups.nth(1).locator('[data-topology-sample]').first()).toHaveAttribute('aria-label', /\d{2,3} ms/)
-  await expect(segmentGroups.nth(2).locator('[data-topology-sample]').first()).toHaveAttribute('aria-label', /[012] ms/)
+  await expect(segmentGroups.nth(1).locator('[data-topology-sample]').first()).toHaveAttribute('aria-label', /\d{2,3}ms/)
+  await expect(segmentGroups.nth(2).locator('[data-topology-sample]').first()).toHaveAttribute('aria-label', /(?:<1|[12])ms/)
   const firstSample = samples.first()
   await firstSample.hover()
   const sampleDetail = page.locator('[data-topology-sample-detail]')
   await expect(sampleDetail).toBeVisible()
-  await expect(sampleDetail).toContainText(/\d+ ms/)
+  await expect(sampleDetail).toContainText(/(?:<1|\d+)ms/)
   await expect(sampleDetail).toContainText('丢包')
   await expect(sampleDetail).toContainText(/\d{2}:\d{2}:\d{2}/)
   await expect(firstSample).toHaveAttribute('aria-label', /ms，丢包/)
@@ -485,7 +488,8 @@ test('Transit desktop topology and cards remain contained', async ({ page }) => 
   await expect(nodeCardSurface.locator('.transit-node-card__header')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
   await expect(nodeCardSurface.locator('.transit-node-card__header')).toHaveCSS('border-bottom-width', '0px')
   const healthyCard = page.getByRole('button', { name: '查看节点 香港边缘节点-超长名称布局测试 详情' }).locator('xpath=..')
-  await expect(healthyCard.locator('[data-node-status-edge]')).toHaveClass(/bg-emerald-500\/85/)
+  await expect(healthyCard.locator('[data-node-status-edge]')).toHaveClass(/bg-emerald-500/)
+  await expect(healthyCard.locator('[data-node-status-edge]')).toHaveCSS('width', '3px')
   await expect(healthyCard.locator('[data-node-alert-edge]')).toHaveCount(0)
   await expect.poll(() => healthyCard.evaluate((card) => {
     const edge = card.querySelector<HTMLElement>('[data-node-status-edge]')
@@ -493,6 +497,13 @@ test('Transit desktop topology and cards remain contained', async ({ page }) => 
       return Number.POSITIVE_INFINITY
     return Math.abs(edge.getBoundingClientRect().left - card.getBoundingClientRect().left)
   })).toBeLessThanOrEqual(0.5)
+  await expect.poll(() => healthyCard.evaluate((card) => {
+    const edge = card.querySelector<HTMLElement>('[data-node-status-edge]')
+    const name = card.querySelector<HTMLElement>('[data-node-name]')
+    if (!edge || !name)
+      return Number.NEGATIVE_INFINITY
+    return name.getBoundingClientRect().left - edge.getBoundingClientRect().right
+  })).toBeGreaterThanOrEqual(16)
   await expect.poll(() => healthyCard.evaluate((card) => {
     const name = card.querySelector<HTMLElement>('[data-node-name]')
     const content = card.querySelector<HTMLElement>('[data-node-resource-grid]')
@@ -531,7 +542,7 @@ test('Transit desktop topology and cards remain contained', async ({ page }) => 
   await expect(alertReason).toBeVisible()
   await expect(alertReason).toHaveCSS('border-top-width', '0px')
   await expect(alertCard.locator('[data-node-alert-edge]')).toBeVisible()
-  await expect(alertCard.locator('[data-node-status-edge]')).toHaveClass(/bg-rose-500\/85/)
+  await expect(alertCard.locator('[data-node-status-edge]')).toHaveClass(/bg-rose-500/)
   await expect(plainCard.locator('[data-node-status-edge]')).toHaveCount(0)
   await expect(plainCard.locator('[data-node-alert-reason]')).toHaveCount(0)
   await alertReason.hover()
@@ -2185,6 +2196,13 @@ test('Transit worst-case node cards remain complete and responsive across densit
     await expect(card).toHaveAttribute('data-transit-node-card-size', testCase.size)
     await expect(name).toHaveAttribute('title', '北京联通精品线路-日本东京-A100-超长节点名称完整展示压力测试')
     await expect.poll(() => name.evaluate(element => element.getBoundingClientRect().height <= Number.parseFloat(getComputedStyle(element).lineHeight) * 2 + 1)).toBe(true)
+    await expect.poll(() => card.evaluate((element) => {
+      const edge = element.querySelector<HTMLElement>('[data-node-status-edge]')
+      const nodeName = element.querySelector<HTMLElement>('[data-node-name]')
+      if (!edge || !nodeName)
+        return Number.NEGATIVE_INFINITY
+      return nodeName.getBoundingClientRect().left - edge.getBoundingClientRect().right
+    })).toBeGreaterThanOrEqual(14)
     await expect(expiryText).toHaveText(/剩余 \d+ 天/)
     await expect(expiryDate).toHaveText('2037-01-01')
     await expect.poll(() => detailGrid.evaluate(element => getComputedStyle(element).gridTemplateColumns.split(' ').length)).toBe(testCase.columns)

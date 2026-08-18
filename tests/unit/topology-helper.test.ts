@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import {
   applyTopologyProbeToRoute,
   buildQuickTopologyRoute,
+  calculateTopologyLatencyBaseline,
   createTopologyRoute,
   findDuplicateTopologyRouteIndex,
   findTopologyProbeKey,
@@ -19,6 +20,7 @@ import {
   parseTopologyRoutes,
   pickQuickHopTaskName,
   pickQuickTopologyTaskName,
+  resolveTopologySampleTone,
   serializeTopologyRoutes,
   shouldAutoApplyTopologyProbe,
   splitTopologyGroups,
@@ -544,5 +546,16 @@ describe('topology configuration validation', () => {
 
   test('keeps valid sub-millisecond topology latency visible', () => {
     expect(formatTopologyLatency(0.1875)).toBe('<1ms')
+    expect(formatTopologyLatency(0)).toBe('<1ms')
+  })
+
+  test('does not flag sub-millisecond quantization as a latency warning', () => {
+    const baseline = calculateTopologyLatencyBaseline([0, 0.2, 0.4, 0.6])
+
+    expect(baseline).toBeCloseTo(0.3)
+    expect(resolveTopologySampleTone(0.6, 0, baseline)).toBe('healthy')
+    expect(resolveTopologySampleTone(70, 0, 50)).toBe('warning')
+    expect(resolveTopologySampleTone(1, 4, 1)).toBe('warning')
+    expect(resolveTopologySampleTone(1, 20, 1)).toBe('critical')
   })
 })

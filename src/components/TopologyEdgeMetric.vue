@@ -7,7 +7,7 @@ import TopologyEdgeSamples from '@/components/TopologyEdgeSamples.vue'
 import { useNodePingStats } from '@/composables/useNodePingStats'
 import { formatDateTime } from '@/utils/helper'
 import { resolveTopologySegmentHealth } from '@/utils/topologyHealth'
-import { findUniqueTopologyNode, formatTopologyLatency, formatTopologyLoss, formatTopologyTelemetryLabel, parseTopologyMetric } from '@/utils/topologyHelper'
+import { calculateTopologyLatencyBaseline, findUniqueTopologyNode, formatTopologyLatency, formatTopologyLoss, formatTopologyTelemetryLabel, parseTopologyMetric, resolveTopologySampleTone } from '@/utils/topologyHelper'
 
 const props = defineProps<{
   metric: string
@@ -101,41 +101,26 @@ const telemetry = computed<TopologySegmentTelemetry>(() => ({
 
 watch(telemetry, value => emit('metricsChange', value), { immediate: true })
 
-function median(values: number[]): number {
-  if (!values.length)
-    return 0
-  const sorted = [...values].sort((left, right) => left - right)
-  const middle = Math.floor(sorted.length / 2)
-  if (sorted.length % 2)
-    return sorted[middle] ?? 0
-  return ((sorted[middle - 1] ?? 0) + (sorted[middle] ?? 0)) / 2
-}
-
-function sampleHeight(latency: number | null, baseline: number): number {
+function sampleHeight(latency: number | null, baseline: number | null): number {
   if (latency === null)
     return 5
-  if (baseline <= 0)
+  if (baseline === null || baseline <= 0)
     return 7
   return Math.round(Math.min(9, Math.max(5, 7 + (latency / baseline - 1) * 6)))
 }
 
 const sampleBars = computed<TelemetrySample[]>(() => {
   const points = ping.history.value.slice(-10)
-  const validLatencies = points
-    .map(point => point.latency)
-    .filter((value): value is number => value !== null && Number.isFinite(value))
-  const baseline = median(validLatencies)
+  const baseline = calculateTopologyLatencyBaseline(points.map(point => point.latency))
   return points.map((point, index) => {
-    const critical = point.latency === null || (point.loss ?? 0) >= 20
-    const warning = !critical && ((point.loss ?? 0) > 3
-      || (point.latency !== null && baseline > 0 && point.latency > baseline * 1.18))
-    const latencyText = point.latency === null ? '无响应' : `${Math.round(point.latency)} ms`
+    const tone = resolveTopologySampleTone(point.latency, point.loss, baseline)
+    const latencyText = point.latency === null ? '无响应' : formatTopologyLatency(point.latency)
     const lossText = `丢包 ${formatTopologyLoss(point.loss)}`
     return {
       key: `${props.segmentIndex}-${point.time}-${index}`,
       height: sampleHeight(point.latency, baseline),
-      tone: critical ? 'critical' : warning ? 'warning' : 'healthy',
-      toneClass: critical ? 'bg-rose-400 opacity-75' : warning ? 'bg-amber-400' : 'bg-emerald-400',
+      tone,
+      toneClass: tone === 'critical' ? 'bg-rose-400 opacity-75' : tone === 'warning' ? 'bg-amber-400' : 'bg-emerald-400',
       valueText: latencyText,
       secondaryText: lossText,
       timeText: formatDateTime(point.time, 'HH:mm:ss'),
