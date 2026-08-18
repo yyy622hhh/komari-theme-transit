@@ -11,12 +11,13 @@ import { Input } from '@/components/ui/input'
 import { Spinner } from '@/components/ui/spinner'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
+import { useMetricRangeSelection } from '@/composables/useMetricRangeSelection'
 import { PING_RECORD_MAX_COUNT } from '@/constants/load'
 import { loadPingRecordsWithTasks } from '@/services/history.service'
 import { loadPingMetricStats, loadPublicPingTasks, queryMetrics } from '@/services/metrics.service'
 import { useAppStore } from '@/stores/app'
 import { ACCESSIBLE_LINE_TYPES, getChartSeriesPalette } from '@/utils/chartPalette'
-import { buildAvailableMetricViews, CUSTOM_METRIC_VIEW_LABEL, formatMetricAxisTime, formatMetricTooltipTime, getMetricCustomRangeError, parseMetricCustomRange } from '@/utils/metricRange'
+import { formatMetricAxisTime, formatMetricTooltipTime } from '@/utils/metricRange'
 import { isPingMetric, normalizeMetricSeriesList, orderPingTasksByBackend, PING_LATENCY_METRIC, pingTaskId, pingTaskName } from '@/utils/metricSeries'
 import { cutPeakValues, interpolateNullsLinear } from '@/utils/recordHelper'
 import '@/utils/echarts' // 共享 ECharts 配置
@@ -58,21 +59,16 @@ const presetViews = [
 ]
 const DEFAULT_CUSTOM_RANGE_HOURS = 24
 
-// 可用视图列表
-const availableViews = computed(() => {
-  return buildAvailableMetricViews(maxPingRecordPreserveTime.value, presetViews)
-})
-
-// 当前选中的视图
-const selectedView = ref<string>('')
-const customStartInput = ref('')
-const customEndInput = ref('')
+const {
+  availableViews,
+  selectedView,
+  customStartInput,
+  customEndInput,
+  isCustomRange,
+  customRange,
+  customRangeError,
+} = useMetricRangeSelection(maxPingRecordPreserveTime, presetViews)
 const appliedCustomRange = shallowRef<MetricCustomRange | null>(null)
-const isCustomRange = computed(() => selectedView.value === CUSTOM_METRIC_VIEW_LABEL)
-const customRange = computed<MetricCustomRange | null>(() => parseMetricCustomRange(customStartInput.value, customEndInput.value))
-const customRangeError = computed(() => {
-  return getMetricCustomRangeError(isCustomRange.value, customStartInput.value, customEndInput.value, customRange.value)
-})
 const selectedHours = computed(() => {
   if (isCustomRange.value)
     return appliedCustomRange.value?.hours ?? customRange.value?.hours ?? DEFAULT_CUSTOM_RANGE_HOURS

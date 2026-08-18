@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import type { ChartDashboardCardKey } from '@/stores/app'
-import type { MetricCustomRange } from '@/utils/metricRange'
 import type { NormalizedMetricSeries } from '@/utils/metricSeries'
 import type { RecordFormat } from '@/utils/recordHelper'
 import type { MetricQueryParams, PingTaskInfo, StatusRecord } from '@/utils/rpc'
@@ -16,6 +15,7 @@ import { CardX } from '@/components/ui/card-x'
 import { Input } from '@/components/ui/input'
 import { Spinner } from '@/components/ui/spinner'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { useMetricRangeSelection } from '@/composables/useMetricRangeSelection'
 import { loadNodeLoadRecords, useNodeLoadStats } from '@/composables/useNodeLoadStats'
 import { LOAD_RECORD_MAX_COUNT } from '@/constants/load'
 import { loadRecentNodeStatus } from '@/services/history.service'
@@ -27,7 +27,7 @@ import { getChartSeriesPalette, getLoadChartPalette } from '@/utils/chartPalette
 import { formatBytes, formatBytesSplit } from '@/utils/helper'
 import { getLoadChartThemeColors, getLoadChartTooltipConfig, LOAD_CHART_MARGIN, LOAD_CHART_MARGIN_WITH_LEGEND, LOAD_CHART_PRESET_VIEWS } from '@/utils/loadChartTheme'
 import { getGpuDeviceNames as formatGpuDeviceNames, LOAD_METRIC_KEYS, metricSeriesToChartRecords, metricValue, statusRecordsToChartRecords } from '@/utils/loadMetricRecords'
-import { buildAvailableMetricViews, CUSTOM_METRIC_VIEW_LABEL, formatMetricAxisTime, formatMetricTooltipTime, getMetricCustomRangeError, parseMetricCustomRange } from '@/utils/metricRange'
+import { formatMetricAxisTime, formatMetricTooltipTime } from '@/utils/metricRange'
 import { comparePingTaskOrder, createPingTaskOrderMap, metricTags, normalizeMetricSeriesList } from '@/utils/metricSeries'
 import { fillMissingTimePoints } from '@/utils/recordHelper'
 import { isRpcPermissionError, RpcError } from '@/utils/rpc'
@@ -74,25 +74,20 @@ const chartMargin = LOAD_CHART_MARGIN
 const chartMarginWithLegend = LOAD_CHART_MARGIN_WITH_LEGEND
 const presetViews = LOAD_CHART_PRESET_VIEWS
 
-// 可用视图列表
-const availableViews = computed(() => {
-  return buildAvailableMetricViews(maxRecordPreserveTime.value, presetViews, { includeRealtime: true })
-})
-
-// 当前选中的视图
-const selectedView = ref<string>('实时')
-const customStartInput = ref('')
-const customEndInput = ref('')
+const {
+  availableViews,
+  selectedView,
+  customStartInput,
+  customEndInput,
+  isCustomRange,
+  customRange,
+  customRangeError,
+} = useMetricRangeSelection(maxRecordPreserveTime, presetViews, { includeRealtime: true, defaultView: '实时' })
 const selectedHours = computed(() => {
   const view = availableViews.value.find(v => v.label === selectedView.value)
   return view?.hours
 })
 const isRealtime = computed(() => selectedView.value === '实时')
-const isCustomRange = computed(() => selectedView.value === CUSTOM_METRIC_VIEW_LABEL)
-const customRange = computed<MetricCustomRange | null>(() => parseMetricCustomRange(customStartInput.value, customEndInput.value))
-const customRangeError = computed(() => {
-  return getMetricCustomRangeError(isCustomRange.value, customStartInput.value, customEndInput.value, customRange.value)
-})
 const effectiveHistoryHours = computed(() => isCustomRange.value ? customRange.value?.hours ?? 4 : selectedHours.value ?? 4)
 
 // 数据状态
