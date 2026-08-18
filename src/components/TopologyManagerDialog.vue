@@ -1,6 +1,4 @@
 <script setup lang="ts">
-import type { TopologyHopProbe } from '@/services/ping-task.service'
-import type { HopTaskVerdict } from '@/services/topology-probe.service'
 import type { NodeData } from '@/stores/nodes'
 import type { TopologyRouteConfig } from '@/utils/topologyHelper'
 import { Icon } from '@iconify/vue'
@@ -8,10 +6,12 @@ import { computed, nextTick, onScopeDispose, reactive, ref, watch } from 'vue'
 import { AppDialog } from '@/components/ui/app-dialog'
 import { Button } from '@/components/ui/button'
 import { useTopologyManager } from '@/composables/useTopologyManager'
-import { OPS_TOPOLOGY_HOP_PROBE, OPS_TOPOLOGY_HOP_PROBE_LADDER } from '@/constants/ops'
-import { deleteTopologyPingTasks, describeTopologyHopProbe, ensureTopologyPingTask, loadAdminPingTaskNamesForNode, normalizeTopologyHopProbe } from '@/services/ping-task.service'
+import { useTopologyRoutePlanner } from '@/composables/useTopologyRoutePlanner'
+import { useTopologyTaskCatalog } from '@/composables/useTopologyTaskCatalog'
+import { OPS_TOPOLOGY_HOP_PROBE } from '@/constants/ops'
+import { deleteTopologyPingTasks, describeTopologyHopProbe, ensureTopologyPingTask } from '@/services/ping-task.service'
 import { planWorkingHopTask } from '@/services/topology-probe.service'
-import { applyTopologyProbeToRoute, findTopologyProbeKey, findUniqueTopologyNode, getTopologyRouteProbeKey, listUnusedQuickLandingUuids, nextQuickLandingUuid, shouldAutoApplyTopologyProbe, TOPOLOGY_PROBE_OPTIONS } from '@/utils/topologyHelper'
+import { applyTopologyProbeToRoute, findUniqueTopologyNode, getTopologyRouteProbeKey, listUnusedQuickLandingUuids, nextQuickLandingUuid, TOPOLOGY_PROBE_OPTIONS } from '@/utils/topologyHelper'
 
 const props = defineProps<{ nodes: NodeData[], open: boolean }>()
 const emit = defineEmits<{ 'update:open': [open: boolean] }>()
@@ -19,36 +19,49 @@ const CUSTOM_PROBE = '__custom_probe__'
 const DEFAULT_PROBE = TOPOLOGY_PROBE_OPTIONS[0]!.key
 const PROBE_CITIES = [...new Set(TOPOLOGY_PROBE_OPTIONS.map(option => option.city))]
 const manager = reactive(useTopologyManager(() => props.nodes))
-const taskOptions = ref<Record<string, string[]>>({})
-const taskErrors = ref<Record<string, string>>({})
-const taskLoaded = ref<Record<string, boolean>>({})
-interface TaskLoadResult { tasks: string[], error: string }
-const taskRequests = new Map<string, Promise<TaskLoadResult>>()
 const quickConfiguring = ref(false)
 const rematching = ref(false)
 const rematchDone = ref(false)
+const catalog = useTopologyTaskCatalog(
+  () => props.nodes,
+  name => manager.isAmbiguousNodeName(name),
+  () => {
+    if (props.open && !rematching.value && !quickConfiguring.value && manager.dirty)
+      void persistDraft('线路已保存。')
+  },
+)
+const planner = useTopologyRoutePlanner(() => props.nodes, manager, catalog, () => props.open)
+const {
+  taskOptions,
+  taskErrors,
+  taskLoaded,
+  loadTasks,
+  rememberTask,
+} = catalog
+const {
+  routeProbeStates,
+  pendingRouteTasks,
+  routeRetiredTasks,
+  routeTaskPlanning,
+  routeTaskErrors,
+  bumpRouteRun,
+  cancelRouteTaskPlanning,
+  clearRouteTaskPlanning,
+  clearPendingRouteTask,
+  clearRouteTaskError,
+  clearRouteProbeState,
+  rememberRetiredTasks,
+  reservedEntryNames,
+  planRouteTasks,
+  routeHopTask,
+  routeHint,
+  routeHintTone,
+} = planner
 const quickSourceUuid = ref('')
 const quickLandingUuid = ref('')
 const quickProbeKey = ref(DEFAULT_PROBE)
-interface RouteProbeState {
-  probe: TopologyHopProbe
-  verdict: HopTaskVerdict
-  exhausted: boolean
-  switchedFrom: TopologyHopProbe | null
-  targetAddress: string
-}
-const pendingRouteTasks = ref<Record<number, { sourceUuid: string, targetUuid: string, taskName: string, probe: TopologyHopProbe }>>({})
-const routeProbeStates = ref<Record<number, RouteProbeState>>({})
-/** 新任务绑定并保存成功后可以清理掉的旧任务候选，按线路记录。 */
-const routeRetiredTasks = ref<Record<number, Array<{ id: number, name: string }>>>({})
 const sessionCreatedTaskIds = new Set<number>()
-const HOP_PROBE_LADDER_TEXT = OPS_TOPOLOGY_HOP_PROBE_LADDER
-  .map(rung => describeTopologyHopProbe(normalizeTopologyHopProbe(rung)))
-  .join('、')
 let recheckTimer: ReturnType<typeof setInterval> | null = null
-const routeTaskPlanning = ref<Record<number, boolean>>({})
-const routeTaskErrors = ref<Record<number, string>>({})
-const routeTaskRuns = new Map<number, number>()
 let quickConfigurationRun = 0
 let dialogSession = 0
 let persistTail: Promise<unknown> = Promise.resolve()
@@ -142,12 +155,8 @@ watch(() => props.open, (value) => {
     if (session !== dialogSession || !props.open)
       return
     manager.reset()
-    pendingRouteTasks.value = {}
-    routeProbeStates.value = {}
-    routeRetiredTasks.value = {}
-    routeTaskPlanning.value = {}
-    routeTaskErrors.value = {}
-    routeTaskRuns.clear()
+    catalog.reset()
+    planner.reset()
     syncQuickSelections(true)
     startRecheckTimer()
     await rematchOpenRoutes(session)
@@ -200,12 +209,6 @@ function cancelQuickConfiguration(): void {
   quickConfiguring.value = false
 }
 
-function cancelRouteTaskPlanning(): void {
-  for (const [routeId, runId] of routeTaskRuns)
-    routeTaskRuns.set(routeId, runId + 1)
-  routeTaskPlanning.value = {}
-}
-
 function reset(): void {
   cancelQuickConfiguration()
   cancelRouteTaskPlanning()
@@ -217,71 +220,10 @@ function reset(): void {
     if (session !== dialogSession || !props.open)
       return
     manager.reset()
-    pendingRouteTasks.value = {}
-    routeProbeStates.value = {}
-    routeRetiredTasks.value = {}
-    routeTaskPlanning.value = {}
-    routeTaskErrors.value = {}
-    routeTaskRuns.clear()
+    catalog.reset()
+    planner.reset()
     await rematchOpenRoutes(session)
   })()
-}
-
-async function loadTasks(nodeName: string): Promise<TaskLoadResult> {
-  const node = findUniqueTopologyNode(props.nodes, nodeName)
-  if (!node && manager.isAmbiguousNodeName(nodeName))
-    return { tasks: [], error: '节点名称重复，无法唯一读取 Ping 任务。' }
-  if (!node)
-    return { tasks: [], error: '' }
-  const pending = taskRequests.get(node.uuid)
-  if (pending)
-    return pending
-  if (!taskOptions.value[node.uuid])
-    taskLoaded.value = { ...taskLoaded.value, [node.uuid]: false }
-  taskErrors.value = { ...taskErrors.value, [node.uuid]: '' }
-
-  const request = (async () => {
-    try {
-      const tasks = await loadAdminPingTaskNamesForNode(node.uuid)
-      taskOptions.value = { ...taskOptions.value, [node.uuid]: tasks }
-      taskLoaded.value = { ...taskLoaded.value, [node.uuid]: true }
-      return { tasks, error: '' }
-    }
-    catch (error) {
-      const detail = error instanceof Error ? error.message : ''
-      const message = detail.includes('登录状态已过期')
-        ? detail
-        : '无法读取 Ping 任务，请稍后重试。'
-      taskErrors.value = {
-        ...taskErrors.value,
-        [node.uuid]: message,
-      }
-      return { tasks: [], error: message }
-    }
-    finally {
-      taskRequests.delete(node.uuid)
-      if (props.open && !rematching.value && !quickConfiguring.value && manager.dirty)
-        void persistDraft('线路已保存。')
-    }
-  })()
-  taskRequests.set(node.uuid, request)
-  return request
-}
-
-function rememberTask(sourceUuid: string, taskName: string): void {
-  if (!sourceUuid || !taskName)
-    return
-  taskOptions.value = {
-    ...taskOptions.value,
-    [sourceUuid]: [...new Set([...(taskOptions.value[sourceUuid] ?? []), taskName])],
-  }
-  taskLoaded.value = { ...taskLoaded.value, [sourceUuid]: true }
-}
-
-function reservedEntryNames(route?: TopologyRouteConfig): string[] {
-  return props.nodes
-    .map(node => node.name)
-    .filter(name => name.trim().toLowerCase() !== route?.nodes[0]?.name.trim().toLowerCase())
 }
 
 function routeProbeValue(route: TopologyRouteConfig): string {
@@ -290,65 +232,6 @@ function routeProbeValue(route: TopologyRouteConfig): string {
 
 function routeProbeLabel(route: TopologyRouteConfig): string {
   return route.nodes[0]?.name.trim() || '自定义入口'
-}
-
-function routeHopTask(route: TopologyRouteConfig): string {
-  return pendingRouteTasks.value[route.id]?.taskName || route.metrics[1]?.taskFilter.trim() || ''
-}
-
-function routeHint(route: TopologyRouteConfig): string {
-  if (routeTaskPlanning.value[route.id])
-    return '正在自动挑选可用的探测方式…'
-  if (routeTaskErrors.value[route.id])
-    return routeTaskErrors.value[route.id] ?? ''
-  const source = route.nodes[1]?.name.trim() ?? ''
-  const landing = route.nodes[2]?.name.trim() ?? ''
-  if (!source)
-    return '请选择线路机。'
-  if (!landing)
-    return '请选择落地机。'
-  const state = routeProbeStates.value[route.id]
-  if (!state)
-    return ''
-  const probeText = describeTopologyHopProbe(state.probe)
-  if (state.exhausted)
-    return `${HOP_PROBE_LADDER_TEXT} 都探测不通；落地机上报地址 ${state.targetAddress} 可能不是真实入站地址。`
-  if (state.switchedFrom)
-    return `${describeTopologyHopProbe(state.switchedFrom)} 探测不通，已自动改用 ${probeText}。`
-  if (pendingRouteTasks.value[route.id])
-    return `正在按 ${probeText} 自动创建探测任务。`
-  if (state.verdict === 'healthy')
-    return `探测方式：${probeText} · 正常`
-  if (state.verdict === 'dead')
-    return `探测方式：${probeText} · 没有成功响应，正在自动换用其它方式。`
-  return `探测方式：${probeText} · 正在等待首批采样`
-}
-
-function routeHintTone(route: TopologyRouteConfig): boolean {
-  return Boolean(routeTaskErrors.value[route.id] || routeProbeStates.value[route.id]?.exhausted)
-}
-
-function clearRouteProbeState(routeId: number): void {
-  if (routeRetiredTasks.value[routeId]) {
-    const nextRetired = { ...routeRetiredTasks.value }
-    delete nextRetired[routeId]
-    routeRetiredTasks.value = nextRetired
-  }
-  if (!routeProbeStates.value[routeId])
-    return
-  const next = { ...routeProbeStates.value }
-  delete next[routeId]
-  routeProbeStates.value = next
-}
-
-function rememberRetiredTasks(routeId: number, tasks: ReadonlyArray<{ id?: number, name: string }>): void {
-  const retirable = tasks.flatMap(task => (Number.isInteger(task.id) ? [{ id: task.id!, name: task.name }] : []))
-  const next = { ...routeRetiredTasks.value }
-  if (retirable.length)
-    next[routeId] = retirable
-  else
-    delete next[routeId]
-  routeRetiredTasks.value = next
 }
 
 /**
@@ -374,101 +257,10 @@ async function retireReplacedTasks(): Promise<void> {
   }
 }
 
-async function planRouteTasks(route: TopologyRouteConfig): Promise<void> {
-  const runId = (routeTaskRuns.get(route.id) ?? 0) + 1
-  routeTaskRuns.set(route.id, runId)
-  clearPendingRouteTask(route.id)
-  routeTaskErrors.value = { ...routeTaskErrors.value, [route.id]: '' }
-  const source = findUniqueTopologyNode(props.nodes, route.nodes[1]?.name ?? '')
-  const landing = findUniqueTopologyNode(props.nodes, route.nodes[2]?.name ?? '')
-  const firstMetric = route.metrics[0]
-  const secondMetric = route.metrics[1]
-  if (!source) {
-    const nextPlanning = { ...routeTaskPlanning.value }
-    delete nextPlanning[route.id]
-    routeTaskPlanning.value = nextPlanning
-    return
-  }
-
-  routeTaskPlanning.value = { ...routeTaskPlanning.value, [route.id]: true }
-  try {
-    const loaded = await loadTasks(source.name)
-    if (routeTaskRuns.get(route.id) !== runId || !props.open || !manager.routes.includes(route))
-      return
-    if (loaded.error)
-      throw new Error(loaded.error)
-
-    const probeKey = getTopologyRouteProbeKey(route)
-    if (probeKey && shouldAutoApplyTopologyProbe(route)) {
-      applyTopologyProbeToRoute(route, probeKey, source.name, loaded.tasks, reservedEntryNames(route))
-    }
-    else if (firstMetric?.live && !firstMetric.taskFilter.trim()) {
-      const matchingEntryTasks = loaded.tasks.filter(task => findTopologyProbeKey(task) === findTopologyProbeKey(route.nodes[0]?.name ?? ''))
-      if (matchingEntryTasks.length === 1)
-        firstMetric.taskFilter = matchingEntryTasks[0]!
-    }
-
-    if (!landing) {
-      clearRouteProbeState(route.id)
-      if (secondMetric) {
-        secondMetric.live = false
-        secondMetric.nodeName = ''
-        secondMetric.taskFilter = ''
-      }
-      return
-    }
-    if (!secondMetric)
-      return
-    const planned = await planWorkingHopTask(source, landing, secondMetric.taskFilter)
-    if (routeTaskRuns.get(route.id) !== runId || !props.open || !manager.routes.includes(route))
-      return
-    secondMetric.live = true
-    secondMetric.nodeName = source.name
-    secondMetric.taskFilter = planned.task.name
-    routeProbeStates.value = {
-      ...routeProbeStates.value,
-      [route.id]: {
-        probe: planned.probe,
-        verdict: planned.verdict,
-        exhausted: planned.exhausted,
-        switchedFrom: planned.switchedFrom,
-        targetAddress: planned.targetAddress,
-      },
-    }
-    rememberRetiredTasks(route.id, planned.retiredTasks)
-    if (planned.needsCreation) {
-      pendingRouteTasks.value = {
-        ...pendingRouteTasks.value,
-        [route.id]: {
-          sourceUuid: source.uuid,
-          targetUuid: landing.uuid,
-          taskName: planned.task.name,
-          probe: planned.probe,
-        },
-      }
-    }
-    else {
-      rememberTask(source.uuid, planned.task.name)
-    }
-  }
-  catch (error) {
-    if (routeTaskRuns.get(route.id) === runId && props.open && manager.routes.includes(route)) {
-      routeTaskErrors.value = {
-        ...routeTaskErrors.value,
-        [route.id]: error instanceof Error ? error.message : '无法按所选节点匹配 Ping 任务。',
-      }
-    }
-  }
-  finally {
-    if (routeTaskRuns.get(route.id) === runId)
-      routeTaskPlanning.value = { ...routeTaskPlanning.value, [route.id]: false }
-  }
-}
-
 function selectRouteNode(route: TopologyRouteConfig, index: number, nodeName: string): void {
   if (index > 0) {
     clearPendingRouteTask(route.id)
-    routeTaskRuns.set(route.id, (routeTaskRuns.get(route.id) ?? 0) + 1)
+    bumpRouteRun(route.id)
   }
   manager.selectNode(route, index, nodeName)
   if (index === 2 && route.metrics[1]) {
@@ -502,13 +294,11 @@ function removeRoute(index: number): void {
   const route = manager.routes[index]
   if (!route)
     return
-  routeTaskRuns.set(route.id, (routeTaskRuns.get(route.id) ?? 0) + 1)
+  bumpRouteRun(route.id)
   clearPendingRouteTask(route.id)
   clearRouteProbeState(route.id)
   clearRouteTaskError(route.id)
-  const nextPlanning = { ...routeTaskPlanning.value }
-  delete nextPlanning[route.id]
-  routeTaskPlanning.value = nextPlanning
+  clearRouteTaskPlanning(route.id)
   manager.removeRoute(index)
   void persistDraft('线路已删除。')
 }
@@ -516,22 +306,6 @@ function removeRoute(index: number): void {
 function moveRoute(index: number, offset: -1 | 1): void {
   manager.moveRoute(index, offset)
   void persistDraft('线路顺序已保存。')
-}
-
-function clearPendingRouteTask(routeId: number): void {
-  if (!pendingRouteTasks.value[routeId])
-    return
-  const nextPending = { ...pendingRouteTasks.value }
-  delete nextPending[routeId]
-  pendingRouteTasks.value = nextPending
-}
-
-function clearRouteTaskError(routeId: number): void {
-  if (!routeTaskErrors.value[routeId])
-    return
-  const nextErrors = { ...routeTaskErrors.value }
-  delete nextErrors[routeId]
-  routeTaskErrors.value = nextErrors
 }
 
 async function rematchOpenRoutes(session: number): Promise<void> {
@@ -654,9 +428,7 @@ async function persistRoutes(options: {
           metric.taskFilter = ensured.task.name
           metric.live = true
           rememberTask(source.uuid, ensured.task.name)
-          const nextPending = { ...pendingRouteTasks.value }
-          delete nextPending[route.id]
-          pendingRouteTasks.value = nextPending
+          clearPendingRouteTask(route.id)
         }
         if (runId !== quickConfigurationRun || session !== dialogSession || !props.open)
           return 'cancelled' as const
