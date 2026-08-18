@@ -1,24 +1,18 @@
 import type { MaybeRefOrGetter } from 'vue'
-import type { TopologyHopProbe } from '@/services/ping-task.service'
 import type { NodeData } from '@/stores/nodes'
-import type { TopologyRouteConfig } from '@/utils/topologyHelper'
 import { onScopeDispose, ref, toValue } from 'vue'
 import { useTopologyManager } from '@/composables/useTopologyManager'
 import { OPS_TOPOLOGY_HOP_PROBE } from '@/constants/ops'
 import { ensureTopologyPingTask } from '@/services/ping-task.service'
 import { planWorkingHopTask } from '@/services/topology-probe.service'
+import { canRunTopologyProbeRepair, runTopologyProbeRepair } from '@/services/topology-repair.service'
 import { useAppStore } from '@/stores/app'
-import { findUniqueTopologyNode } from '@/utils/topologyHelper'
 
-interface PlannedProbeRepair {
-  route: TopologyRouteConfig
-  source: NodeData
-  landing: NodeData
-  probe: TopologyHopProbe
-  taskName: string
-  needsCreation: boolean
-}
-
+/**
+ * 挂在公开首页上的后台自愈：判定和写入逻辑全在
+ * `services/topology-repair.service.ts`（纯函数，完整单测覆盖）；这里只提供
+ * Vue 生命周期、定时器和到 Pinia store / `useTopologyManager` 的取值器桥接。
+ */
 export function useTopologyProbeRepair(
   nodes: MaybeRefOrGetter<NodeData[]>,
   managerOpen: MaybeRefOrGetter<boolean>,
@@ -30,33 +24,12 @@ export function useTopologyProbeRepair(
   let timer: ReturnType<typeof setInterval> | null = null
 
   function canRepair(): boolean {
-    return !disposed
-      && !toValue(managerOpen)
-      && appStore.privateFeaturesAllowed
-      && Boolean(appStore.topologyRoute.trim())
-  }
-
-  async function planRouteRepair(route: TopologyRouteConfig): Promise<PlannedProbeRepair | null> {
-    const source = findUniqueTopologyNode(toValue(nodes), route.nodes[1]?.name ?? '')
-    const landing = findUniqueTopologyNode(toValue(nodes), route.nodes[2]?.name ?? '')
-    const metric = route.metrics[1]
-    if (!source || !landing || !metric?.live)
-      return null
-
-    const planned = await planWorkingHopTask(source, landing, metric.taskFilter)
-    const bindingChanged = metric.nodeName.trim() !== source.name.trim()
-      || metric.taskFilter.trim() !== planned.task.name.trim()
-    if (!planned.needsCreation && !bindingChanged)
-      return null
-
-    return {
-      route,
-      source,
-      landing,
-      probe: planned.probe,
-      taskName: planned.task.name,
-      needsCreation: planned.needsCreation,
-    }
+    return canRunTopologyProbeRepair({
+      disposed,
+      managerOpen: toValue(managerOpen),
+      privateFeaturesAllowed: appStore.privateFeaturesAllowed,
+      topologyRoute: appStore.topologyRoute,
+    })
   }
 
   async function repairNow(): Promise<void> {
@@ -65,46 +38,21 @@ export function useTopologyProbeRepair(
 
     repairing.value = true
     try {
-      const granted = await appStore.requireLoginPermission('nodeTopology', { force: false })
-      if (!granted || !canRepair())
-        return
-
-      manager.reset()
-      if (manager.validationErrors.value.length)
-        return
-
-      const repairs = (await Promise.all(manager.routes.value.map(route => planRouteRepair(route).catch(() => null))))
-        .filter((repair): repair is PlannedProbeRepair => repair !== null)
-      if (!repairs.length || !canRepair())
-        return
-
-      await manager.withSaveLock(async () => {
-        if (!canRepair())
-          return
-        await manager.preflightSave()
-        if (!canRepair())
-          return
-
-        for (const repair of repairs) {
-          if (!canRepair())
-            return
-          const latestRepair = await planRouteRepair(repair.route)
-          if (!latestRepair)
-            continue
-          const metric = latestRepair.route.metrics[1]
-          if (!metric?.live)
-            continue
-          const taskName = latestRepair.needsCreation
-            ? (await ensureTopologyPingTask(latestRepair.source, latestRepair.landing, { probe: latestRepair.probe })).task.name
-            : latestRepair.taskName
-          if (!canRepair())
-            return
-          metric.nodeName = latestRepair.source.name
-          metric.taskFilter = taskName
-        }
-
-        if (manager.dirty.value && canRepair())
-          await manager.save({ lockHeld: true })
+      await runTopologyProbeRepair({
+        nodes: () => toValue(nodes),
+        canRepair,
+        requireLoginPermission: () => appStore.requireLoginPermission('nodeTopology', { force: false }),
+        manager: {
+          get routes() { return manager.routes.value },
+          get validationErrors() { return manager.validationErrors.value },
+          get dirty() { return manager.dirty.value },
+          reset: manager.reset,
+          withSaveLock: manager.withSaveLock,
+          preflightSave: manager.preflightSave,
+          save: manager.save,
+        },
+        planWorkingHopTask,
+        ensureTopologyPingTask,
       })
     }
     catch {
