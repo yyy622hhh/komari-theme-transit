@@ -1,24 +1,10 @@
 <script setup lang="ts">
+import type { VisitorLookupResult as VisitorData } from '@/utils/visitorInfoLookup'
 import { Icon } from '@iconify/vue'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useAppStore } from '@/stores/app'
+import { lookupVisitorInfo } from '@/utils/visitorInfoLookup'
 
-interface VisitorData {
-  ip: string
-  city: string
-  region: string
-  country: string
-  org: string
-}
-
-interface VisitorProvider {
-  url: string
-  normalize: (data: unknown) => VisitorData | null
-}
-
-type JsonRecord = Record<string, unknown>
-
-const visitorFetchTimeout = 8000
 const mobileScrollIdleDelay = 700
 const mobileViewportQuery = '(max-width: 767px)'
 const appStore = useAppStore()
@@ -35,21 +21,6 @@ const visitor = ref<VisitorData>({
   country: '',
   org: '',
 })
-
-const visitorProviders: VisitorProvider[] = [
-  {
-    url: 'https://ipwho.is/',
-    normalize: normalizeIpwhoData,
-  },
-  {
-    url: 'https://ipapi.co/json/',
-    normalize: normalizeIpapiData,
-  },
-  {
-    url: 'https://api.ip.sb/geoip',
-    normalize: normalizeIpSbData,
-  },
-]
 
 const compactLocation = computed(() => {
   const parts = [visitor.value.city, visitor.value.region].filter(Boolean)
@@ -81,7 +52,7 @@ const linuxPattern = /Linux/i
 let mobileViewport: MediaQueryList | null = null
 let scrollIdleTimer: number | undefined
 let revealTimer: number | undefined
-let activeFetchController: AbortController | null = null
+let visitorLookupController: AbortController | null = null
 let lookupCancelled = false
 
 function handleScroll(): void {
@@ -99,6 +70,7 @@ function handleScroll(): void {
 
 onMounted(async () => {
   lookupCancelled = false
+  visitorLookupController = new AbortController()
   mobileViewport = window.matchMedia(mobileViewportQuery)
   window.addEventListener('scroll', handleScroll, { passive: true })
 
@@ -108,7 +80,7 @@ onMounted(async () => {
   }, 600)
 
   try {
-    const data = await fetchVisitorData()
+    const data = await lookupVisitorInfo(visitorLookupController.signal)
     if (lookupCancelled)
       return
     if (data) {
@@ -140,128 +112,8 @@ function dismiss() {
 
 function cancelVisitorLookup(): void {
   lookupCancelled = true
-  activeFetchController?.abort()
-  activeFetchController = null
-}
-
-async function fetchVisitorData(): Promise<VisitorData | null> {
-  for (const provider of visitorProviders) {
-    if (lookupCancelled)
-      return null
-    const data = await fetchProviderData(provider)
-    if (data)
-      return data
-  }
-
-  return null
-}
-
-async function fetchProviderData(provider: VisitorProvider): Promise<VisitorData | null> {
-  try {
-    const data = await fetchJsonWithTimeout(provider.url)
-    return provider.normalize(data)
-  }
-  catch {
-    return null
-  }
-}
-
-async function fetchJsonWithTimeout(url: string): Promise<unknown> {
-  const controller = new AbortController()
-  activeFetchController = controller
-  const timeoutId = window.setTimeout(() => controller.abort(), visitorFetchTimeout)
-
-  try {
-    const response = await fetch(url, {
-      signal: controller.signal,
-      headers: {
-        Accept: 'application/json',
-      },
-    })
-
-    if (!response.ok)
-      throw new Error(`Visitor info request failed: ${response.status}`)
-
-    return await response.json()
-  }
-  finally {
-    window.clearTimeout(timeoutId)
-    if (activeFetchController === controller)
-      activeFetchController = null
-  }
-}
-
-function normalizeIpwhoData(data: unknown): VisitorData | null {
-  if (!isRecord(data) || data.success === false)
-    return null
-
-  const connection = isRecord(data.connection) ? data.connection : {}
-
-  return createVisitorData({
-    ip: data.ip,
-    city: data.city,
-    region: data.region,
-    country: data.country,
-    org: pickString(connection.org, connection.isp, connection.domain),
-  })
-}
-
-function normalizeIpapiData(data: unknown): VisitorData | null {
-  if (!isRecord(data) || data.error === true)
-    return null
-
-  return createVisitorData({
-    ip: data.ip,
-    city: data.city,
-    region: data.region,
-    country: data.country_name,
-    org: data.org,
-  })
-}
-
-function normalizeIpSbData(data: unknown): VisitorData | null {
-  if (!isRecord(data))
-    return null
-
-  return createVisitorData({
-    ip: data.ip,
-    city: data.city,
-    region: data.region,
-    country: data.country,
-    org: pickString(data.organization, data.isp, data.asn_organization),
-  })
-}
-
-function createVisitorData(data: Record<keyof VisitorData, unknown>): VisitorData | null {
-  const ip = readString(data.ip)
-  if (!ip)
-    return null
-
-  return {
-    ip,
-    city: readString(data.city),
-    region: readString(data.region),
-    country: readString(data.country),
-    org: readString(data.org),
-  }
-}
-
-function isRecord(data: unknown): data is JsonRecord {
-  return typeof data === 'object' && data !== null
-}
-
-function pickString(...values: unknown[]): string {
-  for (const value of values) {
-    const text = readString(value)
-    if (text)
-      return text
-  }
-
-  return ''
-}
-
-function readString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : ''
+  visitorLookupController?.abort()
+  visitorLookupController = null
 }
 
 function getOsIcon(): string {
