@@ -4,6 +4,43 @@
 
 ## [Unreleased]
 
+## [1.0.37] - 2026-08-18
+
+### Fixed
+
+- 节点卡状态色改为卡片自身的左边框，消除最左侧可见空隙，并增加状态线与节点名称之间的稳定留白。
+- 节点标题、角色标签和资源内容统一左侧基线；四档卡片密度继续保持一致的间距与完整内容。
+
+### Testing
+
+- 视觉回归直接校验真实左边框、标题间距、标题与资源网格对齐，以及不同卡片密度下的最小留白。
+
+## [1.0.36] - 2026-08-18
+
+### Fixed
+
+- `0` 和其他亚毫秒成功延迟统一显示为 `<1ms`，不再把有效零值误解为缺失数据。
+- 拓扑主面板与历史详情共用中位数基线和样本状态规则；亚毫秒量化波动不再被误标为黄色，严重丢包和无响应继续显示为红色。
+- 加粗节点卡状态线并扩大标题区域左侧留白，使状态、名称与内容更易区分。
+
+### Testing
+
+- 新增亚毫秒格式化、延迟基线和状态色单元测试，并扩展拓扑样本颜色、标签和节点卡间距的视觉回归。
+
+## [1.0.35] - 2026-08-18
+
+### Fixed
+
+- 关闭拓扑管理器后，已登录管理员的页面仍会定期检查第 2 段探测任务，并自动保存可恢复的失效绑定；显式静态指标不会被改写。
+- Metric Store 统计接口不可用时回退旧版 Ping records，兼容旧 Komari Ping API。
+- 任务健康严格按探测来源节点判断，其他线路机的成功样本不会掩盖当前来源故障；同一落地机上已验证可用的任务或 TCP 端口会优先复用。
+- Ping 任务创建完整传播取消信号，避免关闭或切换流程后遗留未完成写入。
+- 正数亚毫秒延迟显示为 `<1ms`，避免四舍五入后误显示为 `0ms`。
+
+### Testing
+
+- 新增旧 Ping API 回退、来源隔离、健康任务复用、已验证端口选择、后台自动修复和任务创建取消回归。
+
 ## [1.0.34] - 2026-08-18
 
 ### Fixed
@@ -490,7 +527,10 @@
 - 亮暗主题、桌面/移动布局和 Transit 风格内嵌 Komari 管理端。
 - Playwright 视觉与交互回归、自动构建和 GitHub Release 发布流程。
 
-[Unreleased]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.34...HEAD
+[Unreleased]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.37...HEAD
+[1.0.37]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.36...v1.0.37
+[1.0.36]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.35...v1.0.36
+[1.0.35]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.34...v1.0.35
 [1.0.34]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.33...v1.0.34
 [1.0.33]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.32...v1.0.33
 [1.0.32]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.31...v1.0.32
