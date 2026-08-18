@@ -2,7 +2,7 @@
 import type { GeneralCardKey } from '@/stores/app'
 import type { NodeData } from '@/stores/nodes'
 import type { CurrencyCode } from '@/utils/financeHelper'
-import type { TopNodeMetric } from '@/utils/nodeMetricsHelper'
+import type { OnlineNodeStats, TopNodeMetric } from '@/utils/nodeMetricsHelper'
 import { Icon } from '@iconify/vue'
 import { useNow } from '@vueuse/core'
 import { computed, defineAsyncComponent, onMounted, ref, watch } from 'vue'
@@ -17,14 +17,18 @@ import { useNodesStore } from '@/stores/nodes'
 import * as financeHelper from '@/utils/financeHelper'
 import { formatBytesPerSecondSplit, formatBytesSplit } from '@/utils/helper'
 import {
-  getConnectionCount,
-  getExpiryDays,
+  computeOnlineNodeStats,
+  formatDistributionTooltip,
+  formatExpiryNodeLine,
+  formatMetricDecimal,
+  formatNodeCount,
+  formatNodeNameList,
   getHighLoadMetrics,
-  getRealtimeTotalSpeed,
+  getKnownNodeDistribution,
+  getNodeDistribution,
   getTrafficUsed,
   getTrafficUsedPercentage,
   isExpiringNode,
-  isHighLoadNode,
   isTrafficWarningNode,
 } from '@/utils/nodeMetricsHelper'
 import { getRegionDisplayName } from '@/utils/regionHelper'
@@ -38,26 +42,6 @@ interface GeneralMetricCard {
   unit?: string
   tooltip?: string
   action?: 'financeDetails'
-}
-
-interface OnlineStats {
-  count: number
-  totalSpeed: { up: number, down: number }
-  avgCpu: number
-  totalGpu: number
-  gpuNodeCount: number
-  avgLoad: number
-  avgLoad5: number
-  avgLoad15: number
-  totalProcesses: number
-  totalConnectionsTcp: number
-  totalConnectionsUdp: number
-  trafficPeak: TopNodeMetric | null
-  uploadPeakNode: TopNodeMetric | null
-  downloadPeakNode: TopNodeMetric | null
-  gpuPeakNode: TopNodeMetric | null
-  connectionPeakNode: TopNodeMetric | null
-  highLoadNodes: NodeData[]
 }
 
 const props = withDefaults(defineProps<{
@@ -128,13 +112,11 @@ function formatSpeedText(bytes: number): string {
 }
 
 function formatCount(value: number): string {
-  return Math.round(value).toLocaleString('zh-CN')
+  return formatNodeCount(value)
 }
 
 function formatDecimal(value: number, digits = 1): string {
-  if (!Number.isFinite(value))
-    return '0'
-  return value.toFixed(digits)
+  return formatMetricDecimal(value, digits)
 }
 
 function formatTopNodeSpeed(metric: TopNodeMetric | null, fallback = '-'): { value: string, unit?: string, tooltip?: string } {
@@ -162,51 +144,15 @@ function formatTopNodePercentage(metric: TopNodeMetric | null): { value: string,
 }
 
 function formatNodeNames(nodes: NodeData[], formatter?: (node: NodeData) => string, max = 8): string {
-  if (nodes.length === 0)
-    return '暂无节点'
-
-  const lines = nodes.slice(0, max).map(node => formatter ? formatter(node) : node.name)
-  if (nodes.length > max)
-    lines.push(`… 还有 ${nodes.length - max} 台`)
-  return lines.join('\n')
+  return formatNodeNameList(nodes, formatter, max)
 }
 
 function getDistribution(nodes: NodeData[], selector: (node: NodeData) => string | null | undefined): Array<[string, number]> {
-  const map = new Map<string, number>()
-  for (const node of nodes) {
-    const key = selector(node)?.trim() || '未知'
-    map.set(key, (map.get(key) || 0) + 1)
-  }
-
-  return Array.from(map.entries()).sort((a, b) => b[1] - a[1])
+  return getNodeDistribution(nodes, selector)
 }
 
 function getKnownDistribution(nodes: NodeData[], selector: (node: NodeData) => string | null | undefined): Array<[string, number]> {
-  const map = new Map<string, number>()
-  for (const node of nodes) {
-    const key = selector(node)?.trim()
-    if (!key)
-      continue
-    map.set(key, (map.get(key) || 0) + 1)
-  }
-
-  return Array.from(map.entries()).sort((a, b) => b[1] - a[1])
-}
-
-function formatDistributionTooltip(entries: Array<[string, number]>): string {
-  if (entries.length === 0)
-    return '暂无数据'
-
-  return entries.slice(0, 8).map(([key, count]) => `${key}: ${count} 台`).join('\n')
-}
-
-function formatExpiryNode(node: NodeData): string {
-  const days = getExpiryDays(node)
-  if (days === null)
-    return `${node.name}: 未知`
-  if (days <= 0)
-    return `${node.name}: 已过期`
-  return `${node.name}: ${days} 天`
+  return getKnownNodeDistribution(nodes, selector)
 }
 
 function getNodePeriodCostCNY(node: NodeData, periodDays: number): number {
@@ -227,74 +173,7 @@ function formatCostCard(amountCNY: number): { value: string, unit?: string } {
   }
 }
 
-function updateTopMetric(current: TopNodeMetric | null, node: NodeData, value: number): TopNodeMetric | null {
-  if (!Number.isFinite(value))
-    return current
-
-  if (!current || value > current.value)
-    return { node, value: Math.max(0, value) }
-
-  return current
-}
-
-const onlineStats = computed<OnlineStats>(() => {
-  const stats: OnlineStats = {
-    count: 0,
-    totalSpeed: { up: 0, down: 0 },
-    avgCpu: 0,
-    totalGpu: 0,
-    gpuNodeCount: 0,
-    avgLoad: 0,
-    avgLoad5: 0,
-    avgLoad15: 0,
-    totalProcesses: 0,
-    totalConnectionsTcp: 0,
-    totalConnectionsUdp: 0,
-    trafficPeak: null,
-    uploadPeakNode: null,
-    downloadPeakNode: null,
-    gpuPeakNode: null,
-    connectionPeakNode: null,
-    highLoadNodes: [],
-  }
-
-  for (const node of summaryNodes.value) {
-    if (!node.online)
-      continue
-
-    stats.count += 1
-    stats.totalSpeed.up += node.net_out || 0
-    stats.totalSpeed.down += node.net_in || 0
-    stats.avgCpu += node.cpu || 0
-    stats.avgLoad += node.load || 0
-    stats.avgLoad5 += node.load5 || 0
-    stats.avgLoad15 += node.load15 || 0
-    stats.totalProcesses += node.process || 0
-    stats.totalConnectionsTcp += node.connections || 0
-    stats.totalConnectionsUdp += node.connections_udp || 0
-    stats.trafficPeak = updateTopMetric(stats.trafficPeak, node, getRealtimeTotalSpeed(node))
-    stats.uploadPeakNode = updateTopMetric(stats.uploadPeakNode, node, node.net_out || 0)
-    stats.downloadPeakNode = updateTopMetric(stats.downloadPeakNode, node, node.net_in || 0)
-    stats.connectionPeakNode = updateTopMetric(stats.connectionPeakNode, node, getConnectionCount(node))
-    const hasGpu = Boolean(node.gpu_name?.trim()) || (node.gpu || 0) > 0
-    if (hasGpu) {
-      stats.totalGpu += node.gpu || 0
-      stats.gpuNodeCount += 1
-      stats.gpuPeakNode = updateTopMetric(stats.gpuPeakNode, node, node.gpu || 0)
-    }
-    if (isHighLoadNode(node, appStore.homeHighLoadThreshold))
-      stats.highLoadNodes.push(node)
-  }
-
-  if (stats.count > 0) {
-    stats.avgCpu /= stats.count
-    stats.avgLoad /= stats.count
-    stats.avgLoad5 /= stats.count
-    stats.avgLoad15 /= stats.count
-  }
-
-  return stats
-})
+const onlineStats = computed<OnlineNodeStats>(() => computeOnlineNodeStats(summaryNodes.value, appStore.homeHighLoadThreshold))
 
 const totalSpeed = computed(() => onlineStats.value.totalSpeed)
 
@@ -658,7 +537,7 @@ function getCardDefinition(key: GeneralCardKey): GeneralMetricCard {
         icon: 'tabler:calendar-exclamation',
         value: formatCount(expiringNodes.value.length),
         unit: '台',
-        tooltip: formatNodeNames(expiringNodes.value, formatExpiryNode),
+        tooltip: formatNodeNames(expiringNodes.value, formatExpiryNodeLine),
       }
     case 'trafficWarnings':
       return {

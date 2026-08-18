@@ -160,3 +160,158 @@ function clampPercentage(value: number): number {
 
   return Math.min(Math.max(value, 0), 100)
 }
+
+// ==================== 首页汇总卡片：聚合与格式化 ====================
+// 从 NodeGeneralCards.vue 抽出的纯函数：只依赖显式参数，不碰 Vue 响应式或
+// Pinia store，可以直接单测，也让组件本身少背一份可能算错的聚合逻辑。
+
+export interface OnlineNodeStats {
+  count: number
+  totalSpeed: { up: number, down: number }
+  avgCpu: number
+  totalGpu: number
+  gpuNodeCount: number
+  avgLoad: number
+  avgLoad5: number
+  avgLoad15: number
+  totalProcesses: number
+  totalConnectionsTcp: number
+  totalConnectionsUdp: number
+  trafficPeak: TopNodeMetric | null
+  uploadPeakNode: TopNodeMetric | null
+  downloadPeakNode: TopNodeMetric | null
+  gpuPeakNode: TopNodeMetric | null
+  connectionPeakNode: TopNodeMetric | null
+  highLoadNodes: NodeData[]
+}
+
+function updateTopNodeMetric(current: TopNodeMetric | null, node: NodeData, value: number): TopNodeMetric | null {
+  if (!Number.isFinite(value))
+    return current
+
+  if (!current || value > current.value)
+    return { node, value: Math.max(0, value) }
+
+  return current
+}
+
+/** 首页总览卡片的核心聚合：只看在线节点的单次遍历求和/求峰值。 */
+export function computeOnlineNodeStats(nodes: readonly NodeData[], highLoadThreshold: number): OnlineNodeStats {
+  const stats: OnlineNodeStats = {
+    count: 0,
+    totalSpeed: { up: 0, down: 0 },
+    avgCpu: 0,
+    totalGpu: 0,
+    gpuNodeCount: 0,
+    avgLoad: 0,
+    avgLoad5: 0,
+    avgLoad15: 0,
+    totalProcesses: 0,
+    totalConnectionsTcp: 0,
+    totalConnectionsUdp: 0,
+    trafficPeak: null,
+    uploadPeakNode: null,
+    downloadPeakNode: null,
+    gpuPeakNode: null,
+    connectionPeakNode: null,
+    highLoadNodes: [],
+  }
+
+  for (const node of nodes) {
+    if (!node.online)
+      continue
+
+    stats.count += 1
+    stats.totalSpeed.up += node.net_out || 0
+    stats.totalSpeed.down += node.net_in || 0
+    stats.avgCpu += node.cpu || 0
+    stats.avgLoad += node.load || 0
+    stats.avgLoad5 += node.load5 || 0
+    stats.avgLoad15 += node.load15 || 0
+    stats.totalProcesses += node.process || 0
+    stats.totalConnectionsTcp += node.connections || 0
+    stats.totalConnectionsUdp += node.connections_udp || 0
+    stats.trafficPeak = updateTopNodeMetric(stats.trafficPeak, node, getRealtimeTotalSpeed(node))
+    stats.uploadPeakNode = updateTopNodeMetric(stats.uploadPeakNode, node, node.net_out || 0)
+    stats.downloadPeakNode = updateTopNodeMetric(stats.downloadPeakNode, node, node.net_in || 0)
+    stats.connectionPeakNode = updateTopNodeMetric(stats.connectionPeakNode, node, getConnectionCount(node))
+    const hasGpu = Boolean(node.gpu_name?.trim()) || (node.gpu || 0) > 0
+    if (hasGpu) {
+      stats.totalGpu += node.gpu || 0
+      stats.gpuNodeCount += 1
+      stats.gpuPeakNode = updateTopNodeMetric(stats.gpuPeakNode, node, node.gpu || 0)
+    }
+    if (isHighLoadNode(node, highLoadThreshold))
+      stats.highLoadNodes.push(node)
+  }
+
+  if (stats.count > 0) {
+    stats.avgCpu /= stats.count
+    stats.avgLoad /= stats.count
+    stats.avgLoad5 /= stats.count
+    stats.avgLoad15 /= stats.count
+  }
+
+  return stats
+}
+
+export function formatNodeCount(value: number): string {
+  return Math.round(value).toLocaleString('zh-CN')
+}
+
+export function formatMetricDecimal(value: number, digits = 1): string {
+  if (!Number.isFinite(value))
+    return '0'
+  return value.toFixed(digits)
+}
+
+/** 列出节点名字，超过 max 个折叠成一行「… 还有 N 台」。 */
+export function formatNodeNameList(nodes: readonly NodeData[], formatter?: (node: NodeData) => string, max = 8): string {
+  if (nodes.length === 0)
+    return '暂无节点'
+
+  const lines = nodes.slice(0, max).map(node => formatter ? formatter(node) : node.name)
+  if (nodes.length > max)
+    lines.push(`… 还有 ${nodes.length - max} 台`)
+  return lines.join('\n')
+}
+
+/** 按 selector 分组计数，未知/空值归入「未知」，按数量降序。 */
+export function getNodeDistribution(nodes: readonly NodeData[], selector: (node: NodeData) => string | null | undefined): Array<[string, number]> {
+  const map = new Map<string, number>()
+  for (const node of nodes) {
+    const key = selector(node)?.trim() || '未知'
+    map.set(key, (map.get(key) || 0) + 1)
+  }
+
+  return Array.from(map.entries()).sort((a, b) => b[1] - a[1])
+}
+
+/** 同 {@link getNodeDistribution}，但丢弃空值而不是归入「未知」。 */
+export function getKnownNodeDistribution(nodes: readonly NodeData[], selector: (node: NodeData) => string | null | undefined): Array<[string, number]> {
+  const map = new Map<string, number>()
+  for (const node of nodes) {
+    const key = selector(node)?.trim()
+    if (!key)
+      continue
+    map.set(key, (map.get(key) || 0) + 1)
+  }
+
+  return Array.from(map.entries()).sort((a, b) => b[1] - a[1])
+}
+
+export function formatDistributionTooltip(entries: ReadonlyArray<[string, number]>): string {
+  if (entries.length === 0)
+    return '暂无数据'
+
+  return entries.slice(0, 8).map(([key, count]) => `${key}: ${count} 台`).join('\n')
+}
+
+export function formatExpiryNodeLine(node: NodeData): string {
+  const days = getExpiryDays(node)
+  if (days === null)
+    return `${node.name}: 未知`
+  if (days <= 0)
+    return `${node.name}: 已过期`
+  return `${node.name}: ${days} 天`
+}
