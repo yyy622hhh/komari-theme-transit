@@ -24,7 +24,12 @@ export interface TopologyRepairDeps {
   canRepair: () => boolean
   requireLoginPermission: () => Promise<boolean>
   manager: TopologyRepairManagerLike
-  planWorkingHopTask: (source: TopologyPingEndpoint, landing: TopologyPingEndpoint, currentTaskName?: string) => Promise<HopTaskPlan>
+  planWorkingHopTask: (
+    source: TopologyPingEndpoint,
+    landing: TopologyPingEndpoint,
+    currentTaskName?: string,
+    options?: { fresh?: boolean },
+  ) => Promise<HopTaskPlan>
   ensureTopologyPingTask: (
     source: TopologyPingEndpoint,
     landing: TopologyPingEndpoint,
@@ -79,14 +84,14 @@ export async function runTopologyProbeRepair(deps: TopologyRepairDeps): Promise<
   if (deps.manager.validationErrors.length)
     return 'skipped'
 
-  async function planRouteRepair(route: TopologyRouteConfig): Promise<PlannedProbeRepair | null> {
+  async function planRouteRepair(route: TopologyRouteConfig, options: { fresh?: boolean } = {}): Promise<PlannedProbeRepair | null> {
     const source = findUniqueTopologyNode(deps.nodes(), route.nodes[1]?.name ?? '')
     const landing = findUniqueTopologyNode(deps.nodes(), route.nodes[2]?.name ?? '')
     const metric = route.metrics[1]
     if (!source || !landing || !metric?.live)
       return null
 
-    const planned = await deps.planWorkingHopTask(source, landing, metric.taskFilter)
+    const planned = await deps.planWorkingHopTask(source, landing, metric.taskFilter, options)
     const bindingChanged = metric.nodeName.trim() !== source.name.trim()
       || metric.taskFilter.trim() !== planned.task.name.trim()
     if (!planned.needsCreation && !bindingChanged)
@@ -118,8 +123,9 @@ export async function runTopologyProbeRepair(deps: TopologyRepairDeps): Promise<
     for (const repair of repairs) {
       if (!deps.canRepair())
         return
-      // 锁内重新规划一次：另一个标签页可能已经在拿到锁之前改了这条线路。
-      const latestRepair = await planRouteRepair(repair.route)
+      // 锁内重新规划一次：另一个标签页可能已经在拿到锁之前改了这条线路。必须
+      // 绕过任务列表缓存，否则这一次读到的还是拿锁前的同一份快照，等于没查。
+      const latestRepair = await planRouteRepair(repair.route, { fresh: true })
       if (!latestRepair)
         continue
       const metric = latestRepair.route.metrics[1]

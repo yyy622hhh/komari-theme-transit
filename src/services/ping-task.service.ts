@@ -281,11 +281,17 @@ export function invalidateAdminPingTasksCache(): void {
  * 强制重新校验（`force: true`）和 `admin:getAllPingTasks` 都会跟着线路数线
  * 性增长。命中缓存时两者都跳过。写路径（`ensureTopologyPingTask` 创建后回查
  * 确认）必须看到最新列表，走的是不缓存的 {@link fetchAdminPingTasks}。
+ *
+ * `options.fresh` 供需要跨标签页可见性的调用方使用：拿到保存锁之后重新规划
+ * 一次（防止另一个标签页在拿锁前改过这条线路）就必须绕过缓存，否则两次规划
+ * 读到的是同一份快照，锁内重新检查形同虚设。
  */
-export async function loadAdminPingTasks(): Promise<AdminPingTask[]> {
-  const cached = adminPingTasksCache.get(ADMIN_PING_TASKS_CACHE_KEY)
-  if (cached)
-    return cached
+export async function loadAdminPingTasks(options: { fresh?: boolean } = {}): Promise<AdminPingTask[]> {
+  if (!options.fresh) {
+    const cached = adminPingTasksCache.get(ADMIN_PING_TASKS_CACHE_KEY)
+    if (cached)
+      return cached
+  }
   await assertPingTaskPermission()
   return adminPingTasksCache.set(ADMIN_PING_TASKS_CACHE_KEY, await fetchAdminPingTasks())
 }

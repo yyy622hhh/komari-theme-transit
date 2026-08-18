@@ -75,8 +75,8 @@ function taskNamesById(tasks: readonly AdminPingTask[]): Map<string, string> {
 }
 
 /** 拉齐这台线路机上所有任务的类型、目标和最近采样情况。 */
-export async function loadSourceProbeProfile(sourceUuid: string): Promise<SourceProbeProfile> {
-  const tasks = await loadAdminPingTasks()
+export async function loadSourceProbeProfile(sourceUuid: string, options: { fresh?: boolean } = {}): Promise<SourceProbeProfile> {
+  const tasks = await loadAdminPingTasks(options)
   const entityIds = [...new Set([
     sourceUuid,
     ...tasks.flatMap(task => task.clients ?? []),
@@ -285,6 +285,7 @@ export async function planWorkingHopTask(
   source: TopologyPingEndpoint,
   landing: TopologyPingEndpoint,
   currentTaskName = '',
+  options: { fresh?: boolean } = {},
 ): Promise<HopTaskPlan> {
   if (!source.uuid.trim() || !landing.uuid.trim())
     throw new Error('线路机或落地机已失效，请重新选择。')
@@ -292,7 +293,7 @@ export async function planWorkingHopTask(
   if (!targetAddress)
     throw new Error(`落地机“${landing.name}”没有可用于 Ping 的 IPv4 或 IPv6 地址。`)
 
-  const profile = await loadSourceProbeProfile(source.uuid)
+  const profile = await loadSourceProbeProfile(source.uuid, options)
   const hopTasks = listTopologyPingTasks(profile.tasks, source.uuid, landing)
   // 只有当按名字认回来的任务确实指向当前落地机时才认它。绑错落地机或落地机被
   // 改过时，仍然按地址重新推导，让主题自己纠正。

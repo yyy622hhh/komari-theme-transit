@@ -429,6 +429,30 @@ describe('loadAdminPingTasks caching', () => {
     }
   })
 
+  test('options.fresh bypasses a warm cache entry and re-validates the session', async () => {
+    const { restore, calls } = mockAdminTaskList([
+      { id: 1, name: 'unique', clients: [source.uuid], type: 'icmp', target: '198.51.100.1', interval: 30 },
+    ])
+    try {
+      await loadAdminPingTasks()
+      expect(calls.me).toBe(1)
+      expect(calls.list).toBe(1)
+
+      await loadAdminPingTasks({ fresh: true })
+      expect(calls.me).toBe(2)
+      expect(calls.list).toBe(2)
+
+      // A plain call right after should be served from the cache that the
+      // fresh read just repopulated, not trigger a third round-trip.
+      await loadAdminPingTasks()
+      expect(calls.me).toBe(2)
+      expect(calls.list).toBe(2)
+    }
+    finally {
+      restore()
+    }
+  })
+
   test('refetches once the cache entry expires', async () => {
     const originalNow = Date.now
     let now = 1_000

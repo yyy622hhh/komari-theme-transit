@@ -180,6 +180,46 @@ describe('topology hop probe selection', () => {
   })
 })
 
+describe('planWorkingHopTask cache freshness', () => {
+  test('options.fresh bypasses the admin task list cache', async () => {
+    const tasks: AdminPingTask[] = [
+      { id: 1, name: 'Transit-Relay-JP-to-Exit-SG', clients: [source.uuid], type: 'icmp', target: landing.ipv4!, interval: 30 },
+    ]
+    const originalFetch = globalThis.fetch
+    let listCalls = 0
+    globalThis.fetch = mock(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (!init?.body)
+        return new Response(JSON.stringify({ logged_in: true, username: 'admin' }))
+      const request = JSON.parse(String(init.body)) as { id: number, method: string }
+      if (request.method === 'admin:getAllPingTasks') {
+        listCalls += 1
+        return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: tasks }), { headers: { 'Content-Type': 'application/json' } })
+      }
+      if (request.method === 'public:getPingMetricStats') {
+        return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: { count: 0, stats: [] } }), { headers: { 'Content-Type': 'application/json' } })
+      }
+      throw new Error(`Unexpected RPC method: ${request.method}`)
+    }) as typeof fetch
+
+    try {
+      await planWorkingHopTask(source, landing, 'Transit-Relay-JP-to-Exit-SG')
+      expect(listCalls).toBe(1)
+
+      // A plain re-plan right after should be served from cache.
+      await planWorkingHopTask(source, landing, 'Transit-Relay-JP-to-Exit-SG')
+      expect(listCalls).toBe(1)
+
+      // The in-lock re-check (topology-repair.service.ts) asks for a fresh
+      // read specifically so it can observe another tab's concurrent write.
+      await planWorkingHopTask(source, landing, 'Transit-Relay-JP-to-Exit-SG', { fresh: true })
+      expect(listCalls).toBe(2)
+    }
+    finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+})
+
 describe('topology hop task planning', () => {
   test('plans a TCP hop task when the relay cannot use ICMP', async () => {
     const restore = mockKomari(
