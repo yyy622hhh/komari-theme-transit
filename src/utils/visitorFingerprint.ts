@@ -196,7 +196,7 @@ async function buildVisitorSecurityProfile(): Promise<VisitorSecurityProfile> {
     .map(trimProfileString)
     .filter(Boolean)
     .slice(0, 6)
-  const timezone = trimProfileString(Intl.DateTimeFormat().resolvedOptions().timeZone)
+  const timezone = trimProfileString(new Intl.DateTimeFormat().resolvedOptions().timeZone)
   const connection = navigatorWithHints.connection
   const webgl = collectWebGlProfile()
   const webrtc = await collectWebRtcProfile(siteScope)
