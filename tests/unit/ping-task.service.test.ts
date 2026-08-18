@@ -150,7 +150,7 @@ describe('topology Ping task management', () => {
     }
   })
 
-  test('an aborted waiter does not fail a shared in-flight ensure', async () => {
+  test('an abort after mutation starts does not fail shared reconciliation', async () => {
     const originalFetch = globalThis.fetch
     const tasks: AdminPingTask[] = []
     let addCalls = 0
@@ -193,7 +193,7 @@ describe('topology Ping task management', () => {
       const second = ensureTopologyPingTask(source, target)
       controller.abort()
       releaseAdd?.()
-      await expect(first).rejects.toMatchObject({ name: 'AbortError' })
+      await expect(first).resolves.toMatchObject({ task: { name: 'Transit-Relay-JP-to-Exit-SG' } })
       await expect(second).resolves.toMatchObject({ task: { name: 'Transit-Relay-JP-to-Exit-SG' } })
       expect(addCalls).toBe(1)
     }
@@ -235,11 +235,13 @@ describe('topology Ping task management', () => {
     }
   })
 
-  test('propagates cancellation to an in-flight Ping task creation', async () => {
+  test('finishes mutation reconciliation after cancellation so callers can clean up', async () => {
     const originalFetch = globalThis.fetch
     const tasks: AdminPingTask[] = []
     let addCalls = 0
-    let addAborted = false
+    let settled = false
+    let mutationAborted = false
+    let releaseAdd: (() => void) | undefined
     let resolveAddStarted: (() => void) | undefined
     const addStarted = new Promise<void>((resolve) => {
       resolveAddStarted = resolve
@@ -247,7 +249,7 @@ describe('topology Ping task management', () => {
     globalThis.fetch = mock(async (_input: RequestInfo | URL, init?: RequestInit) => {
       if (!init?.body)
         return new Response(JSON.stringify({ logged_in: true, username: 'admin' }))
-      const request = JSON.parse(String(init.body)) as { id: number, method: string }
+      const request = JSON.parse(String(init.body)) as { id: number, method: string, params?: AdminPingTask }
       if (request.method === 'admin:getAllPingTasks') {
         return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: tasks }), {
           headers: { 'Content-Type': 'application/json' },
@@ -256,11 +258,16 @@ describe('topology Ping task management', () => {
       if (request.method === 'admin:addPingTask') {
         addCalls += 1
         resolveAddStarted?.()
-        return new Promise<Response>((_resolve, reject) => {
+        return new Promise<Response>((resolve) => {
           init.signal?.addEventListener('abort', () => {
-            addAborted = true
-            reject(new DOMException('Aborted', 'AbortError'))
+            mutationAborted = true
           }, { once: true })
+          releaseAdd = () => {
+            tasks.push({ ...request.params!, id: 13 })
+            resolve(new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id }), {
+              headers: { 'Content-Type': 'application/json' },
+            }))
+          }
         })
       }
       throw new Error(`Unexpected RPC method: ${request.method}`)
@@ -269,13 +276,19 @@ describe('topology Ping task management', () => {
     try {
       const controller = new AbortController()
       const creating = ensureTopologyPingTask(source, target, { signal: controller.signal })
+      void creating.finally(() => {
+        settled = true
+      })
       await addStarted
       controller.abort()
+      await Promise.resolve()
+      expect(settled).toBe(false)
+      releaseAdd?.()
 
-      await expect(creating).rejects.toMatchObject({ name: 'AbortError' })
+      await expect(creating).resolves.toMatchObject({ task: { id: 13 }, created: true })
       expect(addCalls).toBe(1)
-      expect(addAborted).toBe(true)
-      expect(tasks).toEqual([])
+      expect(mutationAborted).toBe(false)
+      expect(tasks).toHaveLength(1)
     }
     finally {
       globalThis.fetch = originalFetch
@@ -516,6 +529,65 @@ describe('loadAdminPingTasks caching', () => {
     }
     finally {
       restore()
+    }
+  })
+
+  test('does not expose a cached admin task list after the local session changes', async () => {
+    const { restore, calls } = mockAdminTaskList([
+      { id: 1, name: 'unique', clients: [source.uuid], type: 'icmp', target: '198.51.100.1', interval: 30 },
+    ])
+    try {
+      await loadAdminPingTasks()
+      setAuthSessionFromLogin(false)
+      await loadAdminPingTasks()
+      expect(calls.me).toBe(2)
+      expect(calls.list).toBe(2)
+    }
+    finally {
+      restore()
+    }
+  })
+
+  test('a fresh read bypasses an older in-flight list and keeps its newer cache value', async () => {
+    const originalFetch = globalThis.fetch
+    let listCalls = 0
+    let releaseOld!: (response: Response) => void
+    let markOldStarted!: () => void
+    const oldStarted = new Promise<void>((resolve) => {
+      markOldStarted = resolve
+    })
+    const oldResponse = new Promise<Response>((resolve) => {
+      releaseOld = resolve
+    })
+    const stale = [{ id: 1, name: 'stale', clients: [source.uuid], type: 'icmp', target: '198.51.100.1', interval: 30 }]
+    const fresh = [{ id: 2, name: 'fresh', clients: [source.uuid], type: 'icmp', target: '198.51.100.2', interval: 30 }]
+    globalThis.fetch = mock(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (!init?.body)
+        return new Response(JSON.stringify({ logged_in: true, username: 'admin' }))
+      const request = JSON.parse(String(init.body)) as { id: number, method: string }
+      if (request.method !== 'admin:getAllPingTasks')
+        throw new Error(`Unexpected RPC method: ${request.method}`)
+      listCalls += 1
+      if (listCalls === 1) {
+        markOldStarted()
+        return oldResponse
+      }
+      return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: fresh }), { headers: { 'Content-Type': 'application/json' } })
+    }) as typeof fetch
+
+    try {
+      const oldRead = loadAdminPingTasks()
+      await oldStarted
+      const freshRead = await loadAdminPingTasks({ fresh: true })
+      releaseOld(new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: stale }), { headers: { 'Content-Type': 'application/json' } }))
+      await oldRead
+
+      expect(freshRead.map(task => task.name)).toEqual(['fresh'])
+      expect((await loadAdminPingTasks()).map(task => task.name)).toEqual(['fresh'])
+      expect(listCalls).toBe(2)
+    }
+    finally {
+      globalThis.fetch = originalFetch
     }
   })
 })

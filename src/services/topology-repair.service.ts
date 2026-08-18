@@ -33,8 +33,10 @@ export interface TopologyRepairDeps {
   ensureTopologyPingTask: (
     source: TopologyPingEndpoint,
     landing: TopologyPingEndpoint,
-    options: { probe: TopologyHopProbe },
+    options: { probe: TopologyHopProbe, signal?: AbortSignal },
   ) => Promise<{ task: AdminPingTask, created: boolean }>
+  deleteTopologyPingTasks: (taskIds: readonly number[]) => Promise<boolean>
+  signal?: AbortSignal
 }
 
 export interface TopologyRepairAvailability {
@@ -73,11 +75,12 @@ interface PlannedProbeRepair {
  * 拆成纯函数以便完整测试每一个提前退出分支。
  */
 export async function runTopologyProbeRepair(deps: TopologyRepairDeps): Promise<TopologyRepairOutcome> {
-  if (!deps.canRepair())
+  const canContinue = () => deps.canRepair() && !deps.signal?.aborted
+  if (!canContinue())
     return 'skipped'
 
   const granted = await deps.requireLoginPermission()
-  if (!granted || !deps.canRepair())
+  if (!granted || !canContinue())
     return 'skipped'
 
   deps.manager.reset()
@@ -109,42 +112,89 @@ export async function runTopologyProbeRepair(deps: TopologyRepairDeps): Promise<
 
   const repairs = (await Promise.all(deps.manager.routes.map(route => planRouteRepair(route).catch(() => null))))
     .filter((repair): repair is PlannedProbeRepair => repair !== null)
-  if (!repairs.length || !deps.canRepair())
+  if (!repairs.length || !canContinue())
     return 'no-op'
 
   let outcome: TopologyRepairOutcome = 'no-op'
-  await deps.manager.withSaveLock(async () => {
-    if (!deps.canRepair())
-      return
-    await deps.manager.preflightSave()
-    if (!deps.canRepair())
-      return
-
-    for (const repair of repairs) {
-      if (!deps.canRepair())
+  const createdTaskIds = new Set<number>()
+  let saveAttempted = false
+  try {
+    await deps.manager.withSaveLock(async () => {
+      if (!canContinue())
         return
-      // 锁内重新规划一次：另一个标签页可能已经在拿到锁之前改了这条线路。必须
-      // 绕过任务列表缓存，否则这一次读到的还是拿锁前的同一份快照，等于没查。
-      const latestRepair = await planRouteRepair(repair.route, { fresh: true })
-      if (!latestRepair)
-        continue
-      const metric = latestRepair.route.metrics[1]
-      if (!metric?.live)
-        continue
-      const taskName = latestRepair.needsCreation
-        ? (await deps.ensureTopologyPingTask(latestRepair.source, latestRepair.landing, { probe: latestRepair.probe })).task.name
-        : latestRepair.taskName
-      if (!deps.canRepair())
+      await deps.manager.preflightSave()
+      if (!canContinue())
         return
-      metric.nodeName = latestRepair.source.name
-      metric.taskFilter = taskName
-    }
 
-    if (deps.manager.dirty && deps.canRepair()) {
-      await deps.manager.save({ lockHeld: true })
-      outcome = 'repaired'
-    }
-  })
+      for (const repair of repairs) {
+        if (!canContinue())
+          return
+        // 锁内重新规划一次：另一个标签页可能已经在拿到锁之前改了这条线路。必须
+        // 绕过任务列表缓存，否则这一次读到的还是拿锁前的同一份快照，等于没查。
+        const latestRepair = await planRouteRepair(repair.route, { fresh: true })
+        if (!latestRepair)
+          continue
+        const metric = latestRepair.route.metrics[1]
+        if (!metric?.live)
+          continue
+        let taskName = latestRepair.taskName
+        if (latestRepair.needsCreation) {
+          const ensured = await deps.ensureTopologyPingTask(latestRepair.source, latestRepair.landing, {
+            probe: latestRepair.probe,
+            signal: deps.signal,
+          })
+          taskName = ensured.task.name
+          if (ensured.created && Number.isInteger(ensured.task.id))
+            createdTaskIds.add(ensured.task.id!)
+        }
+        if (!canContinue())
+          return
+        metric.nodeName = latestRepair.source.name
+        metric.taskFilter = taskName
+      }
+
+      if (deps.manager.dirty && canContinue()) {
+        // Task creation is a separate RPC from the theme save. Recheck auth and
+        // the expected topology snapshot once more before starting the write;
+        // if this fails, the finally block can safely remove tasks created above.
+        await deps.manager.preflightSave()
+        if (!canContinue())
+          return
+        saveAttempted = true
+        try {
+          const result = await deps.manager.save({ lockHeld: true })
+          if (result === 'saved' || result === 'changed') {
+            outcome = 'repaired'
+          }
+          else {
+            saveAttempted = false
+          }
+        }
+        catch (error) {
+          // If the old expected snapshot is still current, the save definitely
+          // did not persist and newly created tasks are safe to remove. If this
+          // check fails, persistence is ambiguous; preserve the task because a
+          // successful POST followed by a failed verification may already bind it.
+          try {
+            await deps.manager.preflightSave()
+            saveAttempted = false
+          }
+          catch {
+          }
+          throw error
+        }
+      }
+      else if (!deps.manager.dirty) {
+        // The server snapshot already contains this task name. Creating the
+        // missing task alone completed the repair, so it must not be cleaned up.
+        createdTaskIds.clear()
+      }
+    })
+  }
+  finally {
+    if (!saveAttempted && createdTaskIds.size)
+      await deps.deleteTopologyPingTasks([...createdTaskIds])
+  }
 
   return outcome
 }

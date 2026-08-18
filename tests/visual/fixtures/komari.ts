@@ -54,6 +54,7 @@ export interface VisualFixtureOptions {
   quickTopologyPresetConflict?: boolean
   quickTopologyTaskFailure?: boolean
   quickTopologyTaskDelayMs?: number
+  quickTopologyMutationDelayMs?: number
   quickTopologyNoTasks?: boolean
   quickTopologyNoAddress?: boolean
   /**
@@ -530,6 +531,8 @@ async function handleRpc(
       break
     }
     case 'admin:addPingTask':
+      if (options.quickTopologyMutationDelayMs)
+        await new Promise(resolve => setTimeout(resolve, options.quickTopologyMutationDelayMs))
       adminPingTasks.push({
         id: Math.max(100, ...adminPingTasks.map(task => Number(task.id) || 0)) + 1,
         weight: adminPingTasks.length,

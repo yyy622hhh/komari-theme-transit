@@ -205,4 +205,59 @@ describe('useTopologyTaskCatalog', () => {
       restore()
     }
   })
+
+  test('reset isolates a late response from the previous dialog session', async () => {
+    const originalFetch = globalThis.fetch
+    let listCalls = 0
+    let releaseOld!: (response: Response) => void
+    let markOldStarted!: () => void
+    const oldStarted = new Promise<void>((resolve) => {
+      markOldStarted = resolve
+    })
+    const oldResponse = new Promise<Response>((resolve) => {
+      releaseOld = resolve
+    })
+    globalThis.fetch = mock(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (!init?.body)
+        return new Response(JSON.stringify({ logged_in: true, username: 'admin' }))
+      const request = JSON.parse(String(init.body)) as { id: number, method: string }
+      if (request.method !== 'admin:getAllPingTasks')
+        throw new Error(`Unexpected RPC method: ${request.method}`)
+      listCalls += 1
+      if (listCalls === 1) {
+        markOldStarted()
+        return oldResponse
+      }
+      return new Response(JSON.stringify({
+        jsonrpc: '2.0',
+        id: request.id,
+        result: [{ id: 2, name: 'new-session', clients: [relay.uuid], type: 'icmp', target: '203.0.113.21', interval: 30 }],
+      }), { headers: { 'Content-Type': 'application/json' } })
+    }) as typeof fetch
+
+    try {
+      let settledCount = 0
+      const catalog = useTopologyTaskCatalog(nodes, noAmbiguity, () => {
+        settledCount += 1
+      })
+      const oldLoad = catalog.loadTasks(relay.name)
+      await oldStarted
+      catalog.reset()
+      const newLoad = await catalog.loadTasks(relay.name)
+      releaseOld(new Response(JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        result: [{ id: 1, name: 'old-session', clients: [relay.uuid], type: 'icmp', target: '203.0.113.20', interval: 30 }],
+      }), { headers: { 'Content-Type': 'application/json' } }))
+      await oldLoad
+
+      expect(newLoad.tasks).toEqual(['new-session'])
+      expect(catalog.taskOptions.value[relay.uuid]).toEqual(['new-session'])
+      expect(settledCount).toBe(1)
+      expect(listCalls).toBe(2)
+    }
+    finally {
+      globalThis.fetch = originalFetch
+    }
+  })
 })

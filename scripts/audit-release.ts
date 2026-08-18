@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import process from 'node:process'
+import { hasChangelogVersionHeading } from './changelog'
 
 const WHITESPACE_PATTERN = /\s+/
 const TEST_ARTIFACT_PATTERN = /ComponentErrorBoundaryProbe|component-boundary-test/i
@@ -58,9 +59,8 @@ const previewMatches = digest(packagedPreview) === digest(sourcePreview)
 
 const sourceVersion = typeof sourceManifest.version === 'string' ? sourceManifest.version : ''
 const changelogPath = resolve(process.cwd(), 'CHANGELOG.md')
-const changelogHasVersionEntry = sourceVersion.length > 0
-  && existsSync(changelogPath)
-  && new RegExp(`^## \\[${sourceVersion.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\]`, 'm').test(readFileSync(changelogPath, 'utf8'))
+const changelogText = existsSync(changelogPath) ? readFileSync(changelogPath, 'utf8') : ''
+const changelogHasVersionEntry = hasChangelogVersionHeading(changelogText, sourceVersion)
 
 if (
   unexpectedTopLevel.length

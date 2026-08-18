@@ -1328,6 +1328,37 @@ test('Transit topology quick generation discards delayed work after closing', as
   await expect(dialog.locator('[data-topology-route-id]')).toHaveCount(2)
 })
 
+test('Transit topology removes a task committed while its editor is closing', async ({ page }) => {
+  const deletedTaskIds: number[][] = []
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, {
+    opsDashboard: true,
+    authenticated: true,
+    emptyTopology: true,
+    quickTopologyNoTasks: true,
+    quickTopologyMutationDelayMs: 500,
+  })
+  page.on('request', (request) => {
+    if (request.method() !== 'POST' || !request.url().endsWith('/api/rpc2'))
+      return
+    const payload = request.postDataJSON() as { method: string, params?: Record<string, unknown> }
+    if (payload.method === 'admin:deletePingTask')
+      deletedTaskIds.push((payload.params?.id as number[] | undefined) ?? [])
+  })
+  await openStablePage(page)
+
+  const dialog = await openTopologyManager(page, 'empty')
+  const mutationStarted = page.waitForRequest(request => request.method() === 'POST'
+    && request.url().endsWith('/api/rpc2')
+    && request.postDataJSON().method === 'admin:addPingTask')
+  await dialog.getByRole('button', { name: '添加线路' }).click()
+  await mutationStarted
+  await dialog.getByRole('button', { name: '关闭' }).click()
+
+  await expect(dialog).toBeHidden()
+  await expect.poll(() => deletedTaskIds.flat()).toContain(101)
+})
+
 test('Transit topology save cannot close or overwrite a reopened editor session', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await installKomariFixture(page, {

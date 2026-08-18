@@ -1,9 +1,9 @@
 import type { MaybeRefOrGetter } from 'vue'
 import type { NodeData } from '@/stores/nodes'
-import { onScopeDispose, ref, toValue } from 'vue'
+import { onScopeDispose, ref, toValue, watch } from 'vue'
 import { useTopologyManager } from '@/composables/useTopologyManager'
 import { OPS_TOPOLOGY_HOP_PROBE } from '@/constants/ops'
-import { ensureTopologyPingTask } from '@/services/ping-task.service'
+import { deleteTopologyPingTasks, ensureTopologyPingTask } from '@/services/ping-task.service'
 import { planWorkingHopTask } from '@/services/topology-probe.service'
 import { canRunTopologyProbeRepair, runTopologyProbeRepair } from '@/services/topology-repair.service'
 import { useAppStore } from '@/stores/app'
@@ -26,6 +26,7 @@ export function useTopologyProbeRepair(
   const repairing = ref(false)
   let disposed = false
   let timer: ReturnType<typeof setInterval> | null = null
+  let activeController: AbortController | null = null
 
   function canRepair(): boolean {
     return canRunTopologyProbeRepair({
@@ -41,6 +42,8 @@ export function useTopologyProbeRepair(
       return
 
     repairing.value = true
+    const controller = new AbortController()
+    activeController = controller
     try {
       await runTopologyProbeRepair({
         nodes: () => toValue(nodes),
@@ -57,12 +60,16 @@ export function useTopologyProbeRepair(
         },
         planWorkingHopTask,
         ensureTopologyPingTask,
+        deleteTopologyPingTasks,
+        signal: controller.signal,
       })
     }
     catch {
       // Background repair is best-effort; auth services synchronize expired sessions.
     }
     finally {
+      if (activeController === controller)
+        activeController = null
       repairing.value = false
     }
   }
@@ -75,8 +82,14 @@ export function useTopologyProbeRepair(
     }, OPS_TOPOLOGY_HOP_PROBE.recheckIntervalMs)
   }
 
+  watch(canRepair, (available) => {
+    if (!available)
+      activeController?.abort()
+  })
+
   onScopeDispose(() => {
     disposed = true
+    activeController?.abort()
     if (timer !== null)
       clearInterval(timer)
   })

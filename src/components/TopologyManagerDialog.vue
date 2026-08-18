@@ -257,6 +257,14 @@ async function retireReplacedTasks(): Promise<void> {
   }
 }
 
+async function cleanupCreatedTasks(taskIds: ReadonlySet<number>): Promise<void> {
+  const ids = [...taskIds]
+  if (!ids.length || !await deleteTopologyPingTasks(ids))
+    return
+  for (const id of ids)
+    sessionCreatedTaskIds.delete(id)
+}
+
 function selectRouteNode(route: TopologyRouteConfig, index: number, nodeName: string): void {
   if (index > 0) {
     clearPendingRouteTask(route.id)
@@ -396,6 +404,8 @@ async function persistRoutes(options: {
     const session = dialogSession
     const runId = options.runId ?? quickConfigurationRun
     const controller = new AbortController()
+    const createdTaskIds = new Set<number>()
+    let saveAttempted = false
     saveTaskController = controller
     persisting.value = true
     try {
@@ -419,10 +429,14 @@ async function persistRoutes(options: {
             throw new Error('待创建 Ping 任务对应的线路段已变化，请重新选择。')
           }
           const ensured = await ensureTopologyPingTask(source, target, { probe: pending.probe, signal: controller.signal })
-          if (runId !== quickConfigurationRun || session !== dialogSession || !props.open)
-            return 'cancelled' as const
-          if (ensured.created && Number.isInteger(ensured.task.id))
+          if (ensured.created && Number.isInteger(ensured.task.id)) {
             sessionCreatedTaskIds.add(ensured.task.id!)
+            createdTaskIds.add(ensured.task.id!)
+          }
+          if (runId !== quickConfigurationRun || session !== dialogSession || !props.open) {
+            await cleanupCreatedTasks(createdTaskIds)
+            return 'cancelled' as const
+          }
           const metric = route.metrics[1]!
           metric.nodeName = source.name
           metric.taskFilter = ensured.task.name
@@ -430,9 +444,26 @@ async function persistRoutes(options: {
           rememberTask(source.uuid, ensured.task.name)
           clearPendingRouteTask(route.id)
         }
-        if (runId !== quickConfigurationRun || session !== dialogSession || !props.open)
+        if (runId !== quickConfigurationRun || session !== dialogSession || !props.open) {
+          await cleanupCreatedTasks(createdTaskIds)
           return 'cancelled' as const
-        return manager.save({ lockHeld })
+        }
+        if (createdTaskIds.size) {
+          await manager.preflightSave()
+          if (runId !== quickConfigurationRun || session !== dialogSession || !props.open) {
+            await cleanupCreatedTasks(createdTaskIds)
+            return 'cancelled' as const
+          }
+        }
+        saveAttempted = true
+        const saveResult = await manager.save({ lockHeld })
+        if (saveResult === 'invalid') {
+          saveAttempted = false
+          await cleanupCreatedTasks(createdTaskIds)
+          return saveResult
+        }
+        createdTaskIds.clear()
+        return saveResult
       }
       const hasPendingTasks = manager.routes.some(route => Boolean(pendingRouteTasks.value[route.id]))
       const result = hasPendingTasks
@@ -455,6 +486,19 @@ async function persistRoutes(options: {
       return result
     }
     catch (error) {
+      if (createdTaskIds.size && !saveAttempted) {
+        await cleanupCreatedTasks(createdTaskIds)
+      }
+      else if (createdTaskIds.size) {
+        try {
+          await manager.preflightSave()
+          await cleanupCreatedTasks(createdTaskIds)
+        }
+        catch {
+          // Persistence is ambiguous after a write starts; keep tasks that may
+          // already be referenced by the server-side topology snapshot.
+        }
+      }
       if (isAbortError(error) || session !== dialogSession || !props.open)
         return 'cancelled'
       window.$message?.error(error instanceof Error ? error.message : '拓扑保存失败。')

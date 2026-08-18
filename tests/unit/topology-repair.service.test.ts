@@ -86,6 +86,7 @@ function createDeps(overrides: Partial<TopologyRepairDeps> & { manager: Topology
     requireLoginPermission: async () => true,
     planWorkingHopTask: async () => hopPlan(),
     ensureTopologyPingTask: async () => ({ task: hopPlan().task, created: false }),
+    deleteTopologyPingTasks: async () => true,
     ...overrides,
   }
 }
@@ -217,7 +218,7 @@ describe('runTopologyProbeRepair persistence', () => {
       }),
     }))
     expect(outcome).toBe('repaired')
-    expect(log.preflightSaveCalls).toBe(1)
+    expect(log.preflightSaveCalls).toBe(2)
     expect(log.saveCalls).toEqual([{ lockHeld: true }])
     expect(staleRoute.metrics[1]?.taskFilter).toBe('Transit-Relay-JP-to-Exit-SG')
     expect(staleRoute.metrics[1]?.nodeName).toBe(relay.name)
@@ -307,6 +308,98 @@ describe('runTopologyProbeRepair persistence', () => {
     expect(log.preflightSaveCalls).toBe(0)
     expect(log.saveCalls).toEqual([])
     expect(staleRoute.metrics[1]?.taskFilter).toBe('stale-name')
+  })
+
+  test('removes a task created just before the repair is cancelled', async () => {
+    const staleRoute = route({ taskFilter: 'stale-name' })
+    const { manager, log } = createManager([staleRoute])
+    let available = true
+    const deleted: number[][] = []
+    const outcome = await runTopologyProbeRepair(createDeps({
+      manager,
+      canRepair: () => available,
+      planWorkingHopTask: async () => hopPlan({ needsCreation: true, task: { ...hopPlan().task, name: 'created-task' } }),
+      ensureTopologyPingTask: async () => {
+        available = false
+        return { task: { ...hopPlan().task, id: 42, name: 'created-task' }, created: true }
+      },
+      deleteTopologyPingTasks: async (ids) => {
+        deleted.push([...ids])
+        return true
+      },
+    }))
+
+    expect(outcome).toBe('no-op')
+    expect(log.saveCalls).toEqual([])
+    expect(deleted).toEqual([[42]])
+  })
+
+  test('removes newly created tasks when the final preflight no longer permits saving', async () => {
+    const staleRoute = route({ taskFilter: 'stale-name' })
+    const { manager, log } = createManager([staleRoute])
+    manager.preflightSave = async () => {
+      log.preflightSaveCalls += 1
+      if (log.preflightSaveCalls === 2)
+        throw new Error('登录状态已过期，请重新登录后保存。')
+    }
+    const deleted: number[][] = []
+    await expect(runTopologyProbeRepair(createDeps({
+      manager,
+      planWorkingHopTask: async () => hopPlan({ needsCreation: true, task: { ...hopPlan().task, name: 'created-task' } }),
+      ensureTopologyPingTask: async () => ({ task: { ...hopPlan().task, id: 43, name: 'created-task' }, created: true }),
+      deleteTopologyPingTasks: async (ids) => {
+        deleted.push([...ids])
+        return true
+      },
+    }))).rejects.toThrow('登录状态已过期')
+    expect(log.saveCalls).toEqual([])
+    expect(deleted).toEqual([[43]])
+  })
+
+  test('removes newly created tasks when saving fails before the expected snapshot changes', async () => {
+    const staleRoute = route({ taskFilter: 'stale-name' })
+    const { manager, log } = createManager([staleRoute])
+    manager.save = async (options) => {
+      log.saveCalls.push(options)
+      throw new Error('保存失败（HTTP 500）')
+    }
+    const deleted: number[][] = []
+    await expect(runTopologyProbeRepair(createDeps({
+      manager,
+      planWorkingHopTask: async () => hopPlan({ needsCreation: true, task: { ...hopPlan().task, name: 'created-task' } }),
+      ensureTopologyPingTask: async () => ({ task: { ...hopPlan().task, id: 44, name: 'created-task' }, created: true }),
+      deleteTopologyPingTasks: async (ids) => {
+        deleted.push([...ids])
+        return true
+      },
+    }))).rejects.toThrow('保存失败')
+    expect(log.preflightSaveCalls).toBe(3)
+    expect(deleted).toEqual([[44]])
+  })
+
+  test('keeps newly created tasks when a failed save has ambiguous persistence', async () => {
+    const staleRoute = route({ taskFilter: 'stale-name' })
+    const { manager, log } = createManager([staleRoute])
+    manager.save = async (options) => {
+      log.saveCalls.push(options)
+      throw new Error('写入后校验失败')
+    }
+    manager.preflightSave = async () => {
+      log.preflightSaveCalls += 1
+      if (log.preflightSaveCalls === 3)
+        throw new Error('拓扑配置已被其他会话修改')
+    }
+    const deleted: number[][] = []
+    await expect(runTopologyProbeRepair(createDeps({
+      manager,
+      planWorkingHopTask: async () => hopPlan({ needsCreation: true, task: { ...hopPlan().task, name: 'created-task' } }),
+      ensureTopologyPingTask: async () => ({ task: { ...hopPlan().task, id: 45, name: 'created-task' }, created: true }),
+      deleteTopologyPingTasks: async (ids) => {
+        deleted.push([...ids])
+        return true
+      },
+    }))).rejects.toThrow('写入后校验失败')
+    expect(deleted).toEqual([])
   })
 
   test('does not save when nothing ends up dirty even though repairs were planned', async () => {

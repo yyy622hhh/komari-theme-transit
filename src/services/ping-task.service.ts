@@ -1,5 +1,5 @@
 import { CACHE_CONFIG } from '@/constants/cache'
-import { requirePermission, setAuthSessionFromLogin } from '@/services/auth.service'
+import { isAuthenticated, requirePermission, setAuthSessionFromLogin, subscribeAuthSession } from '@/services/auth.service'
 import { SharedCache } from '@/services/cache.service'
 import { invalidatePublicPingTasksCache } from '@/services/metrics.service'
 import { requestManager } from '@/services/request.service'
@@ -240,15 +240,15 @@ export function findTopologyPingTaskByName(
   return matches.length === 1 ? matches[0] : undefined
 }
 
-async function assertPingTaskPermission(): Promise<void> {
-  const permission = await requirePermission('advancedTools', { force: true })
+async function assertPingTaskPermission(force = true): Promise<void> {
+  const permission = await requirePermission('advancedTools', { force })
   if (!permission.granted)
     throw new Error('登录状态已过期，请重新登录后管理 Ping 任务。')
 }
 
-async function fetchAdminPingTasks(signal?: AbortSignal): Promise<AdminPingTask[]> {
+async function fetchAdminPingTasks(signal?: AbortSignal, requestKey = 'admin:ping:list'): Promise<AdminPingTask[]> {
   try {
-    return await requestManager.run('admin:ping:list', async (requestSignal) => {
+    return await requestManager.run(requestKey, async (requestSignal) => {
       const tasks = await getSharedRpc().getAllPingTasks(requestSignal)
       return tasks.map(task => ({
         ...task,
@@ -268,9 +268,15 @@ const adminPingTasksCache = new SharedCache<AdminPingTask[]>({
   maxSize: CACHE_CONFIG.adminPingTasks.maxSize,
   ttl: CACHE_CONFIG.adminPingTasks.ttl,
 })
+let adminPingTasksCacheGeneration = 0
+
+subscribeAuthSession(() => {
+  invalidateAdminPingTasksCache()
+})
 
 /** 让下次 {@link loadAdminPingTasks} 强制重新拉取——创建或删除任务后调用。 */
 export function invalidateAdminPingTasksCache(): void {
+  adminPingTasksCacheGeneration += 1
   adminPingTasksCache.clear()
 }
 
@@ -279,27 +285,46 @@ export function invalidateAdminPingTasksCache(): void {
  *
  * 后台自愈每轮都会对多条线路各查一次这台线路机的任务列表；不缓存的话，权限
  * 强制重新校验（`force: true`）和 `admin:getAllPingTasks` 都会跟着线路数线
- * 性增长。命中缓存时两者都跳过。写路径（`ensureTopologyPingTask` 创建后回查
- * 确认）必须看到最新列表，走的是不缓存的 {@link fetchAdminPingTasks}。
+ * 性增长。命中缓存时跳过任务 RPC，只做认证 TTL 内的本地会话检查。写路径
+ * （`ensureTopologyPingTask` 创建后回查确认）必须看到最新列表，走的是不缓存
+ * 且使用独立请求键的 {@link fetchAdminPingTasks}。
  *
  * `options.fresh` 供需要跨标签页可见性的调用方使用：拿到保存锁之后重新规划
  * 一次（防止另一个标签页在拿锁前改过这条线路）就必须绕过缓存，否则两次规划
  * 读到的是同一份快照，锁内重新检查形同虚设。
  */
-export async function loadAdminPingTasks(options: { fresh?: boolean } = {}): Promise<AdminPingTask[]> {
+export async function loadAdminPingTasks(options: { fresh?: boolean, requestKey?: string } = {}): Promise<AdminPingTask[]> {
   if (!options.fresh) {
     const cached = adminPingTasksCache.get(ADMIN_PING_TASKS_CACHE_KEY)
-    if (cached)
-      return cached
+    if (cached) {
+      const generation = adminPingTasksCacheGeneration
+      await assertPingTaskPermission(false)
+      if (
+        generation === adminPingTasksCacheGeneration
+        && adminPingTasksCache.get(ADMIN_PING_TASKS_CACHE_KEY) === cached
+      ) {
+        return cached
+      }
+    }
   }
   await assertPingTaskPermission()
-  return adminPingTasksCache.set(ADMIN_PING_TASKS_CACHE_KEY, await fetchAdminPingTasks())
+  const generation = ++adminPingTasksCacheGeneration
+  const tasks = await fetchAdminPingTasks(
+    undefined,
+    options.requestKey ?? (options.fresh ? `admin:ping:list:fresh:${generation}` : ADMIN_PING_TASKS_CACHE_KEY),
+  )
+  if (generation === adminPingTasksCacheGeneration && isAuthenticated())
+    adminPingTasksCache.set(ADMIN_PING_TASKS_CACHE_KEY, tasks)
+  return tasks
 }
 
-export async function loadAdminPingTaskNamesForNode(nodeUuid: string): Promise<string[]> {
+export async function loadAdminPingTaskNamesForNode(
+  nodeUuid: string,
+  options: { fresh?: boolean, requestKey?: string } = {},
+): Promise<string[]> {
   if (!nodeUuid.trim())
     return []
-  const tasks = await loadAdminPingTasks()
+  const tasks = await loadAdminPingTasks(options)
   const names = tasks
     .filter(task => isPingTaskAssignedToSource(task, nodeUuid) && SUPPORTED_PING_TASK_TYPES.has(task.type.toLowerCase()))
     .map(task => task.name.trim())
@@ -399,14 +424,13 @@ async function createTopologyPingTask(
   target: TopologyPingEndpoint,
   tasks: readonly AdminPingTask[],
   probe: TopologyHopProbe,
-  signal?: AbortSignal,
 ): Promise<void> {
   const draft = draftTopologyPingTask(source, target, probe, tasks)
   const body = { ...draft, default_on: draft.default_on ?? false }
   await requestManager.run(
     `admin:ping:add:${source.uuid}:${target.uuid}:${describeTopologyHopProbe(probe)}`,
     requestSignal => getSharedRpc().addPingTask(body, requestSignal),
-    { retryAttempts: 0, signal },
+    { retryAttempts: 0 },
   )
   invalidatePublicPingTasksCache()
   invalidateAdminPingTasksCache()
@@ -428,10 +452,6 @@ export async function planTopologyPingTask(
   return { task: draftTopologyPingTask(source, target, probe, tasks), needsCreation: true }
 }
 
-function isAbortError(error: unknown): boolean {
-  return error instanceof Error && error.name === 'AbortError'
-}
-
 export async function ensureTopologyPingTask(
   source: TopologyPingEndpoint,
   target: TopologyPingEndpoint,
@@ -449,28 +469,33 @@ export async function ensureTopologyPingTask(
     throwIfAborted(signal)
     await assertPingTaskPermission()
     throwIfAborted(signal)
-    let tasks = await fetchAdminPingTasks(signal)
+    let tasks = await fetchAdminPingTasks(signal, `admin:ping:list:ensure:${requestKey}:before`)
     const existing = findTopologyPingTask(tasks, source.uuid, target, probe)
     if (existing)
       return { task: existing, created: false }
 
+    throwIfAborted(signal)
     try {
-      await createTopologyPingTask(source, target, tasks, probe, signal)
+      // Once the mutation starts it must run through the confirming read. An
+      // abort after the server commits but before the response arrives cannot
+      // prove whether the task exists; returning its ID lets the caller either
+      // bind it or compensate by deleting it.
+      await createTopologyPingTask(source, target, tasks, probe)
     }
     catch (error) {
-      if (signal?.aborted || isAbortError(error))
-        throw error
       if (isRpcPermissionError(error))
         handlePingPermissionError(error)
-      // A second tab may have created the same source/target task concurrently.
-      tasks = await fetchAdminPingTasks(signal)
+      // The response may fail after the server commits. Reconcile without the
+      // caller's abort signal before deciding whether this was a real failure;
+      // a second tab may also have created the same task concurrently.
+      tasks = await fetchAdminPingTasks(undefined, `admin:ping:list:ensure:${requestKey}:retry`)
       const concurrent = findTopologyPingTask(tasks, source.uuid, target, probe)
       if (concurrent)
         return { task: concurrent, created: false }
       throw error
     }
 
-    tasks = await fetchAdminPingTasks(signal)
+    tasks = await fetchAdminPingTasks(undefined, `admin:ping:list:ensure:${requestKey}:after`)
     const created = findTopologyPingTask(tasks, source.uuid, target, probe)
     if (!created)
       throw new Error('Ping 任务已提交，但服务器未返回对应任务，请稍后重试。')

@@ -22,12 +22,16 @@ export function useTopologyTaskCatalog(
   const taskErrors = ref<Record<string, string>>({})
   const taskLoaded = ref<Record<string, boolean>>({})
   const taskRequests = new Map<string, Promise<TopologyTaskLoadResult>>()
+  let generation = 0
+  let refreshedGeneration = -1
 
   function reset(): void {
+    generation += 1
     taskOptions.value = {}
     taskErrors.value = {}
     taskLoaded.value = {}
     taskRequests.clear()
+    refreshedGeneration = -1
   }
 
   async function loadTasks(nodeName: string): Promise<TopologyTaskLoadResult> {
@@ -42,15 +46,25 @@ export function useTopologyTaskCatalog(
     if (!taskOptions.value[node.uuid])
       taskLoaded.value = { ...taskLoaded.value, [node.uuid]: false }
     taskErrors.value = { ...taskErrors.value, [node.uuid]: '' }
+    const requestGeneration = generation
+    const needsRefresh = refreshedGeneration !== requestGeneration
 
-    const request = (async () => {
+    const request = Promise.resolve().then(async () => {
       try {
-        const tasks = await loadAdminPingTaskNamesForNode(node.uuid)
+        const tasks = await loadAdminPingTaskNamesForNode(node.uuid, needsRefresh
+          ? { fresh: true, requestKey: `admin:ping:list:catalog:${requestGeneration}` }
+          : {})
+        if (requestGeneration !== generation)
+          return { tasks: [], error: '' }
+        if (needsRefresh)
+          refreshedGeneration = requestGeneration
         taskOptions.value = { ...taskOptions.value, [node.uuid]: tasks }
         taskLoaded.value = { ...taskLoaded.value, [node.uuid]: true }
         return { tasks, error: '' }
       }
       catch (error) {
+        if (requestGeneration !== generation)
+          return { tasks: [], error: '' }
         const detail = error instanceof Error ? error.message : ''
         const message = detail.includes('登录状态已过期')
           ? detail
@@ -62,10 +76,12 @@ export function useTopologyTaskCatalog(
         return { tasks: [], error: message }
       }
       finally {
-        taskRequests.delete(node.uuid)
-        onRequestSettled?.()
+        if (taskRequests.get(node.uuid) === request)
+          taskRequests.delete(node.uuid)
+        if (requestGeneration === generation)
+          onRequestSettled?.()
       }
-    })()
+    })
     taskRequests.set(node.uuid, request)
     return request
   }
