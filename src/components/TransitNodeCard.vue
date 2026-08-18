@@ -65,34 +65,32 @@ const alertTone = computed(() => visibleAlert.value?.severity === 'critical'
   : 'text-amber-700 dark:text-amber-300')
 const statusEdgeTone = computed(() => {
   if (isMaintenance.value)
-    return 'bg-amber-500 dark:bg-amber-300'
+    return 'var(--warning)'
   if (visibleAlert.value?.severity === 'critical')
-    return 'bg-rose-500 dark:bg-rose-400'
+    return 'var(--destructive)'
   if (visibleAlert.value)
-    return 'bg-amber-500 dark:bg-amber-300'
-  return 'bg-emerald-500 dark:bg-emerald-400'
+    return 'var(--warning)'
+  return 'var(--success)'
 })
+const statusEdgeStyle = computed(() => props.node.online
+  ? { borderLeftColor: statusEdgeTone.value, borderLeftWidth: '3px' }
+  : undefined)
 </script>
 
 <template>
   <article
     :data-transit-node-card-size="appStore.nodeCardSize"
-    class="transit-node-card group relative h-full min-w-0 cursor-pointer overflow-hidden rounded-2xl p-3.5 pl-5 transition duration-200 hover:-translate-y-px hover:border-emerald-400/25"
+    :data-node-status-edge="node.online ? '' : undefined"
+    :data-node-alert-edge="node.online && visibleAlert ? '' : undefined"
+    class="transit-node-card group relative h-full min-w-0 cursor-pointer overflow-hidden rounded-2xl p-3.5 pl-6 transition duration-200 hover:-translate-y-px hover:border-emerald-400/25"
     :class="!node.online ? 'opacity-75' : ''"
+    :style="statusEdgeStyle"
   >
     <button
       type="button"
       class="absolute inset-0 z-0 cursor-pointer rounded-2xl border-0 bg-transparent p-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-400/70"
       :aria-label="`查看节点 ${node.name} 详情`"
       @click="emit('click')"
-    />
-
-    <span
-      v-if="node.online"
-      data-node-status-edge
-      :data-node-alert-edge="visibleAlert ? '' : undefined"
-      class="pointer-events-none absolute inset-y-3 -left-px z-1 w-[3px] rounded-r-full"
-      :class="statusEdgeTone"
     />
 
     <header class="transit-node-card__header pointer-events-none relative z-1 min-h-[2.65rem]">
@@ -307,7 +305,7 @@ const statusEdgeTone = computed(() => {
 
 .transit-node-card[data-transit-node-card-size='mini'] {
   padding: 0.75rem;
-  padding-left: 1.125rem;
+  padding-left: 1.375rem;
 }
 
 .transit-node-card[data-transit-node-card-size='mini'] [data-node-resource-grid] {
@@ -320,11 +318,11 @@ const statusEdgeTone = computed(() => {
 
 .transit-node-card[data-transit-node-card-size='comfortable'] {
   padding: 1rem;
-  padding-left: 1.375rem;
+  padding-left: 1.625rem;
 }
 
 .transit-node-card[data-transit-node-card-size='large'] {
   padding: 1.1rem;
-  padding-left: 1.475rem;
+  padding-left: 1.75rem;
 }
 </style>

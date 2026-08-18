@@ -488,22 +488,18 @@ test('Transit desktop topology and cards remain contained', async ({ page }) => 
   await expect(nodeCardSurface.locator('.transit-node-card__header')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
   await expect(nodeCardSurface.locator('.transit-node-card__header')).toHaveCSS('border-bottom-width', '0px')
   const healthyCard = page.getByRole('button', { name: '查看节点 香港边缘节点-超长名称布局测试 详情' }).locator('xpath=..')
-  await expect(healthyCard.locator('[data-node-status-edge]')).toHaveClass(/bg-emerald-500/)
-  await expect(healthyCard.locator('[data-node-status-edge]')).toHaveCSS('width', '3px')
-  await expect(healthyCard.locator('[data-node-alert-edge]')).toHaveCount(0)
+  await expect(healthyCard).toHaveAttribute('data-node-status-edge', '')
+  await expect(healthyCard).not.toHaveAttribute('data-node-alert-edge', '')
+  await expect(healthyCard).toHaveCSS('border-left-width', '3px')
+  await expect(healthyCard).toHaveCSS('border-left-style', 'solid')
   await expect.poll(() => healthyCard.evaluate((card) => {
-    const edge = card.querySelector<HTMLElement>('[data-node-status-edge]')
-    if (!edge)
-      return Number.POSITIVE_INFINITY
-    return Math.abs(edge.getBoundingClientRect().left - card.getBoundingClientRect().left)
-  })).toBeLessThanOrEqual(0.5)
-  await expect.poll(() => healthyCard.evaluate((card) => {
-    const edge = card.querySelector<HTMLElement>('[data-node-status-edge]')
     const name = card.querySelector<HTMLElement>('[data-node-name]')
-    if (!edge || !name)
+    if (!name)
       return Number.NEGATIVE_INFINITY
-    return name.getBoundingClientRect().left - edge.getBoundingClientRect().right
-  })).toBeGreaterThanOrEqual(16)
+    const cardBox = card.getBoundingClientRect()
+    const borderWidth = Number.parseFloat(getComputedStyle(card).borderLeftWidth)
+    return name.getBoundingClientRect().left - cardBox.left - borderWidth
+  })).toBeGreaterThanOrEqual(22)
   await expect.poll(() => healthyCard.evaluate((card) => {
     const name = card.querySelector<HTMLElement>('[data-node-name]')
     const content = card.querySelector<HTMLElement>('[data-node-resource-grid]')
@@ -541,9 +537,9 @@ test('Transit desktop topology and cards remain contained', async ({ page }) => 
   const alertReason = alertCard.locator('[data-node-alert-reason]')
   await expect(alertReason).toBeVisible()
   await expect(alertReason).toHaveCSS('border-top-width', '0px')
-  await expect(alertCard.locator('[data-node-alert-edge]')).toBeVisible()
-  await expect(alertCard.locator('[data-node-status-edge]')).toHaveClass(/bg-rose-500/)
-  await expect(plainCard.locator('[data-node-status-edge]')).toHaveCount(0)
+  await expect(alertCard).toHaveAttribute('data-node-alert-edge', '')
+  await expect(alertCard).toHaveCSS('border-left-width', '3px')
+  await expect(plainCard).not.toHaveAttribute('data-node-status-edge', '')
   await expect(plainCard.locator('[data-node-alert-reason]')).toHaveCount(0)
   await alertReason.hover()
   await expect(page.locator('[data-node-alert-tooltip]')).toContainText('CPU 96.4%')
@@ -2197,12 +2193,13 @@ test('Transit worst-case node cards remain complete and responsive across densit
     await expect(name).toHaveAttribute('title', '北京联通精品线路-日本东京-A100-超长节点名称完整展示压力测试')
     await expect.poll(() => name.evaluate(element => element.getBoundingClientRect().height <= Number.parseFloat(getComputedStyle(element).lineHeight) * 2 + 1)).toBe(true)
     await expect.poll(() => card.evaluate((element) => {
-      const edge = element.querySelector<HTMLElement>('[data-node-status-edge]')
       const nodeName = element.querySelector<HTMLElement>('[data-node-name]')
-      if (!edge || !nodeName)
+      if (!nodeName)
         return Number.NEGATIVE_INFINITY
-      return nodeName.getBoundingClientRect().left - edge.getBoundingClientRect().right
-    })).toBeGreaterThanOrEqual(14)
+      const cardBox = element.getBoundingClientRect()
+      const borderWidth = Number.parseFloat(getComputedStyle(element).borderLeftWidth)
+      return nodeName.getBoundingClientRect().left - cardBox.left - borderWidth
+    })).toBeGreaterThanOrEqual(20)
     await expect(expiryText).toHaveText(/剩余 \d+ 天/)
     await expect(expiryDate).toHaveText('2037-01-01')
     await expect.poll(() => detailGrid.evaluate(element => getComputedStyle(element).gridTemplateColumns.split(' ').length)).toBe(testCase.columns)
