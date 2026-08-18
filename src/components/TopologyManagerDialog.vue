@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { TopologyHopProbe } from '@/services/ping-task.service'
+import type { HopTaskVerdict } from '@/services/topology-probe.service'
 import type { NodeData } from '@/stores/nodes'
 import type { TopologyRouteConfig } from '@/utils/topologyHelper'
 import { Icon } from '@iconify/vue'
@@ -6,7 +8,9 @@ import { computed, nextTick, onScopeDispose, reactive, ref, watch } from 'vue'
 import { AppDialog } from '@/components/ui/app-dialog'
 import { Button } from '@/components/ui/button'
 import { useTopologyManager } from '@/composables/useTopologyManager'
-import { ensureTopologyPingTask, loadAdminPingTaskNamesForNode, planTopologyPingTask } from '@/services/ping-task.service'
+import { OPS_TOPOLOGY_HOP_PROBE, OPS_TOPOLOGY_HOP_PROBE_LADDER } from '@/constants/ops'
+import { deleteTopologyPingTasks, describeTopologyHopProbe, ensureTopologyPingTask, loadAdminPingTaskNamesForNode, normalizeTopologyHopProbe } from '@/services/ping-task.service'
+import { planWorkingHopTask } from '@/services/topology-probe.service'
 import { applyTopologyProbeToRoute, findTopologyProbeKey, findUniqueTopologyNode, getTopologyRouteProbeKey, listUnusedQuickLandingUuids, nextQuickLandingUuid, shouldAutoApplyTopologyProbe, TOPOLOGY_PROBE_OPTIONS } from '@/utils/topologyHelper'
 
 const props = defineProps<{ nodes: NodeData[], open: boolean }>()
@@ -26,7 +30,22 @@ const rematchDone = ref(false)
 const quickSourceUuid = ref('')
 const quickLandingUuid = ref('')
 const quickProbeKey = ref(DEFAULT_PROBE)
-const pendingRouteTasks = ref<Record<number, { sourceUuid: string, targetUuid: string, taskName: string }>>({})
+interface RouteProbeState {
+  probe: TopologyHopProbe
+  verdict: HopTaskVerdict
+  exhausted: boolean
+  switchedFrom: TopologyHopProbe | null
+  targetAddress: string
+}
+const pendingRouteTasks = ref<Record<number, { sourceUuid: string, targetUuid: string, taskName: string, probe: TopologyHopProbe }>>({})
+const routeProbeStates = ref<Record<number, RouteProbeState>>({})
+/** 新任务绑定并保存成功后可以清理掉的旧任务候选，按线路记录。 */
+const routeRetiredTasks = ref<Record<number, Array<{ id: number, name: string }>>>({})
+const sessionCreatedTaskIds = new Set<number>()
+const HOP_PROBE_LADDER_TEXT = OPS_TOPOLOGY_HOP_PROBE_LADDER
+  .map(rung => describeTopologyHopProbe(normalizeTopologyHopProbe(rung)))
+  .join('、')
+let recheckTimer: ReturnType<typeof setInterval> | null = null
 const routeTaskPlanning = ref<Record<number, boolean>>({})
 const routeTaskErrors = ref<Record<number, string>>({})
 const routeTaskRuns = new Map<number, number>()
@@ -110,6 +129,7 @@ watch(() => props.open, (value) => {
   if (!value) {
     rematching.value = false
     rematchDone.value = false
+    stopRecheckTimer()
     cancelQuickConfiguration()
     cancelRouteTaskPlanning()
     return
@@ -123,10 +143,13 @@ watch(() => props.open, (value) => {
       return
     manager.reset()
     pendingRouteTasks.value = {}
+    routeProbeStates.value = {}
+    routeRetiredTasks.value = {}
     routeTaskPlanning.value = {}
     routeTaskErrors.value = {}
     routeTaskRuns.clear()
     syncQuickSelections(true)
+    startRecheckTimer()
     await rematchOpenRoutes(session)
   })()
 }, { immediate: true })
@@ -138,9 +161,37 @@ watch(() => manager.quickNodes.map(node => node.uuid).join('|'), () => {
 
 onScopeDispose(() => {
   dialogSession += 1
+  stopRecheckTimer()
   cancelQuickConfiguration()
   cancelRouteTaskPlanning()
 })
+
+function stopRecheckTimer(): void {
+  if (!recheckTimer)
+    return
+  clearInterval(recheckTimer)
+  recheckTimer = null
+}
+
+/**
+ * 对话框开着的时候定期复检一轮：刚建好的任务要过一会儿才出样本，判死后才能
+ * 自动换探测方式。操作者什么都不用点，看着提示行变绿即可。
+ */
+function startRecheckTimer(): void {
+  stopRecheckTimer()
+  if (typeof window === 'undefined')
+    return
+  recheckTimer = setInterval(() => {
+    if (props.open && !managerBusy.value)
+      void rematchOpenRoutes(dialogSession)
+  }, OPS_TOPOLOGY_HOP_PROBE.recheckIntervalMs)
+}
+
+function recheckNow(): void {
+  if (!props.open || managerBusy.value)
+    return
+  void rematchOpenRoutes(dialogSession)
+}
 
 function cancelQuickConfiguration(): void {
   quickConfigurationRun += 1
@@ -167,6 +218,8 @@ function reset(): void {
       return
     manager.reset()
     pendingRouteTasks.value = {}
+    routeProbeStates.value = {}
+    routeRetiredTasks.value = {}
     routeTaskPlanning.value = {}
     routeTaskErrors.value = {}
     routeTaskRuns.clear()
@@ -245,7 +298,7 @@ function routeHopTask(route: TopologyRouteConfig): string {
 
 function routeHint(route: TopologyRouteConfig): string {
   if (routeTaskPlanning.value[route.id])
-    return '正在匹配探测任务…'
+    return '正在自动挑选可用的探测方式…'
   if (routeTaskErrors.value[route.id])
     return routeTaskErrors.value[route.id] ?? ''
   const source = route.nodes[1]?.name.trim() ?? ''
@@ -254,9 +307,71 @@ function routeHint(route: TopologyRouteConfig): string {
     return '请选择线路机。'
   if (!landing)
     return '请选择落地机。'
+  const state = routeProbeStates.value[route.id]
+  if (!state)
+    return ''
+  const probeText = describeTopologyHopProbe(state.probe)
+  if (state.exhausted)
+    return `${HOP_PROBE_LADDER_TEXT} 都探测不通；落地机上报地址 ${state.targetAddress} 可能不是真实入站地址。`
+  if (state.switchedFrom)
+    return `${describeTopologyHopProbe(state.switchedFrom)} 探测不通，已自动改用 ${probeText}。`
   if (pendingRouteTasks.value[route.id])
-    return '正在自动创建探测任务。'
-  return ''
+    return `正在按 ${probeText} 自动创建探测任务。`
+  if (state.verdict === 'healthy')
+    return `探测方式：${probeText} · 正常`
+  if (state.verdict === 'dead')
+    return `探测方式：${probeText} · 没有成功响应，正在自动换用其它方式。`
+  return `探测方式：${probeText} · 正在等待首批采样`
+}
+
+function routeHintTone(route: TopologyRouteConfig): boolean {
+  return Boolean(routeTaskErrors.value[route.id] || routeProbeStates.value[route.id]?.exhausted)
+}
+
+function clearRouteProbeState(routeId: number): void {
+  if (routeRetiredTasks.value[routeId]) {
+    const nextRetired = { ...routeRetiredTasks.value }
+    delete nextRetired[routeId]
+    routeRetiredTasks.value = nextRetired
+  }
+  if (!routeProbeStates.value[routeId])
+    return
+  const next = { ...routeProbeStates.value }
+  delete next[routeId]
+  routeProbeStates.value = next
+}
+
+function rememberRetiredTasks(routeId: number, tasks: ReadonlyArray<{ id?: number, name: string }>): void {
+  const retirable = tasks.flatMap(task => (Number.isInteger(task.id) ? [{ id: task.id!, name: task.name }] : []))
+  const next = { ...routeRetiredTasks.value }
+  if (retirable.length)
+    next[routeId] = retirable
+  else
+    delete next[routeId]
+  routeRetiredTasks.value = next
+}
+
+/**
+ * 清理本页面会话中由主题创建、随后被换掉的旧探测任务。
+ *
+ * 名称不是所有权证明：既有任务即使恰好使用 Transit 命名也不能删除。这里只接受
+ * ensure 明确返回 created=true 后记录的 ID，并在配置保存成功后再次确认没有线路绑定。
+ */
+async function retireReplacedTasks(): Promise<void> {
+  const boundNames = new Set(manager.routes.flatMap(route => route.metrics
+    .filter(metric => metric.live)
+    .map(metric => metric.taskFilter.trim())))
+  const entries = Object.entries(routeRetiredTasks.value)
+  if (!entries.length)
+    return
+  routeRetiredTasks.value = {}
+  const ids = [...new Set(entries.flatMap(([, tasks]) => tasks
+    .filter(task => sessionCreatedTaskIds.has(task.id) && !boundNames.has(task.name.trim()))
+    .map(task => task.id)))]
+  if (ids.length && await deleteTopologyPingTasks(ids)) {
+    for (const id of ids)
+      sessionCreatedTaskIds.delete(id)
+  }
 }
 
 async function planRouteTasks(route: TopologyRouteConfig): Promise<void> {
@@ -294,6 +409,7 @@ async function planRouteTasks(route: TopologyRouteConfig): Promise<void> {
     }
 
     if (!landing) {
+      clearRouteProbeState(route.id)
       if (secondMetric) {
         secondMetric.live = false
         secondMetric.nodeName = ''
@@ -303,12 +419,23 @@ async function planRouteTasks(route: TopologyRouteConfig): Promise<void> {
     }
     if (!secondMetric)
       return
-    const planned = await planTopologyPingTask(source, landing)
+    const planned = await planWorkingHopTask(source, landing, secondMetric.taskFilter)
     if (routeTaskRuns.get(route.id) !== runId || !props.open || !manager.routes.includes(route))
       return
     secondMetric.live = true
     secondMetric.nodeName = source.name
     secondMetric.taskFilter = planned.task.name
+    routeProbeStates.value = {
+      ...routeProbeStates.value,
+      [route.id]: {
+        probe: planned.probe,
+        verdict: planned.verdict,
+        exhausted: planned.exhausted,
+        switchedFrom: planned.switchedFrom,
+        targetAddress: planned.targetAddress,
+      },
+    }
+    rememberRetiredTasks(route.id, planned.retiredTasks)
     if (planned.needsCreation) {
       pendingRouteTasks.value = {
         ...pendingRouteTasks.value,
@@ -316,6 +443,7 @@ async function planRouteTasks(route: TopologyRouteConfig): Promise<void> {
           sourceUuid: source.uuid,
           targetUuid: landing.uuid,
           taskName: planned.task.name,
+          probe: planned.probe,
         },
       }
     }
@@ -376,6 +504,7 @@ function removeRoute(index: number): void {
     return
   routeTaskRuns.set(route.id, (routeTaskRuns.get(route.id) ?? 0) + 1)
   clearPendingRouteTask(route.id)
+  clearRouteProbeState(route.id)
   clearRouteTaskError(route.id)
   const nextPlanning = { ...routeTaskPlanning.value }
   delete nextPlanning[route.id]
@@ -515,9 +644,11 @@ async function persistRoutes(options: {
             || plannedMetric.taskFilter !== pending.taskName) {
             throw new Error('待创建 Ping 任务对应的线路段已变化，请重新选择。')
           }
-          const ensured = await ensureTopologyPingTask(source, target, controller.signal)
+          const ensured = await ensureTopologyPingTask(source, target, { probe: pending.probe, signal: controller.signal })
           if (runId !== quickConfigurationRun || session !== dialogSession || !props.open)
             return 'cancelled' as const
+          if (ensured.created && Number.isInteger(ensured.task.id))
+            sessionCreatedTaskIds.add(ensured.task.id!)
           const metric = route.metrics[1]!
           metric.nodeName = source.name
           metric.taskFilter = ensured.task.name
@@ -541,6 +672,7 @@ async function persistRoutes(options: {
       if (result === 'cancelled' || session !== dialogSession || !props.open)
         return 'cancelled'
       if (result === 'saved') {
+        await retireReplacedTasks()
         window.$message?.success(options.successMessage ?? '拓扑配置已保存。')
         if (!options.keepOpen)
           isOpen.value = false
@@ -616,7 +748,7 @@ async function addQuickRoute(): Promise<void> {
       window.$message?.warning('节点已变化，请重新选择后添加。')
       return
     }
-    const planned = await planTopologyPingTask(latestSource, latestLanding)
+    const planned = await planWorkingHopTask(latestSource, latestLanding)
     if (runId !== quickConfigurationRun || !props.open)
       return
     if (!planned.needsCreation)
@@ -640,12 +772,24 @@ async function addQuickRoute(): Promise<void> {
         sourceUuid: latestSource.uuid,
         targetUuid: latestLanding.uuid,
         taskName: planned.task.name,
+        probe: planned.probe,
       }
     }
     else {
       delete nextPending[configured.route.id]
     }
     pendingRouteTasks.value = nextPending
+    routeProbeStates.value = {
+      ...routeProbeStates.value,
+      [configured.route.id]: {
+        probe: planned.probe,
+        verdict: planned.verdict,
+        exhausted: planned.exhausted,
+        switchedFrom: planned.switchedFrom,
+        targetAddress: planned.targetAddress,
+      },
+    }
+    rememberRetiredTasks(configured.route.id, planned.retiredTasks)
     if (configured.created) {
       quickLandingUuid.value = ''
       syncQuickSelections(true)
@@ -699,9 +843,22 @@ function nodeOptionLabel(optionName: string): string {
       :data-topology-ready="rematchDone ? 'true' : 'false'"
     >
       <div class="space-y-3 rounded-lg border border-border/60 bg-background/45 px-3 py-3">
-        <p class="text-xs text-muted-foreground">
-          入口只是线路图上的标签，例如北京电信或北京联通。实时数据由线路机发出 Ping。添加或修改线路都会立刻保存，并按落地机地址自动创建或复用任务。
-        </p>
+        <div class="flex flex-wrap items-start justify-between gap-2">
+          <p class="max-w-prose text-xs text-muted-foreground">
+            入口只是线路图上的标签，例如北京电信或北京联通。实时数据由线路机发出 Ping。添加或修改线路都会立刻保存，探测任务按落地机地址自动创建或复用；探测方式也会自动挑选，打不通会自动换一种。本次管理会话创建后又被换下的任务会安全清理。
+          </p>
+          <Button
+            size="sm"
+            variant="outline"
+            class="h-8"
+            :disabled="managerBusy || !manager.routes.length"
+            data-topology-recheck
+            @click="recheckNow"
+          >
+            <Icon :icon="rematching ? 'tabler:loader-2' : 'tabler:refresh'" :class="rematching && 'animate-spin'" />
+            重新检测
+          </Button>
+        </div>
         <div class="grid items-end gap-2 sm:grid-cols-[1fr_1fr_1fr_auto]">
           <label class="space-y-1 text-[11px] text-muted-foreground">
             入口探测
@@ -786,6 +943,8 @@ function nodeOptionLabel(optionName: string): string {
         :data-topology-entry-task="route.metrics[0]?.taskFilter || ''"
         :data-topology-hop-task="routeHopTask(route)"
         :data-topology-hop-pending="pendingRouteTasks[route.id] ? 'true' : 'false'"
+        :data-topology-hop-probe="routeProbeStates[route.id] ? describeTopologyHopProbe(routeProbeStates[route.id]!.probe) : ''"
+        :data-topology-hop-verdict="routeProbeStates[route.id]?.verdict ?? ''"
         class="rounded-xl border border-border/65 bg-background/40 p-3"
       >
         <header class="mb-2 flex items-center justify-between gap-3">
@@ -873,8 +1032,9 @@ function nodeOptionLabel(optionName: string): string {
         </div>
         <p
           v-if="routeHint(route)"
+          data-topology-hop-hint
           class="mt-2 text-[11px]"
-          :class="routeTaskErrors[route.id] ? 'text-destructive' : 'text-muted-foreground'"
+          :class="routeHintTone(route) ? 'text-destructive' : 'text-muted-foreground'"
         >
           {{ routeHint(route) }}
         </p>

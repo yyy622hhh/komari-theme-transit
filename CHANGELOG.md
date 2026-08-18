@@ -4,6 +4,24 @@
 
 ## [Unreleased]
 
+## [1.0.34] - 2026-08-18
+
+### Fixed
+
+- 修复线路机 → 落地机这一段长期显示「无响应 / 100.0%」：探测任务原来硬编码为 ICMP，在禁用或屏蔽 ICMP 的线路机上必然全部失败。现在主题会先看线路机上哪些任务正在正常出数，据此挑选探测方式（有健康 ICMP 就用 ICMP，否则用出数的 TCP 端口），并在探测方式被证实打不通后按 ICMP → TCP 443 → TCP 80 → TCP 22 自动换用下一种，全程无需操作者选择类型或端口。
+- 重开拓扑管理不再用「按落地机地址重新推导」覆盖已绑定的探测任务；只有当绑定的任务并不指向当前落地机时才重新推导。
+- 主面板区分「探测任务没有任何成功响应」和「暂无匹配的实时数据」，不再都是一片沉默的红条。
+
+### Changed
+
+- 本次管理会话中由主题明确创建、随后被换下且已判死的探测任务会自动删除（Komari 会连带清掉它的历史采样）。既有任务即使名称符合 `Transit-<线路机>-to-<落地机>` 规则也不会仅凭名称删除；操作者手建的任务即使被复用过也不会被删。
+- 拓扑管理会显示每条线路当前的探测方式和状态（正在挑选、正常、等待首批采样、已自动改用、全部方式都不通并附上落地机上报地址），并提供「重新检测」；对话框打开期间每分钟自动复检一次。
+- 第 2 段任务复用范围从只认 ICMP 放宽到 ICMP 与 TCP；TCP 任务命名为 `Transit-<线路机>-to-<落地机>-tcp-<端口>`，ICMP 保持原有命名以免已保存的线路失联。
+
+### Testing
+
+- 新增探测方式挑选、判死阈值、阶梯回退、穷尽提示与旧任务清理边界的单元测试，以及「ICMP 不可用时直接建 TCP」「ICMP 判死后自动换用 TCP」「只清理主题自建任务」的视觉回归。
+
 ## [1.0.33] - 2026-08-18
 
 ### Changed
@@ -472,7 +490,8 @@
 - 亮暗主题、桌面/移动布局和 Transit 风格内嵌 Komari 管理端。
 - Playwright 视觉与交互回归、自动构建和 GitHub Release 发布流程。
 
-[Unreleased]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.33...HEAD
+[Unreleased]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.34...HEAD
+[1.0.34]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.33...v1.0.34
 [1.0.33]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.32...v1.0.33
 [1.0.32]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.31...v1.0.32
 [1.0.31]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.30...v1.0.31

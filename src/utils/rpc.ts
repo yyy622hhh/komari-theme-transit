@@ -43,6 +43,7 @@ const WSS_PROTOCOL_PREFIX = 'wss://'
 const RPC_REQUEST_ABORTED = -32800
 const RPC_METHODS_ALLOWING_MISSING_RESULT = new Set([
   'admin:addPingTask',
+  'admin:deletePingTask',
   'admin:editSettings',
   'admin:orderClients',
 ])
@@ -1109,6 +1110,11 @@ export class KomariRpc {
 
   async addPingTask(task: PingTaskMutation, signal?: AbortSignal): Promise<void> {
     await this.client.callOverHttp('admin:addPingTask', task, signal)
+  }
+
+  /** 删除 Ping 任务；Komari 会连带清掉这些任务的历史采样。 */
+  async deletePingTasks(ids: number[], signal?: AbortSignal): Promise<void> {
+    await this.client.callOverHttp('admin:deletePingTask', { id: ids }, signal)
   }
 
   // ==================== Public 方法（主题/公开页优先使用） ====================

@@ -1,7 +1,7 @@
 import type { AdminPingTask } from '../../src/services/ping-task.service'
 import { afterEach, describe, expect, mock, test } from 'bun:test'
 import { isAuthenticated, setAuthSessionFromLogin } from '../../src/services/auth.service'
-import { ensureTopologyPingTask, findTopologyPingTask, isPingTaskAssignedToSource, loadAdminPingTaskNamesForNode, pingTaskTargetHost, planTopologyPingTask, topologyPingTargets } from '../../src/services/ping-task.service'
+import { buildTopologyHopTarget, ensureTopologyPingTask, findTopologyPingTask, findTopologyPingTaskByName, isPingTaskAssignedToSource, loadAdminPingTaskNamesForNode, pingTaskTargetHost, pingTaskTargetPort, planTopologyPingTask, topologyHopTaskName, topologyPingTargets } from '../../src/services/ping-task.service'
 import { resetSharedRpc } from '../../src/utils/rpc'
 
 const source = { uuid: 'relay-uuid', name: 'Relay-JP', ipv4: '192.0.2.10' }
@@ -184,7 +184,7 @@ describe('topology Ping task management', () => {
 
     try {
       const controller = new AbortController()
-      const first = ensureTopologyPingTask(source, target, controller.signal)
+      const first = ensureTopologyPingTask(source, target, { signal: controller.signal })
       await addStarted
       expect(sawAdd).toBe(true)
       const second = ensureTopologyPingTask(source, target)
@@ -223,9 +223,81 @@ describe('topology Ping task management', () => {
     try {
       const controller = new AbortController()
       controller.abort()
-      await expect(ensureTopologyPingTask(source, target, controller.signal)).rejects.toMatchObject({ name: 'AbortError' })
+      await expect(ensureTopologyPingTask(source, target, { signal: controller.signal })).rejects.toMatchObject({ name: 'AbortError' })
       const created = await ensureTopologyPingTask(source, target)
       expect(created.task.name).toBe('Transit-Relay-JP-to-Exit-SG')
+    }
+    finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  test('builds hop targets and names per probe type', () => {
+    expect(buildTopologyHopTarget(target)).toBe(target.ipv4)
+    expect(buildTopologyHopTarget(target, { type: 'tcp', port: 443 })).toBe(`${target.ipv4}:443`)
+    expect(buildTopologyHopTarget({ ipv6: '2001:db8::20' }, { type: 'tcp', port: 22 })).toBe('[2001:db8::20]:22')
+    // 端口缺失或越界时回落到默认端口，绝不生成非法目标。
+    expect(buildTopologyHopTarget(target, { type: 'tcp' })).toBe(`${target.ipv4}:443`)
+    expect(buildTopologyHopTarget(target, { type: 'tcp', port: 70_000 })).toBe(`${target.ipv4}:443`)
+
+    expect(pingTaskTargetPort(target.ipv4)).toBeNull()
+    expect(pingTaskTargetPort(`${target.ipv4}:8080`)).toBe(8080)
+    expect(pingTaskTargetPort('[2001:db8::20]:22')).toBe(22)
+
+    // ICMP 名字必须保持历史格式，否则已保存的线路会认不回任务。
+    expect(topologyHopTaskName(source, target)).toBe('Transit-Relay-JP-to-Exit-SG')
+    expect(topologyHopTaskName(source, target, { type: 'tcp', port: 80 })).toBe('Transit-Relay-JP-to-Exit-SG-tcp-80')
+  })
+
+  test('matches a TCP hop only on an exact port and resolves bindings by name', () => {
+    const tasks: AdminPingTask[] = [
+      { id: 1, name: 'icmp-hop', clients: [source.uuid], type: 'icmp', target: target.ipv4, interval: 30 },
+      { id: 2, name: 'ssh-check', clients: [source.uuid], type: 'tcp', target: `${target.ipv4}:22`, interval: 30 },
+    ]
+    expect(findTopologyPingTask(tasks, source.uuid, target, { type: 'tcp', port: 22 })?.name).toBe('ssh-check')
+    expect(findTopologyPingTask(tasks, source.uuid, target, { type: 'tcp', port: 443 })).toBeUndefined()
+    expect(findTopologyPingTask(tasks, source.uuid, target, { type: 'icmp' })?.name).toBe('icmp-hop')
+
+    expect(findTopologyPingTaskByName(tasks, source.uuid, 'ssh-check')?.id).toBe(2)
+    expect(findTopologyPingTaskByName(tasks, source.uuid, 'missing')).toBeUndefined()
+    expect(findTopologyPingTaskByName(tasks, 'other', 'ssh-check')).toBeUndefined()
+    expect(findTopologyPingTaskByName([
+      ...tasks,
+      { id: 3, name: 'ssh-check', clients: [source.uuid], type: 'tcp', target: '203.0.113.99:22', interval: 30 },
+    ], source.uuid, 'ssh-check')).toBeUndefined()
+  })
+
+  test('creates a TCP hop task when the caller asks for one', async () => {
+    const originalFetch = globalThis.fetch
+    const tasks: AdminPingTask[] = []
+    globalThis.fetch = mock(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (!init?.body)
+        return new Response(JSON.stringify({ logged_in: true, username: 'admin' }))
+      const request = JSON.parse(String(init.body)) as { id: number, method: string, params?: AdminPingTask }
+      if (request.method === 'admin:getAllPingTasks') {
+        return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: tasks }), {
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      if (request.method === 'admin:addPingTask') {
+        tasks.push({ ...request.params!, id: 21 })
+        return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id }), {
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      throw new Error(`Unexpected RPC method: ${request.method}`)
+    }) as typeof fetch
+
+    try {
+      const ensured = await ensureTopologyPingTask(source, target, { probe: { type: 'tcp', port: 443 } })
+      expect(ensured.created).toBe(true)
+      expect(ensured.task).toMatchObject({
+        name: 'Transit-Relay-JP-to-Exit-SG-tcp-443',
+        type: 'tcp',
+        target: `${target.ipv4}:443`,
+        default_on: false,
+        clients: [source.uuid],
+      })
     }
     finally {
       globalThis.fetch = originalFetch

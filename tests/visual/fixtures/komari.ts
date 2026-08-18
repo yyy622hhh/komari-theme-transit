@@ -56,6 +56,14 @@ export interface VisualFixtureOptions {
   quickTopologyTaskDelayMs?: number
   quickTopologyNoTasks?: boolean
   quickTopologyNoAddress?: boolean
+  /**
+   * 覆写 `public:getPingMetricStats` 的采样结果，用来驱动第 2 段探测方式的
+   * 自动挑选与自愈：`valid > 0` 代表这种探测方式通，`total > 0 && valid === 0`
+   * 代表打不通。
+   */
+  topologyProbeStats?: Array<{ task_id: string | number, name?: string, total: number, valid: number }>
+  /** 把第 1 条线路的 hop 任务改成主题自己会生成的名字，用来验证换下来的任务会被清理。 */
+  topologyGeneratedHopName?: boolean
   themeSaveDelayMs?: number
   emptyTopology?: boolean
   visitorInfoEnabled?: boolean
@@ -453,29 +461,47 @@ async function handleRpc(
       result = buildMetricResponse(payload.params ?? {}, options, pingTasks)
       break
     case 'public:getPingMetricStats':
-      result = options.pingTaskOrdering
-        ? {
-            start: FIXED_NOW,
-            end: FIXED_NOW,
-            interval_seconds: 60,
-            stats: metricPingTasks.map(task => ({
-              entity_id: uuid,
-              task_id: String(task.id),
-              name: task.name,
-              interval: task.interval,
-              tags: { task_id: String(task.id), task_name: task.name },
-              total: 48,
-              valid: 48,
-              loss: 0,
+      result = options.topologyProbeStats
+        ? (() => {
+            const requestedEntityIds = Array.isArray(payload.params?.entity_ids)
+              ? payload.params.entity_ids.map(String)
+              : [uuid]
+            const stats = requestedEntityIds.flatMap(entityId => options.topologyProbeStats!.map(stat => ({
+              entity_id: entityId,
+              task_id: String(stat.task_id),
+              name: stat.name,
+              total: stat.total,
+              valid: stat.valid,
+              loss: stat.valid > 0 ? 0 : 100,
               loss_approximate: false,
-              min: 40 + task.id,
-              max: 120 + task.id,
-              avg: 80 + task.id,
-              latest: 90 + task.id,
-            })),
-            count: metricPingTasks.length,
-          }
-        : { start: FIXED_NOW, end: FIXED_NOW, interval_seconds: 60, stats: [], count: 0 }
+              avg: stat.valid > 0 ? 80 : undefined,
+              latest: stat.valid > 0 ? 82 : undefined,
+            })))
+            return { start: FIXED_NOW, end: FIXED_NOW, interval_seconds: 60, stats, count: stats.length }
+          })()
+        : options.pingTaskOrdering
+          ? {
+              start: FIXED_NOW,
+              end: FIXED_NOW,
+              interval_seconds: 60,
+              stats: metricPingTasks.map(task => ({
+                entity_id: uuid,
+                task_id: String(task.id),
+                name: task.name,
+                interval: task.interval,
+                tags: { task_id: String(task.id), task_name: task.name },
+                total: 48,
+                valid: 48,
+                loss: 0,
+                loss_approximate: false,
+                min: 40 + task.id,
+                max: 120 + task.id,
+                avg: 80 + task.id,
+                latest: 90 + task.id,
+              })),
+              count: metricPingTasks.length,
+            }
+          : { start: FIXED_NOW, end: FIXED_NOW, interval_seconds: 60, stats: [], count: 0 }
       break
     case 'public:getNodesInformation':
       result = Object.values(clientFixtures)
@@ -492,6 +518,15 @@ async function handleRpc(
     case 'admin:getAllPingTasks':
       result = adminPingTasks
       break
+    case 'admin:deletePingTask': {
+      const removedIds = new Set((payload.params?.id as number[] | undefined ?? []).map(Number))
+      for (let index = adminPingTasks.length - 1; index >= 0; index--) {
+        if (removedIds.has(Number(adminPingTasks[index]?.id)))
+          adminPingTasks.splice(index, 1)
+      }
+      result = undefined
+      break
+    }
     case 'admin:addPingTask':
       adminPingTasks.push({
         id: Math.max(100, ...adminPingTasks.map(task => Number(task.id) || 0)) + 1,
@@ -561,7 +596,7 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
         { id: 11, weight: 1, name: '北京联通', clients: allClientUuids, default_on: true, type: 'tcp', target: '198.51.100.11:80', interval: 60 },
         { id: 12, weight: 2, name: '北京电信', clients: allClientUuids, default_on: true, type: 'tcp', target: '198.51.100.12:80', interval: 60 },
         { id: 13, weight: 3, name: '北京移动', clients: allClientUuids, default_on: true, type: 'tcp', target: '198.51.100.13:80', interval: 60 },
-        { id: 18, weight: 4, name: 'PandaOps-Local-Hop', clients: [uuidFor(0), uuidFor(2)], default_on: false, type: 'icmp', target: clientFixtures[uuidFor(1)]?.ipv4 ?? '192.0.2.11', interval: 30 },
+        { id: 18, weight: 4, name: options.topologyGeneratedHopName ? `Transit-主控-洛杉矶-to-${REGION_FIXTURES[1].name}` : 'PandaOps-Local-Hop', clients: [uuidFor(0), uuidFor(2)], default_on: false, type: 'icmp', target: clientFixtures[uuidFor(1)]?.ipv4 ?? '192.0.2.11', interval: 30 },
       ]
   if (options.opsNoRecentTask) {
     adminPingTasks.push({ id: 99, weight: 99, name: 'Configured-No-Recent-Sample', clients: [uuidFor(2)], default_on: false, type: 'icmp', target: '198.51.100.99', interval: 30 })

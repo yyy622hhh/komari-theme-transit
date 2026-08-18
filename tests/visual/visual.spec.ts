@@ -810,6 +810,123 @@ test('Transit topology manager keeps the entry static and creates the selected h
   })
 })
 
+test('Transit topology creates a TCP hop when the relay cannot use ICMP', async ({ page }) => {
+  const addedTasks: Array<Record<string, unknown>> = []
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, {
+    opsDashboard: true,
+    authenticated: true,
+    emptyTopology: true,
+    // 线路机上 ICMP 任务一次都没成功，三网 TCP:80 任务健康——主题应当直接建 TCP。
+    topologyProbeStats: [
+      { task_id: 1, name: 'Tokyo', total: 48, valid: 0 },
+      { task_id: 11, name: '北京联通', total: 48, valid: 47 },
+      { task_id: 12, name: '北京电信', total: 48, valid: 48 },
+    ],
+  })
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && request.url().endsWith('/api/rpc2') && request.postDataJSON().method === 'admin:addPingTask')
+      addedTasks.push(request.postDataJSON().params as Record<string, unknown>)
+  })
+  await openStablePage(page)
+
+  const dialog = await openTopologyManager(page, 'empty')
+  await dialog.getByLabel('添加线路线路机').selectOption({ label: '东京-高负载' })
+  await dialog.getByLabel('添加线路落地机').selectOption({ label: '新加坡-A100' })
+  await dialog.getByRole('button', { name: '添加线路' }).click()
+
+  const route = dialog.locator('[data-topology-route-id]').first()
+  await expect(route).toHaveAttribute('data-topology-hop-probe', 'TCP 80')
+  await expect(route).toHaveAttribute('data-topology-hop-task', 'Transit-东京-高负载-to-新加坡-A100-tcp-80')
+  await expect.poll(() => addedTasks.length).toBe(1)
+  expect(addedTasks[0]).toMatchObject({ type: 'tcp', target: '192.0.2.13:80' })
+})
+
+test('Transit topology switches the hop probe once ICMP is proven dead', async ({ page }) => {
+  const addedTasks: Array<Record<string, unknown>> = []
+  const deletedTaskIds: number[][] = []
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, {
+    opsDashboard: true,
+    authenticated: true,
+    // 已绑定的 ICMP 中转任务采满样本却一次都没成功，且线路机上没有别的健康任务
+    // 可以参考，只能靠阶梯回退到 TCP。
+    topologyProbeStats: [{ task_id: 18, name: 'PandaOps-Local-Hop', total: 48, valid: 0 }],
+  })
+  page.on('request', (request) => {
+    if (request.method() !== 'POST' || !request.url().endsWith('/api/rpc2'))
+      return
+    const payload = request.postDataJSON() as { method: string, params?: Record<string, unknown> }
+    if (payload.method === 'admin:addPingTask')
+      addedTasks.push(payload.params as Record<string, unknown>)
+    if (payload.method === 'admin:deletePingTask')
+      deletedTaskIds.push((payload.params?.id as number[] | undefined) ?? [])
+  })
+  await openStablePage(page)
+
+  const dialog = await openTopologyManager(page)
+  const firstRoute = dialog.locator('[data-topology-route-id]').first()
+  await expect(firstRoute).toHaveAttribute('data-topology-hop-probe', 'TCP 443')
+  await expect(firstRoute.locator('[data-topology-hop-hint]')).toContainText('ICMP 探测不通，已自动改用 TCP 443')
+  await expect.poll(() => addedTasks.some(task => task.type === 'tcp' && task.target === '192.0.2.11:443')).toBe(true)
+  // 换下来的是操作者自己建的任务（名字不属于主题命名空间），绝不能顺手删掉。
+  expect(deletedTaskIds).toEqual([])
+})
+
+test('Transit topology never deletes a pre-existing task based on its name alone', async ({ page }) => {
+  const deletedTaskIds: number[][] = []
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, {
+    opsDashboard: true,
+    authenticated: true,
+    topologyGeneratedHopName: true,
+    topologyProbeStats: [{ task_id: 18, total: 48, valid: 0 }],
+  })
+  page.on('request', (request) => {
+    if (request.method() !== 'POST' || !request.url().endsWith('/api/rpc2'))
+      return
+    const payload = request.postDataJSON() as { method: string, params?: Record<string, unknown> }
+    if (payload.method === 'admin:deletePingTask')
+      deletedTaskIds.push((payload.params?.id as number[] | undefined) ?? [])
+  })
+  await openStablePage(page)
+
+  const dialog = await openTopologyManager(page)
+  await expect(dialog.locator('[data-topology-route-id]').first()).toHaveAttribute('data-topology-hop-probe', 'TCP 443')
+  expect(deletedTaskIds).toEqual([])
+})
+
+test('Transit topology retires only a probe task created in the current session', async ({ page }) => {
+  const probeStats: Array<{ task_id: number, total: number, valid: number }> = []
+  const deletedTaskIds: number[][] = []
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, {
+    opsDashboard: true,
+    authenticated: true,
+    emptyTopology: true,
+    quickTopologyNoTasks: true,
+    topologyProbeStats: probeStats,
+  })
+  page.on('request', (request) => {
+    if (request.method() !== 'POST' || !request.url().endsWith('/api/rpc2'))
+      return
+    const payload = request.postDataJSON() as { method: string, params?: Record<string, unknown> }
+    if (payload.method === 'admin:deletePingTask')
+      deletedTaskIds.push((payload.params?.id as number[] | undefined) ?? [])
+  })
+  await openStablePage(page)
+
+  const dialog = await openTopologyManager(page, 'empty')
+  await dialog.getByRole('button', { name: '添加线路' }).click()
+  const route = dialog.locator('[data-topology-route-id]').first()
+  await expect(route).toHaveAttribute('data-topology-hop-probe', 'ICMP')
+
+  probeStats.push({ task_id: 101, total: 48, valid: 0 })
+  await dialog.getByRole('button', { name: '重新检测' }).click()
+  await expect(route).toHaveAttribute('data-topology-hop-probe', 'TCP 443')
+  await expect.poll(() => deletedTaskIds.flat()).toContain(101)
+})
+
 test('Transit topology quick generation uses the selected source and landing nodes', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await installKomariFixture(page, { opsDashboard: true, authenticated: true, emptyTopology: true })
