@@ -8,6 +8,10 @@ import { planWorkingHopTask } from '@/services/topology-probe.service'
 import { canRunTopologyProbeRepair, runTopologyProbeRepair } from '@/services/topology-repair.service'
 import { useAppStore } from '@/stores/app'
 
+function pageIsVisible(): boolean {
+  return typeof document === 'undefined' || document.visibilityState !== 'hidden'
+}
+
 /**
  * 挂在公开首页上的后台自愈：判定和写入逻辑全在
  * `services/topology-repair.service.ts`（纯函数，完整单测覆盖）；这里只提供
@@ -65,7 +69,9 @@ export function useTopologyProbeRepair(
 
   if (typeof window !== 'undefined') {
     timer = window.setInterval(() => {
-      void repairNow()
+      // 标签页在后台时没人看结果，也没必要每分钟打一轮 admin 请求。
+      if (pageIsVisible())
+        void repairNow()
     }, OPS_TOPOLOGY_HOP_PROBE.recheckIntervalMs)
   }
 

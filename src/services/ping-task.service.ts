@@ -1,4 +1,6 @@
+import { CACHE_CONFIG } from '@/constants/cache'
 import { requirePermission, setAuthSessionFromLogin } from '@/services/auth.service'
+import { SharedCache } from '@/services/cache.service'
 import { invalidatePublicPingTasksCache } from '@/services/metrics.service'
 import { requestManager } from '@/services/request.service'
 import { getSharedRpc, isRpcPermissionError } from '@/utils/rpc'
@@ -261,9 +263,31 @@ async function fetchAdminPingTasks(signal?: AbortSignal): Promise<AdminPingTask[
   }
 }
 
+const ADMIN_PING_TASKS_CACHE_KEY = 'admin:ping:list'
+const adminPingTasksCache = new SharedCache<AdminPingTask[]>({
+  maxSize: CACHE_CONFIG.adminPingTasks.maxSize,
+  ttl: CACHE_CONFIG.adminPingTasks.ttl,
+})
+
+/** 让下次 {@link loadAdminPingTasks} 强制重新拉取——创建或删除任务后调用。 */
+export function invalidateAdminPingTasksCache(): void {
+  adminPingTasksCache.clear()
+}
+
+/**
+ * 读路径用的任务列表，带短 TTL 缓存。
+ *
+ * 后台自愈每轮都会对多条线路各查一次这台线路机的任务列表；不缓存的话，权限
+ * 强制重新校验（`force: true`）和 `admin:getAllPingTasks` 都会跟着线路数线
+ * 性增长。命中缓存时两者都跳过。写路径（`ensureTopologyPingTask` 创建后回查
+ * 确认）必须看到最新列表，走的是不缓存的 {@link fetchAdminPingTasks}。
+ */
 export async function loadAdminPingTasks(): Promise<AdminPingTask[]> {
+  const cached = adminPingTasksCache.get(ADMIN_PING_TASKS_CACHE_KEY)
+  if (cached)
+    return cached
   await assertPingTaskPermission()
-  return fetchAdminPingTasks()
+  return adminPingTasksCache.set(ADMIN_PING_TASKS_CACHE_KEY, await fetchAdminPingTasks())
 }
 
 export async function loadAdminPingTaskNamesForNode(nodeUuid: string): Promise<string[]> {
@@ -335,6 +359,7 @@ export async function deleteTopologyPingTasks(taskIds: readonly number[], signal
       { retryAttempts: 0, signal },
     )
     invalidatePublicPingTasksCache()
+    invalidateAdminPingTasksCache()
     return true
   }
   catch {
@@ -378,6 +403,7 @@ async function createTopologyPingTask(
     { retryAttempts: 0, signal },
   )
   invalidatePublicPingTasksCache()
+  invalidateAdminPingTasksCache()
 }
 
 export async function planTopologyPingTask(

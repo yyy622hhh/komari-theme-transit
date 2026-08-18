@@ -1,6 +1,7 @@
 import type { AdminPingTask } from '../../src/services/ping-task.service'
 import { afterEach, describe, expect, mock, test } from 'bun:test'
 import { setAuthSessionFromLogin } from '../../src/services/auth.service'
+import { invalidateAdminPingTasksCache } from '../../src/services/ping-task.service'
 import {
   assessHopTask,
   chooseInitialHopProbe,
@@ -86,6 +87,9 @@ afterEach(() => {
   mock.restore()
   resetSharedRpc()
   setAuthSessionFromLogin(false)
+  // 短 TTL 缓存跨测试用例存活；每个用例都要用自己的 mockKomari 夹具，不能读到
+  // 上一个用例缓存下来的任务列表。
+  invalidateAdminPingTasksCache()
 })
 
 describe('topology hop probe selection', () => {

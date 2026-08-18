@@ -14,6 +14,10 @@ export const CACHE_CONFIG = {
     maxSize: 1,
     ttl: TIME_MS.minute,
   },
+  adminPingTasks: {
+    maxSize: 1,
+    ttl: 30 * TIME_MS.second,
+  },
   providerMetadata: {
     maxSize: 1000,
     ttl: TIME_MS.day,

@@ -1,7 +1,7 @@
 import type { AdminPingTask } from '../../src/services/ping-task.service'
 import { afterEach, describe, expect, mock, test } from 'bun:test'
 import { isAuthenticated, setAuthSessionFromLogin } from '../../src/services/auth.service'
-import { buildTopologyHopTarget, ensureTopologyPingTask, findTopologyPingTask, findTopologyPingTaskByName, isPingTaskAssignedToSource, loadAdminPingTaskNamesForNode, pingTaskTargetHost, pingTaskTargetPort, planTopologyPingTask, topologyHopTaskName, topologyPingTargets } from '../../src/services/ping-task.service'
+import { buildTopologyHopTarget, deleteTopologyPingTasks, ensureTopologyPingTask, findTopologyPingTask, findTopologyPingTaskByName, invalidateAdminPingTasksCache, isPingTaskAssignedToSource, loadAdminPingTaskNamesForNode, loadAdminPingTasks, pingTaskTargetHost, pingTaskTargetPort, planTopologyPingTask, topologyHopTaskName, topologyPingTargets } from '../../src/services/ping-task.service'
 import { resetSharedRpc } from '../../src/utils/rpc'
 
 const source = { uuid: 'relay-uuid', name: 'Relay-JP', ipv4: '192.0.2.10' }
@@ -11,6 +11,9 @@ afterEach(() => {
   mock.restore()
   resetSharedRpc()
   setAuthSessionFromLogin(false)
+  // 短 TTL 缓存跨测试用例存活；每个用例都要用自己的 fetch 桩，不能读到上一个
+  // 用例缓存下来的任务列表。
+  invalidateAdminPingTasksCache()
 })
 
 describe('topology Ping task management', () => {
@@ -370,6 +373,125 @@ describe('topology Ping task management', () => {
     }
     finally {
       globalThis.fetch = originalFetch
+    }
+  })
+})
+
+describe('loadAdminPingTasks caching', () => {
+  function mockAdminTaskList(tasks: AdminPingTask[]): { restore: () => void, calls: { me: number, list: number, add: number, delete: number } } {
+    const originalFetch = globalThis.fetch
+    const calls = { me: 0, list: 0, add: 0, delete: 0 }
+    globalThis.fetch = mock(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (!init?.body) {
+        calls.me += 1
+        return new Response(JSON.stringify({ logged_in: true, username: 'admin' }))
+      }
+      const request = JSON.parse(String(init.body)) as { id: number, method: string, params?: AdminPingTask }
+      if (request.method === 'admin:getAllPingTasks') {
+        calls.list += 1
+        return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: tasks }), { headers: { 'Content-Type': 'application/json' } })
+      }
+      if (request.method === 'admin:addPingTask') {
+        calls.add += 1
+        tasks.push({ ...request.params!, id: 900 + tasks.length })
+        return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id }), { headers: { 'Content-Type': 'application/json' } })
+      }
+      if (request.method === 'admin:deletePingTask') {
+        calls.delete += 1
+        const removedIds = new Set(((request.params as unknown as { id: number[] } | undefined)?.id ?? []))
+        for (let index = tasks.length - 1; index >= 0; index--) {
+          if (removedIds.has(tasks[index]!.id!))
+            tasks.splice(index, 1)
+        }
+        return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id }), { headers: { 'Content-Type': 'application/json' } })
+      }
+      throw new Error(`Unexpected RPC method: ${request.method}`)
+    }) as typeof fetch
+    return {
+      restore: () => { globalThis.fetch = originalFetch },
+      calls,
+    }
+  }
+
+  test('reuses the task list within the TTL, skipping the forced auth check and the RPC', async () => {
+    const { restore, calls } = mockAdminTaskList([
+      { id: 1, name: 'unique', clients: [source.uuid], type: 'icmp', target: '198.51.100.1', interval: 30 },
+    ])
+    try {
+      await loadAdminPingTasks()
+      await loadAdminPingTasks()
+      await loadAdminPingTasks()
+      expect(calls.me).toBe(1)
+      expect(calls.list).toBe(1)
+    }
+    finally {
+      restore()
+    }
+  })
+
+  test('refetches once the cache entry expires', async () => {
+    const originalNow = Date.now
+    let now = 1_000
+    Date.now = () => now
+    const { restore, calls } = mockAdminTaskList([
+      { id: 1, name: 'unique', clients: [source.uuid], type: 'icmp', target: '198.51.100.1', interval: 30 },
+    ])
+    try {
+      await loadAdminPingTasks()
+      now += 31_000
+      await loadAdminPingTasks()
+      expect(calls.list).toBe(2)
+    }
+    finally {
+      restore()
+      Date.now = originalNow
+    }
+  })
+
+  test('sees a newly created task immediately, without waiting for the cache to expire', async () => {
+    const { restore, calls } = mockAdminTaskList([])
+    try {
+      const before = await loadAdminPingTasks()
+      expect(before).toEqual([])
+
+      await ensureTopologyPingTask(source, target)
+      const after = await loadAdminPingTasks()
+      expect(after.map(task => task.name)).toContain('Transit-Relay-JP-to-Exit-SG')
+      expect(calls.list).toBeGreaterThanOrEqual(3)
+    }
+    finally {
+      restore()
+    }
+  })
+
+  test('sees a deleted task immediately, without waiting for the cache to expire', async () => {
+    const { restore } = mockAdminTaskList([
+      { id: 7, name: 'Transit-Relay-JP-to-Exit-SG', clients: [source.uuid], type: 'icmp', target: target.ipv4, interval: 30 },
+    ])
+    try {
+      const before = await loadAdminPingTasks()
+      expect(before).toHaveLength(1)
+
+      await deleteTopologyPingTasks([7])
+      const after = await loadAdminPingTasks()
+      expect(after).toEqual([])
+    }
+    finally {
+      restore()
+    }
+  })
+
+  test('write-path lookups inside ensureTopologyPingTask never read the stale cache', async () => {
+    // 一个空缓存条目已经存在，若创建路径误用缓存，就会看不到自己刚创建的任务。
+    const { restore } = mockAdminTaskList([])
+    try {
+      await loadAdminPingTasks()
+      const ensured = await ensureTopologyPingTask(source, target)
+      expect(ensured.created).toBe(true)
+      expect(ensured.task.name).toBe('Transit-Relay-JP-to-Exit-SG')
+    }
+    finally {
+      restore()
     }
   })
 })
