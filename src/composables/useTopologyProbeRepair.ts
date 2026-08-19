@@ -3,8 +3,8 @@ import type { NodeData } from '@/stores/nodes'
 import { onScopeDispose, ref, toValue, watch } from 'vue'
 import { useTopologyManager } from '@/composables/useTopologyManager'
 import { OPS_TOPOLOGY_HOP_PROBE } from '@/constants/ops'
-import { deleteTopologyPingTasks, ensureTopologyPingTask } from '@/services/ping-task.service'
-import { planWorkingHopTask } from '@/services/topology-probe.service'
+import { createTopologyEntryProbeTask, deleteTopologyPingTasks, ensureTopologyEntryProbeTask, ensureTopologyPingTask, isSessionCreatedPingTask, rememberSessionCreatedPingTask } from '@/services/ping-task.service'
+import { planEntryProbeTask, planWorkingHopTask } from '@/services/topology-probe.service'
 import { canRunTopologyProbeRepair, runTopologyProbeRepair } from '@/services/topology-repair.service'
 import { useAppStore } from '@/stores/app'
 
@@ -62,6 +62,11 @@ export function useTopologyProbeRepair(
         planWorkingHopTask,
         ensureTopologyPingTask,
         deleteTopologyPingTasks,
+        planEntryProbeTask,
+        ensureTopologyEntryProbeTask,
+        createTopologyEntryProbeTask,
+        isEntryTaskSessionOwned: isSessionCreatedPingTask,
+        rememberEntryTaskCreated: rememberSessionCreatedPingTask,
         signal: controller.signal,
       })
     }

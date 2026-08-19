@@ -108,6 +108,8 @@ describe('formatTopologyEntryHint', () => {
     entryLabel: '北京电信',
     sourceName: 'Relay-JP',
     live: false,
+    pending: false,
+    state: undefined,
   }
 
   test('stays silent until a source node is chosen', () => {
@@ -115,17 +117,47 @@ describe('formatTopologyEntryHint', () => {
     expect(formatTopologyEntryHint({ ...preset, sourceName: '   ' })).toBe('')
   })
 
-  test('confirms the live binding without nagging', () => {
-    expect(formatTopologyEntryHint({ ...preset, live: true })).toBe('入口探测：北京电信 · 实时')
+  test('confirms the live binding and clarifies the probe direction', () => {
+    const hint = formatTopologyEntryHint({ ...preset, live: true })
+    expect(hint).toContain('入口探测：北京电信 · 实时')
+    // 线路机主动探测运营商落地点，方向和「该运营商用户访问线路机」相反，必须说清楚。
+    expect(hint).toContain('不代表该运营商用户访问这台线路机的真实体验')
   })
 
-  test('names the missing task and the fix when a preset entry has no matching task', () => {
+  test('reports the auto-created entry task while it is still pending', () => {
+    const hint = formatTopologyEntryHint({ ...preset, live: true, pending: true })
+    expect(hint).toContain('正在为入口自动创建探测任务')
+    expect(hint).toContain('北京电信')
+  })
+
+  test('names the missing task when a preset entry has no matching task and is not yet planned', () => {
     const hint = formatTopologyEntryHint(preset)
     expect(hint).toContain('Relay-JP')
     expect(hint).toContain('北京电信')
-    expect(hint).toContain('静态基线')
-    // 必须给出可执行的下一步，而不只是陈述现状。
-    expect(hint).toContain('创建同名任务')
+    expect(hint).toContain('正在自动创建')
+  })
+
+  test('reports a ladder switch in progress while the replacement task is pending', () => {
+    const hint = formatTopologyEntryHint({
+      ...preset,
+      live: true,
+      pending: true,
+      state: state({ probe: { type: 'tcp', port: 443 }, switchedFrom: { type: 'icmp' } }),
+    })
+    expect(hint).toContain('北京电信')
+    expect(hint).toContain('ICMP 探测不通')
+    expect(hint).toContain('自动改用 TCP 443')
+  })
+
+  test('reports the ladder as exhausted once every probe type has been tried', () => {
+    const hint = formatTopologyEntryHint({
+      ...preset,
+      live: true,
+      state: state({ exhausted: true, targetAddress: '219.141.140.10' }),
+    })
+    expect(hint).toContain('北京电信')
+    expect(hint).toContain('都探测不通')
+    expect(hint).toContain('219.141.140.10')
   })
 
   test('explains a custom entry that carries no live task', () => {
@@ -135,18 +167,22 @@ describe('formatTopologyEntryHint', () => {
       entryLabel: '自建入口',
       sourceName: 'Relay-JP',
       live: false,
+      pending: false,
+      state: undefined,
     })
     expect(hint).toContain('自建入口')
     expect(hint).toContain('静态基线')
   })
 
-  test('falls back to the entry label when a custom entry is live', () => {
+  test('falls back to the entry label when a custom entry is live, without the direction caveat', () => {
     expect(formatTopologyEntryHint({
       probeLabel: '',
       expectedTaskName: '',
       entryLabel: '自建入口',
       sourceName: 'Relay-JP',
       live: true,
+      pending: false,
+      state: undefined,
     })).toBe('入口探测：自建入口 · 实时')
   })
 })

@@ -29,6 +29,22 @@ export interface TopologyProbeOption {
   carrier: string
   label: string
   taskFilter: string
+  /**
+   * 该运营商在该城市的公网落地地址，用作入口段自动创建探测任务的目标。取自
+   * zhanghanyun/backtrace（社区广泛使用的三网回程路由测试工具，多个衍生工具
+   * 直接引用同一份地址表）内置的测试点，而不是随手挑的地址。即便如此，线路
+   * 机主动 ping 这个地址得到的仍然是「线路机到该地址」的连通质量，方向和
+   * 「该运营商用户访问线路机」是相反的，不能等价。
+   */
+  landmarkAddress: string
+  /**
+   * ICMP 和 TCP 阶梯共用 landmark host。TCP 端口是否开放不能从 ICMP 推断，
+   * 但自动建任务必须有明确目标，所以 443/80/22 也指向同一地址。
+   */
+  probeTargets: {
+    icmp?: string
+    tcp?: Partial<Record<number, string>>
+  }
 }
 
 export interface TopologyQuickNode {
@@ -54,16 +70,27 @@ export const TOPOLOGY_LIMITS = Object.freeze({
   taskNameLength: 200,
 })
 
+function defineTopologyProbe(option: Omit<TopologyProbeOption, 'probeTargets'>): TopologyProbeOption {
+  const host = option.landmarkAddress
+  return {
+    ...option,
+    probeTargets: {
+      icmp: host,
+      tcp: { 443: host, 80: host, 22: host },
+    },
+  }
+}
+
 export const TOPOLOGY_PROBE_OPTIONS: TopologyProbeOption[] = [
-  { key: 'beijing-telecom', city: '北京', carrier: '电信', label: '北京电信', taskFilter: '北京电信' },
-  { key: 'beijing-unicom', city: '北京', carrier: '联通', label: '北京联通', taskFilter: '北京联通' },
-  { key: 'beijing-mobile', city: '北京', carrier: '移动', label: '北京移动', taskFilter: '北京移动' },
-  { key: 'shanghai-telecom', city: '上海', carrier: '电信', label: '上海电信', taskFilter: '上海电信' },
-  { key: 'shanghai-unicom', city: '上海', carrier: '联通', label: '上海联通', taskFilter: '上海联通' },
-  { key: 'shanghai-mobile', city: '上海', carrier: '移动', label: '上海移动', taskFilter: '上海移动' },
-  { key: 'guangzhou-telecom', city: '广州', carrier: '电信', label: '广州电信', taskFilter: '广东电信' },
-  { key: 'guangzhou-unicom', city: '广州', carrier: '联通', label: '广州联通', taskFilter: '广东联通' },
-  { key: 'guangzhou-mobile', city: '广州', carrier: '移动', label: '广州移动', taskFilter: '广东移动' },
+  defineTopologyProbe({ key: 'beijing-telecom', city: '北京', carrier: '电信', label: '北京电信', taskFilter: '北京电信', landmarkAddress: '219.141.140.10' }),
+  defineTopologyProbe({ key: 'beijing-unicom', city: '北京', carrier: '联通', label: '北京联通', taskFilter: '北京联通', landmarkAddress: '202.106.195.68' }),
+  defineTopologyProbe({ key: 'beijing-mobile', city: '北京', carrier: '移动', label: '北京移动', taskFilter: '北京移动', landmarkAddress: '221.179.155.161' }),
+  defineTopologyProbe({ key: 'shanghai-telecom', city: '上海', carrier: '电信', label: '上海电信', taskFilter: '上海电信', landmarkAddress: '202.96.209.133' }),
+  defineTopologyProbe({ key: 'shanghai-unicom', city: '上海', carrier: '联通', label: '上海联通', taskFilter: '上海联通', landmarkAddress: '210.22.97.1' }),
+  defineTopologyProbe({ key: 'shanghai-mobile', city: '上海', carrier: '移动', label: '上海移动', taskFilter: '上海移动', landmarkAddress: '211.136.112.200' }),
+  defineTopologyProbe({ key: 'guangzhou-telecom', city: '广州', carrier: '电信', label: '广州电信', taskFilter: '广东电信', landmarkAddress: '58.60.188.222' }),
+  defineTopologyProbe({ key: 'guangzhou-unicom', city: '广州', carrier: '联通', label: '广州联通', taskFilter: '广东联通', landmarkAddress: '210.21.196.6' }),
+  defineTopologyProbe({ key: 'guangzhou-mobile', city: '广州', carrier: '移动', label: '广州移动', taskFilter: '广东移动', landmarkAddress: '120.196.165.24' }),
 ]
 
 export function normalizePingTaskName(value: string): string {
@@ -74,12 +101,39 @@ export function getTopologyProbe(key?: string): TopologyProbeOption {
   return TOPOLOGY_PROBE_OPTIONS.find(option => option.key === key) ?? TOPOLOGY_PROBE_OPTIONS[0]!
 }
 
+export function getTopologyProbeTarget(
+  option: TopologyProbeOption,
+  probe: { type: string, port?: number },
+): string {
+  if (probe.type === 'icmp')
+    return option.probeTargets.icmp?.trim() ?? ''
+  if (probe.type !== 'tcp' || !Number.isInteger(probe.port))
+    return ''
+  return option.probeTargets.tcp?.[probe.port!]?.trim() ?? ''
+}
+
+export function topologyEntryTaskName(
+  option: TopologyProbeOption,
+  probe: { type: string, port?: number },
+): string {
+  const suffix = probe.type === 'tcp' && Number.isInteger(probe.port)
+    ? `tcp-${probe.port}`
+    : 'icmp'
+  return `Transit-entry-${option.key}-${suffix}`
+}
+
+export function isTopologyEntryTaskName(value: string, option: TopologyProbeOption): boolean {
+  const normalized = normalizePingTaskName(value)
+  const prefix = normalizePingTaskName(`Transit-entry-${option.key}-`)
+  return normalized === `${prefix}icmp` || new RegExp(`^${prefix}tcp\\d+$`).test(normalized)
+}
+
 export function findTopologyProbeKey(...values: string[]): string | undefined {
   const normalizedValues = values.map(normalizePingTaskName).filter(Boolean)
   return TOPOLOGY_PROBE_OPTIONS.find(option => normalizedValues.some((value) => {
     const taskName = normalizePingTaskName(option.taskFilter)
     const label = normalizePingTaskName(option.label)
-    return value === taskName || value === label
+    return value === taskName || value === label || isTopologyEntryTaskName(value, option)
   }))?.key
 }
 
@@ -235,9 +289,16 @@ function makeUniqueQuickEntryLabel(label: string, configuredNames: Set<string>):
 }
 
 export function pickQuickTopologyTaskName(taskNames: readonly string[], probe: TopologyProbeOption = getTopologyProbe('')): string {
-  const normalizedProbe = normalizePingTaskName(probe.taskFilter)
+  // 广州的三网任务惯用名是「广东电信/联通/移动」（taskFilter），但入口下拉显示
+  // 的是「广州电信」（label）；只比 taskFilter 会让站长按显示名建的任务永远配
+  // 不上，见 findTopologyProbeKey 对 label 和 taskFilter 是一视同仁的。
+  const normalizedTaskFilter = normalizePingTaskName(probe.taskFilter)
+  const normalizedLabel = normalizePingTaskName(probe.label)
   const normalizedTasks = normalizeQuickTopologyTaskNames(taskNames)
-  const matches = normalizedTasks.filter(task => normalizePingTaskName(task) === normalizedProbe)
+  const matches = normalizedTasks.filter((task) => {
+    const normalized = normalizePingTaskName(task)
+    return normalized === normalizedTaskFilter || normalized === normalizedLabel
+  })
 
   return matches.length === 1 ? matches[0]! : ''
 }
@@ -296,14 +357,32 @@ export interface QuickTopologyRouteOptions {
   probeKey?: string
 }
 
+const QUICK_ENTRY_COLLISION_SUFFIX_PATTERN = /^(.*)入口\d*$/
+
+/**
+ * `makeUniqueQuickEntryLabel` 撞到同名节点时会把入口标签改成「<预设名>入口」
+ * 或「<预设名>入口<N>」。这里的候选列表把后缀去掉，让探测键识别在撞名之后
+ * 依然成立——否则一旦某台节点恰好叫「北京电信」，该预设入口在没有匹配任务
+ * 时会被永久当成自定义入口：`shouldAutoApplyTopologyProbe` 从此再也不会重新
+ * 尝试匹配，哪怕之后在 Komari 里补建了同名任务。
+ */
+function quickEntryLabelCandidates(label: string): string[] {
+  const trimmed = label.trim()
+  const match = QUICK_ENTRY_COLLISION_SUFFIX_PATTERN.exec(trimmed)
+  return match?.[1] ? [trimmed, match[1]] : [trimmed]
+}
+
 export function getTopologyRouteProbeKey(route: Pick<TopologyRouteConfig, 'nodes' | 'metrics'>): string {
-  return findTopologyProbeKey(route.nodes[0]?.name ?? '', route.metrics[0]?.taskFilter ?? '') ?? ''
+  return findTopologyProbeKey(
+    ...quickEntryLabelCandidates(route.nodes[0]?.name ?? ''),
+    route.metrics[0]?.taskFilter ?? '',
+  ) ?? ''
 }
 
 export function shouldAutoApplyTopologyProbe(route: Pick<TopologyRouteConfig, 'nodes' | 'metrics'>): boolean {
   const firstTask = route.metrics[0]?.taskFilter.trim() ?? ''
   if (!firstTask)
-    return Boolean(findTopologyProbeKey(route.nodes[0]?.name ?? ''))
+    return Boolean(findTopologyProbeKey(...quickEntryLabelCandidates(route.nodes[0]?.name ?? '')))
   return Boolean(findTopologyProbeKey(firstTask))
 }
 

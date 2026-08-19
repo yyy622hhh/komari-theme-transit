@@ -9,9 +9,10 @@ import { useTopologyManager } from '@/composables/useTopologyManager'
 import { useTopologyRoutePlanner } from '@/composables/useTopologyRoutePlanner'
 import { useTopologyTaskCatalog } from '@/composables/useTopologyTaskCatalog'
 import { OPS_TOPOLOGY_HOP_PROBE } from '@/constants/ops'
-import { deleteTopologyPingTasks, describeTopologyHopProbe, ensureTopologyPingTask, topologyPingTargets } from '@/services/ping-task.service'
+import { createTopologyEntryProbeTask, deleteTopologyPingTasks, describeTopologyHopProbe, ensureTopologyEntryProbeTask, ensureTopologyPingTask, forgetSessionCreatedPingTask, isSessionCreatedPingTask, loadAdminPingTasks, rememberSessionCreatedPingTask, sessionCreatedPingTaskCount, topologyPingTargets } from '@/services/ping-task.service'
 import { planWorkingHopTask } from '@/services/topology-probe.service'
-import { applyTopologyProbeToRoute, findUniqueTopologyNode, getTopologyRouteProbeKey, listUnusedQuickLandingUuids, nextQuickLandingUuid, TOPOLOGY_PROBE_OPTIONS } from '@/utils/topologyHelper'
+import { applyTopologyProbeToRoute, getTopologyProbe, getTopologyRouteProbeKey, listUnusedQuickLandingUuids, nextQuickLandingUuid, TOPOLOGY_PROBE_OPTIONS } from '@/utils/topologyHelper'
+import { resolveTopologyNodeIdentity } from '@/utils/topologyNodeIdentity'
 
 const props = defineProps<{ nodes: NodeData[], open: boolean }>()
 const emit = defineEmits<{ 'update:open': [open: boolean] }>()
@@ -26,7 +27,7 @@ const catalog = useTopologyTaskCatalog(
   () => props.nodes,
   name => manager.isAmbiguousNodeName(name),
   () => {
-    if (props.open && !rematching.value && !quickConfiguring.value && manager.dirty)
+    if (props.open && !rematching.value && !quickConfiguring.value && hasPendingWork())
       void persistDraft('线路已保存。')
   },
 )
@@ -40,18 +41,25 @@ const {
 } = catalog
 const {
   routeProbeStates,
+  routeEntryProbeStates,
   pendingRouteTasks,
+  pendingEntryTasks,
   routeRetiredTasks,
+  routeEntryRetiredTasks,
   routeTaskPlanning,
   routeTaskErrors,
   bumpRouteRun,
   cancelRouteTaskPlanning,
   clearRouteTaskPlanning,
   clearPendingRouteTask,
+  clearPendingEntryTask,
   clearRouteTaskError,
   clearRouteProbeState,
+  clearRouteEntryProbeState,
   rememberRetiredTasks,
   reservedEntryNames,
+  planEntryTaskState,
+  applyEntryTaskState,
   planRouteTasks,
   routeHopTask,
   routeHint,
@@ -71,7 +79,6 @@ const customEntrySnapshots = ref<Record<number, { node: TopologyNodeConfig, metr
 const quickSourceUuid = ref('')
 const quickLandingUuid = ref('')
 const quickProbeKey = ref(DEFAULT_PROBE)
-const sessionCreatedTaskIds = new Set<number>()
 let recheckTimer: ReturnType<typeof setInterval> | null = null
 let quickConfigurationRun = 0
 let dialogSession = 0
@@ -87,7 +94,7 @@ const quickTaskError = computed(() => quickSourceUuid.value ? taskErrors.value[q
 const taskBindingErrors = computed(() => manager.routes.flatMap((route, routeIndex) => route.metrics.flatMap((metric, metricIndex) => {
   if (!metric.live || !metric.nodeName.trim() || !metric.taskFilter.trim())
     return []
-  const node = findUniqueTopologyNode(props.nodes, metric.nodeName)
+  const node = resolveTopologyNodeIdentity(props.nodes, metric.nodeName)
   if (!node) {
     return [`第 ${routeIndex + 1} 条线路的探测来源“${metric.nodeName}”不存在或名称重复`]
   }
@@ -95,7 +102,11 @@ const taskBindingErrors = computed(() => manager.routes.flatMap((route, routeInd
     return [`第 ${routeIndex + 1} 条线路无法验证探测任务：${taskErrors.value[node.uuid]}`]
   if (!taskLoaded.value[node.uuid])
     return []
-  const pending = metricIndex === 1 ? pendingRouteTasks.value[route.id] : undefined
+  const pending = metricIndex === 1
+    ? pendingRouteTasks.value[route.id]
+    : metricIndex === 0
+      ? pendingEntryTasks.value[route.id]
+      : undefined
   if (pending?.sourceUuid === node.uuid && pending.taskName === metric.taskFilter)
     return []
   return (taskOptions.value[node.uuid] ?? []).includes(metric.taskFilter)
@@ -114,10 +125,19 @@ const validationErrors = computed(() => [
   }),
 ])
 const managerBusy = computed(() => manager.saving || quickConfiguring.value || rematching.value || persisting.value)
+/**
+ * 入口换挡可能不改序列化后的 metrics，所以还要看排队中的创建任务。
+ * 普通函数：catalog 回调声明更早，依赖函数声明提升。
+ */
+function hasPendingWork(): boolean {
+  return manager.dirty
+    || Object.keys(pendingRouteTasks.value).length > 0
+    || Object.keys(pendingEntryTasks.value).length > 0
+}
 const taskValidationPending = computed(() => rematching.value || Object.values(routeTaskPlanning.value).some(Boolean) || manager.routes.some(route => route.metrics.some((metric) => {
   if (!metric.live || !metric.nodeName.trim() || !metric.taskFilter.trim())
     return false
-  const node = findUniqueTopologyNode(props.nodes, metric.nodeName)
+  const node = resolveTopologyNodeIdentity(props.nodes, metric.nodeName)
   return Boolean(node && !taskLoaded.value[node.uuid] && !taskErrors.value[node.uuid])
 })))
 
@@ -259,20 +279,51 @@ function routeProbeLabel(route: TopologyRouteConfig): string {
  * 名称不是所有权证明：既有任务即使恰好使用 Transit 命名也不能删除。这里只接受
  * ensure 明确返回 created=true 后记录的 ID，并在配置保存成功后再次确认没有线路绑定。
  */
+const TOPOLOGY_PRESET_NAMES = new Set(TOPOLOGY_PROBE_OPTIONS.flatMap(option => [option.label, option.taskFilter]))
+
 async function retireReplacedTasks(): Promise<void> {
   const boundNames = new Set(manager.routes.flatMap(route => route.metrics
     .filter(metric => metric.live)
     .map(metric => metric.taskFilter.trim())))
   const entries = Object.entries(routeRetiredTasks.value)
-  if (!entries.length)
-    return
   routeRetiredTasks.value = {}
-  const ids = [...new Set(entries.flatMap(([, tasks]) => tasks
-    .filter(task => sessionCreatedTaskIds.has(task.id) && !boundNames.has(task.name.trim()))
-    .map(task => task.id)))]
+  const ladderIds = entries.flatMap(([, tasks]) => tasks
+    .filter(task => isSessionCreatedPingTask(task.id) && !boundNames.has(task.name.trim()))
+    .map(task => task.id))
+
+  // 入口段换挡（ICMP 判死切 TCP）留下的旧任务：名字还是同一个预设名、还在
+  // `boundNames` 里（只是换了个 id），所以不能用「名字不再被引用」判断，只能
+  // 靠 `planEntryProbeTask` 已经精确认出来的候选（见 `routeEntryRetiredTasks`）。
+  const entryEntries = Object.entries(routeEntryRetiredTasks.value)
+  routeEntryRetiredTasks.value = {}
+  const entrySwitchIds = entryEntries.flatMap(([, tasks]) => tasks
+    .filter(task => isSessionCreatedPingTask(task.id))
+    .map(task => task.id))
+
+  // 入口段切换预设（如「北京电信」→「北京联通」）留下的旧任务：名字不再是
+  // 任何线路引用的名字了，但也不像第 2 段那样带线路机/落地机后缀能从名称本身
+  // 反推候选——只能反查完整任务列表，挑出本会话创建过、名字属于九个预设、
+  // 但现在没有任何线路绑定的那些。
+  let entryIds: number[] = []
+  if (sessionCreatedPingTaskCount()) {
+    try {
+      const tasks = await loadAdminPingTasks()
+      entryIds = tasks
+        .filter(task => Number.isInteger(task.id)
+          && isSessionCreatedPingTask(task.id!)
+          && TOPOLOGY_PRESET_NAMES.has(task.name.trim())
+          && !boundNames.has(task.name.trim()))
+        .map(task => task.id!)
+    }
+    catch {
+      // 清理是尽力而为，读取失败不影响主流程，下次保存再试。
+    }
+  }
+
+  const ids = [...new Set([...ladderIds, ...entrySwitchIds, ...entryIds])]
   if (ids.length && await deleteTopologyPingTasks(ids)) {
     for (const id of ids)
-      sessionCreatedTaskIds.delete(id)
+      forgetSessionCreatedPingTask(id)
   }
 }
 
@@ -281,7 +332,7 @@ async function cleanupCreatedTasks(taskIds: ReadonlySet<number>): Promise<void> 
   if (!ids.length || !await deleteTopologyPingTasks(ids))
     return
   for (const id of ids)
-    sessionCreatedTaskIds.delete(id)
+    forgetSessionCreatedPingTask(id)
 }
 
 function selectRouteNode(route: TopologyRouteConfig, index: number, nodeName: string): void {
@@ -339,7 +390,7 @@ function selectRouteProbe(route: TopologyRouteConfig, probeKey: string): void {
   if (routeProbeValue(route) === CUSTOM_PROBE)
     rememberCustomEntry(route)
   const sourceName = route.nodes[1]?.name.trim() ?? ''
-  const source = findUniqueTopologyNode(props.nodes, sourceName)
+  const source = resolveTopologyNodeIdentity(props.nodes, sourceName)
   applyTopologyProbeToRoute(
     route,
     probeKey,
@@ -359,7 +410,9 @@ function removeRoute(index: number): void {
     return
   bumpRouteRun(route.id)
   clearPendingRouteTask(route.id)
+  clearPendingEntryTask(route.id)
   clearRouteProbeState(route.id)
+  clearRouteEntryProbeState(route.id)
   clearRouteTaskError(route.id)
   clearRouteTaskPlanning(route.id)
   const nextSnapshots = { ...customEntrySnapshots.value }
@@ -384,7 +437,7 @@ async function rematchOpenRoutes(session: number): Promise<void> {
     }))
     if (session !== dialogSession || !props.open)
       return
-    if (manager.dirty && !persistBlockingErrors.value.length) {
+    if (hasPendingWork() && !persistBlockingErrors.value.length) {
       await persistRoutes({
         keepOpen: true,
         ignoreBusy: true,
@@ -408,7 +461,7 @@ async function planRouteTasksAndSave(route: TopologyRouteConfig): Promise<void> 
 }
 
 async function persistDraft(successMessage: string): Promise<void> {
-  if (!props.open || rematching.value || !manager.dirty || persistBlockingErrors.value.length)
+  if (!props.open || rematching.value || !hasPendingWork() || persistBlockingErrors.value.length)
     return
   // Another route may still be matching tasks. Don't toast an error; the
   // in-flight planner will persist the latest draft when it finishes.
@@ -452,7 +505,7 @@ async function persistRoutes(options: {
         window.$message?.error('请先修正无效的线路配置。')
       return 'invalid'
     }
-    if (!manager.dirty) {
+    if (!hasPendingWork()) {
       if (options.runId !== undefined && options.successMessage) {
         window.$message?.success(options.successMessage)
         return 'saved'
@@ -476,8 +529,8 @@ async function persistRoutes(options: {
           const target = findEndpoint(pending.targetUuid)
           if (!source || !target)
             throw new Error('待创建 Ping 任务的节点已变化，请重新选择线路。')
-          const routeSource = findUniqueTopologyNode(props.nodes, route.nodes[1]?.name ?? '')
-          const routeTarget = findUniqueTopologyNode(props.nodes, route.nodes[2]?.name ?? '')
+          const routeSource = resolveTopologyNodeIdentity(props.nodes, route.nodes[1]?.name ?? '')
+          const routeTarget = resolveTopologyNodeIdentity(props.nodes, route.nodes[2]?.name ?? '')
           const plannedMetric = route.metrics[1]
           if (routeSource?.uuid !== pending.sourceUuid
             || routeTarget?.uuid !== pending.targetUuid
@@ -488,7 +541,7 @@ async function persistRoutes(options: {
           }
           const ensured = await ensureTopologyPingTask(source, target, { probe: pending.probe, signal: controller.signal })
           if (ensured.created && Number.isInteger(ensured.task.id)) {
-            sessionCreatedTaskIds.add(ensured.task.id!)
+            rememberSessionCreatedPingTask(ensured.task.id!)
             createdTaskIds.add(ensured.task.id!)
           }
           if (runId !== quickConfigurationRun || session !== dialogSession || !props.open) {
@@ -501,6 +554,40 @@ async function persistRoutes(options: {
           metric.live = true
           rememberTask(source.uuid, ensured.task.name)
           clearPendingRouteTask(route.id)
+        }
+        for (const route of manager.routes) {
+          const pendingEntry = pendingEntryTasks.value[route.id]
+          if (!pendingEntry)
+            continue
+          const source = findEndpoint(pendingEntry.sourceUuid)
+          if (!source)
+            throw new Error('待创建 Ping 任务的节点已变化，请重新选择线路。')
+          const routeSource = resolveTopologyNodeIdentity(props.nodes, route.nodes[1]?.name ?? '')
+          const firstMetric = route.metrics[0]
+          if (routeSource?.uuid !== pendingEntry.sourceUuid
+            || getTopologyRouteProbeKey(route) !== pendingEntry.probeKey
+            || !firstMetric?.live
+            || firstMetric.nodeName !== source.name
+            || firstMetric.taskFilter !== pendingEntry.taskName) {
+            throw new Error('待创建 Ping 任务对应的线路段已变化，请重新选择。')
+          }
+          const ensured = pendingEntry.forceCreate
+            ? { task: await createTopologyEntryProbeTask(source, getTopologyProbe(pendingEntry.probeKey), pendingEntry.probe, { signal: controller.signal, taskName: pendingEntry.taskName }), created: true }
+            : await ensureTopologyEntryProbeTask(source, getTopologyProbe(pendingEntry.probeKey), { hopProbe: pendingEntry.probe, signal: controller.signal, taskName: pendingEntry.taskName })
+          if (ensured.created && Number.isInteger(ensured.task.id)) {
+            rememberSessionCreatedPingTask(ensured.task.id!)
+            createdTaskIds.add(ensured.task.id!)
+          }
+          if (runId !== quickConfigurationRun || session !== dialogSession || !props.open) {
+            await cleanupCreatedTasks(createdTaskIds)
+            return 'cancelled' as const
+          }
+          const metric = route.metrics[0]!
+          metric.nodeName = source.name
+          metric.taskFilter = ensured.task.name
+          metric.live = true
+          rememberTask(source.uuid, ensured.task.name)
+          clearPendingEntryTask(route.id)
         }
         if (runId !== quickConfigurationRun || session !== dialogSession || !props.open) {
           await cleanupCreatedTasks(createdTaskIds)
@@ -523,7 +610,7 @@ async function persistRoutes(options: {
         createdTaskIds.clear()
         return saveResult
       }
-      const hasPendingTasks = manager.routes.some(route => Boolean(pendingRouteTasks.value[route.id]))
+      const hasPendingTasks = manager.routes.some(route => Boolean(pendingRouteTasks.value[route.id]) || Boolean(pendingEntryTasks.value[route.id]))
       const result = hasPendingTasks
         ? await manager.withSaveLock(async () => {
             await manager.preflightSave()
@@ -659,6 +746,10 @@ async function addQuickRoute(): Promise<void> {
       },
     }
     rememberRetiredTasks(configured.route.id, planned.retiredTasks)
+    const entryState = await planEntryTaskState(configured.route, latestSource.uuid, latestSource.name)
+    if (runId !== quickConfigurationRun || !props.open)
+      return
+    applyEntryTaskState(configured.route, latestSource.uuid, latestSource.name, entryState)
     if (configured.created) {
       quickLandingUuid.value = ''
       syncQuickSelections(true)
@@ -831,6 +922,9 @@ function nodeOption(option: TopologyQuickNode, role: 'source' | 'landing', other
         :data-topology-route-id="route.id"
         :data-topology-entry-probe="routeProbeValue(route)"
         :data-topology-entry-task="route.metrics[0]?.taskFilter || ''"
+        :data-topology-entry-pending="pendingEntryTasks[route.id] ? 'true' : 'false'"
+        :data-topology-entry-hop-probe="routeEntryProbeStates[route.id] ? describeTopologyHopProbe(routeEntryProbeStates[route.id]!.probe) : ''"
+        :data-topology-entry-verdict="routeEntryProbeStates[route.id]?.verdict ?? ''"
         :data-topology-hop-task="routeHopTask(route)"
         :data-topology-hop-pending="pendingRouteTasks[route.id] ? 'true' : 'false'"
         :data-topology-hop-probe="routeProbeStates[route.id] ? describeTopologyHopProbe(routeProbeStates[route.id]!.probe) : ''"
@@ -946,7 +1040,7 @@ function nodeOption(option: TopologyQuickNode, role: 'source' | 'landing', other
         <Button variant="outline" :disabled="managerBusy" @click="reset">
           恢复已保存配置
         </Button>
-        <Button :disabled="managerBusy || taskValidationPending || !manager.dirty || persistBlockingErrors.length > 0" @click="save">
+        <Button :disabled="managerBusy || taskValidationPending || !hasPendingWork() || persistBlockingErrors.length > 0" @click="save">
           <Icon :icon="manager.saving ? 'tabler:loader-2' : 'tabler:device-floppy'" :class="manager.saving && 'animate-spin'" />
           {{ manager.saving ? '保存中' : '保存并应用' }}
         </Button>

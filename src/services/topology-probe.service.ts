@@ -1,9 +1,11 @@
 import type { AdminPingTask, TopologyHopProbe, TopologyPingEndpoint } from '@/services/ping-task.service'
 import type { PingMetricTaskStats } from '@/utils/rpc'
+import type { TopologyProbeOption } from '@/utils/topologyHelper'
 import { OPS_TOPOLOGY_HOP_PROBE, OPS_TOPOLOGY_HOP_PROBE_LADDER } from '@/constants/ops'
 import { loadPingRecordsWithTasks } from '@/services/history.service'
 import { loadPingMetricStats, partitionMetricEntityIds } from '@/services/metrics.service'
 import {
+  buildTopologyHopTarget,
   DEFAULT_TOPOLOGY_HOP_PROBE,
   draftTopologyPingTask,
   findTopologyPingTask,
@@ -18,6 +20,7 @@ import {
   topologyHopTaskNameCandidates,
   topologyPingTargets,
 } from '@/services/ping-task.service'
+import { getTopologyProbeTarget, normalizePingTaskName, topologyEntryTaskName } from '@/utils/topologyHelper'
 
 /** 一个任务在回看窗口内的采样情况。 */
 export interface HopTaskSamples {
@@ -265,6 +268,19 @@ function isThemeGeneratedHopTask(
   return LADDER.some(rung => topologyHopTaskNameCandidates(source, landing, rung).includes(name))
 }
 
+function entryTaskNameCandidates(probe: TopologyProbeOption): Set<string> {
+  return new Set([
+    probe.taskFilter,
+    probe.label,
+    topologyEntryTaskName(probe, { type: 'icmp' }),
+    ...LADDER.filter(rung => rung.type === 'tcp').map(rung => topologyEntryTaskName(probe, rung)),
+  ].map(normalizePingTaskName))
+}
+
+function entryProbeTarget(probe: TopologyProbeOption, hopProbe: TopologyHopProbe): string {
+  return getTopologyProbeTarget(probe, hopProbe)
+}
+
 function collectRetiredTasks(
   profile: SourceProbeProfile,
   source: TopologyPingEndpoint,
@@ -411,5 +427,106 @@ export async function planWorkingHopTask(
     switchedFrom: null,
     targetAddress,
     retiredTasks: retire(task.name),
+  }
+}
+
+export interface EntryProbePlan {
+  task: AdminPingTask
+  probe: TopologyHopProbe
+  verdict: HopTaskVerdict
+  needsCreation: boolean
+  /** 阶梯已经走完，所有探测方式都判死。 */
+  exhausted: boolean
+  /** 本次因为判死而从哪种探测方式切换过来；没切换则为 null。 */
+  switchedFrom: TopologyHopProbe | null
+  /**
+   * 名字符合、但不是这次选中绑定的同名任务——多半是换挡时新建成功、旧的还
+   * 没删掉留下的，也可能是站长本来就建了不止一个。调用方应该在换挡成功后
+   * 尝试清理，但必须先用本会话实际创建的任务 ID 证明所有权，不能仅凭名称
+   * 删除；删不掉也不影响主流程，下一轮还会再给出同样的候选。
+   */
+  retiredTasks: AdminPingTask[]
+}
+
+/**
+ * 第 1 段只按名字认任务（label / taskFilter / 旧版 Transit-entry-*），不按目标地址。
+ * 多个同名任务时绑定健康的那个，其余记入 retiredTasks，避免把「先建后清」误判成缺失。
+ */
+export async function planEntryProbeTask(
+  source: TopologyPingEndpoint,
+  probe: TopologyProbeOption,
+  options: { fresh?: boolean } = {},
+): Promise<EntryProbePlan> {
+  if (!source.uuid.trim())
+    throw new Error('线路机已失效，请重新选择。')
+
+  const profile = await loadSourceProbeProfile(source.uuid, options)
+  const assigned = profile.tasks.filter(task => isPingTaskAssignedToSource(task, source.uuid))
+  const candidateNames = entryTaskNameCandidates(probe)
+  const candidates = assigned.filter(task => candidateNames.has(normalizePingTaskName(task.name)))
+
+  const draftAt = (hopProbe: TopologyHopProbe, taskName = probe.taskFilter): AdminPingTask => {
+    const normalized = normalizeTopologyHopProbe(hopProbe)
+    const targetHost = entryProbeTarget(probe, normalized)
+    const target = targetHost ? buildTopologyHopTarget({ ipv4: targetHost }, normalized) : ''
+    return { name: taskName, type: normalized.type, target, default_on: false, clients: [source.uuid], interval: 30 }
+  }
+
+  if (!candidates.length) {
+    const initialProbe = chooseInitialHopProbe(profile)
+    return {
+      task: draftAt(initialProbe),
+      probe: initialProbe,
+      verdict: 'pending',
+      needsCreation: true,
+      exhausted: false,
+      switchedFrom: null,
+      retiredTasks: [],
+    }
+  }
+
+  // 健康的优先；都不健康时选 id 最大（最近创建）的那个，保证多次重新规划时
+  // 结果稳定，不会在候选之间来回摇摆。
+  const rank = (task: AdminPingTask): number => {
+    const taskVerdict = assessHopTask(profile, task)
+    return taskVerdict === 'healthy' ? 2 : taskVerdict === 'pending' ? 1 : 0
+  }
+  const [existing, ...duplicates] = [...candidates].sort((a, b) => rank(b) - rank(a) || (b.id ?? 0) - (a.id ?? 0))
+
+  const currentProbe = topologyHopProbeFromTask(existing!) ?? DEFAULT_TOPOLOGY_HOP_PROBE
+  const verdict = assessHopTask(profile, existing!)
+  if (verdict !== 'dead') {
+    return {
+      task: existing!,
+      probe: currentProbe,
+      verdict,
+      needsCreation: false,
+      exhausted: false,
+      switchedFrom: null,
+      retiredTasks: duplicates,
+    }
+  }
+
+  const nextRung = nextLadderProbe(profile, currentProbe, candidates)
+  const nextProbe = nextRung && entryProbeTarget(probe, nextRung) ? nextRung : null
+  if (!nextProbe) {
+    return {
+      task: existing!,
+      probe: currentProbe,
+      verdict: 'dead',
+      needsCreation: false,
+      exhausted: true,
+      switchedFrom: null,
+      retiredTasks: duplicates,
+    }
+  }
+  return {
+    task: draftAt(nextProbe, existing!.name),
+    probe: nextProbe,
+    verdict: 'pending',
+    needsCreation: true,
+    exhausted: false,
+    switchedFrom: currentProbe,
+    retiredTasks: [existing!, ...duplicates],
   }
 }

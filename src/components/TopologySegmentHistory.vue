@@ -8,8 +8,9 @@ import TelemetrySampleStrip from '@/components/TelemetrySampleStrip.vue'
 import { useNodePingStats } from '@/composables/useNodePingStats'
 import { formatDateTime } from '@/utils/helper'
 import { resolveTopologySegmentHealth } from '@/utils/topologyHealth'
-import { calculateTopologyLatencyBaseline, findUniqueTopologyNode, formatTopologyLatency, formatTopologyLoss, formatTopologyTelemetryLabel, parseTopologyMetric, resolveTopologySampleTone } from '@/utils/topologyHelper'
+import { calculateTopologyLatencyBaseline, formatTopologyLatency, formatTopologyLoss, formatTopologyTelemetryLabel, parseTopologyMetric, resolveTopologySampleTone } from '@/utils/topologyHelper'
 import { calculateAdaptiveBaseline } from '@/utils/topologyIntelligence'
+import { resolveTopologyNodeIdentity } from '@/utils/topologyNodeIdentity'
 
 const props = defineProps<{
   metric: string
@@ -21,7 +22,7 @@ const props = defineProps<{
 
 const config = computed(() => parseTopologyMetric(props.metric))
 const telemetryLabel = computed(() => formatTopologyTelemetryLabel(props.metric, props.sourceLabel, props.targetLabel))
-const sourceNode = computed(() => findUniqueTopologyNode(props.nodes, config.value.nodeName))
+const sourceNode = computed(() => resolveTopologyNodeIdentity(props.nodes, config.value.nodeName))
 const ping = useNodePingStats(
   () => sourceNode.value?.uuid ?? '',
   {

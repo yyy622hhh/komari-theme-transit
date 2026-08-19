@@ -5,6 +5,7 @@ import { useTopologyTaskCatalog } from '../../src/composables/useTopologyTaskCat
 import { setAuthSessionFromLogin } from '../../src/services/auth.service'
 import { invalidateAdminPingTasksCache } from '../../src/services/ping-task.service'
 import { resetSharedRpc } from '../../src/utils/rpc'
+import { recordTopologyNodeIdentity } from '../../src/utils/topologyNodeIdentity'
 
 const relay: NodeData = { uuid: 'relay-uuid', name: 'Relay-JP' } as NodeData
 const nodes = [relay]
@@ -67,6 +68,38 @@ describe('useTopologyTaskCatalog', () => {
     }
     finally {
       restore()
+    }
+  })
+
+  test('loads tasks for a renamed node using the identity cache', async () => {
+    const originalLocalStorage = globalThis.localStorage
+    const storage = new Map<string, string>()
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
+      value: {
+        getItem: (key: string) => storage.get(key) ?? null,
+        setItem: (key: string, value: string) => storage.set(key, value),
+        removeItem: (key: string) => storage.delete(key),
+        clear: () => storage.clear(),
+        key: (index: number) => [...storage.keys()][index] ?? null,
+        get length() {
+          return storage.size
+        },
+      },
+    })
+    const { restore } = mockAdminTaskList([
+      { id: 1, name: 'Transit-Relay-JP-to-Exit-SG', clients: [relay.uuid], type: 'icmp', target: '203.0.113.20', interval: 30 },
+    ])
+    try {
+      recordTopologyNodeIdentity([{ uuid: relay.uuid, name: 'Relay-JP-old' }])
+      const catalog = useTopologyTaskCatalog([{ ...relay, name: 'Relay-Tokyo' }], noAmbiguity)
+      const result = await catalog.loadTasks('Relay-JP-old')
+      expect(result).toEqual({ tasks: ['Transit-Relay-JP-to-Exit-SG'], error: '' })
+      expect(catalog.taskOptions.value[relay.uuid]).toEqual(['Transit-Relay-JP-to-Exit-SG'])
+    }
+    finally {
+      restore()
+      Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: originalLocalStorage })
     }
   })
 

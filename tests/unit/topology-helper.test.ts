@@ -13,6 +13,7 @@ import {
   getQuickTopologySourceNode,
   getTopologyProbe,
   getTopologyProbeStorageKey,
+  getTopologyProbeTarget,
   getTopologyRouteProbeKey,
   listUnusedQuickLandingUuids,
   nextQuickLandingUuid,
@@ -123,6 +124,17 @@ describe('topology route and metric alignment', () => {
   })
 })
 
+describe('topology probe targets', () => {
+  test('registers ICMP and TCP 443/80/22 against the landmark host', () => {
+    const probe = getTopologyProbe('beijing-telecom')
+    expect(getTopologyProbeTarget(probe, { type: 'icmp' })).toBe(probe.landmarkAddress)
+    expect(getTopologyProbeTarget(probe, { type: 'tcp', port: 443 })).toBe(probe.landmarkAddress)
+    expect(getTopologyProbeTarget(probe, { type: 'tcp', port: 80 })).toBe(probe.landmarkAddress)
+    expect(getTopologyProbeTarget(probe, { type: 'tcp', port: 22 })).toBe(probe.landmarkAddress)
+    expect(getTopologyProbeTarget(probe, { type: 'tcp', port: 8080 })).toBe('')
+  })
+})
+
 describe('topology probe overrides', () => {
   test('does not turn a static or missing metric into a live probe', () => {
     expect(formatTopologyMetricForProbe('51,0', 'beijing-telecom', 'Relay')).toBe('51,0')
@@ -211,6 +223,42 @@ describe('quick topology configuration', () => {
       [{ name: '北京电信', region: 'CN', role: '入口' }],
       [{ live: false, nodeName: '', taskFilter: '', fallbackLatency: null, fallbackLoss: null }],
     ))).toBe(true)
+  })
+
+  test('keeps a preset entry identifiable after a name collision even without a matching task yet', () => {
+    // 撞到同名节点时入口标签会被改成「北京电信入口」；此时线路机上还没有同名
+    // Ping 任务，taskFilter 仍为空。这不该让该入口被永久当成自定义入口——
+    // 否则站长后来在 Komari 里补建了「北京电信」任务，主题也永远不会认领。
+    const route = createTopologyRoute(
+      [{ name: '北京电信入口', region: 'CN', role: '入口' }, { name: 'Riven-JP', region: 'JP', role: '线路机' }],
+      [{ live: false, nodeName: '', taskFilter: '', fallbackLatency: null, fallbackLoss: null }],
+    )
+
+    expect(getTopologyRouteProbeKey(route)).toBe('beijing-telecom')
+    expect(shouldAutoApplyTopologyProbe(route)).toBe(true)
+
+    const suffixedRoute = createTopologyRoute(
+      [{ name: '北京电信入口101', region: 'CN', role: '入口' }, { name: 'Riven-JP', region: 'JP', role: '线路机' }],
+      [{ live: false, nodeName: '', taskFilter: '', fallbackLatency: null, fallbackLoss: null }],
+    )
+    expect(getTopologyRouteProbeKey(suffixedRoute)).toBe('beijing-telecom')
+
+    // 真正的自定义入口（不是我们生成的撞名后缀）不应该被误认成预设。
+    const genuinelyCustom = createTopologyRoute(
+      [{ name: '自定义入口', region: '', role: '入口' }, { name: 'Riven-JP', region: 'JP', role: '线路机' }],
+      [{ live: false, nodeName: '', taskFilter: '', fallbackLatency: null, fallbackLoss: null }],
+    )
+    expect(getTopologyRouteProbeKey(genuinelyCustom)).toBe('')
+    expect(shouldAutoApplyTopologyProbe(genuinelyCustom)).toBe(false)
+  })
+
+  test('matches the entry probe by label as well as task filter for Guangzhou', () => {
+    // Guangzhou 的入口标签是「广州XX」但惯用任务名是「广东XX」；两种命名都要
+    // 能唯一命中，否则按显示名建任务的站长永远配不上。
+    const probe = getTopologyProbe('guangzhou-telecom')
+    expect(pickQuickTopologyTaskName(['广州电信'], probe)).toBe('广州电信')
+    expect(pickQuickTopologyTaskName(['广东电信'], probe)).toBe('广东电信')
+    expect(pickQuickTopologyTaskName(['广州电信', '广东电信'], probe)).toBe('')
   })
 
   test('generates a valid static draft when no Ping task is available', () => {

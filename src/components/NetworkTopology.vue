@@ -5,7 +5,7 @@ import type { TopologyRouteHealth, TopologyRouteScore, TopologySegmentTelemetry 
 import type { TopologyRouteRanking, TopologyRouteReliability, TopologySegmentReliabilitySnapshot } from '@/utils/topologyIntelligence'
 import { Icon } from '@iconify/vue'
 import { useMediaQuery, useStorageAsync } from '@vueuse/core'
-import { computed, ref, watch } from 'vue'
+import { computed, ref, watch, watchEffect } from 'vue'
 import { useRouter } from 'vue-router'
 import IncidentTimelineDialog from '@/components/IncidentTimelineDialog.vue'
 import TopologyEdgeMetric from '@/components/TopologyEdgeMetric.vue'
@@ -20,7 +20,6 @@ import { getRegionCode } from '@/utils/regionHelper'
 import { calculateTopologyRouteScore } from '@/utils/topologyHealth'
 import {
   findTopologyProbeKey,
-  findUniqueTopologyNode,
   formatTopologyMetricForProbe,
   getTopologyProbe,
   getTopologyProbeStorageKey,
@@ -30,6 +29,7 @@ import {
   TOPOLOGY_PROBE_OPTIONS,
 } from '@/utils/topologyHelper'
 import { aggregateTopologyRouteReliability, rankTopologyRoutes } from '@/utils/topologyIntelligence'
+import { recordTopologyNodeIdentity, resolveTopologyNodeIdentity } from '@/utils/topologyNodeIdentity'
 
 interface RouteNode {
   key: string
@@ -72,6 +72,8 @@ const routeSegmentReliability = ref<Record<string, Record<number, TopologySegmen
 const activeDirection = ref('all')
 const isDesktop = useMediaQuery('(min-width: 768px)')
 useTopologyProbeRepair(() => props.nodes, managerOpen)
+// nodes 数组原地 mutate，必须跟踪 uuid/name 字段而不是数组引用。
+watchEffect(() => recordTopologyNodeIdentity(props.nodes))
 
 const routeGroups = computed(() => splitTopologyGroups(appStore.topologyRoute, true))
 // Metric groups map to route groups by index. Empty groups must remain in the
@@ -79,7 +81,7 @@ const routeGroups = computed(() => splitTopologyGroups(appStore.topologyRoute, t
 const metricGroups = computed(() => splitTopologyGroups(appStore.topologyMetrics, true))
 
 function findNode(name: string): NodeData | undefined {
-  return findUniqueTopologyNode(props.nodes, name)
+  return resolveTopologyNodeIdentity(props.nodes, name)
 }
 
 const DIRECTION_LABELS: Record<string, string> = {

@@ -1,8 +1,9 @@
 import type { AdminPingTask } from '../../src/services/ping-task.service'
 import { afterEach, describe, expect, mock, test } from 'bun:test'
 import { isAuthenticated, setAuthSessionFromLogin } from '../../src/services/auth.service'
-import { buildTopologyHopTarget, deleteTopologyPingTasks, ensureTopologyPingTask, findTopologyPingTask, findTopologyPingTaskByName, invalidateAdminPingTasksCache, isPingTaskAssignedToSource, loadAdminPingTaskNamesForNode, loadAdminPingTasks, pingTaskTargetHost, pingTaskTargetPort, planTopologyPingTask, topologyHopTaskName, topologyPingTargets } from '../../src/services/ping-task.service'
+import { buildTopologyHopTarget, createTopologyEntryProbeTask, deleteTopologyPingTasks, ensureTopologyEntryProbeTask, ensureTopologyPingTask, findTopologyPingTask, findTopologyPingTaskByName, invalidateAdminPingTasksCache, isPingTaskAssignedToSource, loadAdminPingTaskNamesForNode, loadAdminPingTasks, pingTaskTargetHost, pingTaskTargetPort, planTopologyPingTask, topologyHopTaskName, topologyPingTargets } from '../../src/services/ping-task.service'
 import { resetSharedRpc } from '../../src/utils/rpc'
+import { getTopologyProbe } from '../../src/utils/topologyHelper'
 
 const source = { uuid: 'relay-uuid', name: 'Relay-JP', ipv4: '192.0.2.10' }
 const target = { uuid: 'exit-uuid', name: 'Exit-SG', ipv4: '203.0.113.20', ipv6: '2001:db8::20' }
@@ -585,6 +586,201 @@ describe('loadAdminPingTasks caching', () => {
       expect(freshRead.map(task => task.name)).toEqual(['fresh'])
       expect((await loadAdminPingTasks()).map(task => task.name)).toEqual(['fresh'])
       expect(listCalls).toBe(2)
+    }
+    finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+})
+
+describe('ensureTopologyEntryProbeTask', () => {
+  const probe = getTopologyProbe('beijing-telecom')
+
+  test('reuses an existing task matched by name, ignoring its actual target', async () => {
+    const originalFetch = globalThis.fetch
+    let addCalls = 0
+    globalThis.fetch = mock(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (!init?.body)
+        return new Response(JSON.stringify({ logged_in: true, username: 'admin' }))
+      const request = JSON.parse(String(init.body)) as { id: number, method: string }
+      if (request.method === 'admin:getAllPingTasks') {
+        // 站长手工建的「北京电信」任务指向一个完全不同的地址；只要名字对得上
+        // 就必须直接复用，不能因为目标地址不是 landmarkAddress 就当作不存在。
+        return new Response(JSON.stringify({
+          jsonrpc: '2.0',
+          id: request.id,
+          result: [{ id: 7, name: '北京电信', clients: [source.uuid], type: 'icmp', target: '198.51.100.9', interval: 30 }],
+        }), { headers: { 'Content-Type': 'application/json' } })
+      }
+      if (request.method === 'admin:addPingTask') {
+        addCalls += 1
+        return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id }), { headers: { 'Content-Type': 'application/json' } })
+      }
+      throw new Error(`Unexpected RPC method: ${request.method}`)
+    }) as typeof fetch
+
+    try {
+      const ensured = await ensureTopologyEntryProbeTask(source, probe)
+      expect(ensured).toMatchObject({ created: false, task: { id: 7, name: '北京电信', target: '198.51.100.9' } })
+      expect(addCalls).toBe(0)
+    }
+    finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  test('creates a new ICMP task named after the taskFilter, targeting the landmark address', async () => {
+    const originalFetch = globalThis.fetch
+    const tasks: AdminPingTask[] = []
+    globalThis.fetch = mock(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (!init?.body)
+        return new Response(JSON.stringify({ logged_in: true, username: 'admin' }))
+      const request = JSON.parse(String(init.body)) as { id: number, method: string, params?: AdminPingTask }
+      if (request.method === 'admin:getAllPingTasks') {
+        return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: tasks }), { headers: { 'Content-Type': 'application/json' } })
+      }
+      if (request.method === 'admin:addPingTask') {
+        tasks.push({ ...request.params!, id: 11 })
+        return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id }), { headers: { 'Content-Type': 'application/json' } })
+      }
+      throw new Error(`Unexpected RPC method: ${request.method}`)
+    }) as typeof fetch
+
+    try {
+      const ensured = await ensureTopologyEntryProbeTask(source, probe)
+      expect(ensured).toMatchObject({
+        created: true,
+        task: { name: '北京电信', type: 'icmp', target: probe.landmarkAddress, clients: [source.uuid] },
+      })
+    }
+    finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  test('matches an existing task by label even when it was named after the taskFilter convention', async () => {
+    // 广州的入口标签是「广州电信」，但社区惯用任务名是「广东电信」；反过来，
+    // 站长如果直接照界面标签建了「广州电信」，也必须能被认领，不能重复创建。
+    const guangzhou = getTopologyProbe('guangzhou-telecom')
+    const originalFetch = globalThis.fetch
+    let addCalls = 0
+    globalThis.fetch = mock(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (!init?.body)
+        return new Response(JSON.stringify({ logged_in: true, username: 'admin' }))
+      const request = JSON.parse(String(init.body)) as { id: number, method: string }
+      if (request.method === 'admin:getAllPingTasks') {
+        return new Response(JSON.stringify({
+          jsonrpc: '2.0',
+          id: request.id,
+          result: [{ id: 9, name: '广州电信', clients: [source.uuid], type: 'icmp', target: '198.51.100.5', interval: 30 }],
+        }), { headers: { 'Content-Type': 'application/json' } })
+      }
+      if (request.method === 'admin:addPingTask') {
+        addCalls += 1
+        return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id }), { headers: { 'Content-Type': 'application/json' } })
+      }
+      throw new Error(`Unexpected RPC method: ${request.method}`)
+    }) as typeof fetch
+
+    try {
+      const ensured = await ensureTopologyEntryProbeTask(source, guangzhou)
+      expect(ensured).toMatchObject({ created: false, task: { id: 9, name: '广州电信' } })
+      expect(addCalls).toBe(0)
+    }
+    finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  test('creates the task only once under concurrent calls', async () => {
+    const originalFetch = globalThis.fetch
+    const tasks: AdminPingTask[] = []
+    let addCalls = 0
+    globalThis.fetch = mock(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (!init?.body)
+        return new Response(JSON.stringify({ logged_in: true, username: 'admin' }))
+      const request = JSON.parse(String(init.body)) as { id: number, method: string, params?: AdminPingTask }
+      if (request.method === 'admin:getAllPingTasks') {
+        return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: tasks }), { headers: { 'Content-Type': 'application/json' } })
+      }
+      if (request.method === 'admin:addPingTask') {
+        addCalls += 1
+        tasks.push({ ...request.params!, id: 13 })
+        return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id }), { headers: { 'Content-Type': 'application/json' } })
+      }
+      throw new Error(`Unexpected RPC method: ${request.method}`)
+    }) as typeof fetch
+
+    try {
+      const [first, second] = await Promise.all([
+        ensureTopologyEntryProbeTask(source, probe),
+        ensureTopologyEntryProbeTask(source, probe),
+      ])
+      expect(first.task.name).toBe('北京电信')
+      expect(second.task.name).toBe('北京电信')
+      expect(addCalls).toBe(1)
+    }
+    finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  test('creates at the requested ladder rung when a hopProbe is given', async () => {
+    const originalFetch = globalThis.fetch
+    let addedTask: AdminPingTask | undefined
+    globalThis.fetch = mock(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (!init?.body)
+        return new Response(JSON.stringify({ logged_in: true, username: 'admin' }))
+      const request = JSON.parse(String(init.body)) as { id: number, method: string, params?: AdminPingTask }
+      if (request.method === 'admin:getAllPingTasks')
+        return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: addedTask ? [addedTask] : [] }), { headers: { 'Content-Type': 'application/json' } })
+      if (request.method === 'admin:addPingTask') {
+        addedTask = { ...request.params!, id: 21 }
+        return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id }), { headers: { 'Content-Type': 'application/json' } })
+      }
+      throw new Error(`Unexpected RPC method: ${request.method}`)
+    }) as typeof fetch
+
+    try {
+      const ensured = await ensureTopologyEntryProbeTask(source, probe, { hopProbe: { type: 'tcp', port: 443 } })
+      expect(ensured).toMatchObject({
+        created: true,
+        task: { name: '北京电信', type: 'tcp', target: `${probe.landmarkAddress}:443` },
+      })
+    }
+    finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+})
+
+describe('createTopologyEntryProbeTask', () => {
+  const probe = getTopologyProbe('guangzhou-telecom')
+
+  test('creates a TCP replacement named after the bound task, not a generated Transit-entry suffix', async () => {
+    const originalFetch = globalThis.fetch
+    const tasks: AdminPingTask[] = []
+    globalThis.fetch = mock(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (!init?.body)
+        return new Response(JSON.stringify({ logged_in: true, username: 'admin' }))
+      const request = JSON.parse(String(init.body)) as { id: number, method: string, params?: AdminPingTask }
+      if (request.method === 'admin:getAllPingTasks')
+        return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: tasks }), { headers: { 'Content-Type': 'application/json' } })
+      if (request.method === 'admin:addPingTask') {
+        tasks.push({ ...request.params!, id: 31 })
+        return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id }), { headers: { 'Content-Type': 'application/json' } })
+      }
+      throw new Error(`Unexpected RPC method: ${request.method}`)
+    }) as typeof fetch
+
+    try {
+      const created = await createTopologyEntryProbeTask(source, probe, { type: 'tcp', port: 443 }, { taskName: '广州电信' })
+      expect(created).toMatchObject({
+        name: '广州电信',
+        type: 'tcp',
+        target: `${probe.landmarkAddress}:443`,
+        clients: [source.uuid],
+      })
     }
     finally {
       globalThis.fetch = originalFetch

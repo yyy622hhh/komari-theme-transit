@@ -55,7 +55,7 @@ interface PendingMetricBatch {
 
 // Exact task matching no longer removes separators. Bump the persisted schema
 // so results aggregated with the old looser semantics cannot leak forward.
-const CACHE_VERSION = 12
+const CACHE_VERSION = 13
 const CACHE_KEY_PREFIX = 'komari-theme-emerald:node-ping-stats'
 const CACHE_INDEX_KEY = `${CACHE_KEY_PREFIX}:index`
 const PING_RECORD_REFRESH_INTERVAL_MS = 60_000
@@ -149,6 +149,62 @@ export function collectNodePingTaskIds(
       taskIds.add(taskId)
   }
   return taskIds
+}
+
+/**
+ * 精确匹配撞到多个同名任务时，选健康样本优先、否则选 id 最大的那个。
+ * 入口换挡会短暂留下两个同名任务，混算或直接空统计都会把图上的实时段打空。
+ */
+export function pickPreferredExactPingTaskId(
+  matchingTaskIds: ReadonlySet<number>,
+  options: {
+    metricStats?: readonly Pick<PingMetricTaskStats, 'task_id' | 'total' | 'valid'>[]
+    records?: readonly Pick<PingRecord, 'task_id' | 'value'>[]
+  } = {},
+): number | undefined {
+  if (!matchingTaskIds.size)
+    return undefined
+  if (matchingTaskIds.size === 1)
+    return [...matchingTaskIds][0]
+
+  const samples = new Map<number, { total: number, valid: number }>()
+  const add = (taskId: number, total: number, valid: number) => {
+    const previous = samples.get(taskId) ?? { total: 0, valid: 0 }
+    samples.set(taskId, { total: previous.total + total, valid: previous.valid + valid })
+  }
+  for (const stat of options.metricStats ?? []) {
+    const taskId = normalizeTaskId(String(stat.task_id))
+    if (!matchingTaskIds.has(taskId))
+      continue
+    add(taskId, Number.isFinite(stat.total) ? stat.total : 0, Number.isFinite(stat.valid) ? stat.valid : 0)
+  }
+  if (![...matchingTaskIds].some(taskId => samples.has(taskId))) {
+    for (const record of options.records ?? []) {
+      if (!matchingTaskIds.has(record.task_id))
+        continue
+      add(record.task_id, 1, Number.isFinite(record.value) && record.value >= 0 ? 1 : 0)
+    }
+  }
+
+  const rank = (taskId: number): number => {
+    const sample = samples.get(taskId)
+    if (!sample || sample.total <= 0)
+      return 1
+    return sample.valid > 0 ? 2 : 0
+  }
+  return [...matchingTaskIds].sort((left, right) => rank(right) - rank(left) || right - left)[0]
+}
+
+function resolveExactMatchingTaskIds(
+  matchingTaskIds: Set<number> | null,
+  match: PingTaskNameMatch,
+  metricStats?: readonly PingMetricTaskStats[],
+  records: readonly PingRecord[] = [],
+): Set<number> | null {
+  if (!matchingTaskIds || match !== 'exact' || matchingTaskIds.size <= 1)
+    return matchingTaskIds
+  const preferred = pickPreferredExactPingTaskId(matchingTaskIds, { metricStats, records })
+  return preferred === undefined ? matchingTaskIds : new Set([preferred])
 }
 
 function getSharedPingRecordsKey(hours: number, maxCount?: number, uuid?: string): string {
@@ -713,13 +769,16 @@ export function useNodePingStats(
       state.metricLossPoints,
       state.taskClientsById,
     )
-    const matchingTaskIds = normalizedFilter
-      ? new Set([...state.taskNamesById.entries()]
-          .filter(([taskId, name]) => nodeTaskIds.has(taskId) && matchesTaskName(name, normalizedFilter, taskNameMatch))
-          .map(([taskId]) => taskId))
-      : null
-    if (taskNameMatch === 'exact' && matchingTaskIds && matchingTaskIds.size > 1)
-      return createEmptyNodePingStats()
+    const matchingTaskIds = resolveExactMatchingTaskIds(
+      normalizedFilter
+        ? new Set([...state.taskNamesById.entries()]
+            .filter(([taskId, name]) => nodeTaskIds.has(taskId) && matchesTaskName(name, normalizedFilter, taskNameMatch))
+            .map(([taskId]) => taskId))
+        : null,
+      taskNameMatch,
+      state.metricStats,
+      state.recordsByClient.get(nodeUuid) ?? [],
+    )
     const records = (state.recordsByClient.get(nodeUuid) ?? [])
       .filter(record => !matchingTaskIds || matchingTaskIds.has(record.task_id))
     const metricStats = state.metricStats?.filter(stat => !matchingTaskIds || matchingTaskIds.has(normalizeTaskId(stat.task_id)))
@@ -767,27 +826,10 @@ export function useNodePingStats(
   })
 
   const error = computed<string | null>(() => {
-    const { uuid: nodeUuid, hours, maxCount, enabled, taskNameFilter, taskNameMatch } = resolved.value
+    const { uuid: nodeUuid, hours, maxCount, enabled } = resolved.value
     if (!enabled || !nodeUuid.trim())
       return null
     const entry = getSharedPingRecordsEntry(hours, maxCount, nodeUuid)
-    const normalizedFilter = normalizeTaskNameFilter(taskNameFilter, taskNameMatch)
-    if (taskNameMatch === 'exact' && normalizedFilter) {
-      const state = entry.data.value
-      const nodeTaskIds = state
-        ? collectNodePingTaskIds(
-            nodeUuid,
-            state.recordsByClient.get(nodeUuid) ?? [],
-            state.metricStats,
-            state.metricLossPoints,
-            state.taskClientsById,
-          )
-        : new Set<number>()
-      const matches = [...(state?.taskNamesById.entries() ?? [])]
-        .filter(([taskId, name]) => nodeTaskIds.has(taskId) && matchesTaskName(name, normalizedFilter, 'exact'))
-      if (matches.length > 1)
-        return `存在多个同名 Ping 任务“${taskNameFilter}”，无法唯一绑定。`
-    }
     return entry.error.value ?? null
   })
 
