@@ -30,6 +30,7 @@
     "test:performance": "bun run build-only && playwright test --config playwright.performance.config.ts",
     "test:accessibility": "bun run build-only && playwright test tests/visual/accessibility.spec.ts",
     "test:visual:update": "bun run build-only && playwright test --update-snapshots",
+    "test:visual:baseline": "bun run build-only && playwright test --update-snapshots=all",
     "lint": "eslint . --fix --cache",
     "lint:eslint": "eslint . --fix --cache",
     "lint:check": "eslint .",
