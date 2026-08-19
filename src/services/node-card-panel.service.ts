@@ -1,16 +1,24 @@
 import type { NodeCardPanelConfigs } from '@/utils/nodeCardPanel'
 import { saveManagedThemeSettings } from '@/services/theme-settings.service'
-import { serializeNodeCardPanelConfigs } from '@/utils/nodeCardPanel'
+import { parseNodeCardPanelConfigs, serializeNodeCardPanelConfigs } from '@/utils/nodeCardPanel'
 
 interface SaveNodeCardPanelConfigsOptions {
   theme: string
-  configs: NodeCardPanelConfigs
+  /**
+   * 同 `saveNodeControls`：`nodeCardPanels` 也是整块覆盖的单键，必须在服务端当前
+   * 映射之上做增量修改，否则会覆盖别的会话设置的逐节点面板。
+   */
+  apply: (current: NodeCardPanelConfigs) => NodeCardPanelConfigs
 }
 
 export async function saveNodeCardPanelConfigs(options: SaveNodeCardPanelConfigsOptions): Promise<Record<string, unknown>> {
   return saveManagedThemeSettings({
     theme: options.theme,
-    patch: { nodeCardPanels: serializeNodeCardPanelConfigs(options.configs) },
+    patch: currentSettings => ({
+      nodeCardPanels: serializeNodeCardPanelConfigs(
+        options.apply(parseNodeCardPanelConfigs(currentSettings.nodeCardPanels)),
+      ),
+    }),
     permission: 'nodeCardPanel',
     requestKey: `node-card-panels:${options.theme}`,
   })

@@ -4,9 +4,18 @@ import { requestManager } from '@/services/request.service'
 import { getSharedApi } from '@/utils/api'
 import { validateServerThemeSettings, validateThemeSettings } from '@/utils/themeSettings'
 
+/**
+ * 补丁可以是一个读取服务端当前配置的函数。按节点存储的映射（维护状态、卡片面板）
+ * 必须用它：这些键会被整块覆盖，而本地映射派生自 `publicSettings`，后者只在启动
+ * 和窗口重新聚焦时刷新，直接写本地映射会把别的会话在此期间的改动一并抹掉。
+ */
+type ThemeSettingsPatch
+  = | Record<string, unknown>
+    | ((currentSettings: Record<string, unknown>) => Record<string, unknown>)
+
 interface SaveThemeSettingsOptions {
   theme: string
-  patch: Record<string, unknown>
+  patch: ThemeSettingsPatch
   expected?: Record<string, unknown>
   permission: PermissionKey
   requestKey: string
@@ -103,7 +112,10 @@ async function sendThemeSettings(
 }
 
 export async function saveManagedThemeSettings(options: SaveThemeSettingsOptions): Promise<Record<string, unknown>> {
-  const patch = validateThemeSettings(options.patch)
+  // 函数式补丁要等拿到服务端快照后才能求值，所以这里先留空，在 GET 之后填充。
+  let patch: Record<string, unknown> = typeof options.patch === 'function'
+    ? {}
+    : validateThemeSettings(options.patch)
   let savedSettings: Record<string, unknown> = {}
   const runSave = () => serializeThemeSave(options.theme, async () => {
     // Revalidate only after older saves finish. A queued mutation must not use
@@ -122,6 +134,8 @@ export async function saveManagedThemeSettings(options: SaveThemeSettingsOptions
       if (current.theme !== options.theme)
         throw new Error('当前主题已改变，请刷新页面后重试。')
       const currentSettings = validateServerThemeSettings(current.theme_settings)
+      if (typeof options.patch === 'function')
+        patch = validateThemeSettings(options.patch(currentSettings))
       if (options.expected && !persistedPatchMatches(currentSettings, options.expected))
         throw new Error('拓扑配置已被其他会话修改，请重新打开管理器后再保存。')
       savedSettings = {

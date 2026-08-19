@@ -466,3 +466,66 @@ describe('runTopologyProbeRepair persistence', () => {
     expect(okRoute.metrics[1]?.taskFilter).toBe('fixed-ok')
   })
 })
+
+describe('runTopologyProbeRepair resilience', () => {
+  test('an offline landing is left alone instead of walking the probe ladder', async () => {
+    const offlineLanding = { ...landing, online: false } as NodeData
+    const target = route({ taskFilter: 'stale-icmp' })
+    const { manager, log } = createManager([target])
+    let planned = 0
+    const outcome = await runTopologyProbeRepair(createDeps({
+      manager,
+      nodes: () => [relay, offlineLanding],
+      planWorkingHopTask: async () => {
+        planned += 1
+        return hopPlan({ needsCreation: true, task: { ...hopPlan().task, name: 'Transit-Relay-JP-to-Exit-SG-tcp-443' } })
+      },
+    }))
+    expect(outcome).toBe('no-op')
+    expect(planned).toBe(0)
+    expect(log.saveCalls).toEqual([])
+    expect(target.metrics[1]?.taskFilter).toBe('stale-icmp')
+  })
+
+  test('an offline relay is left alone too', async () => {
+    const offlineRelay = { ...relay, online: false } as NodeData
+    const target = route({ taskFilter: 'stale-icmp' })
+    const { manager, log } = createManager([target])
+    const outcome = await runTopologyProbeRepair(createDeps({
+      manager,
+      nodes: () => [offlineRelay, landing],
+      planWorkingHopTask: async () => hopPlan({ needsCreation: true }),
+    }))
+    expect(outcome).toBe('no-op')
+    expect(log.saveCalls).toEqual([])
+    expect(target.metrics[1]?.taskFilter).toBe('stale-icmp')
+  })
+
+  test('a re-plan that throws inside the lock does not roll back other routes tasks', async () => {
+    const routeA = route({ id: 1, taskFilter: 'stale-a' })
+    const routeB = route({ id: 2, taskFilter: 'stale-b' })
+    const { manager, log } = createManager([routeA, routeB])
+    const deleted: number[][] = []
+    let planCall = 0
+    const outcome = await runTopologyProbeRepair(createDeps({
+      manager,
+      planWorkingHopTask: async (_source, _landing, _taskFilter, options) => {
+        planCall += 1
+        // 锁外那遍两条都成功；锁内重新规划时 B 撞上瞬时故障。
+        if (options?.fresh && planCall > 3)
+          throw new Error('admin:getAllPingTasks 502')
+        return hopPlan({ needsCreation: true, task: { ...hopPlan().task, name: `fixed-${planCall}` } })
+      },
+      ensureTopologyPingTask: async () => ({ task: { ...hopPlan().task, id: 42, name: 'fixed-a' }, created: true }),
+      deleteTopologyPingTasks: async (ids) => {
+        deleted.push([...ids])
+        return true
+      },
+    }))
+    expect(outcome).toBe('repaired')
+    // 关键断言：为 A 创建的任务 42 必须保留，不能因为 B 失败而被回滚。
+    expect(deleted).toEqual([])
+    expect(routeA.metrics[1]?.taskFilter).toBe('fixed-a')
+    expect(log.saveCalls).toEqual([{ lockHeld: true }])
+  })
+})

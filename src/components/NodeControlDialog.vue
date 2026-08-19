@@ -101,16 +101,15 @@ async function savePanel(): Promise<void> {
     return
   }
 
-  const nextConfigs = updateNodeCardPanelConfig(
-    appStore.nodeCardPanels,
-    node.uuid,
-    panelMode.value === 'inherit'
-      ? undefined
-      : { mode: panelMode.value, pingTasks: panelMode.value === 'ping' ? selectedPingTasks.value : undefined },
-  )
+  const nextConfig = panelMode.value === 'inherit'
+    ? undefined
+    : { mode: panelMode.value, pingTasks: panelMode.value === 'ping' ? selectedPingTasks.value : undefined }
   savingPanel.value = true
   try {
-    const payload = await saveNodeCardPanelConfigs({ theme: publicSettings.theme, configs: nextConfigs })
+    const payload = await saveNodeCardPanelConfigs({
+      theme: publicSettings.theme,
+      apply: current => updateNodeCardPanelConfig(current, node.uuid, nextConfig),
+    })
     appStore.publicSettings = { ...publicSettings, theme_settings: payload }
     window.$message?.success(panelMode.value === 'inherit' ? '节点已恢复跟随全局面板。' : '节点卡片面板已保存。')
   }
@@ -129,12 +128,11 @@ async function updateControl(key: keyof NodeControl, durationMinutes?: number): 
     return
 
   const until = durationMinutes ? Date.now() + durationMinutes * 60_000 : undefined
-  const nextControls = updateNodeControl(appStore.nodeControls, node.uuid, key, until)
   saving.value = key === 'maintenanceUntil' ? 'maintenance' : 'silence'
   try {
     const payload = await saveNodeControls({
       theme: publicSettings.theme,
-      controls: nextControls,
+      apply: current => updateNodeControl(current, node.uuid, key, until),
     })
     appStore.publicSettings = { ...publicSettings, theme_settings: payload }
 

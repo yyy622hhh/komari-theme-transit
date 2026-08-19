@@ -74,13 +74,20 @@ export function getTopologyProbe(key?: string): TopologyProbeOption {
   return TOPOLOGY_PROBE_OPTIONS.find(option => option.key === key) ?? TOPOLOGY_PROBE_OPTIONS[0]!
 }
 
+/**
+ * 一个预设探测可以由两个名字指代：`taskFilter` 是 Ping 任务的实际命名，`label`
+ * 是界面上的显示名。广州三条预设的两者并不相同（`广州电信` / `广东电信`），所以
+ * 任何按名字认预设的地方都必须认全套别名，否则识别与取任务两步会得出相反结论。
+ */
+function topologyProbeAliases(option: TopologyProbeOption): string[] {
+  return [normalizePingTaskName(option.taskFilter), normalizePingTaskName(option.label)].filter(Boolean)
+}
+
 export function findTopologyProbeKey(...values: string[]): string | undefined {
   const normalizedValues = values.map(normalizePingTaskName).filter(Boolean)
-  return TOPOLOGY_PROBE_OPTIONS.find(option => normalizedValues.some((value) => {
-    const taskName = normalizePingTaskName(option.taskFilter)
-    const label = normalizePingTaskName(option.label)
-    return value === taskName || value === label
-  }))?.key
+  return TOPOLOGY_PROBE_OPTIONS.find(option =>
+    normalizedValues.some(value => topologyProbeAliases(option).includes(value)),
+  )?.key
 }
 
 export function formatTopologyMetricNumber(value: number | null): string {
@@ -235,9 +242,9 @@ function makeUniqueQuickEntryLabel(label: string, configuredNames: Set<string>):
 }
 
 export function pickQuickTopologyTaskName(taskNames: readonly string[], probe: TopologyProbeOption = getTopologyProbe('')): string {
-  const normalizedProbe = normalizePingTaskName(probe.taskFilter)
+  const aliases = topologyProbeAliases(probe)
   const normalizedTasks = normalizeQuickTopologyTaskNames(taskNames)
-  const matches = normalizedTasks.filter(task => normalizePingTaskName(task) === normalizedProbe)
+  const matches = normalizedTasks.filter(task => aliases.includes(normalizePingTaskName(task)))
 
   return matches.length === 1 ? matches[0]! : ''
 }
@@ -333,12 +340,23 @@ export function applyTopologyProbeToRoute(
     fallbackLatency: null,
     fallbackLoss: null,
   }
-  route.metrics[0] = {
-    ...first,
-    live: Boolean(entryTask),
-    nodeName: entryTask ? sourceName.trim() : '',
-    taskFilter: entryTask,
-  }
+  // 取不到唯一任务时不要擦掉一条已经指向同一个预设的实时绑定：调用方
+  // (`rematchOpenRoutes`) 会立刻把结果写回服务端，擦掉即不可逆。只有当既有绑定
+  // 属于别的预设时才让位——那是操作员主动换了预设，覆盖才是预期行为。
+  const keepsExistingBinding
+    = !entryTask
+      && first.live
+      && Boolean(first.taskFilter.trim())
+      && findTopologyProbeKey(first.taskFilter) === probe.key
+
+  route.metrics[0] = keepsExistingBinding
+    ? { ...first }
+    : {
+        ...first,
+        live: Boolean(entryTask),
+        nodeName: entryTask ? sourceName.trim() : '',
+        taskFilter: entryTask,
+      }
   return probe
 }
 

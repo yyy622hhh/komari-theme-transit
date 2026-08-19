@@ -189,17 +189,24 @@ async function saveBulkPanel(): Promise<void> {
   if (!publicSettings || props.nodes.length === 0)
     return
 
-  const nextConfigs = { ...appStore.nodeCardPanels }
-  for (const node of props.nodes) {
-    if (bulkPanelMode.value === 'inherit')
-      delete nextConfigs[node.uuid]
-    else
-      nextConfigs[node.uuid] = { mode: bulkPanelMode.value }
-  }
+  const targetUuids = props.nodes.map(node => node.uuid)
+  const mode = bulkPanelMode.value
 
   savingBulkPanel.value = true
   try {
-    const payload = await saveNodeCardPanelConfigs({ theme: publicSettings.theme, configs: nextConfigs })
+    const payload = await saveNodeCardPanelConfigs({
+      theme: publicSettings.theme,
+      apply: (current) => {
+        const nextConfigs = { ...current }
+        for (const uuid of targetUuids) {
+          if (mode === 'inherit')
+            delete nextConfigs[uuid]
+          else
+            nextConfigs[uuid] = { mode }
+        }
+        return nextConfigs
+      },
+    })
     appStore.publicSettings = { ...publicSettings, theme_settings: payload }
     bulkPanelOpen.value = false
     window.$message?.success(`已更新 ${props.nodes.length} 台节点的卡片面板。`)

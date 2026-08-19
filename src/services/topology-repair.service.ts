@@ -96,6 +96,11 @@ export async function runTopologyProbeRepair(deps: TopologyRepairDeps): Promise<
     const metric = route.metrics[1]
     if (!source || !landing || !metric?.live)
       return null
+    // 离线节点不产生样本，`assessHopTask` 无法区分"这种探测方式被封"和"落地机
+    // 挂了"。不加这道闸，一次十分钟的宕机就会把整条探测阶梯走完，留下一串谁也
+    // 不会清理的 Ping 任务，并把主题配置重写好几遍。
+    if (source.online === false || landing.online === false)
+      return null
 
     const planned = await deps.planWorkingHopTask(source, landing, metric.taskFilter, options)
     const bindingChanged = metric.nodeName.trim() !== source.name.trim()
@@ -134,7 +139,10 @@ export async function runTopologyProbeRepair(deps: TopologyRepairDeps): Promise<
           return
         // 锁内重新规划一次：另一个标签页可能已经在拿到锁之前改了这条线路。必须
         // 绕过任务列表缓存，否则这一次读到的还是拿锁前的同一份快照，等于没查。
-        const latestRepair = await planRouteRepair(repair.route, { fresh: true })
+        // 和锁外那遍一样要吞掉单条线路的失败：这里抛出会穿过 withSaveLock 直达
+        // finally，把本轮为**其他**线路刚建好的任务一并删掉，然后下一轮重建、
+        // 再删——只要有一条线路持续失败，就是一个建删循环。
+        const latestRepair = await planRouteRepair(repair.route, { fresh: true }).catch(() => null)
         if (!latestRepair)
           continue
         const metric = latestRepair.route.metrics[1]

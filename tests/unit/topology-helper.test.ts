@@ -559,3 +559,80 @@ describe('topology configuration validation', () => {
     expect(resolveTopologySampleTone(1, 20, 1)).toBe('critical')
   })
 })
+
+describe('probe alias matching', () => {
+  // 广州三条预设的 label 与 taskFilter 不同（广州电信 / 广东电信）。识别用
+  // findTopologyProbeKey（认两者），取任务曾经只认 taskFilter，两步得出相反结论时
+  // applyTopologyProbeToRoute 会把一条实时绑定擦成静态基线，而调用方紧接着就把
+  // 结果写回服务端。
+  const GUANGZHOU_ALIASES = [
+    ['广州电信', '广东电信', 'guangzhou-telecom'],
+    ['广州联通', '广东联通', 'guangzhou-unicom'],
+    ['广州移动', '广东移动', 'guangzhou-mobile'],
+  ] as const
+
+  test.each(GUANGZHOU_ALIASES)('%s and %s both resolve to %s', (label, taskFilter, key) => {
+    expect(findTopologyProbeKey(label)).toBe(key)
+    expect(findTopologyProbeKey(taskFilter)).toBe(key)
+  })
+
+  test.each(GUANGZHOU_ALIASES)('a %s task is pickable for %s', (label, _taskFilter, key) => {
+    expect(pickQuickTopologyTaskName([label], getTopologyProbe(key))).toBe(label)
+  })
+
+  test.each(GUANGZHOU_ALIASES)('a %s task is pickable for %s', (_label, taskFilter, key) => {
+    expect(pickQuickTopologyTaskName([taskFilter], getTopologyProbe(key))).toBe(taskFilter)
+  })
+
+  test('a label-named task keeps its live binding instead of being wiped', () => {
+    const route = {
+      id: 1,
+      nodes: [
+        { name: '广州电信', region: 'CN', role: '入口' },
+        { name: 'HK-A', region: 'HK', role: '线路机' },
+      ],
+      metrics: [
+        { live: true, nodeName: 'HK-A', taskFilter: '广州电信', fallbackLatency: null, fallbackLoss: null },
+      ],
+    } as unknown as Parameters<typeof applyTopologyProbeToRoute>[0]
+
+    applyTopologyProbeToRoute(route, 'guangzhou-telecom', 'HK-A', ['广州电信'], [])
+
+    expect(route.metrics[0]).toMatchObject({ live: true, nodeName: 'HK-A', taskFilter: '广州电信' })
+  })
+
+  test('an ambiguous task list preserves the existing binding for the same probe', () => {
+    const route = {
+      id: 1,
+      nodes: [
+        { name: '北京电信', region: 'CN', role: '入口' },
+        { name: 'HK-A', region: 'HK', role: '线路机' },
+      ],
+      metrics: [
+        { live: true, nodeName: 'HK-A', taskFilter: '北京电信', fallbackLatency: null, fallbackLoss: null },
+      ],
+    } as unknown as Parameters<typeof applyTopologyProbeToRoute>[0]
+
+    // 两个归一化后相同的任务名 -> pickQuickTopologyTaskName 返回 ''
+    applyTopologyProbeToRoute(route, 'beijing-telecom', 'HK-A', ['北京电信', '北京-电信'], [])
+
+    expect(route.metrics[0]).toMatchObject({ live: true, taskFilter: '北京电信' })
+  })
+
+  test('switching to a different preset still overwrites the old binding', () => {
+    const route = {
+      id: 1,
+      nodes: [
+        { name: '北京电信', region: 'CN', role: '入口' },
+        { name: 'HK-A', region: 'HK', role: '线路机' },
+      ],
+      metrics: [
+        { live: true, nodeName: 'HK-A', taskFilter: '北京电信', fallbackLatency: null, fallbackLoss: null },
+      ],
+    } as unknown as Parameters<typeof applyTopologyProbeToRoute>[0]
+
+    applyTopologyProbeToRoute(route, 'shanghai-telecom', 'HK-A', [], [])
+
+    expect(route.metrics[0]).toMatchObject({ live: false, nodeName: '', taskFilter: '' })
+  })
+})
