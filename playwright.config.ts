@@ -22,10 +22,10 @@ export default defineConfig({
   expect: {
     toHaveScreenshot: {
       animations: 'disabled',
-      // GitHub macos-15 runners still show small but repeatable rasterization
-      // drift on dense screenshots. Keep this below the old 5% allowance while
-      // leaving room for 2-3% CI noise that local macOS Chromium does not show.
-      maxDiffPixelRatio: 0.04,
+      // 基线由 .github/workflows/visual-baseline.yml 在 macos-15 runner 上生成，
+      // 与比对环境完全一致，因此不需要为跨环境色彩/栅格化差异留余量。放宽到
+      // 百分之几就足以放过整块卡片的数据或配色回归。
+      maxDiffPixelRatio: 0.01,
       threshold: 0.2,
     },
   },

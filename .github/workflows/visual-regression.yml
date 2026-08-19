@@ -15,9 +15,9 @@ concurrency:
 
 jobs:
   screenshots:
-    # The committed baselines were generated with Playwright Chromium on macOS.
-    # Running pixel comparisons on the same OS avoids false failures caused by
-    # platform font rasterization while keeping the screenshots deterministic.
+    # The committed baselines are produced by visual-baseline.yml on this exact
+    # runner, so comparisons stay deterministic and the tolerance can stay tight.
+    # Keep this runner in sync with the one used by visual-baseline.yml.
     runs-on: macos-15
     timeout-minutes: 30
     steps:

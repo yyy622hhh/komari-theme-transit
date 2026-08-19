@@ -77,7 +77,7 @@ bun run test:performance
 
 该命令在开发测试环境对首页、节点详情和登录后的服务器列表执行 axe 结构与交互扫描，并阻止 serious/critical 级违规。毛玻璃主题的动态透明色由高对比度样式和视觉回归共同覆盖。`audit:dependencies` 会按提交的 `bun.lock` 查询 OSV，并阻止 HIGH/CRITICAL 依赖漏洞。
 
-截图差异只有在人工确认设计变化后，才可以通过 `bun run test:visual:update` 更新。不要仅为让 CI 通过而扩大阈值或删除断言。
+截图差异只有在人工确认设计变化后才可以更新，且必须重新生成基线，不要仅为让 CI 通过而扩大阈值或删除断言。本地 macOS 与 CI runner 的色彩管理不一致，用 `bun run test:visual:update` 生成的基线会带来 2~3% 的固定漂移，足以逼着阈值放宽到能盖住真实回归的程度。请改为在 GitHub Actions 上手动触发 **Visual Baseline** 工作流（`gh workflow run visual-baseline.yml`），下载 `visual-baseline-snapshots` 制品，覆盖 `tests/visual/snapshots/` 后提交。
 
 改动发布流程时，请额外运行 `bun run build`，并确认 zip 顶层仍只有：
 
