@@ -804,6 +804,7 @@ test('Transit renders topology from the JSON config alone, with the legacy field
   await expect(firstRoute).toContainText('北京电信')
   await expect(firstRoute).toContainText('主控-洛杉矶')
   await expect(firstRoute).toContainText('香港边缘节点-超长名称布局测试')
+  await expect(firstRoute.locator('[data-topology-line-node]')).toHaveCSS('justify-content', 'center')
   // 实时绑定也要跟着 JSON 走，而不是退回静态基线。
   await expect(page.locator('[data-topology-sample]').first()).toHaveAttribute('aria-label', /Ping 任务：北京电信/)
 })

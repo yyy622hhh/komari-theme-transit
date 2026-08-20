@@ -536,7 +536,8 @@ function routeRankingLabel(route: RouteRow): string {
 
             <button
               type="button"
-              class="flex min-w-0 items-center gap-2.5 text-left disabled:cursor-default"
+              data-topology-line-node
+              class="flex min-w-0 items-center justify-center gap-2.5 text-left disabled:cursor-default"
               :disabled="!route.nodes[1]?.node"
               @click="route.nodes[1] && openNode(route.nodes[1])"
             >
