@@ -5,6 +5,7 @@ import type { TopologyReliabilityWindow, TopologySegmentReliabilitySnapshot } fr
 import { computed, watch } from 'vue'
 import { useNodePingStats } from '@/composables/useNodePingStats'
 import { resolveTopologyMetricSource } from '@/utils/topologyHelper'
+import { bucketTopologyInsightsByBeijingHour, detectTopologyBaselineShift, diagnoseTopologySegment, getTopologyInsightCoverage } from '@/utils/topologyInsights'
 import { calculateAdaptiveBaseline } from '@/utils/topologyIntelligence'
 import { parseTopologyMetric } from '@/utils/topologyLegacyFormat'
 
@@ -62,10 +63,26 @@ function reliabilityWindow(hours: 24 | 168, ping: typeof dayPing): TopologyRelia
 
 const snapshot = computed<TopologySegmentReliabilitySnapshot>(() => {
   const day = reliabilityWindow(24, dayPing)
+  const weekPoints = weekPing.insightPoints.value
   return {
     day,
     week: reliabilityWindow(168, weekPing),
     adaptive: calculateAdaptiveBaseline(props.current?.latency ?? null, day),
+    insights: {
+      sourceUuid: sourceNode.value?.uuid ?? '',
+      taskId: weekPing.selectedTaskId.value ?? dayPing.selectedTaskId.value,
+      taskName: weekPing.selectedTaskName.value || dayPing.selectedTaskName.value || config.value.taskFilter,
+      diagnosis: diagnoseTopologySegment({
+        currentLatency: props.current?.latency ?? null,
+        currentLoss: props.current?.loss ?? null,
+        hasLiveData: props.current?.hasLiveData ?? false,
+        stale: props.current?.stale ?? true,
+        history: dayPing.insightPoints.value,
+      }),
+      hourlyProfile: bucketTopologyInsightsByBeijingHour(weekPoints),
+      baselineShift: detectTopologyBaselineShift(weekPoints, { stale: weekPing.stale.value }),
+      coverage: getTopologyInsightCoverage(weekPoints, weekPing.stale.value),
+    },
   }
 })
 

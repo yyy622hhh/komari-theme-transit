@@ -4,6 +4,25 @@
 
 ## [Unreleased]
 
+## [1.0.42] - 2026-08-20
+
+### Added
+
+- 线路详情新增延迟/丢包组合诊断：只在当前实时数据新鲜、两项指标齐全且此前 24 小时有效历史充足时给出谨慎结论。
+- 线路详情新增最近 7 天按北京时间归桶的 24 小时质量曲线，并标出 20:00–23:00 晚高峰；复用现有无图表库的采样交互，支持键盘和移动端。
+- 配置中两条实时「线路机 ↔ 落地机」线路互为唯一反向时，详情并排展示两个方向的延迟、丢包、任务名和探测来源 UUID；入口标签、静态指标和重复候选不参与配对。
+- 同一精确 Ping 任务出现经持续窗口确认的显著延迟基线阶跃时，公开首页显示独立的 `基线升高 +Nms` 标签；改善只进详情，标签不扣健康分、不改变线路状态。
+
+### Changed
+
+- 24 小时和 7 天共享 Ping 数据在压缩成原有 20 桶前，按精确任务保留最多 240 个详细点及覆盖范围；Metric Store 和旧 records 回退输出同一洞察结构，没有新增 Komari 方法依赖或重复窗口请求。
+- README 补充线路洞察的数据方向、样本门槛和限制：基线变化不等于确认路由改变，事件不持久化，也无法识别管理员原地编辑同一任务 ID 的历史分界。
+
+### Testing
+
+- 新增诊断四种组合、北京时间归桶、唯一反向配对、持续阶跃、日内晚高峰、缓慢漂移、尖刺、缺口、任务切换、改善与过期数据单元测试。
+- 视觉/交互回归覆盖公开首页基线标签、桌面与移动详情、双向来源信息以及 24 时段键盘操作，并继续核对首屏不预加载 ECharts。
+
 ## [1.0.41] - 2026-08-20
 
 ### Fixed
@@ -613,7 +632,12 @@
 - 亮暗主题、桌面/移动布局和 Transit 风格内嵌 Komari 管理端。
 - Playwright 视觉与交互回归、自动构建和 GitHub Release 发布流程。
 
-[Unreleased]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.37...HEAD
+[Unreleased]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.42...HEAD
+[1.0.42]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.41...v1.0.42
+[1.0.41]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.40...v1.0.41
+[1.0.40]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.39...v1.0.40
+[1.0.39]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.38...v1.0.39
+[1.0.38]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.37...v1.0.38
 [1.0.37]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.36...v1.0.37
 [1.0.36]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.35...v1.0.36
 [1.0.35]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.34...v1.0.35

@@ -600,6 +600,48 @@ test('Transit ranks comparable routes with real reliability windows', async ({ p
   await expect.poll(() => dialog.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
 })
 
+test('Transit exposes topology insights without changing public route health', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, { opsDashboard: true, dark: true, opsTopologyInsights: true })
+  await openStablePage(page)
+
+  const baselineLabels = page.locator('[data-topology-baseline-shift]')
+  await expect(baselineLabels).toHaveCount(1)
+  await expect(baselineLabels.first()).toContainText(/基线升高 \+70ms/)
+  await expect(page.locator('[data-topology-route-status][data-status="healthy"]')).toHaveCount(2)
+
+  await baselineLabels.first().click()
+  const dialog = page.getByRole('dialog')
+  await expect(dialog.locator('[data-topology-direction-pair]')).toBeVisible()
+  await expect(dialog.locator('[data-topology-direction-pair]')).toContainText('PandaOps-Local-Hop')
+  await expect(dialog.locator('[data-topology-direction-pair]')).toContainText('00000000-0000-4000-8000-000000000001')
+  await expect(dialog.locator('[data-topology-direction-delta]')).toBeVisible()
+  await expect(dialog.locator('[data-topology-diagnosis]').first()).toContainText('可能存在排队或路径时延上升')
+  await expect(dialog.locator('[data-topology-baseline-shift-detail]').first()).toContainText('可能与路径、探测方式或目标变化有关')
+
+  const profiles = dialog.locator('[data-topology-hourly-profile]')
+  await expect(profiles).toHaveCount(2)
+  await expect(profiles.first()).toContainText('20:00–23:00 晚高峰')
+  const hourlyStrip = profiles.first().locator('[data-sample-strip]')
+  await expect(hourlyStrip.locator('[data-topology-sample]')).toHaveCount(24)
+  await hourlyStrip.focus()
+  await hourlyStrip.press('Home')
+  const firstActive = await hourlyStrip.getAttribute('aria-activedescendant')
+  expect(firstActive).toBeTruthy()
+  await hourlyStrip.press('ArrowRight')
+  await expect(hourlyStrip).not.toHaveAttribute('aria-activedescendant', firstActive!)
+  await expect(page.locator('[data-topology-sample-detail]')).toBeVisible()
+  await dialog.getByRole('button', { name: '关闭' }).click()
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(page.locator('[data-topology-mobile-route]')).toHaveCount(2)
+  await expect(page.locator('[data-topology-mobile-route]').first().locator('[data-topology-baseline-shift]')).toBeVisible()
+  await page.locator('[data-topology-mobile-route]').first().locator('[data-topology-baseline-shift]').click()
+  const mobileDialog = page.getByRole('dialog')
+  await expect(mobileDialog.locator('[data-topology-direction-pair]')).toBeVisible()
+  await expect.poll(() => mobileDialog.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
+})
+
 test('Transit mobile keeps document width contained', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await installKomariFixture(page, { opsDashboard: true, dark: true })

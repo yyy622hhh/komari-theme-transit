@@ -22,6 +22,7 @@ import { getRegionCode } from '@/utils/regionHelper'
 import { readTopologyRoutes } from '@/utils/topologyConfig'
 import { calculateTopologyRouteScore } from '@/utils/topologyHealth'
 import { resolveTopologyNode } from '@/utils/topologyHelper'
+import { findTopologyDirectionPairs } from '@/utils/topologyInsights'
 import { aggregateTopologyRouteReliability, rankTopologyRoutes } from '@/utils/topologyIntelligence'
 import { formatTopologyMetric, formatTopologyMetricForProbe, getTopologyProbeStorageKey, parseTopologyMetric, serializeTopologyRoutes } from '@/utils/topologyLegacyFormat'
 import { findTopologyProbeKey, getTopologyProbe, listTopologyProbeTaskNamesForSource, TOPOLOGY_PROBE_OPTIONS } from '@/utils/topologyPresets'
@@ -295,10 +296,52 @@ const routeRankings = computed<Record<string, TopologyRouteRanking>>(() => rankT
   reliability: getRouteReliability(route),
 }))))
 
+const directionPairs = computed(() => findTopologyDirectionPairs(routes.value.map(route => ({
+  routeKey: route.key,
+  sourceUuid: route.nodes[1]?.uuid ?? '',
+  targetUuid: route.nodes[2]?.uuid ?? '',
+  live: Boolean(route.nodes[2] && parseTopologyMetric(route.metrics[1] || '').live),
+}))))
+
+function getRouteBaselineShift(route: RouteRow) {
+  return Object.values(routeSegmentReliability.value[route.key] ?? {})
+    .flatMap(snapshot => snapshot.insights?.baselineShift?.direction === 'degraded' ? [snapshot.insights.baselineShift] : [])
+    .sort((left, right) => right.at - left.at)[0]
+}
+
+function routeBaselineShiftLabel(route: RouteRow): string {
+  const shift = getRouteBaselineShift(route)
+  return shift ? `基线升高 +${Math.max(0, Math.round(shift.deltaMs))}ms` : ''
+}
+
 const selectedRoute = computed<TopologyRouteDetail | null>(() => {
   const route = routes.value.find(item => item.key === selectedRouteKey.value)
   if (!route)
     return null
+  const expectedSegments = Math.max(1, route.nodes.length - 1)
+  const segmentMetrics = Array.from({ length: expectedSegments }, (_, index) => routeSegmentMetrics.value[route.key]?.[index])
+  const segmentReliability = Array.from({ length: expectedSegments }, (_, index) => routeSegmentReliability.value[route.key]?.[index])
+  const reverseRoute = routes.value.find(item => item.key === directionPairs.value[route.key])
+  const directionComparison = reverseRoute && route.nodes[2] && reverseRoute.nodes[2]
+    ? {
+        forward: {
+          sourceName: route.nodes[1]?.name || '线路机',
+          targetName: route.nodes[2]?.name || '落地机',
+          sourceUuid: route.nodes[1]?.uuid || '',
+          targetUuid: route.nodes[2]?.uuid || '',
+          taskName: routeSegmentReliability.value[route.key]?.[1]?.insights?.taskName || parseTopologyMetric(route.metrics[1] || '').taskFilter,
+          telemetry: routeSegmentMetrics.value[route.key]?.[1],
+        },
+        reverse: {
+          sourceName: reverseRoute.nodes[1]?.name || '线路机',
+          targetName: reverseRoute.nodes[2]?.name || '落地机',
+          sourceUuid: reverseRoute.nodes[1]?.uuid || '',
+          targetUuid: reverseRoute.nodes[2]?.uuid || '',
+          taskName: routeSegmentReliability.value[reverseRoute.key]?.[1]?.insights?.taskName || parseTopologyMetric(reverseRoute.metrics[1] || '').taskFilter,
+          telemetry: routeSegmentMetrics.value[reverseRoute.key]?.[1],
+        },
+      }
+    : undefined
   return {
     key: route.key,
     sourceUuid: route.nodes[1]?.uuid,
@@ -308,6 +351,9 @@ const selectedRoute = computed<TopologyRouteDetail | null>(() => {
     reliability: getRouteReliability(route),
     ranking: ['healthy', 'warning'].includes(getRouteHealth(route)) ? routeRankings.value[route.key] : undefined,
     directionLabel: route.directionLabel,
+    segmentMetrics,
+    segmentReliability,
+    directionComparison,
   }
 })
 
@@ -520,6 +566,16 @@ function routeRankingLabel(route: RouteRow): string {
                   {{ routeRankingLabel(route) }}
                 </span>
               </button>
+              <button
+                v-if="routeBaselineShiftLabel(route)"
+                type="button"
+                data-topology-baseline-shift
+                class="ml-4 mt-1 block rounded border border-sky-500/25 bg-sky-500/[0.07] px-1.5 py-0.5 text-[8px] font-medium tabular-nums text-sky-700 transition-colors hover:bg-sky-500/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-sky-500/60 dark:text-sky-300"
+                :aria-label="`${routeBaselineShiftLabel(route)}，查看线路详情`"
+                @click="openRouteDetail(route)"
+              >
+                {{ routeBaselineShiftLabel(route) }}
+              </button>
             </div>
 
             <TopologyEdgeMetric
@@ -634,6 +690,16 @@ function routeRankingLabel(route: RouteRow): string {
               <span v-if="routeRankingLabel(route)" class="ml-1 rounded border border-current/20 px-1 py-px text-[8px]">
                 {{ routeRankingLabel(route) }}
               </span>
+            </button>
+            <button
+              v-if="routeBaselineShiftLabel(route)"
+              type="button"
+              data-topology-baseline-shift
+              class="col-span-2 col-start-2 justify-self-start rounded border border-sky-500/25 bg-sky-500/[0.07] px-1.5 py-0.5 text-[8px] font-medium tabular-nums text-sky-700 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-sky-500/60 dark:text-sky-300"
+              :aria-label="`${routeBaselineShiftLabel(route)}，查看线路详情`"
+              @click="openRouteDetail(route)"
+            >
+              {{ routeBaselineShiftLabel(route) }}
             </button>
           </div>
 

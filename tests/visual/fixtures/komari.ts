@@ -47,6 +47,8 @@ export interface VisualFixtureOptions {
   opsTrailingEmptyNode?: boolean
   opsExternalOfflineSource?: boolean
   opsLegacyPingFallback?: boolean
+  /** 为线路洞察生成 7 天小时样本、持续基线阶跃和一组唯一对向线路。 */
+  opsTopologyInsights?: boolean
   opsSevereLoss?: boolean
   opsExtremeLatency?: boolean
   opsMetricDelayMs?: number
@@ -261,8 +263,15 @@ function buildMetricResponse(
   const entityIds = Array.isArray(payload.entity_ids)
     ? payload.entity_ids.map(String)
     : [typeof payload.entity_id === 'string' ? payload.entity_id : uuidFor(0)]
-  const points = Array.from({ length: 48 }, (_, index) => ({
-    time: new Date(Date.parse(FIXED_NOW) - (47 - index) * 75_000).toISOString(),
+  const insightHours = Number(payload.hours)
+  const detailedInsightWindow = options.opsTopologyInsights
+    && Number(payload.max_points) === 240
+    && (insightHours === 24 || insightHours === 168)
+    && requested.every(key => key.startsWith('ping.'))
+  const pointCount = detailedInsightWindow ? insightHours : 48
+  const pointInterval = detailedInsightWindow ? 60 * 60 * 1000 : 75_000
+  const points = Array.from({ length: pointCount }, (_, index) => ({
+    time: new Date(Date.parse(FIXED_NOW) - (pointCount - 1 - index) * pointInterval).toISOString(),
     index,
   }))
   const metricPingTasks = options.pingTaskOrdering
@@ -280,12 +289,18 @@ function buildMetricResponse(
         points: points.map(point => ({
           time: point.time,
           value: task?.name === 'PandaOps-Local-Hop' && key === 'ping.latency_ms'
-            ? 1.1 + Math.sin(point.index / 4) * 0.15
+            ? options.opsTopologyInsights && detailedInsightWindow
+              ? (insightHours === 168 && point.index >= 120 ? 151 : 81)
+              : 1.1 + Math.sin(point.index / 4) * 0.15
             : task?.name === 'PandaOps-Local-Hop' && key === 'ping.loss'
               ? 0
               : key === 'ping.loss'
-                ? metricValue(key, point.index)
-                : metricValue(key, point.index) + (task?.id ?? 0),
+                ? options.opsTopologyInsights ? 0 : metricValue(key, point.index)
+                : options.opsTopologyInsights && detailedInsightWindow
+                  ? (insightHours === 168 && point.index >= 120 ? 150 : 80) + (task?.id ?? 0)
+                  : options.opsTopologyInsights
+                    ? 155 + (task?.id ?? 0)
+                    : metricValue(key, point.index) + (task?.id ?? 0),
         })),
       }))
     }))
@@ -484,7 +499,7 @@ async function handleRpc(
               })))
             return { start: FIXED_NOW, end: FIXED_NOW, interval_seconds: 60, stats, count: stats.length }
           })()
-        : options.pingTaskOrdering
+        : options.pingTaskOrdering || options.opsTopologyInsights
           ? {
               start: FIXED_NOW,
               end: FIXED_NOW,
@@ -499,10 +514,10 @@ async function handleRpc(
                 valid: 48,
                 loss: 0,
                 loss_approximate: false,
-                min: 40 + task.id,
-                max: 120 + task.id,
-                avg: 80 + task.id,
-                latest: 90 + task.id,
+                min: options.opsTopologyInsights ? 70 : 40 + task.id,
+                max: options.opsTopologyInsights ? 145 : 120 + task.id,
+                avg: options.opsTopologyInsights ? (task.name === 'PandaOps-Local-Hop' ? 105 : 125) : 80 + task.id,
+                latest: options.opsTopologyInsights ? (task.name === 'PandaOps-Local-Hop' ? 108 : 128) : 90 + task.id,
               })),
               count: metricPingTasks.length,
             }
@@ -698,6 +713,9 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
     : options.opsCustomFirstMetric
       ? defaultTopologyRoute.replace('北京电信|CN|入口', '自定义入口|CN|入口')
       : defaultTopologyRoute
+  if (options.opsTopologyInsights) {
+    topologyRoute = '北京电信|CN|入口;主控-洛杉矶|US|线路机;香港边缘节点-超长名称布局测试|HK|落地机||北京电信|CN|入口;香港边缘节点-超长名称布局测试|HK|线路机;主控-洛杉矶|US|落地机'
+  }
   if (options.opsTrailingEmptyNode) {
     const [firstRoute = '', ...remainingRoutes] = topologyRoute.split('||')
     topologyRoute = `${firstRoute.split(';').slice(0, 2).join(';')};||${remainingRoutes.join('||')}`
@@ -710,6 +728,9 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
       : options.opsTwoNodeRoute
         ? `51,0||${defaultTopologyMetrics.split('||')[1] ?? ''}`
         : defaultTopologyMetrics
+  if (options.opsTopologyInsights) {
+    topologyMetrics = 'live@主控-洛杉矶@北京电信@51@0;live@主控-洛杉矶@PandaOps-Local-Hop@84@0||live@香港边缘节点-超长名称布局测试@北京电信@51@0;live@香港边缘节点-超长名称布局测试@PandaOps-Local-Hop@84@0'
+  }
   if (options.opsExternalOfflineSource)
     topologyMetrics = topologyMetrics.replace('live@主控-洛杉矶@北京电信', 'live@伦敦-离线归档@北京电信')
   if (options.opsMissingPingSource)

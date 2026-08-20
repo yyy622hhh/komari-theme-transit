@@ -1,6 +1,7 @@
 import type { MaybeRefOrGetter } from 'vue'
 import type { PingTaskNameMatch } from '@/services/nodePingRecords.shared'
 import type { NodePingStatsState } from '@/utils/pingStats'
+import type { TopologyInsightPoint } from '@/utils/topologyInsights'
 import { useThrottleFn } from '@vueuse/core'
 import { computed, onScopeDispose, ref, toValue, watch } from 'vue'
 import { PING_RECORD_MAX_COUNT } from '@/constants/load'
@@ -22,6 +23,7 @@ import {
 import { readStatsCache, writeStatsCache } from '@/services/nodePingStatsCache'
 import { resolvePingFreshness } from '@/utils/pingFreshness'
 import { buildNodePingStats, createEmptyNodePingStats } from '@/utils/pingStats'
+import { buildTopologyInsightPoints } from '@/utils/topologyInsights'
 
 export { buildPingMetricState, collectNodePingTaskIds, pickPreferredExactPingTaskId } from '@/services/nodePingRecords.shared'
 
@@ -87,12 +89,15 @@ export function useNodePingStats(
   // 判断监控数据是否新鲜，否则后端重复返回旧样本时会永久显示为正常。
   const resolvedStats = computed<{
     stats: NodePingStatsState
+    insightPoints: TopologyInsightPoint[]
+    taskId: number | null
+    taskName: string
     sampleUpdatedAt: number
     source: 'live' | 'cache' | 'empty'
   }>(() => {
     const { uuid: nodeUuid, hours, maxCount, taskNameFilter, taskNameMatch, enabled } = resolved.value
     if (!enabled || !nodeUuid.trim())
-      return { stats: createEmptyNodePingStats(), sampleUpdatedAt: 0, source: 'empty' }
+      return { stats: createEmptyNodePingStats(), insightPoints: [], taskId: null, taskName: '', sampleUpdatedAt: 0, source: 'empty' }
 
     // 通过 getSharedPingRecordsEntry 读取（不存在则创建），确保 computed 始终对
     // entry.data 这个 shallowRef 建立响应式依赖——即便首次加载尚未返回。
@@ -103,8 +108,8 @@ export function useNodePingStats(
       void pingFreshnessTick.value
       const cached = readStatsCache(nodeUuid, hours, maxCount, taskNameFilter, taskNameMatch)
       return cached
-        ? { stats: cached.stats, sampleUpdatedAt: cached.sampleUpdatedAt, source: 'cache' }
-        : { stats: createEmptyNodePingStats(), sampleUpdatedAt: 0, source: 'empty' }
+        ? { stats: cached.stats, insightPoints: [], taskId: null, taskName: '', sampleUpdatedAt: cached.sampleUpdatedAt, source: 'cache' }
+        : { stats: createEmptyNodePingStats(), insightPoints: [], taskId: null, taskName: '', sampleUpdatedAt: 0, source: 'empty' }
     }
 
     const normalizedFilter = normalizeTaskNameFilter(taskNameFilter, taskNameMatch)
@@ -133,8 +138,14 @@ export function useNodePingStats(
       ? buildNodePingStats(records, metricStats, metricLossPoints)
       : createEmptyNodePingStats()
     const sampleTaskIds = matchingTaskIds ?? nodeTaskIds
+    const selectedTaskId = matchingTaskIds?.size === 1 ? [...matchingTaskIds][0]! : null
     return {
       stats,
+      insightPoints: selectedTaskId === null
+        ? []
+        : buildTopologyInsightPoints(records, metricLossPoints, new Set([selectedTaskId]), maxCount ?? 240),
+      taskId: selectedTaskId,
+      taskName: selectedTaskId === null ? '' : state.taskNamesById.get(selectedTaskId) ?? taskNameFilter,
       sampleUpdatedAt: latestMatchingSampleAt(state.sampleUpdatedAtByTaskId, sampleTaskIds),
       source: 'live',
     }
@@ -263,6 +274,9 @@ export function useNodePingStats(
     delayed,
     stale,
     taskNames,
+    insightPoints: computed(() => resolvedStats.value.insightPoints),
+    selectedTaskId: computed(() => resolvedStats.value.taskId),
+    selectedTaskName: computed(() => resolvedStats.value.taskName),
   }
 }
 
