@@ -602,12 +602,25 @@ test('Transit ranks comparable routes with real reliability windows', async ({ p
 
 test('Transit exposes topology insights without changing public route health', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: async (value: string) => {
+          ;(window as typeof window & { __copiedTopologyReport?: string }).__copiedTopologyReport = value
+        },
+      },
+    })
+  })
   await installKomariFixture(page, { opsDashboard: true, dark: true, opsTopologyInsights: true })
   await openStablePage(page)
 
   const baselineLabels = page.locator('[data-topology-baseline-shift]')
+  const peakLabels = page.locator('[data-topology-peak-insight-home]')
   await expect(baselineLabels).toHaveCount(1)
   await expect(baselineLabels.first()).toContainText(/基线升高 \+70ms/)
+  await expect(peakLabels).toHaveCount(1)
+  await expect(peakLabels.first()).toContainText(/晚高峰 \+60ms/)
   await expect(page.locator('[data-topology-route-status][data-status="healthy"]')).toHaveCount(2)
 
   await baselineLabels.first().click()
@@ -618,6 +631,28 @@ test('Transit exposes topology insights without changing public route health', a
   await expect(dialog.locator('[data-topology-direction-delta]')).toBeVisible()
   await expect(dialog.locator('[data-topology-diagnosis]').first()).toContainText('可能存在排队或路径时延上升')
   await expect(dialog.locator('[data-topology-baseline-shift-detail]').first()).toContainText('可能与路径、探测方式或目标变化有关')
+  await expect(dialog.locator('[data-topology-insight-evidence]')).toHaveCount(2)
+  await expect(dialog.locator('[data-topology-insight-evidence]').first()).toContainText('24h 延迟基线')
+  await expect(dialog.locator('[data-topology-insight-evidence]').first()).toContainText('7d 覆盖')
+  await expect(dialog.locator('[data-topology-peak-insight]')).toHaveCount(2)
+  await expect(dialog.locator('[data-topology-peak-insight]').first()).toContainText(/晚高峰延迟高 60 ms/)
+
+  await dialog.locator('[data-copy-topology-diagnostic]').click()
+  await expect(page.getByText('线路诊断已复制')).toBeVisible()
+  const copiedReport = await page.evaluate(() => (window as typeof window & { __copiedTopologyReport?: string }).__copiedTopologyReport ?? '')
+  expect(copiedReport).toContain('Transit v1.0.43 线路诊断')
+  expect(copiedReport).toContain('晚高峰延迟高 60 ms')
+  expect(copiedReport).not.toContain('00000000-0000-4000-8000-000000000001')
+  expect(copiedReport).not.toContain('PandaOps-Local-Hop')
+
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: async () => Promise.reject(new Error('permission denied')) },
+    })
+  })
+  await dialog.locator('[data-copy-topology-diagnostic]').click()
+  await expect(page.getByText('复制失败，请检查浏览器剪贴板权限')).toBeVisible()
 
   const profiles = dialog.locator('[data-topology-hourly-profile]')
   await expect(profiles).toHaveCount(2)
@@ -636,6 +671,7 @@ test('Transit exposes topology insights without changing public route health', a
   await page.setViewportSize({ width: 390, height: 844 })
   await expect(page.locator('[data-topology-mobile-route]')).toHaveCount(2)
   await expect(page.locator('[data-topology-mobile-route]').first().locator('[data-topology-baseline-shift]')).toBeVisible()
+  await expect(page.locator('[data-topology-mobile-route]').first().locator('[data-topology-peak-insight-home]')).toBeVisible()
   await page.locator('[data-topology-mobile-route]').first().locator('[data-topology-baseline-shift]').click()
   const mobileDialog = page.getByRole('dialog')
   await expect(mobileDialog.locator('[data-topology-direction-pair]')).toBeVisible()
@@ -660,6 +696,7 @@ test('Transit mobile keeps document width contained', async ({ page }) => {
   await mobileAlertStrip.getByRole('button', { name: '另有 9 个' }).click()
   await expect(mobileAlertStrip.getByRole('button', { name: '收起' })).toBeVisible()
   await expect(page.locator('[data-topology-mobile-route]')).toHaveCount(2)
+  await expect(page.locator('[data-topology-peak-insight-home]')).toHaveCount(0)
   await expect(page.locator('.topology-scroll')).toHaveCount(0)
   await expect(page.locator('[data-topology-mobile-node]')).toHaveCount(4)
   const firstMobileRoute = page.locator('[data-topology-mobile-route]').first()

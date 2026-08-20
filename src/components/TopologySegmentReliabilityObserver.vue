@@ -5,7 +5,7 @@ import type { TopologyReliabilityWindow, TopologySegmentReliabilitySnapshot } fr
 import { computed, watch } from 'vue'
 import { useNodePingStats } from '@/composables/useNodePingStats'
 import { resolveTopologyMetricSource } from '@/utils/topologyHelper'
-import { bucketTopologyInsightsByBeijingHour, detectTopologyBaselineShift, diagnoseTopologySegment, getTopologyInsightCoverage } from '@/utils/topologyInsights'
+import { analyzeTopologyPeakInsight, bucketTopologyInsightsByBeijingHour, calculateTopologyInsightBaseline, detectTopologyBaselineShift, diagnoseTopologySegment, getTopologyInsightCoverage } from '@/utils/topologyInsights'
 import { calculateAdaptiveBaseline } from '@/utils/topologyIntelligence'
 import { parseTopologyMetric } from '@/utils/topologyLegacyFormat'
 
@@ -63,12 +63,18 @@ function reliabilityWindow(hours: 24 | 168, ping: typeof dayPing): TopologyRelia
 
 const snapshot = computed<TopologySegmentReliabilitySnapshot>(() => {
   const day = reliabilityWindow(24, dayPing)
+  const dayPoints = dayPing.insightPoints.value
   const weekPoints = weekPing.insightPoints.value
+  const hourlyProfile = bucketTopologyInsightsByBeijingHour(weekPoints)
+  const dayCoverage = getTopologyInsightCoverage(dayPoints, dayPing.stale.value)
+  const weekCoverage = getTopologyInsightCoverage(weekPoints, weekPing.stale.value)
+  const baseline = calculateTopologyInsightBaseline(dayPoints)
   return {
     day,
     week: reliabilityWindow(168, weekPing),
     adaptive: calculateAdaptiveBaseline(props.current?.latency ?? null, day),
     insights: {
+      live: config.value.live,
       sourceUuid: sourceNode.value?.uuid ?? '',
       taskId: weekPing.selectedTaskId.value ?? dayPing.selectedTaskId.value,
       taskName: weekPing.selectedTaskName.value || dayPing.selectedTaskName.value || config.value.taskFilter,
@@ -77,11 +83,27 @@ const snapshot = computed<TopologySegmentReliabilitySnapshot>(() => {
         currentLoss: props.current?.loss ?? null,
         hasLiveData: props.current?.hasLiveData ?? false,
         stale: props.current?.stale ?? true,
-        history: dayPing.insightPoints.value,
+        history: dayPoints,
       }),
-      hourlyProfile: bucketTopologyInsightsByBeijingHour(weekPoints),
+      hourlyProfile,
+      peakInsight: analyzeTopologyPeakInsight(hourlyProfile, {
+        stale: weekPing.stale.value,
+        taskId: weekPing.selectedTaskId.value,
+      }),
       baselineShift: detectTopologyBaselineShift(weekPoints, { stale: weekPing.stale.value }),
-      coverage: getTopologyInsightCoverage(weekPoints, weekPing.stale.value),
+      coverage: weekCoverage,
+      evidence: {
+        currentLatency: props.current?.hasLiveData ? props.current.latency : null,
+        currentLoss: props.current?.hasLiveData ? props.current.loss : null,
+        baselineLatencyP50: baseline.latencyP50,
+        baselineLatencyP95: baseline.latencyP95,
+        baselineLossMedian: baseline.lossMedian,
+        baselineSampleCount: baseline.sampleCount,
+        latestSampleAt: dayPing.lastFetchedAt.value || null,
+        freshness: dayPing.freshness.value,
+        dayCoverage,
+        weekCoverage,
+      },
     },
   }
 })

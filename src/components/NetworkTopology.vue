@@ -314,6 +314,16 @@ function routeBaselineShiftLabel(route: RouteRow): string {
   return shift ? `基线升高 +${Math.max(0, Math.round(shift.deltaMs))}ms` : ''
 }
 
+function routePeakInsightLabel(route: RouteRow): string {
+  const degraded = Object.values(routeSegmentReliability.value[route.key] ?? {})
+    .flatMap(snapshot => snapshot.insights?.peakInsight?.status === 'degraded' ? [snapshot.insights.peakInsight] : [])
+  const latencyDelta = Math.max(...degraded.flatMap(insight => insight.latencyDeltaMs !== null && insight.latencyDeltaMs > 0 ? [insight.latencyDeltaMs] : []), Number.NEGATIVE_INFINITY)
+  if (Number.isFinite(latencyDelta))
+    return `晚高峰 +${Math.round(latencyDelta)}ms`
+  const lossDelta = Math.max(...degraded.flatMap(insight => insight.lossDeltaPoints !== null && insight.lossDeltaPoints > 0 ? [insight.lossDeltaPoints] : []), Number.NEGATIVE_INFINITY)
+  return Number.isFinite(lossDelta) ? `晚高峰丢包 +${lossDelta.toFixed(lossDelta >= 10 ? 0 : 1)}pp` : ''
+}
+
 const selectedRoute = computed<TopologyRouteDetail | null>(() => {
   const route = routes.value.find(item => item.key === selectedRouteKey.value)
   if (!route)
@@ -576,6 +586,16 @@ function routeRankingLabel(route: RouteRow): string {
               >
                 {{ routeBaselineShiftLabel(route) }}
               </button>
+              <button
+                v-if="routePeakInsightLabel(route)"
+                type="button"
+                data-topology-peak-insight-home
+                class="ml-4 mt-1 block rounded border border-amber-500/25 bg-amber-500/[0.07] px-1.5 py-0.5 text-[8px] font-medium tabular-nums text-amber-800 transition-colors hover:bg-amber-500/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber-500/60 dark:text-amber-200"
+                :aria-label="`${routePeakInsightLabel(route)}，查看线路详情`"
+                @click="openRouteDetail(route)"
+              >
+                {{ routePeakInsightLabel(route) }}
+              </button>
             </div>
 
             <TopologyEdgeMetric
@@ -700,6 +720,16 @@ function routeRankingLabel(route: RouteRow): string {
               @click="openRouteDetail(route)"
             >
               {{ routeBaselineShiftLabel(route) }}
+            </button>
+            <button
+              v-if="routePeakInsightLabel(route)"
+              type="button"
+              data-topology-peak-insight-home
+              class="col-span-2 col-start-2 justify-self-start rounded border border-amber-500/25 bg-amber-500/[0.07] px-1.5 py-0.5 text-[8px] font-medium tabular-nums text-amber-800 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber-500/60 dark:text-amber-200"
+              :aria-label="`${routePeakInsightLabel(route)}，查看线路详情`"
+              @click="openRouteDetail(route)"
+            >
+              {{ routePeakInsightLabel(route) }}
             </button>
           </div>
 

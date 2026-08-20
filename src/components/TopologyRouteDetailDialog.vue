@@ -7,6 +7,9 @@ import { computed, ref } from 'vue'
 import TelemetrySampleStrip from '@/components/TelemetrySampleStrip.vue'
 import TopologySegmentHistory from '@/components/TopologySegmentHistory.vue'
 import { AppDialog } from '@/components/ui/app-dialog'
+import { message } from '@/utils/message'
+import { describeTopologyPeakInsight } from '@/utils/topologyInsights'
+import { buildTopologyDiagnosticReport } from '@/utils/topologyReport'
 
 export interface TopologyDirectionReading {
   sourceName: string
@@ -144,6 +147,58 @@ function baselineTone(reliability: TopologyRouteReliability): string {
     return 'text-emerald-700 dark:text-emerald-300'
   return 'text-muted-foreground'
 }
+
+function formatInsightTime(value: number | null): string {
+  if (value === null)
+    return '待数据'
+  return new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).format(new Date(value))
+}
+
+function freshnessLabel(snapshot: TopologySegmentReliabilitySnapshot): string {
+  const freshness = snapshot.insights?.evidence.freshness
+  return freshness === 'stale' ? '已过期' : freshness === 'delayed' ? '可能延迟' : '实时'
+}
+
+async function copyDiagnosticReport(): Promise<void> {
+  if (!props.route)
+    return
+  const report = buildTopologyDiagnosticReport({
+    version: __BUILD_VERSION__,
+    generatedAt: Date.now(),
+    routeName: title.value,
+    segments: props.route.segmentReliability.map((reliability, index) => ({
+      sourceName: props.route?.nodeNames[index] || `节点 ${index + 1}`,
+      targetName: props.route?.nodeNames[index + 1] || `节点 ${index + 2}`,
+      telemetry: props.route?.segmentMetrics[index],
+      reliability,
+    })),
+    directions: props.route.directionComparison
+      ? (Object.entries(props.route.directionComparison) as Array<['forward' | 'reverse', TopologyDirectionReading]>).map(([direction, reading]) => ({
+          label: direction === 'forward' ? '正向' : '反向',
+          sourceName: reading.sourceName,
+          targetName: reading.targetName,
+          telemetry: reading.telemetry,
+        }))
+      : undefined,
+  })
+  try {
+    if (!navigator.clipboard?.writeText)
+      throw new Error('Clipboard API unavailable')
+    await navigator.clipboard.writeText(report)
+    message.success('线路诊断已复制')
+  }
+  catch (error) {
+    console.error('Failed to copy topology diagnostic report', error)
+    message.error('复制失败，请检查浏览器剪贴板权限')
+  }
+}
 </script>
 
 <template>
@@ -154,6 +209,17 @@ function baselineTone(reliability: TopologyRouteReliability): string {
     content-class="max-w-4xl"
   >
     <div v-if="route" class="space-y-4">
+      <div class="flex justify-end">
+        <button
+          type="button"
+          data-copy-topology-diagnostic
+          class="rounded-md border border-border/70 bg-background/55 px-2.5 py-1.5 text-[11px] font-medium text-foreground transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50"
+          @click="copyDiagnosticReport"
+        >
+          复制诊断
+        </button>
+      </div>
+
       <section data-topology-score-detail class="grid gap-3 rounded-xl border border-border/60 bg-background/35 p-3.5 sm:grid-cols-[120px_1fr]">
         <div class="flex items-baseline gap-2 sm:block">
           <strong class="text-3xl font-semibold tabular-nums" :class="scoreTone(route.score)">{{ route.score.score }}</strong>
@@ -302,6 +368,81 @@ function baselineTone(reliability: TopologyRouteReliability): string {
         class="space-y-2"
       >
         <div
+          v-if="snapshot?.insights?.live"
+          data-topology-insight-evidence
+          class="rounded-xl border border-border/60 bg-background/35 p-3.5"
+        >
+          <div class="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <div class="text-xs font-semibold">
+                {{ route.nodeNames[index] }} → {{ route.nodeNames[index + 1] }} · 判断依据
+              </div>
+              <div class="mt-0.5 text-[9px] text-muted-foreground">
+                24 小时基线排除最近 1 小时；时间均为北京时间。
+              </div>
+            </div>
+            <span class="rounded border border-border/60 bg-background/55 px-1.5 py-0.5 text-[9px] text-muted-foreground">
+              {{ freshnessLabel(snapshot) }} · {{ formatInsightTime(snapshot.insights.evidence.latestSampleAt) }}
+            </span>
+          </div>
+          <dl class="mt-3 grid gap-2 text-[10px] sm:grid-cols-2 lg:grid-cols-4">
+            <div class="rounded-lg border border-border/45 bg-background/35 p-2.5">
+              <dt class="text-muted-foreground">
+                当前 1h
+              </dt>
+              <dd class="mt-1 font-semibold tabular-nums">
+                {{ formatLatency(snapshot.insights.evidence.currentLatency) }} / {{ formatLoss(snapshot.insights.evidence.currentLoss) }}
+              </dd>
+            </div>
+            <div class="rounded-lg border border-border/45 bg-background/35 p-2.5">
+              <dt class="text-muted-foreground">
+                24h 延迟基线
+              </dt>
+              <dd class="mt-1 font-semibold tabular-nums">
+                P50 {{ formatLatency(snapshot.insights.evidence.baselineLatencyP50) }} · P95 {{ formatLatency(snapshot.insights.evidence.baselineLatencyP95) }}
+              </dd>
+            </div>
+            <div class="rounded-lg border border-border/45 bg-background/35 p-2.5">
+              <dt class="text-muted-foreground">
+                24h 丢包基线
+              </dt>
+              <dd class="mt-1 font-semibold tabular-nums">
+                {{ formatLoss(snapshot.insights.evidence.baselineLossMedian) }} · {{ snapshot.insights.evidence.baselineSampleCount }} 个样本
+              </dd>
+            </div>
+            <div class="rounded-lg border border-border/45 bg-background/35 p-2.5">
+              <dt class="text-muted-foreground">
+                7d 覆盖
+              </dt>
+              <dd class="mt-1 font-semibold tabular-nums">
+                {{ formatInsightTime(snapshot.insights.evidence.weekCoverage.from) }}–{{ formatInsightTime(snapshot.insights.evidence.weekCoverage.to) }}
+              </dd>
+              <div class="mt-0.5 text-[9px] text-muted-foreground">
+                {{ snapshot.insights.evidence.weekCoverage.sampleCount }} 个样本
+              </div>
+            </div>
+          </dl>
+          <dl class="mt-2 grid gap-1 text-[9px] text-muted-foreground sm:grid-cols-2">
+            <div class="flex min-w-0 gap-2">
+              <dt class="shrink-0">
+                任务
+              </dt>
+              <dd class="truncate" :title="snapshot.insights.taskName || '待识别'">
+                {{ snapshot.insights.taskName || '待识别' }} · ID {{ snapshot.insights.taskId ?? '待识别' }}
+              </dd>
+            </div>
+            <div class="flex min-w-0 gap-2">
+              <dt class="shrink-0">
+                探测来源
+              </dt>
+              <dd class="truncate font-mono" :title="snapshot.insights.sourceUuid || '待识别'">
+                {{ snapshot.insights.sourceUuid || '待识别' }}
+              </dd>
+            </div>
+          </dl>
+        </div>
+
+        <div
           v-if="snapshot?.insights?.diagnosis"
           data-topology-diagnosis
           class="rounded-lg border px-3 py-2 text-[11px]"
@@ -339,6 +480,14 @@ function baselineTone(reliability: TopologyRouteReliability): string {
           </div>
           <div class="mt-1 flex justify-between text-[8px] tabular-nums text-muted-foreground">
             <span>00</span><span>06</span><span>12</span><span>18</span><span>23</span>
+          </div>
+          <div
+            v-if="snapshot.insights.peakInsight"
+            data-topology-peak-insight
+            class="mt-2 rounded-lg border px-2.5 py-2 text-[10px]"
+            :class="snapshot.insights.peakInsight.status === 'degraded' ? 'border-amber-500/25 bg-amber-500/[0.06] text-amber-800 dark:text-amber-200' : 'border-emerald-500/20 bg-emerald-500/[0.045] text-emerald-800 dark:text-emerald-200'"
+          >
+            {{ describeTopologyPeakInsight(snapshot.insights.peakInsight) }}
           </div>
         </div>
 

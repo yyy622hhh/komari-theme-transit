@@ -286,22 +286,26 @@ function buildMetricResponse(
         entity_id: uuid,
         type: 'gauge',
         tags: task ? { task_id: String(task.id), task_name: task.name } : {},
-        points: points.map(point => ({
-          time: point.time,
-          value: task?.name === 'PandaOps-Local-Hop' && key === 'ping.latency_ms'
-            ? options.opsTopologyInsights && detailedInsightWindow
-              ? (insightHours === 168 && point.index >= 120 ? 151 : 81)
-              : 1.1 + Math.sin(point.index / 4) * 0.15
-            : task?.name === 'PandaOps-Local-Hop' && key === 'ping.loss'
-              ? 0
-              : key === 'ping.loss'
-                ? options.opsTopologyInsights ? 0 : metricValue(key, point.index)
-                : options.opsTopologyInsights && detailedInsightWindow
-                  ? (insightHours === 168 && point.index >= 120 ? 150 : 80) + (task?.id ?? 0)
-                  : options.opsTopologyInsights
-                    ? 155 + (task?.id ?? 0)
-                    : metricValue(key, point.index) + (task?.id ?? 0),
-        })),
+        points: points.map((point) => {
+          const beijingHour = (new Date(point.time).getUTCHours() + 8) % 24
+          const eveningPenalty = insightHours === 168 && beijingHour >= 20 && beijingHour <= 23 ? 60 : 0
+          return {
+            time: point.time,
+            value: task?.name === 'PandaOps-Local-Hop' && key === 'ping.latency_ms'
+              ? options.opsTopologyInsights && detailedInsightWindow
+                ? (insightHours === 168 && point.index >= 120 ? 151 : 81) + eveningPenalty
+                : 1.1 + Math.sin(point.index / 4) * 0.15
+              : task?.name === 'PandaOps-Local-Hop' && key === 'ping.loss'
+                ? 0
+                : key === 'ping.loss'
+                  ? options.opsTopologyInsights ? 0 : metricValue(key, point.index)
+                  : options.opsTopologyInsights && detailedInsightWindow
+                    ? (insightHours === 168 && point.index >= 120 ? 150 : 80) + (task?.id ?? 0) + eveningPenalty
+                    : options.opsTopologyInsights
+                      ? 155 + (task?.id ?? 0)
+                      : metricValue(key, point.index) + (task?.id ?? 0),
+          }
+        }),
       }))
     }))
   return { start: points[0].time, end: points.at(-1)?.time, series, count: series.length }

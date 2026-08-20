@@ -3,8 +3,11 @@ import type { PingRecord } from '../../src/utils/rpc'
 import type { TopologyInsightPoint } from '../../src/utils/topologyInsights'
 import { describe, expect, test } from 'bun:test'
 import {
+  analyzeTopologyPeakInsight,
   bucketTopologyInsightsByBeijingHour,
   buildTopologyInsightPoints,
+  calculateTopologyInsightBaseline,
+  describeTopologyPeakInsight,
   detectTopologyBaselineShift,
   diagnoseTopologySegment,
   findTopologyDirectionPairs,
@@ -76,6 +79,80 @@ describe('Beijing hourly topology buckets', () => {
     expect(buckets[20]).toMatchObject({ latencyMedian: 120, lossMedian: 3, sampleCount: 4 })
     expect(buckets[19]).toMatchObject({ latencyMedian: null, lossMedian: null, sampleCount: 1 })
     expect(buckets[0]).toMatchObject({ latencyMedian: null, lossMedian: null, sampleCount: 0 })
+  })
+})
+
+function hourlyBuckets(options: {
+  normalLatency?: number | null
+  peakLatency?: number | null
+  normalLoss?: number | null
+  peakLoss?: number | null
+} = {}) {
+  return Array.from({ length: 24 }, (_, hour) => ({
+    hour,
+    latencyMedian: hour >= 20 ? options.peakLatency ?? 100 : options.normalLatency ?? 100,
+    lossMedian: hour >= 20 ? options.peakLoss ?? 0 : options.normalLoss ?? 0,
+    sampleCount: 7,
+  }))
+}
+
+describe('topology evening peak insight', () => {
+  test('detects latency, loss and combined degradation at inclusive thresholds', () => {
+    const latency = analyzeTopologyPeakInsight(hourlyBuckets({ normalLatency: 100, peakLatency: 130 }), { taskId: 7 })
+    expect(latency).toMatchObject({ status: 'degraded', latencyDeltaMs: 30, worstHour: 20 })
+
+    const absolute = analyzeTopologyPeakInsight(hourlyBuckets({ normalLatency: 50, peakLatency: 70 }), { taskId: 7 })
+    expect(absolute?.status).toBe('degraded')
+
+    const loss = analyzeTopologyPeakInsight(hourlyBuckets({ normalLoss: 0, peakLoss: 3 }), { taskId: 7 })
+    expect(loss).toMatchObject({ status: 'degraded', lossDeltaPoints: 3, worstHour: 20 })
+
+    const both = analyzeTopologyPeakInsight(hourlyBuckets({ normalLatency: 100, peakLatency: 145, normalLoss: 1, peakLoss: 5 }), { taskId: 7 })
+    expect(describeTopologyPeakInsight(both!)).toContain('晚高峰延迟高 45 ms，丢包高 4.0 个百分点')
+  })
+
+  test('keeps sub-threshold differences stable and picks the worst peak hour', () => {
+    const buckets = hourlyBuckets({ normalLatency: 100, peakLatency: 130, normalLoss: 1, peakLoss: 3 })
+    buckets[22]!.latencyMedian = 170
+    const insight = analyzeTopologyPeakInsight(buckets, { taskId: 7 })
+    expect(insight).toMatchObject({ status: 'degraded', worstHour: 22 })
+
+    expect(analyzeTopologyPeakInsight(hourlyBuckets({ normalLatency: 100, peakLatency: 129, normalLoss: 1, peakLoss: 3 }), { taskId: 7 })?.status).toBe('stable')
+    expect(analyzeTopologyPeakInsight(hourlyBuckets({ normalLatency: 100, peakLatency: 120, normalLoss: 2, peakLoss: 4 }), { taskId: 7 })?.status).toBe('stable')
+  })
+
+  test('suppresses stale, ambiguous and thin hourly coverage', () => {
+    expect(analyzeTopologyPeakInsight(hourlyBuckets({ peakLatency: 160 }), { stale: true, taskId: 7 })).toBeNull()
+    expect(analyzeTopologyPeakInsight(hourlyBuckets({ peakLatency: 160 }), { taskId: null })).toBeNull()
+
+    const thinPeak = hourlyBuckets({ peakLatency: 160 })
+    thinPeak[20]!.latencyMedian = null
+    thinPeak[20]!.lossMedian = null
+    thinPeak[21]!.latencyMedian = null
+    thinPeak[21]!.lossMedian = null
+    expect(analyzeTopologyPeakInsight(thinPeak, { taskId: 7 })).toBeNull()
+
+    const thinNormal = hourlyBuckets({ peakLatency: 160 })
+    for (let hour = 0; hour < 9; hour++) {
+      thinNormal[hour]!.latencyMedian = null
+      thinNormal[hour]!.lossMedian = null
+    }
+    expect(analyzeTopologyPeakInsight(thinNormal, { taskId: 7 })).toBeNull()
+  })
+})
+
+describe('topology insight evidence baseline', () => {
+  test('excludes the newest hour and matches diagnosis baseline values', () => {
+    const history = [...diagnosisHistory(), point(14, 500, 20)]
+    const baseline = calculateTopologyInsightBaseline(history)
+    expect(baseline).toMatchObject({ latencyP50: 100, latencyP95: 100, lossMedian: 0, sampleCount: 14 })
+    expect(diagnoseTopologySegment({
+      hasLiveData: true,
+      stale: false,
+      currentLatency: 150,
+      currentLoss: 4,
+      history,
+    })).toMatchObject({ baselineLatency: baseline.latencyP50, baselineLoss: baseline.lossMedian })
   })
 })
 

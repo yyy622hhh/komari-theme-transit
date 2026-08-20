@@ -1,3 +1,4 @@
+import type { PingFreshness } from '@/utils/pingFreshness'
 import type { MetricLossPoint } from '@/utils/pingStats'
 import type { PingRecord } from '@/utils/rpc'
 
@@ -36,6 +37,40 @@ export interface TopologyInsightCoverage {
   to: number | null
   sampleCount: number
   stale: boolean
+}
+
+export interface TopologyInsightBaseline {
+  latencyP50: number | null
+  latencyP95: number | null
+  lossMedian: number | null
+  sampleCount: number
+}
+
+export interface TopologyInsightEvidence {
+  currentLatency: number | null
+  currentLoss: number | null
+  baselineLatencyP50: number | null
+  baselineLatencyP95: number | null
+  baselineLossMedian: number | null
+  baselineSampleCount: number
+  latestSampleAt: number | null
+  freshness: PingFreshness
+  dayCoverage: TopologyInsightCoverage
+  weekCoverage: TopologyInsightCoverage
+}
+
+export interface TopologyPeakInsight {
+  status: 'degraded' | 'stable'
+  peakLatencyMedian: number | null
+  normalLatencyMedian: number | null
+  latencyDeltaMs: number | null
+  latencyDeltaPercent: number | null
+  peakLossMedian: number | null
+  normalLossMedian: number | null
+  lossDeltaPoints: number | null
+  worstHour: number | null
+  validPeakHours: number
+  validNormalHours: number
 }
 
 export type TopologyDiagnosisKind = 'latency' | 'loss' | 'both'
@@ -173,6 +208,99 @@ export function bucketTopologyInsightsByBeijingHour(
   })
 }
 
+/** Build the 24h comparison window once so diagnosis and its visible evidence cannot drift apart. */
+export function calculateTopologyInsightBaseline(
+  history: readonly TopologyInsightPoint[],
+): TopologyInsightBaseline {
+  const latestAt = Math.max(...history.map(point => point.at), 0)
+  const baselinePoints = latestAt > 0 ? history.filter(point => point.at <= latestAt - HOUR_MS) : []
+  const latencies = finite(baselinePoints.map(point => point.latency))
+  const losses = finite(baselinePoints.map(point => point.loss))
+  return {
+    latencyP50: latencies.length >= 12 ? median(latencies) : null,
+    latencyP95: latencies.length >= 12 ? percentile(latencies, 0.95) : null,
+    lossMedian: losses.length >= 12 ? median(losses) : null,
+    sampleCount: baselinePoints.filter(point => point.latency !== null || point.loss !== null).length,
+  }
+}
+
+export function analyzeTopologyPeakInsight(
+  buckets: readonly TopologyHourlyBucket[],
+  options: { stale?: boolean, taskId?: number | null } = {},
+): TopologyPeakInsight | null {
+  if (options.stale || options.taskId === null || options.taskId === undefined)
+    return null
+  const peak = buckets.filter(bucket => bucket.hour >= 20 && bucket.hour <= 23)
+  const normal = buckets.filter(bucket => bucket.hour >= 0 && bucket.hour < 20)
+  const validPeakHours = peak.filter(bucket => bucket.latencyMedian !== null || bucket.lossMedian !== null).length
+  const validNormalHours = normal.filter(bucket => bucket.latencyMedian !== null || bucket.lossMedian !== null).length
+  if (validPeakHours < 3 || validNormalHours < 12)
+    return null
+
+  const peakLatencies = finite(peak.map(bucket => bucket.latencyMedian))
+  const normalLatencies = finite(normal.map(bucket => bucket.latencyMedian))
+  const peakLosses = finite(peak.map(bucket => bucket.lossMedian))
+  const normalLosses = finite(normal.map(bucket => bucket.lossMedian))
+  const peakLatencyMedian = peakLatencies.length >= 3 ? median(peakLatencies) : null
+  const normalLatencyMedian = normalLatencies.length >= 12 ? median(normalLatencies) : null
+  const peakLossMedian = peakLosses.length >= 3 ? median(peakLosses) : null
+  const normalLossMedian = normalLosses.length >= 12 ? median(normalLosses) : null
+  if ((peakLatencyMedian === null || normalLatencyMedian === null)
+    && (peakLossMedian === null || normalLossMedian === null)) {
+    return null
+  }
+
+  const latencyDeltaMs = peakLatencyMedian !== null && normalLatencyMedian !== null
+    ? peakLatencyMedian - normalLatencyMedian
+    : null
+  const latencyDeltaPercent = latencyDeltaMs !== null && normalLatencyMedian !== null && normalLatencyMedian > 0
+    ? latencyDeltaMs / normalLatencyMedian * 100
+    : null
+  const lossDeltaPoints = peakLossMedian !== null && normalLossMedian !== null
+    ? peakLossMedian - normalLossMedian
+    : null
+  const latencyDegraded = latencyDeltaMs !== null && normalLatencyMedian !== null
+    && latencyDeltaMs >= Math.max(20, normalLatencyMedian * 0.3)
+  const lossDegraded = peakLossMedian !== null && normalLossMedian !== null && lossDeltaPoints !== null
+    && peakLossMedian >= 3
+    && lossDeltaPoints >= 3
+    && (normalLossMedian <= 0 || peakLossMedian >= normalLossMedian * 2)
+  const status: TopologyPeakInsight['status'] = latencyDegraded || lossDegraded ? 'degraded' : 'stable'
+  const worst = status === 'degraded'
+    ? [...peak]
+        .filter(bucket => latencyDegraded ? bucket.latencyMedian !== null : bucket.lossMedian !== null)
+        .sort((left, right) => latencyDegraded
+          ? (right.latencyMedian ?? -1) - (left.latencyMedian ?? -1) || (right.lossMedian ?? -1) - (left.lossMedian ?? -1)
+          : (right.lossMedian ?? -1) - (left.lossMedian ?? -1))[0]
+    : undefined
+
+  return {
+    status,
+    peakLatencyMedian,
+    normalLatencyMedian,
+    latencyDeltaMs,
+    latencyDeltaPercent,
+    peakLossMedian,
+    normalLossMedian,
+    lossDeltaPoints,
+    worstHour: worst?.hour ?? null,
+    validPeakHours,
+    validNormalHours,
+  }
+}
+
+export function describeTopologyPeakInsight(insight: TopologyPeakInsight): string {
+  if (insight.status === 'stable')
+    return '晚高峰与其他时段未见显著差异。'
+  const parts: string[] = []
+  if (insight.latencyDeltaMs !== null && insight.latencyDeltaMs > 0)
+    parts.push(`晚高峰延迟高 ${Math.round(insight.latencyDeltaMs)} ms`)
+  if (insight.lossDeltaPoints !== null && insight.lossDeltaPoints > 0)
+    parts.push(`丢包高 ${insight.lossDeltaPoints.toFixed(insight.lossDeltaPoints >= 10 ? 0 : 1)} 个百分点`)
+  const summary = parts.join('，') || '晚高峰质量明显变差'
+  return insight.worstHour === null ? `${summary}。` : `${summary}，${String(insight.worstHour).padStart(2, '0')}:00 最明显。`
+}
+
 export function diagnoseTopologySegment(input: {
   currentLatency: number | null
   currentLoss: number | null
@@ -182,15 +310,10 @@ export function diagnoseTopologySegment(input: {
 }): TopologyDiagnosis | null {
   if (!input.hasLiveData || input.stale || input.currentLatency === null || input.currentLoss === null)
     return null
-  const latestAt = Math.max(...input.history.map(point => point.at), 0)
-  const baselinePoints = input.history.filter(point => point.at <= latestAt - HOUR_MS)
-  const latencies = finite(baselinePoints.map(point => point.latency))
-  const losses = finite(baselinePoints.map(point => point.loss))
-  if (latencies.length < 12 || losses.length < 12)
-    return null
-  const baselineLatency = median(latencies)
-  const p95Latency = percentile(latencies, 0.95)
-  const baselineLoss = median(losses)
+  const baseline = calculateTopologyInsightBaseline(input.history)
+  const baselineLatency = baseline.latencyP50
+  const p95Latency = baseline.latencyP95
+  const baselineLoss = baseline.lossMedian
   if (baselineLatency === null || p95Latency === null || baselineLoss === null)
     return null
 

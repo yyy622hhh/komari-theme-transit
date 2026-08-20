@@ -1,5 +1,5 @@
 import type { TopologyRouteHealth, TopologySegmentTelemetry } from '@/utils/topologyHealth'
-import type { TopologyBaselineShift, TopologyDiagnosis, TopologyHourlyBucket, TopologyInsightCoverage } from '@/utils/topologyInsights'
+import type { TopologyBaselineShift, TopologyDiagnosis, TopologyHourlyBucket, TopologyInsightCoverage, TopologyInsightEvidence, TopologyPeakInsight } from '@/utils/topologyInsights'
 
 export interface TopologyReliabilityWindow {
   hours: 24 | 168
@@ -27,13 +27,16 @@ export interface TopologySegmentReliabilitySnapshot {
   week: TopologyReliabilityWindow
   adaptive: TopologyAdaptiveBaseline
   insights?: {
+    live: boolean
     sourceUuid: string
     taskId: number | null
     taskName: string
     diagnosis: TopologyDiagnosis | null
     hourlyProfile: TopologyHourlyBucket[]
+    peakInsight: TopologyPeakInsight | null
     baselineShift: TopologyBaselineShift | null
     coverage: TopologyInsightCoverage
+    evidence: TopologyInsightEvidence
   }
 }
 
