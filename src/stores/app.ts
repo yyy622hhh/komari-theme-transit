@@ -232,6 +232,9 @@ const useAppStore = defineStore('app', () => {
    */
   const topologyAutoRepairEnabled = computed<boolean>(() => readBooleanSetting(themeSettings.value, 'topologyAutoRepairEnabled', true))
 
+  /** JSON 格式的拓扑配置，取代下面两条遗留字符串；读取一律走 readTopologyRoutes()。 */
+  const topologyConfig = computed<string>(() => readStringSetting(themeSettings.value, 'topologyConfig'))
+
   const topologyRoute = computed<string>(() => readStringSetting(themeSettings.value, 'topologyRoute'))
 
   const topologyMetrics = computed<string>(() => readStringSetting(themeSettings.value, 'topologyMetrics'))
@@ -556,6 +559,7 @@ const useAppStore = defineStore('app', () => {
     opsDashboardEnabled,
     topologyEnabled,
     topologyAutoRepairEnabled,
+    topologyConfig,
     topologyRoute,
     topologyMetrics,
     nodeControls,

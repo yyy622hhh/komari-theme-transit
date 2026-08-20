@@ -67,6 +67,8 @@ export interface VisualFixtureOptions {
   topologyGeneratedHopName?: boolean
   themeSaveDelayMs?: number
   emptyTopology?: boolean
+  /** 只写 JSON 配置、清空遗留字段，用来验证新读路径不依赖旧格式。 */
+  opsJsonTopologyOnly?: boolean
   visitorInfoEnabled?: boolean
   visitorAuditClientEnabled?: boolean
   visitorAuditSupported?: boolean
@@ -579,6 +581,44 @@ async function handleRpc(
   })
 }
 
+/**
+ * 把 fixture 里的旧格式拓扑翻成 JSON，用来构造「只有新格式」的站点。
+ *
+ * 刻意不从 src/ 引 serializeTopologyConfig：夹具应该独立描述期望的存储形状，
+ * 否则序列化写错了，用它生成夹具的测试也会跟着一起错，等于自证。
+ */
+function legacyTopologyToJson(routeValue: string, metricValue: string): string {
+  const routeGroups = routeValue.split('||')
+  const metricGroups = metricValue.split('||')
+  return JSON.stringify({
+    version: 1,
+    routes: routeGroups.map((group, index) => ({
+      nodes: group.split(';').filter(Boolean).map((segment) => {
+        const [name = '', region = '', role = '', uuid = ''] = segment.split('|').map(part => part.trim())
+        return { name, ...(region ? { region } : {}), ...(role ? { role } : {}), ...(uuid ? { uuid } : {}) }
+      }),
+      metrics: (metricGroups[index] ?? '').split(';').filter(Boolean).map((segment) => {
+        const trimmedSegment = segment.trim()
+        if (!trimmedSegment.startsWith('live@')) {
+          const [latency = '', loss = ''] = trimmedSegment.split(',')
+          return {
+            ...(latency.trim() && latency.trim() !== '-' ? { fallbackLatency: Number(latency) } : {}),
+            ...(loss.trim() && loss.trim() !== '-' ? { fallbackLoss: Number(loss) } : {}),
+          }
+        }
+        const [, source = '', task = '', latency = '', loss = ''] = trimmedSegment.split('@')
+        return {
+          live: true,
+          source: source.trim(),
+          task: task.trim(),
+          ...(latency.trim() && latency.trim() !== '-' ? { fallbackLatency: Number(latency) } : {}),
+          ...(loss.trim() && loss.trim() !== '-' ? { fallbackLoss: Number(loss) } : {}),
+        }
+      }),
+    })),
+  })
+}
+
 export async function installKomariFixture(page: Page, options: VisualFixtureOptions = {}): Promise<void> {
   await page.route('**/__transit-visual-font-chinese.woff2', route => route.fulfill({
     path: VISUAL_FONT_FILES.chinese,
@@ -700,11 +740,14 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
     topologyEnabled: options.opsDashboard ?? false,
     carrierPingRegion: 'all',
     nodeCardPanels: options.nodeCardPanels ? JSON.stringify(options.nodeCardPanels) : undefined,
-    topologyRoute: options.opsDashboard && !options.emptyTopology
+    topologyRoute: options.opsDashboard && !options.emptyTopology && !options.opsJsonTopologyOnly
       ? topologyRoute
       : '',
-    topologyMetrics: options.opsDashboard && !options.emptyTopology
+    topologyMetrics: options.opsDashboard && !options.emptyTopology && !options.opsJsonTopologyOnly
       ? topologyMetrics
+      : '',
+    topologyConfig: options.opsDashboard && !options.emptyTopology && options.opsJsonTopologyOnly
+      ? legacyTopologyToJson(topologyRoute, topologyMetrics)
       : '',
   }
 

@@ -6,8 +6,9 @@ import { assertManagedThemeSettingsCurrent, createThemeSettingsSnapshot, withMan
 import { saveTopologyConfiguration } from '@/services/topology.service'
 import { useAppStore } from '@/stores/app'
 import { normalizeThemeSettings } from '@/utils/themeSettings'
+import { readTopologyRoutes } from '@/utils/topologyConfig'
 import { adoptTopologyCreatedTaskIds, parseTopologyOwnedPingTaskIds } from '@/utils/topologyCreatedTasks'
-import { buildQuickTopologyRoute, findDuplicateTopologyRouteIndex, getQuickTopologySourceNode, hydrateTopologyRouteNodes, listQuickTopologyNodes, parseTopologyRoutes, resolveTopologyNode, TOPOLOGY_LIMITS, validateTopologyRoutes } from '@/utils/topologyHelper'
+import { buildQuickTopologyRoute, findDuplicateTopologyRouteIndex, getQuickTopologySourceNode, hydrateTopologyRouteNodes, listQuickTopologyNodes, resolveTopologyNode, TOPOLOGY_LIMITS, validateTopologyRoutes } from '@/utils/topologyHelper'
 
 function nodeConfig(node?: NodeData, role = '节点'): TopologyNodeConfig {
   return { name: node?.name ?? '', region: node?.region ?? '', role, uuid: node?.uuid }
@@ -33,13 +34,13 @@ export function useTopologyManager(nodes: MaybeRefOrGetter<NodeData[]>) {
 
   function reset(): void {
     const settings = normalizeThemeSettings(appStore.publicSettings?.theme_settings)
-    routes.value = parseTopologyRoutes(appStore.topologyRoute, appStore.topologyMetrics)
+    routes.value = readTopologyRoutes(appStore.topologyConfig, appStore.topologyRoute, appStore.topologyMetrics)
     hydrateTopologyRouteNodes(routes.value, availableNodes.value)
     savedSnapshot.value = JSON.stringify(routes.value)
     adoptTopologyCreatedTaskIds(parseTopologyOwnedPingTaskIds(settings.topologyOwnedPingTaskIds))
     expectedTopologySettings.value = createThemeSettingsSnapshot(
       settings,
-      ['topologyRoute', 'topologyMetrics', 'topologyOwnedPingTaskIds'],
+      ['topologyConfig', 'topologyRoute', 'topologyMetrics', 'topologyOwnedPingTaskIds'],
     )
   }
 

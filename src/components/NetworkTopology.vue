@@ -19,17 +19,18 @@ import { loadPublicPingTasks } from '@/services/metrics.service'
 import { useAppStore } from '@/stores/app'
 import { getNodeRole } from '@/utils/nodeRoleHelper'
 import { getRegionCode } from '@/utils/regionHelper'
+import { readTopologyRoutes } from '@/utils/topologyConfig'
 import { calculateTopologyRouteScore } from '@/utils/topologyHealth'
 import {
   findTopologyProbeKey,
+  formatTopologyMetric,
   formatTopologyMetricForProbe,
   getTopologyProbe,
   getTopologyProbeStorageKey,
   listTopologyProbeTaskNamesForSource,
   parseTopologyMetric,
-  parseTopologyNodes,
   resolveTopologyNode,
-  splitTopologyGroups,
+  serializeTopologyRoutes,
   TOPOLOGY_PROBE_OPTIONS,
 } from '@/utils/topologyHelper'
 import { aggregateTopologyRouteReliability, rankTopologyRoutes } from '@/utils/topologyIntelligence'
@@ -88,10 +89,13 @@ onMounted(() => {
     })
 })
 
-const routeGroups = computed(() => splitTopologyGroups(appStore.topologyRoute, true))
-// Metric groups map to route groups by index. Empty groups must remain in the
-// array or later routes will display another route's latency and loss.
-const metricGroups = computed(() => splitTopologyGroups(appStore.topologyMetrics, true))
+// 有 JSON 配置就用 JSON，没有才解析旧的两条字符串——和拓扑管理器共用同一个
+// 入口，避免同一份配置在首页和管理器里解析出不同结果。
+const configuredRoutes = computed(() => readTopologyRoutes(
+  appStore.topologyConfig,
+  appStore.topologyRoute,
+  appStore.topologyMetrics,
+))
 
 function findNode(name: string, uuid = ''): NodeData | undefined {
   return resolveTopologyNode(props.nodes, name, uuid)
@@ -119,8 +123,11 @@ function getRouteDirection(nodes: RouteNode[]): { key: string, label: string } {
   }
 }
 
-const routes = computed<RouteRow[]>(() => routeGroups.value.map((group, routeIndex) => {
-  const nodes = parseTopologyNodes(group, true).slice(0, 3).map((config, nodeIndex) => {
+const routes = computed<RouteRow[]>(() => configuredRoutes.value.map((configured, routeIndex) => {
+  // 探测选择存在 localStorage 里，键沿用旧的线路组字符串——换成别的算法会让
+  // 所有人已保存的入口选择一次性失效。
+  const group = serializeTopologyRoutes([configured]).topologyRoute
+  const nodes = configured.nodes.slice(0, 3).map((config, nodeIndex) => {
     const node = nodeIndex === 0 ? findNode(config.name) : findNode(config.name, config.uuid)
     return {
       key: `${routeIndex}-${nodeIndex}-${config.uuid || config.name}`,
@@ -133,9 +140,9 @@ const routes = computed<RouteRow[]>(() => routeGroups.value.map((group, routeInd
   })
   while (nodes.length && !nodes.at(-1)?.name.trim())
     nodes.pop()
-  const metrics = (metricGroups.value[routeIndex] || '')
-    .split(';')
-    .map(metric => metric.trim())
+  // 子组件仍按字符串接收指标；这里把解析结果格式化回去，读路径的格式差异
+  // （例如旧版六段 live@ 写法）在这一步就被归一化掉了。
+  const metrics = configured.metrics.slice(0, 2).map(formatTopologyMetric)
   const configuredFirstMetric = parseTopologyMetric(metrics[0] || '')
   const configuredEntryProbeKey = findTopologyProbeKey(nodes[0]?.name || '')
   const configuredTaskProbeKey = findTopologyProbeKey(configuredFirstMetric.taskFilter)
@@ -471,6 +478,7 @@ function routeRankingLabel(route: RouteRow): string {
           <article
             v-for="route in visibleRoutes"
             :key="route.key"
+            data-topology-route
             class="transit-divider transit-hover-surface group grid min-h-16 items-center gap-3 border-b px-2 transition-colors last:border-b-0"
             :class="route.nodes[2] ? 'grid-cols-[144px_minmax(190px,1fr)_178px_minmax(190px,1fr)_190px]' : 'grid-cols-[144px_minmax(190px,1fr)_190px]'"
           >

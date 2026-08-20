@@ -49,6 +49,9 @@ describe('topology service', () => {
       expected: { topologyRoute: '入口|CN|入口;线路|JP|线路机', topologyMetrics: '10,0' },
     })).resolves.toEqual({
       topologyEnabled: true,
+      // 清空后 JSON 里是空数组，而不是缺字段——否则读取时会回退到遗留字段，
+      // 刚删掉的线路一刷新又会冒出来。
+      topologyConfig: '{"version":1,"routes":[]}',
       topologyRoute: '',
       topologyMetrics: '',
       topologyOwnedPingTaskIds: '[12]',
@@ -56,6 +59,7 @@ describe('topology service', () => {
 
     expect(postedBody).toEqual({
       topologyEnabled: true,
+      topologyConfig: '{"version":1,"routes":[]}',
       topologyRoute: '',
       topologyMetrics: '',
       topologyOwnedPingTaskIds: '[12]',

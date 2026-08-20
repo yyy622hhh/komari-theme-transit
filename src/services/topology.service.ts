@@ -1,6 +1,7 @@
 import type { PublicSettingsUpdater } from '@/services/theme-settings.service'
 import type { TopologyRouteConfig } from '@/utils/topologyHelper'
 import { saveManagedThemeSettings } from '@/services/theme-settings.service'
+import { serializeTopologyConfig } from '@/utils/topologyConfig'
 import { getTopologyCreatedTaskIds, serializeTopologyOwnedPingTaskIds } from '@/utils/topologyCreatedTasks'
 import { serializeTopologyRoutes, validateTopologyRoutes } from '@/utils/topologyHelper'
 
@@ -21,11 +22,12 @@ export async function saveTopologyConfiguration(options: SaveTopologyOptions): P
   if (validationErrors[0])
     throw new Error(validationErrors[0])
 
-  const serialized = serializeTopologyRoutes(options.routes)
-
+  // 写双份：JSON 是新的真值，旧的两条字符串继续写，好让降级安装或还没升级的
+  // 页面不会看到空拓扑。确认没人回滚之后才能停写旧字段。
   const patch = {
     topologyEnabled: true,
-    ...serialized,
+    topologyConfig: serializeTopologyConfig(options.routes),
+    ...serializeTopologyRoutes(options.routes),
     topologyOwnedPingTaskIds: serializeTopologyOwnedPingTaskIds(getTopologyCreatedTaskIds()),
   }
 

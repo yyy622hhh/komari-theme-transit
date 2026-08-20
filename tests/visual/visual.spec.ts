@@ -786,6 +786,24 @@ test('Transit does not replace a custom first-segment task when the entry uses a
   await expect(firstEdge).toHaveAttribute('title', /Relay-JP-to-Exit-US/)
 })
 
+test('Transit renders topology from the JSON config alone, with the legacy fields empty', async ({ page }) => {
+  // 新装或已迁移的站点只有 topologyConfig。读路径必须完全不依赖旧的两条字符串，
+  // 否则迁移完成的那一刻首页就空了。
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, { opsDashboard: true, opsJsonTopologyOnly: true })
+  await openStablePage(page)
+
+  // 两条线路都从 JSON 解析出来
+  await expect(page.locator('[data-topology-route-status]')).toHaveCount(2)
+  // 节点名来自 JSON 的 nodes 数组
+  const firstRoute = page.locator('[data-topology-route]').first()
+  await expect(firstRoute).toContainText('北京电信')
+  await expect(firstRoute).toContainText('主控-洛杉矶')
+  await expect(firstRoute).toContainText('香港边缘节点-超长名称布局测试')
+  // 实时绑定也要跟着 JSON 走，而不是退回静态基线。
+  await expect(page.locator('[data-topology-sample]').first()).toHaveAttribute('aria-label', /Ping 任务：北京电信/)
+})
+
 test('Transit renders and edits a two-node topology with a trailing empty slot without a phantom segment', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await installKomariFixture(page, { opsDashboard: true, dark: true, authenticated: true, opsTwoNodeRoute: true, opsTrailingEmptyNode: true })
