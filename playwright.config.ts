@@ -1,10 +1,25 @@
+import { release } from 'node:os'
 import process from 'node:process'
 import { defineConfig } from '@playwright/test'
+
+/**
+ * CI 用版本库里提交的基线；本地用按平台分开、且不进版本库的目录。
+ *
+ * 基线由 visual-baseline.yml 在固定的 macos-15 runner 上生成。在别的系统版本上
+ * 跑同一份基线，字体栅格化差异会让一批用例恒定失败——那不是回归，但它会淹没
+ * 真正的回归，最后的结果是本地干脆不跑截图，改 UI 只能推上去等 CI。
+ *
+ * 分开之后本地第一次运行会写入缺失的基线并把那一轮标记为失败，第二次起就是
+ * 真实比对了。
+ */
+const snapshotRoot = process.env.CI
+  ? 'snapshots'
+  : `snapshots-local/${process.platform}-${release().split('.')[0]}`
 
 export default defineConfig({
   testDir: './tests/visual',
   outputDir: 'test-results/artifacts',
-  snapshotPathTemplate: '{testDir}/snapshots/{projectName}/{arg}{ext}',
+  snapshotPathTemplate: `{testDir}/${snapshotRoot}/{projectName}/{arg}{ext}`,
   fullyParallel: false,
   forbidOnly: Boolean(process.env.CI),
   retries: process.env.CI ? 1 : 0,

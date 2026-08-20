@@ -44,6 +44,8 @@ playwright-report/
 playwright-functional-report/
 dist-functional/
 test-results/
+# 本地视觉基线：按平台生成，只用于本地比对，权威基线是 tests/visual/snapshots/
+tests/visual/snapshots-local/
 
 # Vite
 *.timestamp-*-*.mjs
