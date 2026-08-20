@@ -643,7 +643,7 @@ test('Transit exposes topology insights without changing public route health', a
   await dialog.locator('[data-copy-topology-diagnostic]').click()
   await expect(page.getByText('线路诊断已复制')).toBeVisible()
   const copiedReport = await page.evaluate(() => (window as typeof window & { __copiedTopologyReport?: string }).__copiedTopologyReport ?? '')
-  expect(copiedReport).toContain('Transit v1.0.43 线路诊断')
+  expect(copiedReport).toContain('Transit v1.0.44 线路诊断')
   expect(copiedReport).toContain('晚高峰延迟高 60 ms')
   expect(copiedReport).not.toContain('00000000-0000-4000-8000-000000000001')
   expect(copiedReport).not.toContain('PandaOps-Local-Hop')
