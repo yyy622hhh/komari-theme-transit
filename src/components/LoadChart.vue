@@ -1,12 +1,9 @@
 <script setup lang="ts">
 import type { ChartDashboardCardKey } from '@/stores/app'
-import type { NormalizedMetricSeries } from '@/utils/metricSeries'
 import type { RecordFormat } from '@/utils/recordHelper'
-import type { MetricQueryParams, PingTaskInfo, StatusRecord } from '@/utils/rpc'
 import { Icon } from '@iconify/vue'
-import { useIntervalFn } from '@vueuse/core'
 import dayjs from 'dayjs'
-import { computed, onBeforeUnmount, onMounted, reactive, ref, shallowRef, watch, watchEffect } from 'vue'
+import { computed, reactive, watch, watchEffect } from 'vue'
 import VChart from 'vue-echarts'
 import AsyncDataState from '@/components/AsyncDataState.vue'
 import MetricChartHeader from '@/components/MetricChartHeader.vue'
@@ -16,22 +13,18 @@ import { CardX } from '@/components/ui/card-x'
 import { Input } from '@/components/ui/input'
 import { Spinner } from '@/components/ui/spinner'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { useLoadChartData } from '@/composables/useLoadChartData'
 import { useMetricRangeSelection } from '@/composables/useMetricRangeSelection'
-import { loadNodeLoadRecords, useNodeLoadStats } from '@/composables/useNodeLoadStats'
-import { LOAD_RECORD_MAX_COUNT } from '@/constants/load'
-import { loadRecentNodeStatus } from '@/services/history.service'
-import { loadMetricDefinitions, loadPublicPingTasks, queryMetrics } from '@/services/metrics.service'
+import { useNodeLoadStats } from '@/composables/useNodeLoadStats'
 import { useAppStore } from '@/stores/app'
 import { useNodesStore } from '@/stores/nodes'
-import { createAsyncGeneration } from '@/utils/asyncGeneration'
 import { getChartSeriesPalette, getLoadChartPalette } from '@/utils/chartPalette'
 import { formatBytes, formatBytesSplit } from '@/utils/helper'
 import { getLoadChartThemeColors, getLoadChartTooltipConfig, LOAD_CHART_MARGIN, LOAD_CHART_MARGIN_WITH_LEGEND, LOAD_CHART_PRESET_VIEWS } from '@/utils/loadChartTheme'
-import { getGpuDeviceNames as formatGpuDeviceNames, LOAD_METRIC_KEYS, metricSeriesToChartRecords, metricValue, recordHasLoadSample, statusRecordsToChartRecords } from '@/utils/loadMetricRecords'
+import { getGpuDeviceNames as formatGpuDeviceNames, metricValue, statusRecordsToChartRecords } from '@/utils/loadMetricRecords'
 import { formatMetricAxisTime, formatMetricTooltipTime } from '@/utils/metricRange'
-import { comparePingTaskOrder, createPingTaskOrderMap, metricTags, normalizeMetricSeriesList } from '@/utils/metricSeries'
+import { comparePingTaskOrder, createPingTaskOrderMap, metricTags } from '@/utils/metricSeries'
 import { fillMissingTimePoints } from '@/utils/recordHelper'
-import { isRpcPermissionError, RpcError } from '@/utils/rpc'
 import '@/utils/echarts' // 共享 ECharts 配置
 
 const props = defineProps<{
@@ -68,10 +61,6 @@ watchEffect(() => {
   Object.assign(chartColors, getLoadChartPalette(appStore.colorVisionFriendly))
 })
 
-const PING_METRIC_KEYS = ['ping.latency_ms', 'ping.loss'] as const
-const METRIC_HISTORY_MAX_POINTS = 700
-const REALTIME_METRIC_REFRESH_MS = 30_000
-
 interface MetricChartSeriesData {
   name: string
   color: string
@@ -102,20 +91,6 @@ const selectedHours = computed(() => {
 })
 const isRealtime = computed(() => selectedView.value === '实时')
 const effectiveHistoryHours = computed(() => isCustomRange.value ? customRange.value?.hours ?? 4 : selectedHours.value ?? 4)
-
-// 数据状态
-const remoteData = shallowRef<StatusRecord[]>([])
-const metricData = shallowRef<RecordFormat[] | null>(null)
-const rawMetricSeries = shallowRef<NormalizedMetricSeries[]>([])
-const availableMetricKeys = shallowRef<Set<string>>(new Set())
-const pingTasks = shallowRef<PingTaskInfo[]>([])
-const loading = ref(false)
-const isInitialLoad = ref(true) // 是否为首次加载（用于控制实时模式下的 NSpin 显示）
-const error = ref<string | null>(null)
-let lastRealtimeMetricFetchAt = 0
-const dataRequests = createAsyncGeneration()
-const realtimeMetricRequests = createAsyncGeneration()
-const metricCatalogRequests = createAsyncGeneration()
 
 // 节点信息
 const nodeInfo = computed(() => nodesStore.nodesByUuid.get(props.uuid))
@@ -151,265 +126,28 @@ const diskPredictionSummary = computed(() => {
   return ''
 })
 
-// ==================== 数据获取 ====================
-
-interface MetricHistoryData {
-  records: RecordFormat[]
-  series: NormalizedMetricSeries[]
-}
-
-interface MetricHistoryResult {
-  availableKeys: Set<string>
-  history: MetricHistoryData | null
-}
-
-interface LoadChartRequest {
-  generation: number
-  uuid: string
-}
+const {
+  remoteData,
+  metricData,
+  rawMetricSeries,
+  pingTasks,
+  loading,
+  error,
+  reload,
+} = useLoadChartData({
+  uuid: () => props.uuid,
+  isRealtime: () => isRealtime.value,
+  isCustomRange: () => isCustomRange.value,
+  customRange: () => customRange.value,
+  effectiveHistoryHours: () => effectiveHistoryHours.value,
+  chartCards: () => appStore.chartDashboardTemplate.cards,
+  customRangeError: () => customRangeError.value,
+  maxRecordPreserveTime: () => maxRecordPreserveTime.value,
+  pollIntervalMs: dataUpdateInterval,
+})
 
 function getGpuDeviceNames(record: RecordFormat | null): string {
   return formatGpuDeviceNames(record, nodeInfo.value?.gpu_name || '')
-}
-
-async function loadMetricCatalog(): Promise<{ availableKeys: Set<string>, tasks: PingTaskInfo[] }> {
-  const [definitions, tasks] = await Promise.all([
-    loadMetricDefinitions().catch(() => []),
-    loadPublicPingTasks().catch(() => []),
-  ])
-  return {
-    availableKeys: new Set(definitions.map(definition => definition.name)),
-    tasks,
-  }
-}
-
-async function loadMetricHistoryRecords(
-  uuid: string,
-  params: Pick<MetricQueryParams, 'hours' | 'start' | 'end'>,
-): Promise<MetricHistoryResult> {
-  const definitions = await loadMetricDefinitions()
-  const availableKeys = new Set(definitions.map(definition => definition.name))
-  const metricKeys = LOAD_METRIC_KEYS.filter(key => availableKeys.has(key))
-  if (!metricKeys.length)
-    return { availableKeys, history: null }
-
-  const result = await queryMetrics({
-    metric_keys: metricKeys,
-    entity_id: uuid,
-    ...params,
-    downsample: true,
-    fill_empty: true,
-    max_points: METRIC_HISTORY_MAX_POINTS,
-    aggregation: 'avg',
-  })
-
-  const series = normalizeMetricSeriesList(result.series)
-  if (!series.some(item => item.points.length > 0))
-    return { availableKeys, history: null }
-
-  return {
-    availableKeys,
-    history: {
-      records: metricSeriesToChartRecords(result.series, {
-        uuid,
-        memoryTotal: nodesStore.nodesByUuid.get(uuid)?.mem_total,
-        swapTotal: nodesStore.nodesByUuid.get(uuid)?.swap_total,
-        diskTotal: nodesStore.nodesByUuid.get(uuid)?.disk_total,
-      }),
-      series,
-    },
-  }
-}
-
-async function refreshRealtimeMetricSeries(force = false): Promise<void> {
-  const cards = appStore.chartDashboardTemplate.cards
-  if (!cards.includes('ping') && !cards.includes('pingLoss')) {
-    realtimeMetricRequests.invalidate()
-    rawMetricSeries.value = []
-    return
-  }
-
-  const now = Date.now()
-  if (!force && now - lastRealtimeMetricFetchAt < REALTIME_METRIC_REFRESH_MS)
-    return
-  lastRealtimeMetricFetchAt = now
-  const requestedUuid = props.uuid
-  const generation = realtimeMetricRequests.begin()
-
-  try {
-    let metricKeysCatalog = availableMetricKeys.value
-    if (!metricKeysCatalog.size) {
-      const catalog = await loadMetricCatalog()
-      if (!realtimeMetricRequests.isCurrent(generation))
-        return
-      availableMetricKeys.value = catalog.availableKeys
-      pingTasks.value = catalog.tasks
-      metricKeysCatalog = catalog.availableKeys
-    }
-
-    const metricKeys = PING_METRIC_KEYS.filter(key => metricKeysCatalog.has(key))
-    if (!metricKeys.length) {
-      if (realtimeMetricRequests.isCurrent(generation))
-        rawMetricSeries.value = []
-      return
-    }
-
-    const result = await queryMetrics({
-      metric_keys: [...metricKeys],
-      entity_id: requestedUuid,
-      hours: 1,
-      downsample: true,
-      fill_empty: true,
-      max_points: 150,
-      aggregation: 'avg',
-    })
-    if (!realtimeMetricRequests.isCurrent(generation) || !isRealtime.value || props.uuid !== requestedUuid)
-      return
-    rawMetricSeries.value = normalizeMetricSeriesList(result.series)
-  }
-  catch {
-    if (realtimeMetricRequests.isCurrent(generation) && isRealtime.value && props.uuid === requestedUuid)
-      rawMetricSeries.value = []
-  }
-}
-
-async function fetchRecentData(request: LoadChartRequest): Promise<void> {
-  metricData.value = null
-  void refreshRealtimeMetricSeries()
-
-  // 只在首次加载时显示 loading
-  if (isInitialLoad.value) {
-    loading.value = true
-  }
-  error.value = null
-
-  try {
-    const records = await loadRecentNodeStatus(request.uuid, 150)
-    if (dataRequests.isCurrent(request.generation))
-      remoteData.value = records
-  }
-  catch (err) {
-    if (dataRequests.isCurrent(request.generation)) {
-      error.value = err instanceof Error ? err.message : '获取数据失败'
-      remoteData.value = []
-    }
-  }
-  finally {
-    if (dataRequests.isCurrent(request.generation)) {
-      loading.value = false
-      isInitialLoad.value = false
-    }
-  }
-}
-
-function sliceTimedRecordsToCustomRange<T extends { time?: string }>(records: T[]): T[] {
-  const range = customRange.value
-  if (!isCustomRange.value || !range)
-    return records
-  const fromTs = range.start.valueOf()
-  const toTs = range.end.valueOf()
-  return records.filter((record) => {
-    const timestamp = dayjs(record.time ?? '').valueOf()
-    return timestamp >= fromTs && timestamp <= toTs
-  })
-}
-
-async function fetchHistoryData(request: LoadChartRequest): Promise<void> {
-  if (isCustomRange.value && !customRange.value) {
-    realtimeMetricRequests.invalidate()
-    metricData.value = null
-    rawMetricSeries.value = []
-    remoteData.value = []
-    loading.value = false
-    error.value = customRangeError.value || '请选择有效的自定义时间范围'
-    return
-  }
-
-  const range = customRange.value
-  const hours = effectiveHistoryHours.value
-  const metricParams: Pick<MetricQueryParams, 'hours' | 'start' | 'end'> = isCustomRange.value && range
-    ? { start: range.start.toDate().toISOString(), end: range.end.toDate().toISOString() }
-    : { hours }
-  const legacyHours = range
-    ? Math.min(
-        maxRecordPreserveTime.value,
-        Math.max(hours, Math.ceil(dayjs().diff(range.start, 'hour', true))),
-      )
-    : hours
-
-  loading.value = true
-  error.value = null
-
-  try {
-    let metricResult: MetricHistoryResult | null = null
-    try {
-      metricResult = await loadMetricHistoryRecords(request.uuid, metricParams)
-    }
-    catch (metricError) {
-      // Metric Store is optional on older Komari versions. Only use the
-      // legacy load-record route for compatibility failures; never conceal an
-      // expired session or a cancelled request by starting a second request.
-      const compatibilityFailure = metricError instanceof RpcError
-        && (metricError.code === -32601 || metricError.code === 404 || metricError.code === 405)
-      if (!compatibilityFailure || isRpcPermissionError(metricError))
-        throw metricError
-    }
-    if (!dataRequests.isCurrent(request.generation))
-      return
-
-    if (metricResult)
-      availableMetricKeys.value = metricResult.availableKeys
-    const metricHistory = metricResult?.history ?? null
-    const hasLoadHistory = metricHistory?.records.some(recordHasLoadSample) ?? false
-    if (metricHistory && hasLoadHistory) {
-      metricData.value = sliceTimedRecordsToCustomRange(metricHistory.records)
-      rawMetricSeries.value = metricHistory.series
-      remoteData.value = []
-    }
-    else {
-      const records = await loadNodeLoadRecords(request.uuid, legacyHours, LOAD_RECORD_MAX_COUNT)
-      if (!dataRequests.isCurrent(request.generation))
-        return
-      metricData.value = null
-      rawMetricSeries.value = metricHistory?.series ?? []
-      remoteData.value = sliceTimedRecordsToCustomRange(records)
-    }
-  }
-  catch (err) {
-    if (dataRequests.isCurrent(request.generation)) {
-      error.value = err instanceof Error ? err.message : '获取数据失败'
-      remoteData.value = []
-      metricData.value = null
-      rawMetricSeries.value = []
-    }
-  }
-  finally {
-    if (dataRequests.isCurrent(request.generation))
-      loading.value = false
-  }
-}
-
-async function fetchData(): Promise<void> {
-  const request: LoadChartRequest = {
-    generation: dataRequests.begin(),
-    uuid: props.uuid,
-  }
-  if (!request.uuid) {
-    realtimeMetricRequests.invalidate()
-    remoteData.value = []
-    metricData.value = null
-    rawMetricSeries.value = []
-    loading.value = false
-    return
-  }
-
-  if (isRealtime.value) {
-    await fetchRecentData(request)
-  }
-  else {
-    realtimeMetricRequests.invalidate()
-    await fetchHistoryData(request)
-  }
 }
 
 // ==================== 数据处理 ====================
@@ -1242,65 +980,7 @@ const processChartOption = computed(() => ({
   ],
 }))
 
-// ==================== 实时更新 ====================
-
-// 使用 VueUse 的 useIntervalFn 自动管理定时器
-const { pause: pauseRealtimeUpdate, resume: resumeRealtimeUpdate } = useIntervalFn(
-  () => fetchData(),
-  dataUpdateInterval,
-  { immediate: false },
-)
-
-// 根据是否为实时模式控制定时器
-watch(isRealtime, (realtime) => {
-  if (realtime) {
-    resumeRealtimeUpdate()
-  }
-  else {
-    pauseRealtimeUpdate()
-  }
-}, { immediate: true })
-
-// 生命周期 ====================
-
-watch(selectedView, () => {
-  isInitialLoad.value = true // 切换视图时重置首次加载状态
-  void fetchData()
-})
-
-watch(() => props.uuid, () => {
-  remoteData.value = []
-  metricData.value = null
-  rawMetricSeries.value = []
-  lastRealtimeMetricFetchAt = 0
-  isInitialLoad.value = true // 切换节点时重置首次加载状态
-  void fetchData()
-})
-
-watch(chartDashboardCards, () => {
-  if (isRealtime.value) {
-    lastRealtimeMetricFetchAt = 0
-    void refreshRealtimeMetricSeries(true)
-  }
-})
-
-onMounted(() => {
-  const catalogGeneration = metricCatalogRequests.begin()
-  void loadMetricCatalog().then((catalog) => {
-    if (!metricCatalogRequests.isCurrent(catalogGeneration))
-      return
-    availableMetricKeys.value = catalog.availableKeys
-    pingTasks.value = catalog.tasks
-  })
-  void fetchData()
-})
-
-onBeforeUnmount(() => {
-  pauseRealtimeUpdate()
-  dataRequests.dispose()
-  realtimeMetricRequests.dispose()
-  metricCatalogRequests.dispose()
-})
+watch(selectedView, reload)
 </script>
 
 <template>
@@ -1338,7 +1018,7 @@ onBeforeUnmount(() => {
             variant="outline"
             :disabled="!customRange"
             class="h-8 text-xs"
-            @click="fetchData"
+            @click="reload"
           >
             应用
           </Button>
@@ -1351,7 +1031,7 @@ onBeforeUnmount(() => {
 
     <!-- 内容区域 -->
     <Spinner :show="loading">
-      <AsyncDataState :error="error" :empty="chartData.length === 0 && !loading" empty-description="暂无负载数据" @retry="fetchData" />
+      <AsyncDataState :error="error" :empty="chartData.length === 0 && !loading" empty-description="暂无负载数据" @retry="reload" />
 
       <!-- 图表网格 -->
       <div v-if="!error && (chartData.length > 0 || loading)" class="gap-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3">
