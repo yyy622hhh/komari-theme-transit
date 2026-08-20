@@ -8,7 +8,7 @@ import TelemetrySampleStrip from '@/components/TelemetrySampleStrip.vue'
 import { useNodePingStats } from '@/composables/useNodePingStats'
 import { formatDateTime } from '@/utils/helper'
 import { resolveTopologySegmentHealth } from '@/utils/topologyHealth'
-import { calculateTopologyLatencyBaseline, findUniqueTopologyNode, formatTopologyLatency, formatTopologyLoss, formatTopologyTelemetryLabel, parseTopologyMetric, resolveTopologySampleTone } from '@/utils/topologyHelper'
+import { calculateTopologyLatencyBaseline, formatTopologyLatency, formatTopologyLoss, formatTopologyTelemetryLabel, parseTopologyMetric, resolveTopologyMetricSource, resolveTopologySampleTone } from '@/utils/topologyHelper'
 import { calculateAdaptiveBaseline } from '@/utils/topologyIntelligence'
 
 const props = defineProps<{
@@ -17,11 +17,12 @@ const props = defineProps<{
   sourceLabel: string
   targetLabel: string
   hours: number
+  sourceUuid?: string
 }>()
 
 const config = computed(() => parseTopologyMetric(props.metric))
 const telemetryLabel = computed(() => formatTopologyTelemetryLabel(props.metric, props.sourceLabel, props.targetLabel))
-const sourceNode = computed(() => findUniqueTopologyNode(props.nodes, config.value.nodeName))
+const sourceNode = computed(() => resolveTopologyMetricSource(props.nodes, config.value.nodeName, props.sourceUuid))
 const ping = useNodePingStats(
   () => sourceNode.value?.uuid ?? '',
   {
@@ -151,7 +152,7 @@ const sampleBars = computed<TelemetrySample[]>(() => history.value.map((point, i
   const lossText = `丢包 ${formatTopologyLoss(point.loss)}`
   const tone = resolveTopologySampleTone(point.latency, point.loss, baselineLatency.value)
   return {
-    key: `${point.time}-${index}`,
+    key: `${history.value.length - 1 - index}`,
     height: sampleHeight(point.latency),
     tone,
     toneClass: tone === 'critical' ? 'bg-rose-400 opacity-75' : tone === 'warning' ? 'bg-amber-400' : 'bg-emerald-400',

@@ -1,9 +1,11 @@
+import type { PingTaskMutation } from '@/utils/rpc'
 import { CACHE_CONFIG } from '@/constants/cache'
 import { isAuthenticated, requirePermission, setAuthSessionFromLogin, subscribeAuthSession } from '@/services/auth.service'
 import { SharedCache } from '@/services/cache.service'
 import { invalidatePublicPingTasksCache } from '@/services/metrics.service'
 import { requestManager } from '@/services/request.service'
-import { getSharedRpc, isRpcPermissionError } from '@/utils/rpc'
+import { getSharedRpc, isRpcPermissionError, RpcError } from '@/utils/rpc'
+import { findTopologyProbeKey, getTopologyProbe } from '@/utils/topologyHelper'
 
 export interface AdminPingTask {
   id?: number
@@ -238,6 +240,84 @@ export function findTopologyPingTaskByName(
     return undefined
   const matches = tasks.filter(task => isPingTaskAssignedToSource(task, sourceUuid) && task.name.trim() === name)
   return matches.length === 1 ? matches[0] : undefined
+}
+
+function isSupportedEntryPingTask(task: Pick<AdminPingTask, 'type' | 'target'>): boolean {
+  return SUPPORTED_PING_TASK_TYPES.has(task.type.trim().toLowerCase())
+    && Boolean(pingTaskTargetHost(task.target))
+}
+
+function listAssignedPresetEntryTasks(
+  tasks: readonly AdminPingTask[],
+  sourceUuid: string,
+  probeKey: string,
+): AdminPingTask[] {
+  if (!sourceUuid.trim() || !probeKey.trim())
+    return []
+  return tasks.filter(task => isPingTaskAssignedToSource(task, sourceUuid)
+    && isSupportedEntryPingTask(task)
+    && findTopologyProbeKey(task.name) === probeKey)
+}
+
+function pickPreferredAssignedPresetEntryTask(
+  matches: readonly AdminPingTask[],
+  probeKey: string,
+): AdminPingTask | undefined {
+  if (!matches.length)
+    return undefined
+  const probe = getTopologyProbe(probeKey)
+  return matches.find(task => task.name.trim() === probe.taskFilter)
+    ?? matches.find(task => task.name.trim() === probe.label)
+    ?? [...matches].sort((left, right) => (left.id ?? Number.MAX_SAFE_INTEGER) - (right.id ?? Number.MAX_SAFE_INTEGER))[0]
+}
+
+/**
+ * 这台线路机上已经绑好、且名字对应某个入口预设的任务。
+ *
+ * 别名可以同时存在（`北京电信` / `北京-电信`）。只要已经绑在这台线路机上，
+ * 就复用其中一个，不要因为不唯一就再创建一个。
+ */
+export function findAssignedPresetEntryTask(
+  tasks: readonly AdminPingTask[],
+  sourceUuid: string,
+  probeKey: string,
+): AdminPingTask | undefined {
+  return pickPreferredAssignedPresetEntryTask(
+    listAssignedPresetEntryTasks(tasks, sourceUuid, probeKey),
+    probeKey,
+  )
+}
+
+/**
+ * 全站已经存在的同名入口探测。目标必须一致，否则不敢替操作者猜该 Ping 哪里。
+ *
+ * 典型用法是站点里已有「北京电信」任务，新线路机还没进 clients 列表——Komari 的
+ * `default_on` 只对之后新注册的节点生效。
+ */
+export function findPresetEntryTaskTemplate(
+  tasks: readonly AdminPingTask[],
+  probeKey: string,
+): AdminPingTask | undefined {
+  if (!probeKey.trim())
+    return undefined
+  const matches = tasks
+    .filter(task => findTopologyProbeKey(task.name) === probeKey && isSupportedEntryPingTask(task))
+    .sort((left, right) => (left.id ?? Number.MAX_SAFE_INTEGER) - (right.id ?? Number.MAX_SAFE_INTEGER))
+  if (!matches.length)
+    return undefined
+  const signature = (task: AdminPingTask) => `${task.type.trim().toLowerCase()}\0${task.target.trim()}`
+  const first = matches[0]!
+  if (matches.some(task => signature(task) !== signature(first)))
+    return undefined
+  return first
+}
+
+function isMissingPingMethodError(error: unknown): boolean {
+  return error instanceof RpcError && (
+    error.code === -32601
+    || error.code === 404
+    || error.code === 405
+  )
 }
 
 async function assertPingTaskPermission(force = true): Promise<void> {
@@ -501,4 +581,156 @@ export async function ensureTopologyPingTask(
       throw new Error('Ping 任务已提交，但服务器未返回对应任务，请稍后重试。')
     return { task: created, created: true }
   })
+}
+
+function pingTaskMutationFromAdmin(task: AdminPingTask, clients: string[]): PingTaskMutation {
+  return {
+    id: task.id,
+    name: task.name,
+    clients,
+    default_on: Boolean(task.default_on),
+    type: task.type,
+    target: task.target,
+    interval: task.interval || 30,
+  }
+}
+
+const DEFAULT_ENTRY_PING_INTERVAL = 60
+
+function draftPresetEntryPingTask(
+  source: TopologyPingEndpoint,
+  probeKey: string,
+): AdminPingTask | null {
+  const probe = getTopologyProbe(probeKey)
+  if (probe.key !== probeKey || !probe.target.trim())
+    return null
+  return {
+    name: probe.taskFilter,
+    type: 'icmp',
+    target: probe.target,
+    default_on: false,
+    clients: [source.uuid],
+    interval: DEFAULT_ENTRY_PING_INTERVAL,
+  }
+}
+
+/**
+ * 保证线路机上有对应入口探测。
+ *
+ * 1. 已经绑在这台线路机上 → 直接用
+ * 2. 全站已有目标一致的同名任务 → 把线路机加进 clients（不是主题建的，不记所有权）
+ * 3. 都没有 → 按预设测试点自动创建 ICMP 任务（主题建的，可清理）
+ */
+export async function ensureTopologyEntryPingTask(
+  source: TopologyPingEndpoint,
+  probeKey: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<{ task: AdminPingTask, assigned: boolean, created: boolean } | null> {
+  const { signal } = options
+  if (!source.uuid.trim() || !probeKey.trim())
+    return null
+  throwIfAborted(signal)
+  return withCrossTabPingLock(`entry:${probeKey}`, async () => {
+    throwIfAborted(signal)
+    await assertPingTaskPermission()
+    throwIfAborted(signal)
+    const listKey = `admin:ping:list:entry:${source.uuid}:${probeKey}`
+    let tasks = await fetchAdminPingTasks(signal, `${listKey}:before`)
+    const existing = findAssignedPresetEntryTask(tasks, source.uuid, probeKey)
+    if (existing)
+      return { task: existing, assigned: false, created: false }
+
+    const template = findPresetEntryTaskTemplate(tasks, probeKey)
+    if (template && Number.isInteger(template.id)) {
+      const clients = [...new Set([...(template.clients ?? []), source.uuid])]
+      if ((template.clients ?? []).includes(source.uuid))
+        return { task: template, assigned: false, created: false }
+
+      try {
+        await requestManager.run(
+          `admin:ping:edit:entry:${source.uuid}:${probeKey}`,
+          requestSignal => getSharedRpc().editPingTasks([pingTaskMutationFromAdmin(template, clients)], requestSignal),
+          { retryAttempts: 0 },
+        )
+        invalidatePublicPingTasksCache()
+        invalidateAdminPingTasksCache()
+      }
+      catch (error) {
+        if (isMissingPingMethodError(error))
+          return createPresetEntryPingTask(source, probeKey, `${listKey}:create-after-edit`, tasks)
+        if (isRpcPermissionError(error))
+          handlePingPermissionError(error)
+        tasks = await fetchAdminPingTasks(undefined, `${listKey}:retry`)
+        const concurrent = findAssignedPresetEntryTask(tasks, source.uuid, probeKey)
+        if (concurrent)
+          return { task: concurrent, assigned: false, created: false }
+        throw error
+      }
+
+      tasks = await fetchAdminPingTasks(undefined, `${listKey}:after-edit`)
+      const assigned = tasks.find(task => task.id === template.id && isPingTaskAssignedToSource(task, source.uuid))
+        ?? findAssignedPresetEntryTask(tasks, source.uuid, probeKey)
+      if (!assigned)
+        throw new Error('入口探测任务已提交，但服务器未把线路机加入任务，请稍后重试。')
+      return { task: assigned, assigned: true, created: false }
+    }
+
+    return createPresetEntryPingTask(source, probeKey, `${listKey}:create`, tasks)
+  })
+}
+
+async function createPresetEntryPingTask(
+  source: TopologyPingEndpoint,
+  probeKey: string,
+  requestKey: string,
+  knownTasks: readonly AdminPingTask[] = [],
+): Promise<{ task: AdminPingTask, assigned: boolean, created: boolean } | null> {
+  const draft = draftPresetEntryPingTask(source, probeKey)
+  if (!draft)
+    return null
+  const previousIds = new Set(
+    knownTasks
+      .map(task => task.id)
+      .filter((id): id is number => typeof id === 'number' && Number.isInteger(id)),
+  )
+  try {
+    await requestManager.run(
+      `admin:ping:add:entry:${source.uuid}:${probeKey}`,
+      requestSignal => getSharedRpc().addPingTask({
+        name: draft.name,
+        type: draft.type,
+        target: draft.target,
+        default_on: false,
+        clients: [source.uuid],
+        interval: draft.interval,
+      }, requestSignal),
+      { retryAttempts: 0 },
+    )
+    invalidatePublicPingTasksCache()
+    invalidateAdminPingTasksCache()
+  }
+  catch (error) {
+    if (isRpcPermissionError(error))
+      handlePingPermissionError(error)
+    const tasks = await fetchAdminPingTasks(undefined, `${requestKey}:retry`)
+    const concurrent = findAssignedPresetEntryTask(tasks, source.uuid, probeKey)
+    if (concurrent)
+      return { task: concurrent, assigned: false, created: false }
+    throw error
+  }
+
+  const tasks = await fetchAdminPingTasks(undefined, `${requestKey}:after`)
+  const createdIds = new Set(
+    tasks
+      .map(task => task.id)
+      .filter((id): id is number => typeof id === 'number' && Number.isInteger(id) && !previousIds.has(id)),
+  )
+  const created = pickPreferredAssignedPresetEntryTask(
+    listAssignedPresetEntryTasks(tasks, source.uuid, probeKey)
+      .filter(task => !createdIds.size || (Number.isInteger(task.id) && createdIds.has(task.id!))),
+    probeKey,
+  ) ?? findAssignedPresetEntryTask(tasks, source.uuid, probeKey)
+  if (!created)
+    throw new Error('入口探测任务已提交，但服务器未返回对应任务，请稍后重试。')
+  return { task: created, assigned: true, created: true }
 }

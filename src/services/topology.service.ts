@@ -1,5 +1,7 @@
+import type { PublicSettingsUpdater } from '@/services/theme-settings.service'
 import type { TopologyRouteConfig } from '@/utils/topologyHelper'
 import { saveManagedThemeSettings } from '@/services/theme-settings.service'
+import { getTopologyCreatedTaskIds, serializeTopologyOwnedPingTaskIds } from '@/utils/topologyCreatedTasks'
 import { serializeTopologyRoutes, validateTopologyRoutes } from '@/utils/topologyHelper'
 
 interface SaveTopologyOptions {
@@ -7,6 +9,7 @@ interface SaveTopologyOptions {
   routes: TopologyRouteConfig[]
   expected?: Record<string, unknown>
   lockHeld?: boolean
+  onPublicSettings?: PublicSettingsUpdater
 }
 
 function getSaveKey(theme: string): string {
@@ -23,6 +26,7 @@ export async function saveTopologyConfiguration(options: SaveTopologyOptions): P
   const patch = {
     topologyEnabled: true,
     ...serialized,
+    topologyOwnedPingTaskIds: serializeTopologyOwnedPingTaskIds(getTopologyCreatedTaskIds()),
   }
 
   return saveManagedThemeSettings({
@@ -32,5 +36,6 @@ export async function saveTopologyConfiguration(options: SaveTopologyOptions): P
     permission: 'nodeTopology',
     requestKey: getSaveKey(options.theme),
     lockHeld: options.lockHeld,
+    onPublicSettings: options.onPublicSettings,
   })
 }

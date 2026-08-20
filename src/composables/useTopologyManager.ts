@@ -5,10 +5,12 @@ import { computed, ref, toValue } from 'vue'
 import { assertManagedThemeSettingsCurrent, createThemeSettingsSnapshot, withManagedThemeSettingsLock } from '@/services/theme-settings.service'
 import { saveTopologyConfiguration } from '@/services/topology.service'
 import { useAppStore } from '@/stores/app'
-import { buildQuickTopologyRoute, findDuplicateTopologyRouteIndex, findUniqueTopologyNode, getQuickTopologySourceNode, listQuickTopologyNodes, parseTopologyRoutes, TOPOLOGY_LIMITS, validateTopologyRoutes } from '@/utils/topologyHelper'
+import { normalizeThemeSettings } from '@/utils/themeSettings'
+import { adoptTopologyCreatedTaskIds, parseTopologyOwnedPingTaskIds } from '@/utils/topologyCreatedTasks'
+import { buildQuickTopologyRoute, findDuplicateTopologyRouteIndex, getQuickTopologySourceNode, hydrateTopologyRouteNodes, listQuickTopologyNodes, parseTopologyRoutes, resolveTopologyNode, TOPOLOGY_LIMITS, validateTopologyRoutes } from '@/utils/topologyHelper'
 
 function nodeConfig(node?: NodeData, role = '节点'): TopologyNodeConfig {
-  return { name: node?.name ?? '', region: node?.region ?? '', role }
+  return { name: node?.name ?? '', region: node?.region ?? '', role, uuid: node?.uuid }
 }
 
 export function useTopologyManager(nodes: MaybeRefOrGetter<NodeData[]>) {
@@ -30,22 +32,24 @@ export function useTopologyManager(nodes: MaybeRefOrGetter<NodeData[]>) {
   })
 
   function reset(): void {
+    const settings = normalizeThemeSettings(appStore.publicSettings?.theme_settings)
     routes.value = parseTopologyRoutes(appStore.topologyRoute, appStore.topologyMetrics)
+    hydrateTopologyRouteNodes(routes.value, availableNodes.value)
     savedSnapshot.value = JSON.stringify(routes.value)
-    const serverSettings = appStore.publicSettings?.theme_settings
-    expectedTopologySettings.value = createThemeSettingsSnapshot(serverSettings ?? {}, ['topologyRoute', 'topologyMetrics'])
+    adoptTopologyCreatedTaskIds(parseTopologyOwnedPingTaskIds(settings.topologyOwnedPingTaskIds))
+    expectedTopologySettings.value = createThemeSettingsSnapshot(
+      settings,
+      ['topologyRoute', 'topologyMetrics', 'topologyOwnedPingTaskIds'],
+    )
   }
 
   const dirty = computed(() => JSON.stringify(routes.value) !== savedSnapshot.value)
   const validationErrors = computed(() => {
     const errors = validateTopologyRoutes(routes.value)
     routes.value.forEach((route, routeIndex) => {
-      const ambiguousNames = new Set([
-        ...route.nodes.slice(1).map(node => node.name),
-        ...route.metrics.filter(metric => metric.live).map(metric => metric.nodeName),
-      ].map(name => name.trim()).filter(name => isAmbiguousNodeName(name)))
-      for (const name of ambiguousNames)
-        errors.push(`第 ${routeIndex + 1} 条线路的节点“${name}”名称重复，无法唯一绑定`)
+      const unresolved = route.nodes.slice(1).filter(node => node.name.trim() && !node.uuid && isAmbiguousNodeName(node.name))
+      for (const node of unresolved)
+        errors.push(`第 ${routeIndex + 1} 条线路的节点“${node.name}”名称重复，无法唯一绑定`)
     })
     return errors
   })
@@ -58,8 +62,8 @@ export function useTopologyManager(nodes: MaybeRefOrGetter<NodeData[]>) {
     return duplicateNodeNames.value.has(name.trim().toLowerCase())
   }
 
-  function findDuplicateRoute(sourceName: string, landingName = ''): number {
-    return findDuplicateTopologyRouteIndex(routes.value, sourceName, landingName)
+  function findDuplicateRoute(sourceName: string, landingName = '', sourceUuid = '', landingUuid = ''): number {
+    return findDuplicateTopologyRouteIndex(routes.value, sourceName, landingName, sourceUuid, landingUuid)
   }
 
   function addQuickRoute(
@@ -81,6 +85,8 @@ export function useTopologyManager(nodes: MaybeRefOrGetter<NodeData[]>) {
       routes.value,
       route.nodes[1]?.name ?? '',
       route.nodes[2]?.name ?? '',
+      route.nodes[1]?.uuid ?? '',
+      route.nodes[2]?.uuid ?? '',
     )
     if (duplicateIndex >= 0) {
       const existing = routes.value[duplicateIndex]
@@ -110,12 +116,14 @@ export function useTopologyManager(nodes: MaybeRefOrGetter<NodeData[]>) {
   }
 
   function selectNode(route: TopologyRouteConfig, index: number, nodeName: string): void {
-    if (nodeName && isAmbiguousNodeName(nodeName))
+    const selected = resolveTopologyNode(availableNodes.value, nodeName, nodeName)
+    if (nodeName.trim() && !selected)
       return
-    const selected = findUniqueTopologyNode(availableNodes.value, nodeName)
     const previous = route.nodes[index]
     const previousName = previous?.name.trim() ?? ''
-    const nextName = nodeName.trim()
+    const previousUuid = previous?.uuid?.trim() ?? ''
+    const nextName = selected?.name.trim() || nodeName.trim()
+    const nextUuid = selected?.uuid?.trim() ?? ''
     const followingMetrics = index === 1
       ? route.metrics.filter(metric => !metric.nodeName.trim() || metric.nodeName.trim() === previousName)
       : []
@@ -124,12 +132,12 @@ export function useTopologyManager(nodes: MaybeRefOrGetter<NodeData[]>) {
       for (const metric of followingMetrics) {
         if (metric.nodeName.trim() !== nextName)
           metric.taskFilter = ''
-        metric.nodeName = nodeName
+        metric.nodeName = nextName
       }
     }
     else if (index === 2 && route.metrics[1]?.live) {
       route.metrics[1].nodeName = route.nodes[1]?.name.trim() ?? ''
-      if (previousName !== nextName)
+      if (previousName !== nextName || previousUuid !== nextUuid)
         route.metrics[1].taskFilter = ''
     }
   }
@@ -150,6 +158,7 @@ export function useTopologyManager(nodes: MaybeRefOrGetter<NodeData[]>) {
       theme: publicSettings.theme,
       expected: expectedTopologySettings.value,
       permission: 'nodeTopology',
+      onPublicSettings: appStore.applyPublicSettings,
     })
   }
 
@@ -177,13 +186,14 @@ export function useTopologyManager(nodes: MaybeRefOrGetter<NodeData[]>) {
         routes: submittedRoutes,
         expected: expectedTopologySettings.value,
         lockHeld: options.lockHeld,
+        onPublicSettings: appStore.applyPublicSettings,
       })
-      const latestPublicSettings = appStore.publicSettings
-      if (latestPublicSettings?.theme === publicSettings.theme)
-        appStore.publicSettings = { ...latestPublicSettings, theme_settings: payload }
       expectedTopologySettings.value = {
         topologyRoute: payload.topologyRoute,
         topologyMetrics: payload.topologyMetrics,
+        ...(Object.hasOwn(payload, 'topologyOwnedPingTaskIds')
+          ? { topologyOwnedPingTaskIds: payload.topologyOwnedPingTaskIds }
+          : {}),
       }
       savedSnapshot.value = submittedSnapshot
       return JSON.stringify(routes.value) === submittedSnapshot ? 'saved' : 'changed'

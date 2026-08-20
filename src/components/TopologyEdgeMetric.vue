@@ -7,7 +7,7 @@ import TopologyEdgeSamples from '@/components/TopologyEdgeSamples.vue'
 import { useNodePingStats } from '@/composables/useNodePingStats'
 import { formatDateTime } from '@/utils/helper'
 import { resolveTopologySegmentHealth } from '@/utils/topologyHealth'
-import { calculateTopologyLatencyBaseline, findUniqueTopologyNode, formatTopologyLatency, formatTopologyLoss, formatTopologyTelemetryLabel, parseTopologyMetric, resolveTopologySampleTone } from '@/utils/topologyHelper'
+import { calculateTopologyLatencyBaseline, formatTopologyLatency, formatTopologyLoss, formatTopologyTelemetryLabel, parseTopologyMetric, resolveTopologyMetricSource, resolveTopologySampleTone } from '@/utils/topologyHelper'
 
 const props = defineProps<{
   metric: string
@@ -15,6 +15,7 @@ const props = defineProps<{
   sourceLabel: string
   targetLabel: string
   segmentIndex: number
+  sourceUuid?: string
   mobile?: boolean
   observeOnly?: boolean
 }>()
@@ -25,7 +26,7 @@ const emit = defineEmits<{
 }>()
 const config = computed(() => parseTopologyMetric(props.metric))
 const telemetryLabel = computed(() => formatTopologyTelemetryLabel(props.metric, props.sourceLabel, props.targetLabel))
-const sourceNode = computed(() => findUniqueTopologyNode(props.nodes, config.value.nodeName))
+const sourceNode = computed(() => resolveTopologyMetricSource(props.nodes, config.value.nodeName, props.sourceUuid))
 const ping = useNodePingStats(
   () => sourceNode.value?.uuid ?? '',
   {
@@ -117,7 +118,7 @@ const sampleBars = computed<TelemetrySample[]>(() => {
     const latencyText = point.latency === null ? '无响应' : formatTopologyLatency(point.latency)
     const lossText = `丢包 ${formatTopologyLoss(point.loss)}`
     return {
-      key: `${props.segmentIndex}-${point.time}-${index}`,
+      key: `${props.segmentIndex}-${points.length - 1 - index}`,
       height: sampleHeight(point.latency, baseline),
       tone,
       toneClass: tone === 'critical' ? 'bg-rose-400 opacity-75' : tone === 'warning' ? 'bg-amber-400' : 'bg-emerald-400',

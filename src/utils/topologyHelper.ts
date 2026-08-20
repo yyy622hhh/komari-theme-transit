@@ -4,6 +4,8 @@ export interface TopologyNodeConfig {
   name: string
   region: string
   role: string
+  /** 线路机/落地机在 Komari 里的 UUID。入口只是标签，一般没有。 */
+  uuid?: string
 }
 
 export interface TopologyMetricConfig {
@@ -29,6 +31,8 @@ export interface TopologyProbeOption {
   carrier: string
   label: string
   taskFilter: string
+  /** 站里还没有同名任务时，主题按这个公网测试点自动创建 ICMP 探测。 */
+  target: string
 }
 
 export interface TopologyQuickNode {
@@ -39,6 +43,8 @@ export interface TopologyQuickNode {
   ipv4?: string
   ipv6?: string
 }
+
+let nextTopologyRouteId = 0
 
 const TOPOLOGY_PROBE_SEPARATOR_PATTERN = /[\s\-_—–·]+/g
 const TOPOLOGY_NODE_RESERVED_PATTERN = /[|;]/
@@ -55,15 +61,15 @@ export const TOPOLOGY_LIMITS = Object.freeze({
 })
 
 export const TOPOLOGY_PROBE_OPTIONS: TopologyProbeOption[] = [
-  { key: 'beijing-telecom', city: '北京', carrier: '电信', label: '北京电信', taskFilter: '北京电信' },
-  { key: 'beijing-unicom', city: '北京', carrier: '联通', label: '北京联通', taskFilter: '北京联通' },
-  { key: 'beijing-mobile', city: '北京', carrier: '移动', label: '北京移动', taskFilter: '北京移动' },
-  { key: 'shanghai-telecom', city: '上海', carrier: '电信', label: '上海电信', taskFilter: '上海电信' },
-  { key: 'shanghai-unicom', city: '上海', carrier: '联通', label: '上海联通', taskFilter: '上海联通' },
-  { key: 'shanghai-mobile', city: '上海', carrier: '移动', label: '上海移动', taskFilter: '上海移动' },
-  { key: 'guangzhou-telecom', city: '广州', carrier: '电信', label: '广州电信', taskFilter: '广东电信' },
-  { key: 'guangzhou-unicom', city: '广州', carrier: '联通', label: '广州联通', taskFilter: '广东联通' },
-  { key: 'guangzhou-mobile', city: '广州', carrier: '移动', label: '广州移动', taskFilter: '广东移动' },
+  { key: 'beijing-telecom', city: '北京', carrier: '电信', label: '北京电信', taskFilter: '北京电信', target: '219.141.140.10' },
+  { key: 'beijing-unicom', city: '北京', carrier: '联通', label: '北京联通', taskFilter: '北京联通', target: '202.106.196.115' },
+  { key: 'beijing-mobile', city: '北京', carrier: '移动', label: '北京移动', taskFilter: '北京移动', target: '221.179.155.161' },
+  { key: 'shanghai-telecom', city: '上海', carrier: '电信', label: '上海电信', taskFilter: '上海电信', target: '202.96.209.133' },
+  { key: 'shanghai-unicom', city: '上海', carrier: '联通', label: '上海联通', taskFilter: '上海联通', target: '210.22.84.3' },
+  { key: 'shanghai-mobile', city: '上海', carrier: '移动', label: '上海移动', taskFilter: '上海移动', target: '211.136.112.50' },
+  { key: 'guangzhou-telecom', city: '广州', carrier: '电信', label: '广州电信', taskFilter: '广东电信', target: '202.96.128.86' },
+  { key: 'guangzhou-unicom', city: '广州', carrier: '联通', label: '广州联通', taskFilter: '广东联通', target: '210.21.196.6' },
+  { key: 'guangzhou-mobile', city: '广州', carrier: '移动', label: '广州移动', taskFilter: '广东移动', target: '211.136.192.6' },
 ]
 
 export function normalizePingTaskName(value: string): string {
@@ -111,7 +117,41 @@ export function formatTopologyTelemetryLabel(metric: string, visualSource: strin
   return `探测来源：${source} · Ping 任务：${task}`
 }
 
-export function formatTopologyMetricForProbe(metric: string, probeKey: string, targetFallback = ''): string {
+export function listTopologyProbeTaskNamesForSource(
+  tasks: readonly { name: string, clients?: readonly string[] }[],
+  sourceUuid: string,
+): string[] {
+  const namesOf = (list: readonly { name: string }[]) => list
+    .map(task => task.name.trim())
+    .filter(Boolean)
+  const uuid = sourceUuid.trim()
+  const hasClientLists = tasks.some(task => Array.isArray(task.clients))
+  if (uuid && hasClientLists)
+    return namesOf(tasks.filter(task => task.clients?.includes(uuid)))
+  return namesOf(tasks)
+}
+
+export function resolveTopologyProbeTaskName(
+  probeKey: string,
+  taskNames: readonly string[] = [],
+  configuredTaskFilter = '',
+): string {
+  const probe = getTopologyProbe(probeKey)
+  const uniqueTask = pickQuickTopologyTaskName(taskNames, probe)
+  if (uniqueTask)
+    return uniqueTask
+  const configured = configuredTaskFilter.trim()
+  if (configured && findTopologyProbeKey(configured) === probe.key)
+    return configured
+  return probe.taskFilter
+}
+
+export function formatTopologyMetricForProbe(
+  metric: string,
+  probeKey: string,
+  targetFallback = '',
+  taskNames: readonly string[] = [],
+): string {
   const configured = parseTopologyMetric(metric)
   if (!configured.live)
     return metric.trim() || '-,-'
@@ -122,7 +162,7 @@ export function formatTopologyMetricForProbe(metric: string, probeKey: string, t
   return [
     'live',
     configured.nodeName || targetFallback,
-    probe.taskFilter,
+    resolveTopologyProbeTaskName(probe.key, taskNames, configured.taskFilter),
     formatTopologyMetricNumber(useConfiguredFallback ? configured.fallbackLatency : null),
     formatTopologyMetricNumber(useConfiguredFallback ? configured.fallbackLoss : null),
   ].join('@')
@@ -156,8 +196,9 @@ export function getTopologyProbeStorageKey(routeGroup: string, metric: string): 
 }
 
 export function createTopologyRoute(nodes: TopologyNodeConfig[] = [], metrics: TopologyMetricConfig[] = []): TopologyRouteConfig {
+  nextTopologyRouteId = Math.max(nextTopologyRouteId + 1, Date.now() * 1_000)
   return {
-    id: Date.now() + Math.floor(Math.random() * 1_000_000),
+    id: nextTopologyRouteId,
     enabled: true,
     nodes,
     metrics,
@@ -191,7 +232,7 @@ export function listQuickTopologyNodes<T extends TopologyQuickNode>(nodes: reado
     .map((node, index) => ({ node, index }))
     .filter(({ node }) => node.name.trim()
       && node.online !== false
-      && nameCounts.get(node.name.trim().toLowerCase()) === 1
+      && (Boolean(node.uuid?.trim()) || nameCounts.get(node.name.trim().toLowerCase()) === 1)
       && !TOPOLOGY_NODE_RESERVED_PATTERN.test(node.name)
       && !TOPOLOGY_NODE_RESERVED_PATTERN.test(node.region ?? ''))
     .sort((left, right) => quickNodeRank(left.node) - quickNodeRank(right.node) || left.index - right.index)
@@ -208,6 +249,59 @@ export function findUniqueTopologyNode<T extends Pick<TopologyQuickNode, 'name'>
     return undefined
   const matches = nodes.filter(node => node.name.trim().toLowerCase() === normalized)
   return matches.length === 1 ? matches[0] : undefined
+}
+
+export function resolveTopologyNode<T extends TopologyQuickNode>(
+  nodes: readonly T[],
+  name: string,
+  uuid = '',
+): T | undefined {
+  const id = uuid.trim()
+  if (id) {
+    const matches = nodes.filter(node => node.uuid?.trim() === id)
+    if (matches.length === 1)
+      return matches[0]
+  }
+  return findUniqueTopologyNode(nodes, name)
+}
+
+/**
+ * 实时探测来源以指标里的节点名为准。线路机 UUID 只在名字对得上时用来消歧；
+ * 入口段可以把探测放到另一台机器上（例如离线的外部来源），不能被线路机 UUID 盖掉。
+ */
+export function resolveTopologyMetricSource<T extends TopologyQuickNode>(
+  nodes: readonly T[],
+  nodeName: string,
+  uuid = '',
+): T | undefined {
+  const named = nodeName.trim()
+  const id = uuid.trim()
+  if (id) {
+    const matches = nodes.filter(node => node.uuid?.trim() === id)
+    if (matches.length === 1 && (!named || matches[0]!.name.trim() === named))
+      return matches[0]
+  }
+  return findUniqueTopologyNode(nodes, named)
+}
+
+/** 只给线路机/落地机补 UUID；入口是探测标签，不能误绑到同名节点。 */
+export function hydrateTopologyRouteNodes(
+  routes: TopologyRouteConfig[],
+  nodes: readonly TopologyQuickNode[],
+): void {
+  for (const route of routes) {
+    route.nodes.forEach((config, index) => {
+      if (index === 0)
+        return
+      const resolved = resolveTopologyNode(nodes, config.name, config.uuid)
+      if (!resolved?.uuid)
+        return
+      config.uuid = resolved.uuid
+      config.name = resolved.name.trim()
+      if (resolved.region?.trim())
+        config.region = resolved.region.trim()
+    })
+  }
 }
 
 function findQuickTopologyTaskProbe(taskNames: readonly string[]): TopologyProbeOption | null {
@@ -376,10 +470,26 @@ export function nextQuickLandingUuid(
   return preferred[0] ?? landings[0] ?? ''
 }
 
+function topologyEndpointKey(node?: Pick<TopologyNodeConfig, 'name' | 'uuid'>): string {
+  return node?.uuid?.trim() || node?.name.trim().toLowerCase() || ''
+}
+
+function isSameTopologyEndpoint(
+  node: Pick<TopologyNodeConfig, 'name' | 'uuid'> | undefined,
+  name: string,
+  uuid = '',
+): boolean {
+  if (!node)
+    return !name.trim() && !uuid.trim()
+  if (uuid.trim() && node.uuid?.trim())
+    return node.uuid === uuid.trim()
+  return node.name.trim().toLowerCase() === name.trim().toLowerCase()
+}
+
 export function getTopologyRouteEndpoints(route: Pick<TopologyRouteConfig, 'nodes'>): { source: string, landing: string } {
   return {
-    source: route.nodes[1]?.name.trim().toLowerCase() ?? '',
-    landing: route.nodes[2]?.name.trim().toLowerCase() ?? '',
+    source: topologyEndpointKey(route.nodes[1]),
+    landing: topologyEndpointKey(route.nodes[2]),
   }
 }
 
@@ -387,15 +497,13 @@ export function findDuplicateTopologyRouteIndex(
   routes: readonly Pick<TopologyRouteConfig, 'nodes'>[],
   sourceName: string,
   landingName = '',
+  sourceUuid = '',
+  landingUuid = '',
 ): number {
-  const source = sourceName.trim().toLowerCase()
-  const landing = landingName.trim().toLowerCase()
-  if (!source)
+  if (!sourceUuid.trim() && !sourceName.trim())
     return -1
-  return routes.findIndex((route) => {
-    const ends = getTopologyRouteEndpoints(route)
-    return ends.source === source && ends.landing === landing
-  })
+  return routes.findIndex(route => isSameTopologyEndpoint(route.nodes[1], sourceName, sourceUuid)
+    && isSameTopologyEndpoint(route.nodes[2], landingName, landingUuid))
 }
 
 export function listUnusedQuickLandingUuids(
@@ -408,7 +516,7 @@ export function listUnusedQuickLandingUuids(
     const uuid = node.uuid?.trim()
     if (!uuid || uuid === sourceUuid)
       return []
-    return findDuplicateTopologyRouteIndex(routes, sourceName, node.name) < 0 ? [uuid] : []
+    return findDuplicateTopologyRouteIndex(routes, sourceName, node.name, sourceUuid, uuid) < 0 ? [uuid] : []
   })
 }
 
@@ -474,8 +582,8 @@ export function buildQuickTopologyRoute(
   return createTopologyRoute(
     [
       { name: makeUniqueQuickEntryLabel(entryLabel, configuredNames), region: probe ? 'CN' : '', role: '入口' },
-      { name: source.name.trim(), region: source.region?.trim() ?? '', role: '线路机' },
-      { name: landing?.name.trim() ?? '', region: landing?.region?.trim() ?? '', role: '落地机' },
+      { name: source.name.trim(), region: source.region?.trim() ?? '', role: '线路机', uuid: source.uuid },
+      { name: landing?.name.trim() ?? '', region: landing?.region?.trim() ?? '', role: '落地机', uuid: landing?.uuid },
     ],
     [
       { live: Boolean(entryTask), nodeName: entryTask ? source.name.trim() : '', taskFilter: entryTask, fallbackLatency: null, fallbackLoss: null },
@@ -570,7 +678,11 @@ export function serializeTopologyRoutes(routes: TopologyRouteConfig[]): { topolo
     .filter(({ nodes }) => nodes.filter(node => node.name.trim()).length >= 2)
   return {
     topologyRoute: activeRoutes.map(({ nodes }) => nodes
-      .map(node => `${formatTopologyNodeField(node.name)}|${formatTopologyNodeField(node.region)}|${formatTopologyNodeField(node.role || '节点')}`)
+      .map((node) => {
+        const base = `${formatTopologyNodeField(node.name)}|${formatTopologyNodeField(node.region)}|${formatTopologyNodeField(node.role || '节点')}`
+        const uuid = node.uuid?.trim()
+        return uuid && !TOPOLOGY_NODE_RESERVED_PATTERN.test(uuid) ? `${base}|${uuid}` : base
+      })
       .join(';'))
       .join('||'),
     topologyMetrics: activeRoutes.map(({ route, nodes }) => route.metrics
@@ -649,12 +761,22 @@ export function validateTopologyRoutes(routes: TopologyRouteConfig[]): string[] 
 
 export function parseTopologyNodes(value: string, preserveEmpty = false): TopologyNodeConfig[] {
   const nodes = value.split(';').map((segment, index) => {
-    const [name = '', region = '', ...roleParts] = segment.split('|').map(part => part.trim())
+    const parts = segment.split('|').map(part => part.trim())
+    const [name = '', region = '', roleRaw = '', maybeUuid = ''] = parts
     const defaultRole = index === 0 ? '入口' : index === 1 ? '线路机' : index === 2 ? '落地机' : '节点'
+    if (parts.length > 4) {
+      return {
+        name: parseTopologyNodeField(name),
+        region: parseTopologyNodeField(region),
+        role: parseTopologyNodeField(parts.slice(2).join('|')) || defaultRole,
+      }
+    }
+    const uuid = parseTopologyNodeField(maybeUuid)
     return {
       name: parseTopologyNodeField(name),
       region: parseTopologyNodeField(region),
-      role: parseTopologyNodeField(roleParts.join('|')) || defaultRole,
+      role: parseTopologyNodeField(roleRaw) || defaultRole,
+      ...(uuid ? { uuid } : {}),
     }
   })
 

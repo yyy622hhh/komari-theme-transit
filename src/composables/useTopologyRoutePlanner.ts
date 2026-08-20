@@ -6,9 +6,10 @@ import type { NodeData } from '@/stores/nodes'
 import type { TopologyRouteConfig } from '@/utils/topologyHelper'
 import { ref, toValue } from 'vue'
 import { OPS_TOPOLOGY_HOP_PROBE_LADDER } from '@/constants/ops'
-import { describeTopologyHopProbe, normalizeTopologyHopProbe } from '@/services/ping-task.service'
+import { describeTopologyHopProbe, ensureTopologyEntryPingTask, normalizeTopologyHopProbe } from '@/services/ping-task.service'
 import { planWorkingHopTask } from '@/services/topology-probe.service'
-import { applyTopologyProbeToRoute, findTopologyProbeKey, findUniqueTopologyNode, getTopologyProbe, getTopologyRouteProbeKey, shouldAutoApplyTopologyProbe } from '@/utils/topologyHelper'
+import { rememberTopologyCreatedTaskId } from '@/utils/topologyCreatedTasks'
+import { applyTopologyProbeToRoute, findTopologyProbeKey, getTopologyProbe, getTopologyRouteProbeKey, resolveTopologyNode, shouldAutoApplyTopologyProbe } from '@/utils/topologyHelper'
 
 export interface TopologyRouteProbeState {
   probe: TopologyHopProbe
@@ -36,8 +37,16 @@ export interface TopologyRoutePlannerManager {
 }
 
 export interface TopologyRoutePlannerCatalog {
-  loadTasks: (nodeName: string) => Promise<TopologyTaskLoadResult>
+  loadTasks: (nodeName: string, nodeUuid?: string) => Promise<TopologyTaskLoadResult>
   rememberTask: (sourceUuid: string, taskName: string) => void
+}
+
+export function findUniquePresetEntryTask(taskNames: readonly string[], entryName: string): string {
+  const entryProbeKey = findTopologyProbeKey(entryName)
+  if (!entryProbeKey)
+    return ''
+  const matches = taskNames.filter(task => findTopologyProbeKey(task) === entryProbeKey)
+  return matches.length === 1 ? matches[0]! : ''
 }
 
 const HOP_PROBE_LADDER_TEXT = OPS_TOPOLOGY_HOP_PROBE_LADDER
@@ -105,8 +114,8 @@ export function formatTopologyEntryHint(input: TopologyEntryHintInput): string {
   if (input.live)
     return `入口探测：${input.probeLabel || input.entryLabel} · 实时`
   if (input.probeLabel) {
-    return `入口探测：线路机“${input.sourceName}”上没有名为“${input.expectedTaskName}”的 Ping 任务，`
-      + '该段暂显示静态基线。在 Komari 中为这台节点创建同名任务后会自动转为实时。'
+    return `入口探测：线路机“${input.sourceName}”上还没有“${input.expectedTaskName}”。`
+      + '添加或复检线路时会自动创建；若一直没有，请稍后重试。'
   }
   return `入口探测：自定义入口“${input.entryLabel}”未绑定实时任务，该段显示静态基线。`
 }
@@ -213,10 +222,8 @@ export function useTopologyRoutePlanner(
     routeTaskRuns.set(route.id, runId)
     clearPendingRouteTask(route.id)
     routeTaskErrors.value = { ...routeTaskErrors.value, [route.id]: '' }
-    const source = findUniqueTopologyNode(toValue(nodes), route.nodes[1]?.name ?? '')
-    const landing = findUniqueTopologyNode(toValue(nodes), route.nodes[2]?.name ?? '')
-    const firstMetric = route.metrics[0]
-    const secondMetric = route.metrics[1]
+    const source = resolveTopologyNode(toValue(nodes), route.nodes[1]?.name ?? '', route.nodes[1]?.uuid ?? '')
+    const landing = resolveTopologyNode(toValue(nodes), route.nodes[2]?.name ?? '', route.nodes[2]?.uuid ?? '')
     if (!source) {
       clearRouteTaskPlanning(route.id)
       return
@@ -224,22 +231,46 @@ export function useTopologyRoutePlanner(
 
     routeTaskPlanning.value = { ...routeTaskPlanning.value, [route.id]: true }
     try {
-      const loaded = await catalog.loadTasks(source.name)
+      const loaded = await catalog.loadTasks(source.name, source.uuid)
       if (routeTaskRuns.get(route.id) !== runId || !isOpen() || !manager.routes.includes(route))
         return
       if (loaded.error)
         throw new Error(loaded.error)
 
       const probeKey = getTopologyRouteProbeKey(route)
+      let entryTasks = loaded.tasks
       if (probeKey && shouldAutoApplyTopologyProbe(route)) {
-        applyTopologyProbeToRoute(route, probeKey, source.name, loaded.tasks, reservedEntryNames(route))
+        applyTopologyProbeToRoute(route, probeKey, source.name, entryTasks, reservedEntryNames(route))
       }
-      else if (firstMetric?.live && !firstMetric.taskFilter.trim()) {
-        const matchingEntryTasks = loaded.tasks.filter(task => findTopologyProbeKey(task) === findTopologyProbeKey(route.nodes[0]?.name ?? ''))
-        if (matchingEntryTasks.length === 1)
-          firstMetric.taskFilter = matchingEntryTasks[0]!
+      else if (route.metrics[0]?.live && !route.metrics[0].taskFilter.trim()) {
+        const matchingEntryTask = findUniquePresetEntryTask(entryTasks, route.nodes[0]?.name ?? '')
+        if (matchingEntryTask)
+          route.metrics[0].taskFilter = matchingEntryTask
       }
 
+      // applyTopologyProbeToRoute 会换掉 metrics[0]，必须读替换后的对象。
+      // 离线线路机发不出样本，不要为它自动建入口探测。
+      const firstMetric = route.metrics[0]
+      if (probeKey && firstMetric && !firstMetric.taskFilter.trim() && source.online !== false) {
+        const ensured = await ensureTopologyEntryPingTask(source, probeKey)
+        if (routeTaskRuns.get(route.id) !== runId || !isOpen() || !manager.routes.includes(route))
+          return
+        if (ensured) {
+          if (ensured.created && Number.isInteger(ensured.task.id))
+            rememberTopologyCreatedTaskId(ensured.task.id!)
+          catalog.rememberTask(source.uuid, ensured.task.name)
+          entryTasks = [...new Set([...entryTasks, ensured.task.name])]
+          applyTopologyProbeToRoute(route, probeKey, source.name, entryTasks, reservedEntryNames(route))
+          const bound = route.metrics[0]
+          if (bound) {
+            bound.live = true
+            bound.nodeName = source.name
+            bound.taskFilter = ensured.task.name
+          }
+        }
+      }
+
+      const secondMetric = route.metrics[1]
       if (!landing) {
         clearRouteProbeState(route.id)
         if (secondMetric) {
@@ -250,6 +281,9 @@ export function useTopologyRoutePlanner(
         return
       }
       if (!secondMetric)
+        return
+      // 离线节点给不出样本，走阶梯会把 ICMP/443/80/22 建一遍并自动写回。
+      if (source.online === false || landing.online === false)
         return
       const planned = await planWorkingHopTask(source, landing, secondMetric.taskFilter)
       if (routeTaskRuns.get(route.id) !== runId || !isOpen() || !manager.routes.includes(route))

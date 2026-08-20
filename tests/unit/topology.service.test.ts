@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { setAuthSessionFromLogin } from '../../src/services/auth.service'
 import { saveTopologyConfiguration } from '../../src/services/topology.service'
+import { persistTopologyCreatedTaskIds, resetTopologyCreatedTaskIdsCache } from '../../src/utils/topologyCreatedTasks'
 
 const originalFetch = globalThis.fetch
 
@@ -14,6 +15,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 afterEach(() => {
   globalThis.fetch = originalFetch
   setAuthSessionFromLogin(false)
+  resetTopologyCreatedTaskIdsCache()
 })
 
 describe('topology service', () => {
@@ -39,6 +41,7 @@ describe('topology service', () => {
       return jsonResponse({ message: 'unexpected endpoint' }, 500)
     }) as typeof fetch
     setAuthSessionFromLogin(true, { logged_in: true, username: 'admin' })
+    persistTopologyCreatedTaskIds(new Set([12]))
 
     await expect(saveTopologyConfiguration({
       theme: 'Transit',
@@ -48,12 +51,14 @@ describe('topology service', () => {
       topologyEnabled: true,
       topologyRoute: '',
       topologyMetrics: '',
+      topologyOwnedPingTaskIds: '[12]',
     })
 
     expect(postedBody).toEqual({
       topologyEnabled: true,
       topologyRoute: '',
       topologyMetrics: '',
+      topologyOwnedPingTaskIds: '[12]',
     })
   })
 })

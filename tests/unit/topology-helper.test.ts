@@ -14,12 +14,16 @@ import {
   getTopologyProbe,
   getTopologyProbeStorageKey,
   getTopologyRouteProbeKey,
+  hydrateTopologyRouteNodes,
+  listTopologyProbeTaskNamesForSource,
   listUnusedQuickLandingUuids,
   nextQuickLandingUuid,
   parseTopologyMetric,
   parseTopologyRoutes,
   pickQuickHopTaskName,
   pickQuickTopologyTaskName,
+  resolveTopologyMetricSource,
+  resolveTopologyNode,
   resolveTopologySampleTone,
   serializeTopologyRoutes,
   shouldAutoApplyTopologyProbe,
@@ -45,6 +49,48 @@ describe('topology telemetry direction labels', () => {
   test('does not invent missing live source or task names', () => {
     expect(formatTopologyTelemetryLabel('live@@@-@-', '北京电信', '东京'))
       .toBe('探测来源：未指定来源节点 · Ping 任务：未指定任务')
+  })
+})
+
+describe('topology node identity', () => {
+  test('resolves a duplicate name by uuid and hydrates unique names', () => {
+    const duplicates = [
+      { uuid: 'a', name: '同名', region: 'JP' },
+      { uuid: 'b', name: '同名', region: 'US' },
+    ]
+    expect(findUniqueTopologyNode(duplicates, '同名')).toBeUndefined()
+    expect(resolveTopologyNode(duplicates, '同名', 'b')?.uuid).toBe('b')
+
+    const unique = [{ uuid: 'relay', name: '线路', region: 'JP' }]
+    const routes = parseTopologyRoutes('入口|CN|入口;线路|JP|线路机', '-,-')
+    hydrateTopologyRouteNodes(routes, unique)
+    expect(routes[0]?.nodes[1]?.uuid).toBe('relay')
+
+    const saved = parseTopologyRoutes('入口|CN|入口;同名|JP|线路机|a;同名|US|落地机|b', '-,-')
+    expect(findDuplicateTopologyRouteIndex(saved, '同名', '同名', 'a', 'b')).toBe(0)
+    expect(findDuplicateTopologyRouteIndex(saved, '同名', '同名', 'b', 'a')).toBe(-1)
+  })
+
+  test('does not let a relay uuid override a differently named live probe source', () => {
+    const nodes = [
+      { uuid: 'relay', name: '主控-洛杉矶', region: 'US', online: true },
+      { uuid: 'offline', name: '伦敦-离线归档', region: 'GB', online: false },
+    ]
+    expect(resolveTopologyMetricSource(nodes, '伦敦-离线归档', 'relay')?.name).toBe('伦敦-离线归档')
+    expect(resolveTopologyMetricSource(nodes, '主控-洛杉矶', 'relay')?.uuid).toBe('relay')
+  })
+})
+
+describe('topology route identity', () => {
+  test('creates distinct route IDs even when routes are added in the same clock tick', () => {
+    const originalNow = Date.now
+    try {
+      Date.now = () => 1
+      expect(createTopologyRoute().id).not.toBe(createTopologyRoute().id)
+    }
+    finally {
+      Date.now = originalNow
+    }
   })
 })
 
@@ -115,11 +161,18 @@ describe('topology route and metric alignment', () => {
     expect(validateTopologyRoutes(routes)).toContain('第 1 条线路节点顺序存在空位')
   })
 
-  test('retains extra node field separators so invalid configuration is visible', () => {
-    const routes = parseTopologyRoutes('入口|CN|入口|额外字段;线路|JP|线路机', '-,-')
+  test('treats a fourth node field as a uuid and keeps extra fields invalid', () => {
+    const routes = parseTopologyRoutes('入口|CN|入口;线路|JP|线路机|relay-uuid;落地|US|落地机|exit-uuid', '-,-')
+    expect(routes[0]?.nodes[1]).toMatchObject({ name: '线路', role: '线路机', uuid: 'relay-uuid' })
+    expect(routes[0]?.nodes[2]).toMatchObject({ name: '落地', uuid: 'exit-uuid' })
+    expect(serializeTopologyRoutes(routes)).toEqual({
+      topologyRoute: '入口|CN|入口;线路|JP|线路机|relay-uuid;落地|US|落地机|exit-uuid',
+      topologyMetrics: '-,-;-,-',
+    })
 
-    expect(routes[0]?.nodes[0]?.role).toBe('入口|额外字段')
-    expect(validateTopologyRoutes(routes)).toContain('第 1 条线路节点名称、地区或角色不能包含“|”或“;”')
+    const invalid = parseTopologyRoutes('入口|CN|入口|extra|more;线路|JP|线路机', '-,-')
+    expect(invalid[0]?.nodes[0]?.role).toBe('入口|extra|more')
+    expect(validateTopologyRoutes(invalid)).toContain('第 1 条线路节点名称、地区或角色不能包含“|”或“;”')
   })
 })
 
@@ -127,6 +180,39 @@ describe('topology probe overrides', () => {
   test('does not turn a static or missing metric into a live probe', () => {
     expect(formatTopologyMetricForProbe('51,0', 'beijing-telecom', 'Relay')).toBe('51,0')
     expect(formatTopologyMetricForProbe('', 'beijing-telecom', 'Relay')).toBe('-,-')
+  })
+
+  test('keeps a unique alias task name instead of rewriting to the preset filter', () => {
+    expect(formatTopologyMetricForProbe(
+      'live@Relay@广州电信@-@-',
+      'guangzhou-telecom',
+      'Relay',
+      ['广州电信'],
+    )).toBe('live@Relay@广州电信@-@-')
+    expect(formatTopologyMetricForProbe(
+      'live@Relay@北京电信@-@-',
+      'guangzhou-telecom',
+      'Relay',
+      ['广州电信'],
+    )).toBe('live@Relay@广州电信@-@-')
+  })
+
+  test('falls back to the preset filter when no unique task is available', () => {
+    expect(formatTopologyMetricForProbe(
+      'live@Relay@北京电信@-@-',
+      'guangzhou-telecom',
+      'Relay',
+    )).toBe('live@Relay@广东电信@-@-')
+  })
+
+  test('lists ping task names assigned to a source when client lists exist', () => {
+    const tasks = [
+      { name: '广州电信', clients: ['relay-a'] },
+      { name: '广东电信', clients: ['relay-b'] },
+      { name: '北京电信' },
+    ]
+    expect(listTopologyProbeTaskNamesForSource(tasks, 'relay-a')).toEqual(['广州电信'])
+    expect(listTopologyProbeTaskNamesForSource(tasks, 'missing')).toEqual([])
   })
 
   test('matches only known probe task names and preserves custom tasks', () => {
@@ -297,14 +383,16 @@ describe('quick topology configuration', () => {
     expect(buildQuickTopologyRoute([{ name: 'offline-a', online: false }])).toBeNull()
   })
 
-  test('does not auto-configure an ambiguous duplicate node name', () => {
+  test('keeps name-only lookups unique but still lists duplicate names that have uuids', () => {
     const nodes = [
       { uuid: 'node-a', name: 'edge', region: 'US', online: true },
       { uuid: 'node-b', name: 'edge', region: 'JP', online: true },
     ]
 
     expect(findUniqueTopologyNode(nodes, 'edge')).toBeUndefined()
-    expect(getQuickTopologySourceNode(nodes)).toBeNull()
+    expect(getQuickTopologySourceNode(nodes)?.uuid).toBe('node-a')
+    expect(buildQuickTopologyRoute(nodes, { sourceUuid: 'node-a', landingUuid: 'node-b' })?.nodes.map(node => node.uuid))
+      .toEqual([undefined, 'node-a', 'node-b'])
   })
 
   test('exposes the quick source node and task picker separately', () => {

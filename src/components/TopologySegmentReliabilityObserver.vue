@@ -4,13 +4,14 @@ import type { TopologySegmentTelemetry } from '@/utils/topologyHealth'
 import type { TopologyReliabilityWindow, TopologySegmentReliabilitySnapshot } from '@/utils/topologyIntelligence'
 import { computed, watch } from 'vue'
 import { useNodePingStats } from '@/composables/useNodePingStats'
-import { findUniqueTopologyNode, parseTopologyMetric } from '@/utils/topologyHelper'
+import { parseTopologyMetric, resolveTopologyMetricSource } from '@/utils/topologyHelper'
 import { calculateAdaptiveBaseline } from '@/utils/topologyIntelligence'
 
 const props = defineProps<{
   metric: string
   nodes: NodeData[]
   current?: TopologySegmentTelemetry
+  sourceUuid?: string
 }>()
 
 const emit = defineEmits<{
@@ -18,7 +19,7 @@ const emit = defineEmits<{
 }>()
 
 const config = computed(() => parseTopologyMetric(props.metric))
-const sourceNode = computed(() => findUniqueTopologyNode(props.nodes, config.value.nodeName))
+const sourceNode = computed(() => resolveTopologyMetricSource(props.nodes, config.value.nodeName, props.sourceUuid))
 const enabled = computed(() => config.value.live && Boolean(sourceNode.value) && sourceNode.value?.online !== false)
 
 const dayPing = useNodePingStats(

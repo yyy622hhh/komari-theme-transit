@@ -44,6 +44,7 @@ const RPC_REQUEST_ABORTED = -32800
 const RPC_METHODS_ALLOWING_MISSING_RESULT = new Set([
   'admin:addPingTask',
   'admin:deletePingTask',
+  'admin:editPingTask',
   'admin:editSettings',
   'admin:orderClients',
 ])
@@ -1110,6 +1111,11 @@ export class KomariRpc {
 
   async addPingTask(task: PingTaskMutation, signal?: AbortSignal): Promise<void> {
     await this.client.callOverHttp('admin:addPingTask', task, signal)
+  }
+
+  /** 批量更新 Ping 任务。Komari 用这个接口改 clients 列表，没有单独的“加一台机器”。 */
+  async editPingTasks(tasks: PingTaskMutation[], signal?: AbortSignal): Promise<void> {
+    await this.client.callOverHttp('admin:editPingTask', { tasks }, signal)
   }
 
   /** 删除 Ping 任务；Komari 会连带清掉这些任务的历史采样。 */

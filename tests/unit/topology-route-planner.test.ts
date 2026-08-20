@@ -1,6 +1,17 @@
 import type { TopologyRouteProbeState } from '../../src/composables/useTopologyRoutePlanner'
 import { describe, expect, test } from 'bun:test'
-import { formatTopologyEntryHint, formatTopologyRouteHint, isTopologyRouteHintDestructive } from '../../src/composables/useTopologyRoutePlanner'
+import { findUniquePresetEntryTask, formatTopologyEntryHint, formatTopologyRouteHint, isTopologyRouteHintDestructive } from '../../src/composables/useTopologyRoutePlanner'
+
+describe('findUniquePresetEntryTask', () => {
+  test('does not treat two unrelated unknown values as the same preset', () => {
+    expect(findUniquePresetEntryTask(['custom-observer'], 'custom-entry')).toBe('')
+  })
+
+  test('returns one matching preset task but rejects ambiguous matches', () => {
+    expect(findUniquePresetEntryTask(['北京电信'], '北京电信')).toBe('北京电信')
+    expect(findUniquePresetEntryTask(['北京电信', '北京-电信'], '北京电信')).toBe('')
+  })
+})
 
 function state(overrides: Partial<TopologyRouteProbeState> = {}): TopologyRouteProbeState {
   return {
@@ -123,9 +134,7 @@ describe('formatTopologyEntryHint', () => {
     const hint = formatTopologyEntryHint(preset)
     expect(hint).toContain('Relay-JP')
     expect(hint).toContain('北京电信')
-    expect(hint).toContain('静态基线')
-    // 必须给出可执行的下一步，而不只是陈述现状。
-    expect(hint).toContain('创建同名任务')
+    expect(hint).toContain('自动创建')
   })
 
   test('explains a custom entry that carries no live task', () => {

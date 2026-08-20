@@ -112,6 +112,25 @@ describe('topology hop probe selection', () => {
     }
   })
 
+  test('breaks a TCP port tie by the probe ladder order', async () => {
+    const restore = mockKomari(
+      [
+        { id: 1, name: 'https', clients: [source.uuid], type: 'tcp', target: '198.51.100.2:443', interval: 30 },
+        { id: 2, name: 'http', clients: [source.uuid], type: 'tcp', target: '198.51.100.3:80', interval: 30 },
+      ],
+      [
+        { task_id: '1', name: 'https', total: 100, valid: 99 },
+        { task_id: '2', name: 'http', total: 100, valid: 99 },
+      ],
+    )
+    try {
+      expect(chooseInitialHopProbe(await loadSourceProbeProfile(source.uuid))).toEqual({ type: 'tcp', port: 443 })
+    }
+    finally {
+      restore()
+    }
+  })
+
   test('falls back to the most common healthy TCP port when ICMP produces nothing', async () => {
     const restore = mockKomari(
       [

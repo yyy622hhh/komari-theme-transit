@@ -8,6 +8,7 @@ import { AppDialog } from '@/components/ui/app-dialog'
 
 export interface TopologyRouteDetail {
   key: string
+  sourceUuid?: string
   nodeNames: string[]
   metrics: string[]
   score: TopologyRouteScore
@@ -176,6 +177,7 @@ function baselineTone(reliability: TopologyRouteReliability): string {
           :nodes="nodes"
           :source-label="route.nodeNames[index] || `节点 ${index + 1}`"
           :target-label="route.nodeNames[index + 1] || `节点 ${index + 2}`"
+          :source-uuid="route.sourceUuid"
           :hours="hours"
         />
       </div>

@@ -2,7 +2,7 @@ import type { MaybeRefOrGetter } from 'vue'
 import type { NodeData } from '@/stores/nodes'
 import { ref, toValue } from 'vue'
 import { loadAdminPingTaskNamesForNode } from '@/services/ping-task.service'
-import { findUniqueTopologyNode } from '@/utils/topologyHelper'
+import { resolveTopologyNode } from '@/utils/topologyHelper'
 
 export interface TopologyTaskLoadResult {
   tasks: string[]
@@ -34,8 +34,8 @@ export function useTopologyTaskCatalog(
     refreshedGeneration = -1
   }
 
-  async function loadTasks(nodeName: string): Promise<TopologyTaskLoadResult> {
-    const node = findUniqueTopologyNode(toValue(nodes), nodeName)
+  async function loadTasks(nodeName: string, nodeUuid = ''): Promise<TopologyTaskLoadResult> {
+    const node = resolveTopologyNode(toValue(nodes), nodeName, nodeUuid)
     if (!node && isAmbiguousNodeName(nodeName))
       return { tasks: [], error: '节点名称重复，无法唯一读取 Ping 任务。' }
     if (!node)

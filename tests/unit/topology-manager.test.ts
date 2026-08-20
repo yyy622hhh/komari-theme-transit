@@ -191,11 +191,13 @@ describe('topology manager save snapshots', () => {
     ])
     manager.reset()
     manager.routes.value.splice(0)
-    saveTopologyConfiguration.mockImplementation(async () => ({
-      topologyEnabled: true,
-      topologyRoute: '',
-      topologyMetrics: '',
-    }))
+    saveTopologyConfiguration.mockImplementation(async (options) => {
+      const payload = { topologyEnabled: true, topologyRoute: '', topologyMetrics: '' }
+      const current = useAppStore().publicSettings
+      if (current)
+        options.onPublicSettings?.({ ...current, theme_settings: { ...current.theme_settings, ...payload } })
+      return payload
+    })
 
     await expect(manager.save()).resolves.toBe('saved')
     expect(saveTopologyConfiguration.mock.calls[0]?.[0]).toMatchObject({
@@ -210,6 +212,33 @@ describe('topology manager save snapshots', () => {
       topologyEnabled: true,
       topologyRoute: '',
       topologyMetrics: '',
+    })
+  })
+
+  test('reads topology fields when the server stored theme_settings as a JSON string', async () => {
+    const appStore = useAppStore()
+    appStore.publicSettings = {
+      ...publicSettings({}),
+      theme_settings: JSON.stringify({
+        topologyRoute: '入口|CN|入口;线路|JP|线路机',
+        topologyMetrics: '10,0',
+      }),
+    }
+    const manager = useTopologyManager([
+      node({ uuid: 'relay', name: '线路', region: 'JP', online: true }),
+    ])
+    manager.reset()
+    saveTopologyConfiguration.mockImplementation(async () => ({
+      topologyRoute: '入口|CN|入口;线路|JP|线路机',
+      topologyMetrics: '10,0',
+    }))
+
+    await expect(manager.save()).resolves.toBe('saved')
+    expect(saveTopologyConfiguration.mock.calls[0]?.[0]).toMatchObject({
+      expected: {
+        topologyRoute: '入口|CN|入口;线路|JP|线路机',
+        topologyMetrics: '10,0',
+      },
     })
   })
 })

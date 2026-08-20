@@ -540,6 +540,16 @@ async function handleRpc(
       })
       result = undefined
       break
+    case 'admin:editPingTask': {
+      const edits = (payload.params?.tasks as Array<Record<string, unknown>> | undefined) ?? []
+      for (const edit of edits) {
+        const current = adminPingTasks.find(task => Number(task.id) === Number(edit.id))
+        if (current)
+          Object.assign(current, edit)
+      }
+      result = undefined
+      break
+    }
     case 'admin:orderClients':
       for (const [uuid, weight] of Object.entries(payload.params ?? {})) {
         const client = clientFixtures[uuid]

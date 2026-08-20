@@ -2,7 +2,8 @@ import type { AdminPingTask, TopologyHopProbe, TopologyPingEndpoint } from '@/se
 import type { HopTaskPlan } from '@/services/topology-probe.service'
 import type { NodeData } from '@/stores/nodes'
 import type { TopologyRouteConfig } from '@/utils/topologyHelper'
-import { findUniqueTopologyNode } from '@/utils/topologyHelper'
+import { isStaleManagedThemeSettingsError } from '@/services/theme-settings.service'
+import { resolveTopologyNode } from '@/utils/topologyHelper'
 
 /**
  * `useTopologyManager()` 的最小切面：只暴露自愈流程需要读写的部分，且用取值
@@ -36,7 +37,60 @@ export interface TopologyRepairDeps {
     options: { probe: TopologyHopProbe, signal?: AbortSignal },
   ) => Promise<{ task: AdminPingTask, created: boolean }>
   deleteTopologyPingTasks: (taskIds: readonly number[]) => Promise<boolean>
+  /**
+   * 本页会话里 `ensure` 明确 created=true 的任务 ID。跨自愈轮次保留，用来证明
+   * 所有权；不能只凭 Transit 命名去删站长自己建的任务。
+   */
+  sessionCreatedTaskIds?: Set<number>
   signal?: AbortSignal
+}
+
+export interface TopologyRetiredTask {
+  id: number
+  name: string
+}
+
+export function liveTopologyTaskNames(routes: readonly Pick<TopologyRouteConfig, 'metrics'>[]): Set<string> {
+  return new Set(routes.flatMap(route => route.metrics
+    .filter(metric => metric.live)
+    .map(metric => metric.taskFilter.trim())
+    .filter(Boolean)))
+}
+
+/** 只删本会话创建、且当前没有线路再绑定的探测任务。 */
+export function listOwnedRetiredTaskIds(
+  retired: readonly TopologyRetiredTask[],
+  sessionCreatedIds: ReadonlySet<number>,
+  boundTaskNames: ReadonlySet<string>,
+): number[] {
+  return [...new Set(retired
+    .filter(task => sessionCreatedIds.has(task.id) && !boundTaskNames.has(task.name.trim()))
+    .map(task => task.id))]
+}
+
+/**
+ * 对照当前任务列表：主题建过、但已经没有任何线路绑定的任务。
+ * 用来清掉换入口后留下的「北京电信」之类，不依赖规划阶段有没有记下 retired。
+ */
+export function listOwnedUnboundTaskIds(
+  ownedIds: ReadonlySet<number>,
+  tasks: ReadonlyArray<{ id?: number, name: string }>,
+  boundTaskNames: ReadonlySet<string>,
+): number[] {
+  const namesById = new Map<number, string>()
+  for (const task of tasks) {
+    if (!Number.isInteger(task.id))
+      continue
+    namesById.set(task.id!, task.name.trim())
+  }
+  return [...ownedIds].filter((id) => {
+    const name = namesById.get(id)
+    return Boolean(name) && !boundTaskNames.has(name!)
+  })
+}
+
+function ownedRetiredTasks(tasks: ReadonlyArray<{ id?: number, name: string }>): TopologyRetiredTask[] {
+  return tasks.flatMap(task => (Number.isInteger(task.id) ? [{ id: task.id!, name: task.name }] : []))
 }
 
 export interface TopologyRepairAvailability {
@@ -70,6 +124,7 @@ interface PlannedProbeRepair {
   probe: TopologyHopProbe
   taskName: string
   needsCreation: boolean
+  retiredTasks: TopologyRetiredTask[]
 }
 
 /**
@@ -91,8 +146,8 @@ export async function runTopologyProbeRepair(deps: TopologyRepairDeps): Promise<
     return 'skipped'
 
   async function planRouteRepair(route: TopologyRouteConfig, options: { fresh?: boolean } = {}): Promise<PlannedProbeRepair | null> {
-    const source = findUniqueTopologyNode(deps.nodes(), route.nodes[1]?.name ?? '')
-    const landing = findUniqueTopologyNode(deps.nodes(), route.nodes[2]?.name ?? '')
+    const source = resolveTopologyNode(deps.nodes(), route.nodes[1]?.name ?? '', route.nodes[1]?.uuid ?? '')
+    const landing = resolveTopologyNode(deps.nodes(), route.nodes[2]?.name ?? '', route.nodes[2]?.uuid ?? '')
     const metric = route.metrics[1]
     if (!source || !landing || !metric?.live)
       return null
@@ -115,6 +170,7 @@ export async function runTopologyProbeRepair(deps: TopologyRepairDeps): Promise<
       probe: planned.probe,
       taskName: planned.task.name,
       needsCreation: planned.needsCreation,
+      retiredTasks: ownedRetiredTasks(planned.retiredTasks),
     }
   }
 
@@ -125,12 +181,26 @@ export async function runTopologyProbeRepair(deps: TopologyRepairDeps): Promise<
 
   let outcome: TopologyRepairOutcome = 'no-op'
   const createdTaskIds = new Set<number>()
+  const sessionCreatedTaskIds = deps.sessionCreatedTaskIds ?? new Set<number>()
+  const appliedRetiredTasks: TopologyRetiredTask[] = []
   let saveAttempted = false
+  let bindingPersisted = false
   try {
     await deps.manager.withSaveLock(async () => {
       if (!canContinue())
         return
-      await deps.manager.preflightSave()
+      try {
+        await deps.manager.preflightSave()
+      }
+      catch (error) {
+        // GET 已经通过 onPublicSettings 把权威值写回 store。这里 reset 一次，
+        // 下一轮按新快照规划；不要把本轮按陈旧线路算好的补丁写上去。
+        if (isStaleManagedThemeSettingsError(error)) {
+          deps.manager.reset()
+          return
+        }
+        throw error
+      }
       if (!canContinue())
         return
 
@@ -150,18 +220,29 @@ export async function runTopologyProbeRepair(deps: TopologyRepairDeps): Promise<
           continue
         let taskName = latestRepair.taskName
         if (latestRepair.needsCreation) {
-          const ensured = await deps.ensureTopologyPingTask(latestRepair.source, latestRepair.landing, {
-            probe: latestRepair.probe,
-            signal: deps.signal,
-          })
-          taskName = ensured.task.name
-          if (ensured.created && Number.isInteger(ensured.task.id))
-            createdTaskIds.add(ensured.task.id!)
+          try {
+            const ensured = await deps.ensureTopologyPingTask(latestRepair.source, latestRepair.landing, {
+              probe: latestRepair.probe,
+              signal: deps.signal,
+            })
+            taskName = ensured.task.name
+            if (ensured.created && Number.isInteger(ensured.task.id)) {
+              createdTaskIds.add(ensured.task.id!)
+              sessionCreatedTaskIds.add(ensured.task.id!)
+            }
+          }
+          catch {
+            // 单条建任务失败不能掀翻整轮：否则 finally 会把已经建好的其他线路任务删掉。
+            if (!canContinue())
+              return
+            continue
+          }
         }
         if (!canContinue())
           return
         metric.nodeName = latestRepair.source.name
         metric.taskFilter = taskName
+        appliedRetiredTasks.push(...latestRepair.retiredTasks)
       }
 
       if (deps.manager.dirty && canContinue()) {
@@ -176,6 +257,7 @@ export async function runTopologyProbeRepair(deps: TopologyRepairDeps): Promise<
           const result = await deps.manager.save({ lockHeld: true })
           if (result === 'saved' || result === 'changed') {
             outcome = 'repaired'
+            bindingPersisted = true
           }
           else {
             saveAttempted = false
@@ -199,12 +281,25 @@ export async function runTopologyProbeRepair(deps: TopologyRepairDeps): Promise<
         // The server snapshot already contains this task name. Creating the
         // missing task alone completed the repair, so it must not be cleaned up.
         createdTaskIds.clear()
+        bindingPersisted = true
       }
     })
   }
   finally {
     if (!saveAttempted && createdTaskIds.size)
       await deps.deleteTopologyPingTasks([...createdTaskIds])
+  }
+
+  if (bindingPersisted) {
+    const retiredIds = listOwnedRetiredTaskIds(
+      appliedRetiredTasks,
+      sessionCreatedTaskIds,
+      liveTopologyTaskNames(deps.manager.routes),
+    )
+    if (retiredIds.length && await deps.deleteTopologyPingTasks(retiredIds)) {
+      for (const id of retiredIds)
+        sessionCreatedTaskIds.delete(id)
+    }
   }
 
   return outcome

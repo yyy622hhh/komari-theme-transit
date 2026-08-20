@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import type { TopologyRouteDetail } from '@/components/TopologyRouteDetailDialog.vue'
 import type { NodeData } from '@/stores/nodes'
+import type { PingTaskInfo } from '@/utils/rpc'
 import type { TopologyRouteHealth, TopologyRouteScore, TopologySegmentTelemetry } from '@/utils/topologyHealth'
 import type { TopologyRouteRanking, TopologyRouteReliability, TopologySegmentReliabilitySnapshot } from '@/utils/topologyIntelligence'
 import { Icon } from '@iconify/vue'
 import { useMediaQuery, useStorageAsync } from '@vueuse/core'
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, ref, shallowRef, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import IncidentTimelineDialog from '@/components/IncidentTimelineDialog.vue'
 import TopologyEdgeMetric from '@/components/TopologyEdgeMetric.vue'
@@ -14,18 +15,20 @@ import TopologyProbeSelect from '@/components/TopologyProbeSelect.vue'
 import TopologyRouteDetailDialog from '@/components/TopologyRouteDetailDialog.vue'
 import TopologySegmentReliabilityObserver from '@/components/TopologySegmentReliabilityObserver.vue'
 import { useTopologyProbeRepair } from '@/composables/useTopologyProbeRepair'
+import { loadPublicPingTasks } from '@/services/metrics.service'
 import { useAppStore } from '@/stores/app'
 import { getNodeRole } from '@/utils/nodeRoleHelper'
 import { getRegionCode } from '@/utils/regionHelper'
 import { calculateTopologyRouteScore } from '@/utils/topologyHealth'
 import {
   findTopologyProbeKey,
-  findUniqueTopologyNode,
   formatTopologyMetricForProbe,
   getTopologyProbe,
   getTopologyProbeStorageKey,
+  listTopologyProbeTaskNamesForSource,
   parseTopologyMetric,
   parseTopologyNodes,
+  resolveTopologyNode,
   splitTopologyGroups,
   TOPOLOGY_PROBE_OPTIONS,
 } from '@/utils/topologyHelper'
@@ -36,6 +39,7 @@ interface RouteNode {
   name: string
   region: string
   role: string
+  uuid?: string
   node?: NodeData
 }
 
@@ -62,6 +66,7 @@ const props = withDefaults(defineProps<{ nodes: NodeData[], embedded?: boolean }
 const appStore = useAppStore()
 const router = useRouter()
 const probeSelections = useStorageAsync<Record<string, string>>('pandaTopologyProbeSelections', {}, localStorage)
+const publicPingTasks = shallowRef<PingTaskInfo[]>([])
 const managerOpen = ref(false)
 const timelineOpen = ref(false)
 const detailOpen = ref(false)
@@ -71,15 +76,25 @@ const routeSegmentMetrics = ref<Record<string, Record<number, TopologySegmentTel
 const routeSegmentReliability = ref<Record<string, Record<number, TopologySegmentReliabilitySnapshot>>>({})
 const activeDirection = ref('all')
 const isDesktop = useMediaQuery('(min-width: 768px)')
-useTopologyProbeRepair(() => props.nodes, managerOpen)
+const { lastError: repairError } = useTopologyProbeRepair(() => props.nodes, managerOpen)
+
+onMounted(() => {
+  void loadPublicPingTasks()
+    .then((tasks) => {
+      publicPingTasks.value = tasks
+    })
+    .catch(() => {
+      publicPingTasks.value = []
+    })
+})
 
 const routeGroups = computed(() => splitTopologyGroups(appStore.topologyRoute, true))
 // Metric groups map to route groups by index. Empty groups must remain in the
 // array or later routes will display another route's latency and loss.
 const metricGroups = computed(() => splitTopologyGroups(appStore.topologyMetrics, true))
 
-function findNode(name: string): NodeData | undefined {
-  return findUniqueTopologyNode(props.nodes, name)
+function findNode(name: string, uuid = ''): NodeData | undefined {
+  return resolveTopologyNode(props.nodes, name, uuid)
 }
 
 const DIRECTION_LABELS: Record<string, string> = {
@@ -106,12 +121,13 @@ function getRouteDirection(nodes: RouteNode[]): { key: string, label: string } {
 
 const routes = computed<RouteRow[]>(() => routeGroups.value.map((group, routeIndex) => {
   const nodes = parseTopologyNodes(group, true).slice(0, 3).map((config, nodeIndex) => {
-    const node = findNode(config.name)
+    const node = nodeIndex === 0 ? findNode(config.name) : findNode(config.name, config.uuid)
     return {
-      key: `${routeIndex}-${nodeIndex}-${config.name}`,
+      key: `${routeIndex}-${nodeIndex}-${config.uuid || config.name}`,
       name: config.name,
       region: node?.region || config.region,
       role: node ? (getNodeRole(node.tags, node.groups) || config.role) : config.role,
+      uuid: config.uuid || node?.uuid,
       node,
     }
   })
@@ -135,7 +151,8 @@ const routes = computed<RouteRow[]>(() => routeGroups.value.map((group, routeInd
   const probeSelectable = configuredFirstMetric.live
 
   if (configuredFirstMetric.live && storedProbeKey && selectedProbe) {
-    metrics[0] = formatTopologyMetricForProbe(metrics[0] || '', selectedProbe.key, nodes[1]?.name || '')
+    const probeTaskNames = listTopologyProbeTaskNamesForSource(publicPingTasks.value, nodes[1]?.uuid || '')
+    metrics[0] = formatTopologyMetricForProbe(metrics[0] || '', selectedProbe.key, nodes[1]?.name || '', probeTaskNames)
     if (nodes[0])
       nodes[0].name = selectedProbe.label
   }
@@ -274,6 +291,7 @@ const selectedRoute = computed<TopologyRouteDetail | null>(() => {
     return null
   return {
     key: route.key,
+    sourceUuid: route.nodes[1]?.uuid,
     nodeNames: route.nodes.map(node => node.name),
     metrics: route.metrics,
     score: getRouteScore(route),
@@ -391,6 +409,13 @@ function routeRankingLabel(route: RouteRow): string {
           <span class="text-slate-400 dark:text-slate-700">·</span>
           <span role="status" aria-live="polite" aria-atomic="true">{{ healthSummary.label }}</span>
           <span class="size-1.5 rounded-full" :class="healthSummary.dot" />
+          <span
+            v-if="repairError"
+            data-topology-repair-error
+            role="status"
+            class="max-w-40 truncate text-amber-700 dark:text-amber-300"
+            :title="repairError"
+          >自愈失败</span>
           <button
             type="button"
             data-transit-incident-timeline-button
@@ -486,6 +511,7 @@ function routeRankingLabel(route: RouteRow): string {
             <TopologyEdgeMetric
               :metric="route.metrics[0] || '-,-'"
               :nodes="nodes"
+              :source-uuid="route.nodes[1]?.uuid"
               :source-label="route.nodes[0]?.name || '入口'"
               :target-label="route.nodes[1]?.name || '线路机'"
               :segment-index="0"
@@ -517,6 +543,7 @@ function routeRankingLabel(route: RouteRow): string {
               <TopologyEdgeMetric
                 :metric="route.metrics[1] || '-,-'"
                 :nodes="nodes"
+                :source-uuid="route.nodes[1]?.uuid"
                 :source-label="route.nodes[1]?.name || '线路机'"
                 :target-label="route.nodes[2]?.name || '落地机'"
                 :segment-index="1"
@@ -595,6 +622,7 @@ function routeRankingLabel(route: RouteRow): string {
               mobile
               :metric="route.metrics[0] || '-,-'"
               :nodes="nodes"
+              :source-uuid="route.nodes[1]?.uuid"
               :source-label="route.nodes[0]?.name || '入口'"
               :target-label="route.nodes[1]?.name || '线路机'"
               :segment-index="0"
@@ -635,6 +663,7 @@ function routeRankingLabel(route: RouteRow): string {
                 mobile
                 :metric="route.metrics[1] || '-,-'"
                 :nodes="nodes"
+                :source-uuid="route.nodes[1]?.uuid"
                 :source-label="route.nodes[1]?.name || '线路机'"
                 :target-label="route.nodes[2]?.name || '落地机'"
                 :segment-index="1"
@@ -679,6 +708,7 @@ function routeRankingLabel(route: RouteRow): string {
             observe-only
             :metric="metric || '-,-'"
             :nodes="nodes"
+            :source-uuid="route.nodes[1]?.uuid"
             :source-label="route.nodes[segmentIndex]?.name || `节点 ${segmentIndex + 1}`"
             :target-label="route.nodes[segmentIndex + 1]?.name || `节点 ${segmentIndex + 2}`"
             :segment-index="segmentIndex"
@@ -692,6 +722,7 @@ function routeRankingLabel(route: RouteRow): string {
             :key="`${route.key}-${segmentIndex}-reliability`"
             :metric="metric || '-,-'"
             :nodes="nodes"
+            :source-uuid="route.nodes[1]?.uuid"
             :current="routeSegmentMetrics[route.key]?.[segmentIndex]"
             @snapshot-change="updateRouteSegmentReliability(route.key, segmentIndex, $event)"
           />

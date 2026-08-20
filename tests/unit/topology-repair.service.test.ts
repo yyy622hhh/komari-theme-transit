@@ -4,7 +4,7 @@ import type { TopologyRepairDeps, TopologyRepairManagerLike } from '../../src/se
 import type { NodeData } from '../../src/stores/nodes'
 import type { TopologyRouteConfig } from '../../src/utils/topologyHelper'
 import { describe, expect, test } from 'bun:test'
-import { canRunTopologyProbeRepair, runTopologyProbeRepair } from '../../src/services/topology-repair.service'
+import { canRunTopologyProbeRepair, listOwnedRetiredTaskIds, listOwnedUnboundTaskIds, liveTopologyTaskNames, runTopologyProbeRepair } from '../../src/services/topology-repair.service'
 
 const relay: NodeData = { uuid: 'relay-uuid', name: 'Relay-JP', ipv4: '192.0.2.10' } as NodeData
 const landing: NodeData = { uuid: 'exit-uuid', name: 'Exit-SG', ipv4: '203.0.113.20' } as NodeData
@@ -90,6 +90,40 @@ function createDeps(overrides: Partial<TopologyRepairDeps> & { manager: Topology
     ...overrides,
   }
 }
+
+describe('owned retired task selection', () => {
+  test('keeps tasks that are still bound or were not created in this session', () => {
+    const ids = listOwnedRetiredTaskIds(
+      [
+        { id: 1, name: 'owned-dead' },
+        { id: 2, name: 'still-bound' },
+        { id: 3, name: 'someone-else' },
+      ],
+      new Set([1, 2]),
+      new Set(['still-bound']),
+    )
+    expect(ids).toEqual([1])
+  })
+
+  test('lists owned entry tasks that no route still binds', () => {
+    expect(listOwnedUnboundTaskIds(
+      new Set([7, 8, 9]),
+      [
+        { id: 7, name: '北京电信' },
+        { id: 8, name: 'Transit-Relay-JP-to-Exit-SG' },
+      ],
+      new Set(['Transit-Relay-JP-to-Exit-SG']),
+    )).toEqual([7])
+    expect(listOwnedUnboundTaskIds(new Set([4]), [{ id: 5, name: 'other' }], new Set())).toEqual([])
+  })
+
+  test('collects live task names from every enabled metric', () => {
+    expect([...liveTopologyTaskNames([
+      route({ taskFilter: 'alpha' }),
+      route({ id: 2, live: false, taskFilter: 'ignored' }),
+    ])]).toEqual(['alpha'])
+  })
+})
 
 describe('canRunTopologyProbeRepair', () => {
   const healthy = { disposed: false, autoRepairEnabled: true, managerOpen: false, privateFeaturesAllowed: true, topologyRoute: '北京电信|CN|入口' }
@@ -445,6 +479,40 @@ describe('runTopologyProbeRepair persistence', () => {
     expect(routeB.metrics[1]?.taskFilter).toBe('fixed-Other-Landing')
   })
 
+  test('an ensure failure on one route does not roll back another route created task', async () => {
+    const routeA = route({ id: 1, taskFilter: 'stale-a' })
+    const otherLanding: NodeData = { uuid: 'other-uuid', name: 'Other-Landing', ipv4: '203.0.113.99' } as NodeData
+    const routeB = route({ id: 2, sourceName: relay.name, landingName: otherLanding.name, taskFilter: 'stale-b' })
+    const { manager, log } = createManager([routeA, routeB])
+    const deleted: number[][] = []
+    let ensureCalls = 0
+    const outcome = await runTopologyProbeRepair(createDeps({
+      nodes: () => [relay, landing, otherLanding],
+      manager,
+      planWorkingHopTask: async (_source, landingEndpoint) => hopPlan({
+        needsCreation: true,
+        targetAddress: landingEndpoint.ipv4 ?? '',
+        task: { ...hopPlan().task, name: `fixed-${landingEndpoint.name}` },
+      }),
+      ensureTopologyPingTask: async (_source, landingEndpoint) => {
+        ensureCalls += 1
+        if (landingEndpoint.name === otherLanding.name)
+          throw new Error('admin:addPingTask 502')
+        return { task: { ...hopPlan().task, id: 42, name: `fixed-${landingEndpoint.name}` }, created: true }
+      },
+      deleteTopologyPingTasks: async (ids) => {
+        deleted.push([...ids])
+        return true
+      },
+    }))
+    expect(ensureCalls).toBe(2)
+    expect(outcome).toBe('repaired')
+    expect(log.saveCalls).toEqual([{ lockHeld: true }])
+    expect(routeA.metrics[1]?.taskFilter).toBe('fixed-Exit-SG')
+    expect(routeB.metrics[1]?.taskFilter).toBe('stale-b')
+    expect(deleted).toEqual([])
+  })
+
   test('a route that throws while planning does not block the others', async () => {
     const brokenRoute = route({ id: 1, taskFilter: 'stale-broken' })
     const okRoute = route({ id: 2, sourceName: relay.name, landingName: landing.name, taskFilter: 'stale-ok' })
@@ -468,6 +536,23 @@ describe('runTopologyProbeRepair persistence', () => {
 })
 
 describe('runTopologyProbeRepair resilience', () => {
+  test('a stale snapshot during the first preflight resets and skips instead of throwing', async () => {
+    const target = route({ taskFilter: 'stale-name' })
+    const { manager, log } = createManager([target])
+    manager.preflightSave = async () => {
+      log.preflightSaveCalls += 1
+      throw new Error('拓扑配置已被其他会话修改，请重新打开管理器后再保存。')
+    }
+    const outcome = await runTopologyProbeRepair(createDeps({
+      manager,
+      planWorkingHopTask: async () => hopPlan({ needsCreation: false, task: { ...hopPlan().task, name: 'Transit-Relay-JP-to-Exit-SG' } }),
+    }))
+    expect(outcome).toBe('no-op')
+    expect(log.resetCalls).toBe(2)
+    expect(log.saveCalls).toEqual([])
+    expect(target.metrics[1]?.taskFilter).toBe('stale-name')
+  })
+
   test('an offline landing is left alone instead of walking the probe ladder', async () => {
     const offlineLanding = { ...landing, online: false } as NodeData
     const target = route({ taskFilter: 'stale-icmp' })
@@ -499,6 +584,80 @@ describe('runTopologyProbeRepair resilience', () => {
     expect(outcome).toBe('no-op')
     expect(log.saveCalls).toEqual([])
     expect(target.metrics[1]?.taskFilter).toBe('stale-icmp')
+  })
+
+  test('deletes a session-created retired task after the new binding is saved', async () => {
+    const target = route({ taskFilter: 'stale-icmp' })
+    const { manager } = createManager([target])
+    const sessionCreatedTaskIds = new Set<number>([7])
+    const deleted: number[][] = []
+    const outcome = await runTopologyProbeRepair(createDeps({
+      manager,
+      sessionCreatedTaskIds,
+      planWorkingHopTask: async () => hopPlan({
+        needsCreation: true,
+        task: { ...hopPlan().task, name: 'Transit-Relay-JP-to-Exit-SG-tcp-443' },
+        retiredTasks: [{ id: 7, name: 'stale-icmp', type: 'icmp', target: landing.ipv4!, clients: [relay.uuid], interval: 30 }],
+      }),
+      ensureTopologyPingTask: async () => ({
+        task: { ...hopPlan().task, id: 8, name: 'Transit-Relay-JP-to-Exit-SG-tcp-443' },
+        created: true,
+      }),
+      deleteTopologyPingTasks: async (ids) => {
+        deleted.push([...ids])
+        return true
+      },
+    }))
+    expect(outcome).toBe('repaired')
+    expect(sessionCreatedTaskIds.has(8)).toBe(true)
+    expect(sessionCreatedTaskIds.has(7)).toBe(false)
+    expect(deleted).toEqual([[7]])
+  })
+
+  test('does not delete a retired task that this session did not create', async () => {
+    const target = route({ taskFilter: 'stale-icmp' })
+    const { manager } = createManager([target])
+    const deleted: number[][] = []
+    await runTopologyProbeRepair(createDeps({
+      manager,
+      sessionCreatedTaskIds: new Set<number>(),
+      planWorkingHopTask: async () => hopPlan({
+        needsCreation: false,
+        task: { ...hopPlan().task, name: 'Transit-Relay-JP-to-Exit-SG' },
+        retiredTasks: [{ id: 7, name: 'stale-icmp', type: 'icmp', target: landing.ipv4!, clients: [relay.uuid], interval: 30 }],
+      }),
+      deleteTopologyPingTasks: async (ids) => {
+        deleted.push([...ids])
+        return true
+      },
+    }))
+    expect(deleted).toEqual([])
+  })
+
+  test('does not retire tasks when a failed save is rolled back', async () => {
+    const target = route({ taskFilter: 'stale-name' })
+    const { manager } = createManager([target])
+    manager.save = async () => {
+      throw new Error('保存失败（HTTP 500）')
+    }
+    const sessionCreatedTaskIds = new Set<number>([7])
+    const deleted: number[][] = []
+    await expect(runTopologyProbeRepair(createDeps({
+      manager,
+      sessionCreatedTaskIds,
+      planWorkingHopTask: async () => hopPlan({
+        needsCreation: true,
+        task: { ...hopPlan().task, name: 'created-task' },
+        retiredTasks: [{ id: 7, name: 'stale-name', type: 'icmp', target: landing.ipv4!, clients: [relay.uuid], interval: 30 }],
+      }),
+      ensureTopologyPingTask: async () => ({ task: { ...hopPlan().task, id: 44, name: 'created-task' }, created: true }),
+      deleteTopologyPingTasks: async (ids) => {
+        deleted.push([...ids])
+        return true
+      },
+    }))).rejects.toThrow('保存失败')
+    expect(deleted).toEqual([[44]])
+    expect(sessionCreatedTaskIds.has(7)).toBe(true)
   })
 
   test('a re-plan that throws inside the lock does not roll back other routes tasks', async () => {

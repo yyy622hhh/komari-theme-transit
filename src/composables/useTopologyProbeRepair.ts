@@ -3,13 +3,30 @@ import type { NodeData } from '@/stores/nodes'
 import { onScopeDispose, ref, toValue, watch } from 'vue'
 import { useTopologyManager } from '@/composables/useTopologyManager'
 import { OPS_TOPOLOGY_HOP_PROBE } from '@/constants/ops'
+import { TIME_MS } from '@/constants/time'
 import { deleteTopologyPingTasks, ensureTopologyPingTask } from '@/services/ping-task.service'
 import { planWorkingHopTask } from '@/services/topology-probe.service'
 import { canRunTopologyProbeRepair, runTopologyProbeRepair } from '@/services/topology-repair.service'
 import { useAppStore } from '@/stores/app'
+import { logAppWarning } from '@/utils/safeError'
+import { getTopologyCreatedTaskIds, persistTopologyCreatedTaskIds } from '@/utils/topologyCreatedTasks'
 
 function pageIsVisible(): boolean {
   return typeof document === 'undefined' || document.visibilityState !== 'hidden'
+}
+
+const REPAIR_ERROR_NOTICE_COOLDOWN_MS = 5 * TIME_MS.minute
+
+export function isAbortLikeError(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'name' in error && error.name === 'AbortError'
+}
+
+export function formatTopologyRepairError(error: unknown): string {
+  return error instanceof Error && error.message.trim() ? error.message : '拓扑探测自愈失败'
+}
+
+export function shouldAnnounceTopologyRepairError(lastAnnouncedAt: number, now: number): boolean {
+  return lastAnnouncedAt <= 0 || now - lastAnnouncedAt >= REPAIR_ERROR_NOTICE_COOLDOWN_MS
 }
 
 /**
@@ -24,9 +41,12 @@ export function useTopologyProbeRepair(
   const appStore = useAppStore()
   const manager = useTopologyManager(nodes)
   const repairing = ref(false)
+  const lastError = ref('')
+  const sessionCreatedTaskIds = getTopologyCreatedTaskIds()
   let disposed = false
   let timer: ReturnType<typeof setInterval> | null = null
   let activeController: AbortController | null = null
+  let lastErrorAnnouncedAt = 0
 
   function canRepair(): boolean {
     return canRunTopologyProbeRepair({
@@ -62,13 +82,25 @@ export function useTopologyProbeRepair(
         planWorkingHopTask,
         ensureTopologyPingTask,
         deleteTopologyPingTasks,
+        sessionCreatedTaskIds,
         signal: controller.signal,
       })
+      lastError.value = ''
     }
-    catch {
-      // Background repair is best-effort; auth services synchronize expired sessions.
+    catch (error) {
+      if (isAbortLikeError(error) || controller.signal.aborted)
+        return
+      const message = formatTopologyRepairError(error)
+      lastError.value = message
+      logAppWarning('Topology probe auto-repair failed', error)
+      const now = Date.now()
+      if (shouldAnnounceTopologyRepairError(lastErrorAnnouncedAt, now)) {
+        lastErrorAnnouncedAt = now
+        window.$message?.warning(`拓扑探测自愈失败：${message}`)
+      }
     }
     finally {
+      persistTopologyCreatedTaskIds(sessionCreatedTaskIds)
       if (activeController === controller)
         activeController = null
       repairing.value = false
@@ -95,5 +127,5 @@ export function useTopologyProbeRepair(
       clearInterval(timer)
   })
 
-  return { repairing, repairNow }
+  return { repairing, lastError, repairNow }
 }

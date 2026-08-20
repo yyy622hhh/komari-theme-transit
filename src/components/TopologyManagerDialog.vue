@@ -9,9 +9,11 @@ import { useTopologyManager } from '@/composables/useTopologyManager'
 import { useTopologyRoutePlanner } from '@/composables/useTopologyRoutePlanner'
 import { useTopologyTaskCatalog } from '@/composables/useTopologyTaskCatalog'
 import { OPS_TOPOLOGY_HOP_PROBE } from '@/constants/ops'
-import { deleteTopologyPingTasks, describeTopologyHopProbe, ensureTopologyPingTask, topologyPingTargets } from '@/services/ping-task.service'
+import { deleteTopologyPingTasks, describeTopologyHopProbe, ensureTopologyEntryPingTask, ensureTopologyPingTask, loadAdminPingTasks, topologyPingTargets } from '@/services/ping-task.service'
 import { planWorkingHopTask } from '@/services/topology-probe.service'
-import { applyTopologyProbeToRoute, findUniqueTopologyNode, getTopologyRouteProbeKey, listUnusedQuickLandingUuids, nextQuickLandingUuid, TOPOLOGY_PROBE_OPTIONS } from '@/utils/topologyHelper'
+import { listOwnedRetiredTaskIds, listOwnedUnboundTaskIds, liveTopologyTaskNames } from '@/services/topology-repair.service'
+import { getTopologyCreatedTaskIds, persistTopologyCreatedTaskIds, rememberTopologyCreatedTaskId } from '@/utils/topologyCreatedTasks'
+import { applyTopologyProbeToRoute, getTopologyRouteProbeKey, listUnusedQuickLandingUuids, nextQuickLandingUuid, resolveTopologyNode, TOPOLOGY_PROBE_OPTIONS } from '@/utils/topologyHelper'
 
 const props = defineProps<{ nodes: NodeData[], open: boolean }>()
 const emit = defineEmits<{ 'update:open': [open: boolean] }>()
@@ -71,7 +73,7 @@ const customEntrySnapshots = ref<Record<number, { node: TopologyNodeConfig, metr
 const quickSourceUuid = ref('')
 const quickLandingUuid = ref('')
 const quickProbeKey = ref(DEFAULT_PROBE)
-const sessionCreatedTaskIds = new Set<number>()
+const sessionCreatedTaskIds = getTopologyCreatedTaskIds()
 let recheckTimer: ReturnType<typeof setInterval> | null = null
 let quickConfigurationRun = 0
 let dialogSession = 0
@@ -87,7 +89,7 @@ const quickTaskError = computed(() => quickSourceUuid.value ? taskErrors.value[q
 const taskBindingErrors = computed(() => manager.routes.flatMap((route, routeIndex) => route.metrics.flatMap((metric, metricIndex) => {
   if (!metric.live || !metric.nodeName.trim() || !metric.taskFilter.trim())
     return []
-  const node = findUniqueTopologyNode(props.nodes, metric.nodeName)
+  const node = resolveTopologyNode(props.nodes, metric.nodeName, route.nodes[1]?.uuid)
   if (!node) {
     return [`第 ${routeIndex + 1} 条线路的探测来源“${metric.nodeName}”不存在或名称重复`]
   }
@@ -117,7 +119,7 @@ const managerBusy = computed(() => manager.saving || quickConfiguring.value || r
 const taskValidationPending = computed(() => rematching.value || Object.values(routeTaskPlanning.value).some(Boolean) || manager.routes.some(route => route.metrics.some((metric) => {
   if (!metric.live || !metric.nodeName.trim() || !metric.taskFilter.trim())
     return false
-  const node = findUniqueTopologyNode(props.nodes, metric.nodeName)
+  const node = resolveTopologyNode(props.nodes, metric.nodeName, route.nodes[1]?.uuid)
   return Boolean(node && !taskLoaded.value[node.uuid] && !taskErrors.value[node.uuid])
 })))
 
@@ -260,20 +262,31 @@ function routeProbeLabel(route: TopologyRouteConfig): string {
  * ensure 明确返回 created=true 后记录的 ID，并在配置保存成功后再次确认没有线路绑定。
  */
 async function retireReplacedTasks(): Promise<void> {
-  const boundNames = new Set(manager.routes.flatMap(route => route.metrics
-    .filter(metric => metric.live)
-    .map(metric => metric.taskFilter.trim())))
   const entries = Object.entries(routeRetiredTasks.value)
-  if (!entries.length)
-    return
   routeRetiredTasks.value = {}
-  const ids = [...new Set(entries.flatMap(([, tasks]) => tasks
-    .filter(task => sessionCreatedTaskIds.has(task.id) && !boundNames.has(task.name.trim()))
-    .map(task => task.id)))]
-  if (ids.length && await deleteTopologyPingTasks(ids)) {
+  const boundNames = liveTopologyTaskNames(manager.routes)
+  const ids = new Set(listOwnedRetiredTaskIds(
+    entries.flatMap(([, tasks]) => tasks),
+    sessionCreatedTaskIds,
+    boundNames,
+  ))
+  try {
+    const tasks = await loadAdminPingTasks({ fresh: true })
+    for (const id of listOwnedUnboundTaskIds(sessionCreatedTaskIds, tasks, boundNames))
+      ids.add(id)
+    for (const id of [...sessionCreatedTaskIds]) {
+      if (!tasks.some(task => task.id === id))
+        sessionCreatedTaskIds.delete(id)
+    }
+  }
+  catch {
+    // 任务列表读失败时仍按规划阶段记下的 hop 候选清理。
+  }
+  if (ids.size && await deleteTopologyPingTasks([...ids])) {
     for (const id of ids)
       sessionCreatedTaskIds.delete(id)
   }
+  persistTopologyCreatedTaskIds(sessionCreatedTaskIds)
 }
 
 async function cleanupCreatedTasks(taskIds: ReadonlySet<number>): Promise<void> {
@@ -282,6 +295,7 @@ async function cleanupCreatedTasks(taskIds: ReadonlySet<number>): Promise<void> 
     return
   for (const id of ids)
     sessionCreatedTaskIds.delete(id)
+  persistTopologyCreatedTaskIds(sessionCreatedTaskIds)
 }
 
 function selectRouteNode(route: TopologyRouteConfig, index: number, nodeName: string): void {
@@ -339,7 +353,7 @@ function selectRouteProbe(route: TopologyRouteConfig, probeKey: string): void {
   if (routeProbeValue(route) === CUSTOM_PROBE)
     rememberCustomEntry(route)
   const sourceName = route.nodes[1]?.name.trim() ?? ''
-  const source = findUniqueTopologyNode(props.nodes, sourceName)
+  const source = resolveTopologyNode(props.nodes, sourceName, route.nodes[1]?.uuid)
   applyTopologyProbeToRoute(
     route,
     probeKey,
@@ -476,8 +490,8 @@ async function persistRoutes(options: {
           const target = findEndpoint(pending.targetUuid)
           if (!source || !target)
             throw new Error('待创建 Ping 任务的节点已变化，请重新选择线路。')
-          const routeSource = findUniqueTopologyNode(props.nodes, route.nodes[1]?.name ?? '')
-          const routeTarget = findUniqueTopologyNode(props.nodes, route.nodes[2]?.name ?? '')
+          const routeSource = resolveTopologyNode(props.nodes, route.nodes[1]?.name ?? '', route.nodes[1]?.uuid ?? '')
+          const routeTarget = resolveTopologyNode(props.nodes, route.nodes[2]?.name ?? '', route.nodes[2]?.uuid ?? '')
           const plannedMetric = route.metrics[1]
           if (routeSource?.uuid !== pending.sourceUuid
             || routeTarget?.uuid !== pending.targetUuid
@@ -486,25 +500,42 @@ async function persistRoutes(options: {
             || plannedMetric.taskFilter !== pending.taskName) {
             throw new Error('待创建 Ping 任务对应的线路段已变化，请重新选择。')
           }
-          const ensured = await ensureTopologyPingTask(source, target, { probe: pending.probe, signal: controller.signal })
-          if (ensured.created && Number.isInteger(ensured.task.id)) {
-            sessionCreatedTaskIds.add(ensured.task.id!)
-            createdTaskIds.add(ensured.task.id!)
+          try {
+            const ensured = await ensureTopologyPingTask(source, target, { probe: pending.probe, signal: controller.signal })
+            if (ensured.created && Number.isInteger(ensured.task.id)) {
+              sessionCreatedTaskIds.add(ensured.task.id!)
+              persistTopologyCreatedTaskIds()
+              createdTaskIds.add(ensured.task.id!)
+            }
+            if (runId !== quickConfigurationRun || session !== dialogSession || !props.open) {
+              await cleanupCreatedTasks(createdTaskIds)
+              return 'cancelled' as const
+            }
+            const metric = route.metrics[1]!
+            metric.nodeName = source.name
+            metric.taskFilter = ensured.task.name
+            metric.live = true
+            rememberTask(source.uuid, ensured.task.name)
+            clearPendingRouteTask(route.id)
+            clearRouteTaskError(route.id)
           }
-          if (runId !== quickConfigurationRun || session !== dialogSession || !props.open) {
-            await cleanupCreatedTasks(createdTaskIds)
-            return 'cancelled' as const
+          catch (error) {
+            if (controller.signal.aborted)
+              throw error
+            routeTaskErrors.value = {
+              ...routeTaskErrors.value,
+              [route.id]: error instanceof Error ? error.message : '无法创建探测任务。',
+            }
+            continue
           }
-          const metric = route.metrics[1]!
-          metric.nodeName = source.name
-          metric.taskFilter = ensured.task.name
-          metric.live = true
-          rememberTask(source.uuid, ensured.task.name)
-          clearPendingRouteTask(route.id)
         }
         if (runId !== quickConfigurationRun || session !== dialogSession || !props.open) {
           await cleanupCreatedTasks(createdTaskIds)
           return 'cancelled' as const
+        }
+        if (manager.routes.some(route => Boolean(pendingRouteTasks.value[route.id]))) {
+          window.$message?.error('部分探测任务创建失败，未保存未完成的绑定。')
+          return 'invalid' as const
         }
         if (createdTaskIds.size) {
           await manager.preflightSave()
@@ -576,12 +607,12 @@ async function save(): Promise<void> {
 
 function onQuickSourceChange(): void {
   const landingName = manager.quickNodes.find(node => node.uuid === quickLandingUuid.value)?.name ?? ''
-  if (quickLandingUuid.value === quickSourceUuid.value || manager.findDuplicateRoute(quickSourceName.value, landingName) >= 0)
+  if (quickLandingUuid.value === quickSourceUuid.value || manager.findDuplicateRoute(quickSourceName.value, landingName, quickSourceUuid.value, quickLandingUuid.value) >= 0)
     quickLandingUuid.value = ''
   if (!quickLandingUuid.value)
     syncQuickSelections(true)
   if (quickSourceName.value)
-    void loadTasks(quickSourceName.value)
+    void loadTasks(quickSourceName.value, quickSourceUuid.value)
 }
 
 function focusTopologyRoute(routeId: number): void {
@@ -604,7 +635,7 @@ async function addQuickRoute(): Promise<void> {
   const selectedProbeKey = quickProbeKey.value
   quickConfiguring.value = true
   try {
-    const result = await loadTasks(source.name)
+    const result = await loadTasks(source.name, source.uuid)
     if (runId !== quickConfigurationRun || !props.open)
       return
     if (result.error) {
@@ -617,13 +648,27 @@ async function addQuickRoute(): Promise<void> {
       window.$message?.warning('节点已变化，请重新选择后添加。')
       return
     }
+    if (latestSource.online === false || latestLanding.online === false) {
+      window.$message?.warning('线路机或落地机已离线，请上线后再添加。')
+      return
+    }
+    let sourceTasks = result.tasks
+    const entry = await ensureTopologyEntryPingTask(latestSource, selectedProbeKey)
+    if (runId !== quickConfigurationRun || !props.open)
+      return
+    if (entry) {
+      if (entry.created && Number.isInteger(entry.task.id))
+        rememberTopologyCreatedTaskId(entry.task.id!)
+      rememberTask(latestSource.uuid, entry.task.name)
+      sourceTasks = [...new Set([...sourceTasks, entry.task.name])]
+    }
     const planned = await planWorkingHopTask(latestSource, latestLanding)
     if (runId !== quickConfigurationRun || !props.open)
       return
     if (!planned.needsCreation)
       rememberTask(latestSource.uuid, planned.task.name)
     const configured = manager.addQuickRoute(
-      [...new Set([...result.tasks, planned.task.name])],
+      [...new Set([...sourceTasks, planned.task.name])],
       selectedSourceUuid,
       {
         landingUuid: selectedLandingUuid,
@@ -696,14 +741,16 @@ const selectClass = 'h-9 w-full rounded-md border border-input bg-background px-
  * 原则是「不能用的选项要在点下去之前就说清楚」：以前无公网 IP 的落地机可以照常
  * 选中，直到点了「添加线路」才弹一句红字报错，而重名节点早就是预先置灰的。
  */
-function nodeOption(option: TopologyQuickNode, role: 'source' | 'landing', otherName = ''): { disabled: boolean, label: string } {
+function nodeOption(option: TopologyQuickNode, role: 'source' | 'landing', otherUuid = '', otherName = ''): { disabled: boolean, label: string } {
   const name = option.name
-  if (manager.isAmbiguousNodeName(name))
+  if (manager.isAmbiguousNodeName(name) && !option.uuid)
     return { disabled: true, label: `${name}（重名，不可用）` }
   // 落地机是被 Ping 的一方，没有可探测地址就建不出任务；线路机只负责发探测，不需要地址。
   if (role === 'landing' && !topologyPingTargets(option).length)
     return { disabled: true, label: `${name}（无公网 IP，不可用）` }
-  if (otherName && name === otherName)
+  if (otherUuid && option.uuid === otherUuid)
+    return { disabled: true, label: name }
+  if (!otherUuid && otherName && name === otherName)
     return { disabled: true, label: name }
   return { disabled: false, label: option.online === false ? `${name}（离线）` : name }
 }
@@ -724,8 +771,8 @@ function nodeOption(option: TopologyQuickNode, role: 'source' | 'landing', other
       <div class="space-y-3 rounded-lg border border-border/60 bg-background/45 px-3 py-3">
         <div class="flex flex-wrap items-start justify-between gap-2">
           <p class="max-w-prose text-xs text-muted-foreground">
-            入口只是线路图上的标签，例如北京电信或北京联通。实时数据由线路机发出 Ping。添加或修改线路都会立刻保存，探测任务按落地机地址自动创建或复用；探测方式也会自动挑选，打不通会自动换一种。本次管理会话创建后又被换下的任务会安全清理。<br>
-            新建线路只列出在线节点（需要当场验证探测）；下方已有线路可以选到离线节点，方便节点掉线后继续修改。没有公网 IP 的节点不能作为落地机，会标注为不可用。
+            入口只是线路图上的标签，例如北京电信或北京联通。实时数据由线路机发出 Ping。添加或修改线路都会立刻保存；入口探测会自动创建或把线路机加进已有的同名任务，第 2 段按落地机地址自动创建或复用。探测方式也会自动挑选，打不通会自动换一种。主题自己建的任务会记在配置里，关页后再开仍可安全清理。<br>
+            新建线路只列出在线节点（需要当场验证探测）；下方已有线路可以选到离线节点，方便节点掉线后继续修改。没有公网 IP 的节点不能作为落地机。重名节点只要能选中就会按 UUID 绑定。
           </p>
           <Button
             size="sm"
@@ -879,7 +926,7 @@ function nodeOption(option: TopologyQuickNode, role: 'source' | 'landing', other
           <label class="space-y-1 text-[11px] text-muted-foreground">
             线路机
             <select
-              :value="route.nodes[1]?.name ?? ''"
+              :value="route.nodes[1]?.uuid || route.nodes[1]?.name || ''"
               :aria-label="`第 ${routeIndex + 1} 条线路线路机`"
               :class="selectClass"
               @change="selectRouteNode(route, 1, ($event.target as HTMLSelectElement).value)"
@@ -890,10 +937,10 @@ function nodeOption(option: TopologyQuickNode, role: 'source' | 'landing', other
               <option
                 v-for="option in props.nodes"
                 :key="option.uuid"
-                :value="option.name"
-                :disabled="nodeOption(option, 'source', route.nodes[2]?.name).disabled"
+                :value="option.uuid"
+                :disabled="nodeOption(option, 'source', route.nodes[2]?.uuid, route.nodes[2]?.name).disabled"
               >
-                {{ nodeOption(option, 'source', route.nodes[2]?.name).label }}
+                {{ nodeOption(option, 'source', route.nodes[2]?.uuid, route.nodes[2]?.name).label }}
               </option>
             </select>
           </label>
@@ -901,7 +948,7 @@ function nodeOption(option: TopologyQuickNode, role: 'source' | 'landing', other
           <label class="space-y-1 text-[11px] text-muted-foreground">
             落地机
             <select
-              :value="route.nodes[2]?.name ?? ''"
+              :value="route.nodes[2]?.uuid || route.nodes[2]?.name || ''"
               :aria-label="`第 ${routeIndex + 1} 条线路落地机`"
               :class="selectClass"
               @change="selectRouteNode(route, 2, ($event.target as HTMLSelectElement).value)"
@@ -912,10 +959,10 @@ function nodeOption(option: TopologyQuickNode, role: 'source' | 'landing', other
               <option
                 v-for="option in props.nodes"
                 :key="option.uuid"
-                :value="option.name"
-                :disabled="nodeOption(option, 'landing', route.nodes[1]?.name).disabled"
+                :value="option.uuid"
+                :disabled="nodeOption(option, 'landing', route.nodes[1]?.uuid, route.nodes[1]?.name).disabled"
               >
-                {{ nodeOption(option, 'landing', route.nodes[1]?.name).label }}
+                {{ nodeOption(option, 'landing', route.nodes[1]?.uuid, route.nodes[1]?.name).label }}
               </option>
             </select>
           </label>
