@@ -650,7 +650,8 @@
 - 亮暗主题、桌面/移动布局和 Transit 风格内嵌 Komari 管理端。
 - Playwright 视觉与交互回归、自动构建和 GitHub Release 发布流程。
 
-[Unreleased]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.42...HEAD
+[Unreleased]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.43...HEAD
+[1.0.43]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.42...v1.0.43
 [1.0.42]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.41...v1.0.42
 [1.0.41]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.40...v1.0.41
 [1.0.40]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.39...v1.0.40
