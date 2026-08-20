@@ -83,11 +83,11 @@ export function getCarrierNodeAlert(
   const issues = carriers.flatMap((carrier) => {
     if (carrier.delayed || carrier.stale)
       return []
-    const loss = Number.parseFloat(carrier.lossDisplay)
+    const loss = carrier.alertLoss
     const latency = Number.parseFloat(carrier.latencyDisplay)
     const result: NodeAlert[] = []
 
-    if (Number.isFinite(loss) && loss > OPS_ALERT_THRESHOLDS.carrierLoss.warning) {
+    if (loss !== null && Number.isFinite(loss) && loss > OPS_ALERT_THRESHOLDS.carrierLoss.warning) {
       result.push({
         key: `${node.uuid}:carrier:${carrier.key}:loss`,
         nodeUuid: node.uuid,

@@ -5,7 +5,7 @@ import { normalizeExactPingTaskName, normalizePingTaskFilter } from '@/utils/pin
 
 export type PingTaskNameMatch = 'contains' | 'exact'
 
-const CACHE_VERSION = 14
+const CACHE_VERSION = 15
 const CACHE_KEY_PREFIX = 'komari-theme-emerald:node-ping-stats'
 const CACHE_INDEX_KEY = `${CACHE_KEY_PREFIX}:index`
 const pendingStatsCacheTouches = new Map<string, number>()
@@ -38,6 +38,8 @@ function isValidStatsState(value: unknown): value is NodePingStatsState {
   const state = value as Record<string, unknown>
   return typeof state.avgLatency === 'number'
     && typeof state.avgLoss === 'number'
+    && typeof state.lineLoss === 'number'
+    && typeof state.commonModeLossEvents === 'number'
     && typeof state.avgVolatility === 'number'
     && (state.p50Latency === null || typeof state.p50Latency === 'number')
     && (state.p95Latency === null || typeof state.p95Latency === 'number')

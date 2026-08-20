@@ -7,6 +7,7 @@ export const OPS_ALERT_THRESHOLDS = {
   traffic: { warning: 85, critical: 95 },
   carrierLoss: { warning: 3, critical: 10 },
   carrierLatency: { warning: 200, critical: 260 },
+  carrierCommonMode: { minAffectedNodes: 5, minAffectedRatio: 0.6 },
 } as const
 
 export const OPS_ALERT_STABILITY = {

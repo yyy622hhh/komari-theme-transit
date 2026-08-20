@@ -17,6 +17,9 @@ export interface CarrierPingDisplay {
   latencyDisplay: string
   volatilityDisplay: string
   lossDisplay: string
+  /** 用于节点告警的独立线路丢包率；公共目标故障不计入。 */
+  alertLoss: number | null
+  commonModeLossEvents: number
   latencyBars: CarrierPingBar[]
   lossBars: CarrierPingBar[]
   latencyTooltip: string
@@ -196,7 +199,11 @@ export function useNodeCarrierPingDisplay(uuid: MaybeRefOrGetter<string>) {
       ? `，${appStore.lang === 'zh-CN' ? '平均抖动' : 'average jitter'} ${carrier.stats.avgVolatility.toFixed(1)} ms`
       : ''
     const lossTooltip = carrier.stats.hasData
-      ? `${taskHint}\n${appStore.lang === 'zh-CN' ? '平均丢包' : 'Average loss'} ${carrier.stats.avgLoss.toFixed(1)}%${volatility}`
+      ? `${taskHint}\n${appStore.lang === 'zh-CN' ? '平均丢包' : 'Average loss'} ${carrier.stats.avgLoss.toFixed(1)}%${volatility}${carrier.stats.commonModeLossEvents > 0
+        ? appStore.lang === 'zh-CN'
+          ? `，其中 ${carrier.stats.commonModeLossEvents} 次为多节点同步目标异常，未计入节点告警`
+          : `; ${carrier.stats.commonModeLossEvents} synchronized target failure(s) excluded from node alerts`
+        : ''}`
       : taskHint
 
     return {
@@ -207,6 +214,8 @@ export function useNodeCarrierPingDisplay(uuid: MaybeRefOrGetter<string>) {
       latencyDisplay,
       volatilityDisplay,
       lossDisplay,
+      alertLoss: carrier.stale || !carrier.stats.hasData ? null : carrier.stats.lineLoss,
+      commonModeLossEvents: carrier.stale ? 0 : carrier.stats.commonModeLossEvents,
       latencyBars,
       lossBars,
       latencyTooltip,
@@ -223,16 +232,30 @@ export function useNodeCarrierPingDisplay(uuid: MaybeRefOrGetter<string>) {
         appStore.lang,
       )
     : '')
+  const commonModeLossEvents = computed(() => carrierDisplays.value.reduce(
+    (sum, carrier) => sum + carrier.commonModeLossEvents,
+    0,
+  ))
   const freshnessLabel = computed(() => {
     if (carrierStats.stale.value)
       return appStore.lang === 'zh-CN' ? `${carrierScopeLabel.value} 数据过期` : `${carrierScopeLabel.value} data stale`
     if (carrierStats.delayed.value)
       return `${carrierScopeLabel.value} · ${freshnessAge.value}`
+    if (commonModeLossEvents.value > 0) {
+      return appStore.lang === 'zh-CN'
+        ? `${carrierScopeLabel.value} · 目标异常`
+        : `${carrierScopeLabel.value} · target issue`
+    }
     return carrierScopeLabel.value
   })
   const freshnessTitle = computed(() => {
-    if (!carrierStats.delayed.value && !carrierStats.stale.value)
-      return ''
+    if (!carrierStats.delayed.value && !carrierStats.stale.value) {
+      if (!commonModeLossEvents.value)
+        return ''
+      return appStore.lang === 'zh-CN'
+        ? `检测到 ${commonModeLossEvents.value} 次多节点同步失败，更可能是公共探测目标异常；原始丢包保留，但不计入逐节点告警。`
+        : `${commonModeLossEvents.value} synchronized multi-node failure(s) look like a shared target issue. Raw loss is retained but excluded from per-node alerts.`
+    }
     return appStore.lang === 'zh-CN'
       ? `数据可能不是最新，上次成功更新于 ${freshnessAge.value}`
       : `Data may not be current. Last successful update: ${freshnessAge.value}`

@@ -2,6 +2,7 @@ import type { MetricLossPoint } from '../../src/utils/pingStats'
 import type { MetricQueryResponse, MetricSeries, PingMetricStatsResponse, PingMetricTaskStats, PingRecord } from '../../src/utils/rpc'
 import { describe, expect, test } from 'bun:test'
 import { buildPingMetricState, collectNodePingTaskIds, pickPreferredExactPingTaskId } from '../../src/composables/useNodePingStats'
+import { detectPingCommonModeLossKeys, getPingCommonModeLossKey } from '../../src/utils/pingCommonMode'
 import { formatPingFreshnessAge, resolvePingFreshness } from '../../src/utils/pingFreshness'
 import { buildNodePingStats, createEmptyNodePingStats, matchesPingTaskName, normalizePingTaskFilter } from '../../src/utils/pingStats'
 
@@ -20,10 +21,10 @@ function pingStat(overrides: Partial<PingMetricTaskStats> = {}): PingMetricTaskS
   }
 }
 
-function lossSeries(taskId: string, points: Array<{ time: string, value: number, count?: number }> = [{ time: '2026-08-15T00:00:00.000Z', value: 0 }]): MetricSeries {
+function lossSeries(taskId: string, points: Array<{ time: string, value: number, count?: number }> = [{ time: '2026-08-15T00:00:00.000Z', value: 0 }], entityId = nodeUuid): MetricSeries {
   return {
     metric_key: 'ping.loss',
-    entity_id: nodeUuid,
+    entity_id: entityId,
     downsampled: false,
     tags: { task_id: taskId },
     points,
@@ -120,6 +121,19 @@ describe('ping statistics helpers', () => {
     expect(createEmptyNodePingStats().hasData).toBe(false)
   })
 
+  test('keeps raw loss but excludes synchronized target failures from node alerts', () => {
+    const points: MetricLossPoint[] = [
+      { taskId: 1, time: '2026-08-15T00:00:00.000Z', value: 0, count: 9 },
+      { taskId: 1, time: '2026-08-15T00:01:00.000Z', value: 1, count: 1, commonMode: true },
+    ]
+    const stats = buildNodePingStats([], [pingStat({ total: 10, valid: 9, loss: 10 })], points)
+
+    expect(stats.avgLoss).toBe(10)
+    expect(stats.lineLoss).toBe(0)
+    expect(stats.commonModeLossEvents).toBe(1)
+    expect(stats.availability).toBe(90)
+  })
+
   test('keeps total loss data without inventing zero latency', () => {
     const stats = buildNodePingStats([], [{
       task_id: '1',
@@ -190,6 +204,38 @@ describe('ping statistics helpers', () => {
 })
 
 describe('buildPingMetricState (Metric Store vs. legacy fallback gate)', () => {
+  test('marks a loss bucket only when at least five and 60% of observed nodes fail together', () => {
+    const time = '2026-08-15T00:12:00.000Z'
+    const widespread = Array.from({ length: 8 }, (_, index) => lossSeries(
+      '8',
+      [{ time, value: index < 5 ? 1 : 0 }],
+      `node-${index + 1}`,
+    ))
+    const tooFewAffected = Array.from({ length: 8 }, (_, index) => lossSeries(
+      '9',
+      [{ time, value: index < 4 ? 1 : 0 }],
+      `node-${index + 1}`,
+    ))
+
+    const keys = detectPingCommonModeLossKeys([...widespread, ...tooFewAffected])
+    expect(keys.has(getPingCommonModeLossKey('8', time))).toBe(true)
+    expect(keys.has(getPingCommonModeLossKey('9', time))).toBe(false)
+  })
+
+  test('carries the batch-level common-mode marker into each affected node state', () => {
+    const time = '2026-08-15T00:12:00.000Z'
+    const entities = [nodeUuid, 'node-b', 'node-c', 'node-d', 'node-e', 'node-f', 'node-g', 'node-h']
+    const stats = entities.map(entityId => pingStat({ entity_id: entityId, task_id: '8' }))
+    const loss = entities.map((entityId, index) => lossSeries(
+      '8',
+      [{ time, value: index < 5 ? 1 : 0 }],
+      entityId,
+    ))
+
+    const state = buildPingMetricState(nodeUuid, statsResponse(stats), metricsResponse(loss))
+    expect(state?.metricLossPoints?.[0]).toMatchObject({ taskId: 8, commonMode: true, value: 1 })
+  })
+
   test('falls back to legacy when there is no metrics query response at all', () => {
     expect(buildPingMetricState(nodeUuid, statsResponse([pingStat()]), null)).toBeNull()
   })

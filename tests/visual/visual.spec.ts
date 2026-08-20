@@ -1833,6 +1833,29 @@ test('Transit node cards render per-node insight panels without changing card he
   expect(Math.max(...firstRowHeights) - Math.min(...firstRowHeights)).toBeLessThanOrEqual(1)
 })
 
+test('Transit separates synchronized target failures from per-node carrier alerts', async ({ page }) => {
+  const pingMetricBatchSizes: number[] = []
+  page.on('request', (request) => {
+    if (!request.url().endsWith('/api/rpc2'))
+      return
+    const payload = request.postDataJSON() as { method?: string, params?: { entity_ids?: unknown[] } } | null
+    if (payload?.method === 'public:queryMetrics' && Array.isArray(payload.params?.entity_ids))
+      pingMetricBatchSizes.push(payload.params.entity_ids.length)
+  })
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, { opsDashboard: true, carrierCommonModeLoss: true })
+  await openStablePage(page)
+
+  expect(Math.max(...pingMetricBatchSizes)).toBeGreaterThanOrEqual(5)
+  const nodeCard = page.getByRole('button', { name: '查看节点 主控-洛杉矶 详情' }).locator('xpath=..')
+  const incident = nodeCard.locator('[data-carrier-target-incident]')
+  await expect(incident).toHaveText('4.2%')
+  await expect(incident).toHaveAttribute('title', /2 次为多节点同步目标异常，未计入节点告警/)
+  await expect(nodeCard.locator('[data-node-insight-mode="carrier"]')).toContainText('目标异常')
+  await expect(nodeCard.locator('[data-node-alert-reason]')).toHaveCount(0)
+  await expect(nodeCard).not.toHaveAttribute('data-node-alert-edge', '')
+})
+
 test('Transit node panel editor saves selected custom Ping tasks by UUID', async ({ page }) => {
   const saves: Record<string, unknown>[] = []
   await page.setViewportSize({ width: 1440, height: 900 })

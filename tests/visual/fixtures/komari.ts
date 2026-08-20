@@ -51,6 +51,8 @@ export interface VisualFixtureOptions {
   opsTopologyInsights?: boolean
   opsSevereLoss?: boolean
   opsExtremeLatency?: boolean
+  /** 让北京联通任务在多数节点的同两个时间桶同步失败。 */
+  carrierCommonModeLoss?: boolean
   opsMetricDelayMs?: number
   quickTopologyCustomTask?: boolean
   quickTopologyPresetConflict?: boolean
@@ -298,7 +300,9 @@ function buildMetricResponse(
               : task?.name === 'PandaOps-Local-Hop' && key === 'ping.loss'
                 ? 0
                 : key === 'ping.loss'
-                  ? options.opsTopologyInsights ? 0 : metricValue(key, point.index)
+                  ? options.carrierCommonModeLoss
+                    ? task?.id === 11 && point.index >= pointCount - 2 ? 1 : 0
+                    : options.opsTopologyInsights ? 0 : metricValue(key, point.index)
                   : options.opsTopologyInsights && detailedInsightWindow
                     ? (insightHours === 168 && point.index >= 120 ? 150 : 80) + (task?.id ?? 0) + eveningPenalty
                     : options.opsTopologyInsights
@@ -503,29 +507,49 @@ async function handleRpc(
               })))
             return { start: FIXED_NOW, end: FIXED_NOW, interval_seconds: 60, stats, count: stats.length }
           })()
-        : options.pingTaskOrdering || options.opsTopologyInsights
-          ? {
-              start: FIXED_NOW,
-              end: FIXED_NOW,
-              interval_seconds: 60,
-              stats: metricPingTasks.map(task => ({
-                entity_id: uuid,
+        : options.carrierCommonModeLoss
+          ? (() => {
+              const requestedEntityIds = Array.isArray(payload.params?.entity_ids)
+                ? payload.params.entity_ids.map(String)
+                : [uuid]
+              const stats = requestedEntityIds.flatMap(entityId => metricPingTasks.map(task => ({
+                entity_id: entityId,
                 task_id: String(task.id),
                 name: task.name,
                 interval: task.interval,
                 tags: { task_id: String(task.id), task_name: task.name },
                 total: 48,
-                valid: 48,
-                loss: 0,
+                valid: task.id === 11 ? 46 : 48,
+                loss: task.id === 11 ? 100 / 24 : 0,
                 loss_approximate: false,
-                min: options.opsTopologyInsights ? 70 : 40 + task.id,
-                max: options.opsTopologyInsights ? 145 : 120 + task.id,
-                avg: options.opsTopologyInsights ? (task.name === 'PandaOps-Local-Hop' ? 105 : 125) : 80 + task.id,
-                latest: options.opsTopologyInsights ? (task.name === 'PandaOps-Local-Hop' ? 108 : 128) : 90 + task.id,
-              })),
-              count: metricPingTasks.length,
-            }
-          : { start: FIXED_NOW, end: FIXED_NOW, interval_seconds: 60, stats: [], count: 0 }
+                avg: 80 + task.id,
+                latest: 90 + task.id,
+              })))
+              return { start: FIXED_NOW, end: FIXED_NOW, interval_seconds: 60, stats, count: stats.length }
+            })()
+          : options.pingTaskOrdering || options.opsTopologyInsights
+            ? {
+                start: FIXED_NOW,
+                end: FIXED_NOW,
+                interval_seconds: 60,
+                stats: metricPingTasks.map(task => ({
+                  entity_id: uuid,
+                  task_id: String(task.id),
+                  name: task.name,
+                  interval: task.interval,
+                  tags: { task_id: String(task.id), task_name: task.name },
+                  total: 48,
+                  valid: 48,
+                  loss: 0,
+                  loss_approximate: false,
+                  min: options.opsTopologyInsights ? 70 : 40 + task.id,
+                  max: options.opsTopologyInsights ? 145 : 120 + task.id,
+                  avg: options.opsTopologyInsights ? (task.name === 'PandaOps-Local-Hop' ? 105 : 125) : 80 + task.id,
+                  latest: options.opsTopologyInsights ? (task.name === 'PandaOps-Local-Hop' ? 108 : 128) : 90 + task.id,
+                })),
+                count: metricPingTasks.length,
+              }
+            : { start: FIXED_NOW, end: FIXED_NOW, interval_seconds: 60, stats: [], count: 0 }
       break
     case 'public:getNodesInformation':
       result = Object.values(clientFixtures)

@@ -4,6 +4,17 @@
 
 ## [Unreleased]
 
+## [1.0.45] - 2026-08-20
+
+### Fixed
+
+- 三网 Ping 同一任务在同一时间桶内出现至少 5 台、且不少于 60% 已观测节点同步失败时，标记为公共探测目标异常：卡片继续保留原始丢包率用于追溯，但该时间桶不再触发逐节点丢包告警或改变节点状态轨。
+- 公共目标异常在三网质量区使用琥珀色读数和“目标异常”说明，悬停可查看排除次数；缓存格式同步升级，避免旧统计被误当成已识别数据。
+
+### Testing
+
+- 新增公共目标故障阈值、原始/告警丢包分离、节点告警抑制和公开节点卡交互回归，继续验证正常的单节点丢包仍会触发既有告警。
+
 ## [1.0.44] - 2026-08-20
 
 ### Changed
@@ -661,7 +672,8 @@
 - 亮暗主题、桌面/移动布局和 Transit 风格内嵌 Komari 管理端。
 - Playwright 视觉与交互回归、自动构建和 GitHub Release 发布流程。
 
-[Unreleased]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.44...HEAD
+[Unreleased]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.45...HEAD
+[1.0.45]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.44...v1.0.45
 [1.0.44]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.43...v1.0.44
 [1.0.43]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.42...v1.0.43
 [1.0.42]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.41...v1.0.42

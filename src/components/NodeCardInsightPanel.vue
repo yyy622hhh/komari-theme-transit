@@ -87,7 +87,9 @@ const swapPercentage = computed(() => props.node.swap_total > 0
 const totalConnections = computed(() => Math.max(0, props.node.connections) + Math.max(0, props.node.connections_udp))
 const formatBytes = (value: number) => formatBytesWithConfig(value || 0, appStore.byteDecimals)
 
-function lossTone(loss: string): string {
+function lossTone(loss: string, commonMode = false): string {
+  if (commonMode)
+    return 'text-amber-700 dark:text-amber-300'
   const value = Number.parseFloat(loss)
   if (!Number.isFinite(value) || value <= 1)
     return 'text-slate-700 dark:text-slate-300'
@@ -113,7 +115,12 @@ function lossTone(loss: string): string {
           <span class="flex items-center gap-1 text-slate-500"><i class="size-1.5 rounded-full" :class="carrier.dotClass" />{{ carrier.label }}</span>
           <CarrierPingSamples :bars="carrier.latencyBars.slice(-12)" :label="`${carrier.label}延迟`" />
           <strong class="text-right font-medium tabular-nums text-slate-700 dark:text-slate-200">{{ carrier.latencyDisplay.replace(' ms', '') }}</strong>
-          <strong class="text-right font-medium tabular-nums" :class="lossTone(carrier.lossDisplay)">{{ carrier.lossDisplay }}</strong>
+          <strong
+            class="text-right font-medium tabular-nums"
+            :class="lossTone(carrier.lossDisplay, carrier.commonModeLossEvents > 0)"
+            :data-carrier-target-incident="carrier.commonModeLossEvents > 0 ? '' : undefined"
+            :title="carrier.lossTooltip"
+          >{{ carrier.lossDisplay }}</strong>
         </div>
       </div>
     </template>

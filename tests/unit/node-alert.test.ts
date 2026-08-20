@@ -20,6 +20,7 @@ function node(overrides: Partial<NodeData> = {}): NodeData {
 }
 
 function carrier(overrides: Partial<CarrierPingDisplay> = {}): CarrierPingDisplay {
+  const lossDisplay = overrides.lossDisplay ?? '0'
   return {
     key: 'telecom',
     label: '电信',
@@ -27,7 +28,9 @@ function carrier(overrides: Partial<CarrierPingDisplay> = {}): CarrierPingDispla
     taskNames: [],
     latencyDisplay: '30',
     volatilityDisplay: '',
-    lossDisplay: '0',
+    lossDisplay,
+    alertLoss: Number.isFinite(Number.parseFloat(lossDisplay)) ? Number.parseFloat(lossDisplay) : null,
+    commonModeLossEvents: 0,
     latencyBars: [],
     lossBars: [],
     latencyTooltip: '',
@@ -86,6 +89,11 @@ describe('getCarrierNodeAlert', () => {
   test('delayed carrier samples stay visible but never raise a new alert', () => {
     const delayed = carrier({ delayed: true, lossDisplay: '100', latencyDisplay: '900' })
     expect(getCarrierNodeAlert(node(), [delayed], '北京三网')).toBeNull()
+  })
+
+  test('shared target failures keep raw loss visible without raising a per-node alert', () => {
+    const commonMode = carrier({ lossDisplay: '20', alertLoss: 0, commonModeLossEvents: 2 })
+    expect(getCarrierNodeAlert(node(), [commonMode], '北京三网')).toBeNull()
   })
 
   test('an offline node reports no carrier alert', () => {

@@ -7,6 +7,7 @@ import { SharedCache } from '@/services/cache.service'
 import { abortPingRecords, loadPingRecordsWithTasks } from '@/services/history.service'
 import { loadPingMetricStats, loadPublicPingTasks, partitionMetricEntityIds, queryMetrics } from '@/services/metrics.service'
 import { isPingMetric, normalizeMetricSeriesList, PING_LATENCY_METRIC, PING_LOSS_METRIC, pingTaskId } from '@/utils/metricSeries'
+import { detectPingCommonModeLossKeys, getPingCommonModeLossKey } from '@/utils/pingCommonMode'
 import { matchesPingTaskName, normalizeExactPingTaskName, normalizePingTaskFilter } from '@/utils/pingStats'
 
 export function normalizeMaxCount(maxCount: number | null | undefined): number | undefined {
@@ -308,6 +309,7 @@ export function buildPingMetricState(
   const metricLossPoints: MetricLossPoint[] = []
   const metricLossTaskIds = new Set<number>()
   const sampleUpdatedAtByTaskId = new Map<number, number>()
+  const commonModeLossKeys = detectPingCommonModeLossKeys(metricsResponse?.series ?? [])
 
   if (metricsResponse) {
     const seriesList = normalizeMetricSeriesList(metricsResponse.series)
@@ -315,7 +317,8 @@ export function buildPingMetricState(
       if (series.entity_id !== nodeUuid)
         continue
 
-      const taskId = normalizeTaskId(pingTaskId(series))
+      const rawTaskId = pingTaskId(series)
+      const taskId = normalizeTaskId(rawTaskId)
       if (!Number.isFinite(taskId))
         continue
 
@@ -329,6 +332,7 @@ export function buildPingMetricState(
             value: point.value,
             count: isFiniteNumber(point.count) && point.count > 0 ? point.count : 1,
             taskId,
+            commonMode: commonModeLossKeys.has(getPingCommonModeLossKey(rawTaskId, point.time)),
           })
           updateLatestSampleTime(sampleUpdatedAtByTaskId, taskId, point.time)
           metricLossTaskIds.add(taskId)

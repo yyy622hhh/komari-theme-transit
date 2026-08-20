@@ -9,6 +9,10 @@ export interface NodePingHistoryPoint {
 export interface NodePingStatsState {
   avgLatency: number
   avgLoss: number
+  /** 排除多节点同步目标故障后，用于逐节点告警的丢包率。 */
+  lineLoss: number
+  /** 当前窗口内该节点实际命中的公共目标故障时间桶数量。 */
+  commonModeLossEvents: number
   avgVolatility: number
   p50Latency: number | null
   p95Latency: number | null
@@ -24,6 +28,7 @@ export interface MetricLossPoint {
   value: number
   count: number
   taskId: number
+  commonMode?: boolean
 }
 
 interface TaskRecordSummary {
@@ -39,6 +44,8 @@ export function createEmptyNodePingStats(): NodePingStatsState {
   return {
     avgLatency: 0,
     avgLoss: 0,
+    lineLoss: 0,
+    commonModeLossEvents: 0,
     avgVolatility: 0,
     p50Latency: null,
     p95Latency: null,
@@ -221,6 +228,12 @@ function metricLossPercent(points?: MetricLossPoint[]): number | null {
   return weightedAverage(points.map(point => ({ value: point.value * 100, weight: point.count })))
 }
 
+function commonModeLossEventCount(points?: MetricLossPoint[]): number {
+  return new Set((points ?? [])
+    .filter(point => point.commonMode && point.value > 0)
+    .map(point => point.time)).size
+}
+
 export function buildNodePingStats(
   records: PingRecord[],
   metricStats?: PingMetricTaskStats[],
@@ -245,6 +258,11 @@ export function buildNodePingStats(
 
     const metricLoss = metricLossPercent(metricLossPoints)
     const avgLoss = lossValues.length ? weightedAverage(lossValues) : (metricLoss ?? 0)
+    const commonModeLossEvents = commonModeLossEventCount(metricLossPoints)
+    const lineMetricLoss = commonModeLossEvents
+      ? metricLossPercent(metricLossPoints?.filter(point => !point.commonMode))
+      : null
+    const lineLoss = commonModeLossEvents ? (lineMetricLoss ?? 0) : avgLoss
     const recordLatencies = records
       .map(record => record.value)
       .filter(value => value >= 0 && Number.isFinite(value))
@@ -259,6 +277,8 @@ export function buildNodePingStats(
     return {
       avgLatency: latencyValues.length ? weightedAverage(latencyValues) : average(latestLatencyValues),
       avgLoss,
+      lineLoss,
+      commonModeLossEvents,
       avgVolatility: weightedAverage(volatilityValues),
       p50Latency: getPercentile(recordLatencies, 0.5) ?? (p50Values.length ? weightedAverage(p50Values) : null),
       p95Latency: getPercentile(recordLatencies, 0.95) ?? (p99Values.length ? weightedAverage(p99Values) : null),
@@ -328,6 +348,8 @@ export function buildNodePingStats(
   return {
     avgLatency,
     avgLoss,
+    lineLoss: avgLoss,
+    commonModeLossEvents: 0,
     avgVolatility,
     p50Latency: getPercentile(validLatencyValues, 0.5),
     p95Latency: getPercentile(validLatencyValues, 0.95),
