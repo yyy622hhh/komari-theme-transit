@@ -67,6 +67,7 @@ rewrites the authoritative set with this machine's rendering.
 - [.github/workflows/release-on-version-bump.yml](.github/workflows/release-on-version-bump.yml) — release automation.
 - [vite.config.ts](vite.config.ts) — Vite config, build constants, manual chunks, zip packaging.
 - [package.json](package.json) — bun scripts and dependencies; intentionally no top-level `version`.
+- [docs/DependencyPins.md](docs/DependencyPins.md) — majors that were tried, measured and rolled back, each with a checkable exit condition. Read it before starting a dependency bump; do not re-litigate a pin from memory.
 
 ## Architecture anchor
 
