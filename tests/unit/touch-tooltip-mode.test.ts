@@ -54,6 +54,19 @@ describe('createTouchTooltipState', () => {
     expect(tooltip.activeTaskTooltipId.value).toBeNull()
   })
 
+  test('ignores blur-driven closes while touch toggle mode is on', () => {
+    const tooltip = createTouchTooltipState()
+    tooltip.isTouchTooltipMode.value = true
+    tooltip.toggleTaskTooltip(3)
+    tooltip.setTaskTooltipOpen(3, false)
+    tooltip.setSmoothInfoOpen(true)
+    tooltip.setSmoothInfoOpen(false)
+    expect(tooltip.activeTaskTooltipId.value).toBe(3)
+    expect(tooltip.smoothInfoTooltipOpen.value).toBe(true)
+    tooltip.toggleTaskTooltip(3)
+    expect(tooltip.activeTaskTooltipId.value).toBeNull()
+  })
+
   test('reset closes both tooltip kinds', () => {
     const tooltip = createTouchTooltipState()
     tooltip.isTouchTooltipMode.value = true

@@ -102,7 +102,11 @@ export function normalizeStatusRecord(record: Partial<StatusRecord>): StatusReco
     client: record.client,
     time: record.time,
     cpu: numberOrZero(record.cpu),
-    gpu: numberOrZero(record.gpu),
+    gpu: numberOrZero(record.gpu_average_usage ?? record.gpu),
+    gpu_average_usage: typeof record.gpu_average_usage === 'number' && Number.isFinite(record.gpu_average_usage)
+      ? record.gpu_average_usage
+      : undefined,
+    gpu_detailed_info: record.gpu_detailed_info,
     ram: numberOrZero(record.ram),
     ram_total: numberOrZero(record.ram_total),
     swap: numberOrZero(record.swap),
@@ -161,10 +165,9 @@ export async function loadRecentNodeStatus(uuid: string, limit = 150): Promise<S
     getRecentNodeStatusRequestKey(uuid, safeLimit),
     async (signal) => {
       const result = await getSharedRpc().getNodeRecentStatus(uuid, safeLimit, signal)
-      return (result.records ?? [])
-        .filter(record => Boolean(record.client && record.time))
-        .sort((left, right) => new Date(left.time).getTime() - new Date(right.time).getTime())
-        .slice(-safeLimit)
+      // 与 loadLoadRecords 同一条归一化路径：详情页「实时」折线也来自
+      // agent 的 connections=TCP+UDP 合计，不能原样当 TCP 画。
+      return normalizeStatusRecords(result.records).slice(-safeLimit)
     },
     { shouldRetry: shouldRetryHistoryRequest },
   )

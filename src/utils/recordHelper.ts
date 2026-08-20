@@ -129,23 +129,38 @@ export function fillMissingTimePoints<T extends { time?: string, updated_at?: st
 
   const filled: T[] = timePoints.map((t) => {
     let found: T | undefined
+    let matchedIndex = -1
+    let matchedDistance = Number.POSITIVE_INFINITY
 
-    // 跳过太旧的数据点
-    while (
-      dataIdx < timedData.length
-      && timedData[dataIdx]!.timeMs < t - matchToleranceMs
-    ) {
+    // 丢掉不可能再匹配后续网格的旧点。随后在当前容差窗口里挑最近的点并消费
+    // 它；只看第一个点会把前一格的样本反复挪到下一格，最终丢掉最新样本。
+    while (dataIdx < timedData.length && timedData[dataIdx]!.timeMs < t - matchToleranceMs)
       dataIdx++
+
+    for (let index = dataIdx; index < timedData.length; index++) {
+      const candidate = timedData[index]!
+      if (candidate.timeMs > t + matchToleranceMs)
+        break
+      const distance = Math.abs(candidate.timeMs - t)
+      if (distance < matchedDistance || (distance === matchedDistance && candidate.timeMs > (timedData[matchedIndex]?.timeMs ?? Number.NEGATIVE_INFINITY))) {
+        found = candidate.item
+        matchedIndex = index
+        matchedDistance = distance
+      }
     }
 
-    const currentData = timedData[dataIdx]
-    // 检查当前数据点是否在容差范围内
+    const nextGrid = t + interval
     if (
-      currentData
-      && Math.abs(currentData.timeMs - t) <= matchToleranceMs
+      matchedIndex >= 0
+      && nextGrid <= end
+      && Math.abs(timedData[matchedIndex]!.timeMs - nextGrid) < matchedDistance
     ) {
-      found = currentData.item
+      found = undefined
+      matchedIndex = -1
     }
+
+    if (matchedIndex >= 0)
+      dataIdx = matchedIndex + 1
 
     if (found) {
       // 找到则使用，但对齐时间到网格

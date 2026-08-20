@@ -162,11 +162,11 @@ const statusEdgeStyle = computed(() => props.node.online
       <div>
         <div class="flex items-center justify-between gap-2 text-[10px]">
           <span class="text-slate-500">CPU</span>
-          <strong class="font-medium tabular-nums text-slate-700 dark:text-slate-200">{{ node.cpu.toFixed(1) }}%</strong>
+          <strong class="font-medium tabular-nums text-slate-700 dark:text-slate-200">{{ (node.cpu ?? 0).toFixed(1) }}%</strong>
         </div>
         <ProgressThin class="mt-1.5" :percentage="node.cpu" :status="resourceStatus(node.cpu)" :height="3" />
         <div data-node-resource-value class="mt-1 break-words text-[9px] leading-tight tabular-nums text-slate-500 dark:text-slate-600">
-          {{ node.load.toFixed(2) }}, {{ node.load5.toFixed(2) }}, {{ node.load15.toFixed(2) }}
+          {{ (node.load ?? 0).toFixed(2) }}, {{ (node.load5 ?? 0).toFixed(2) }}, {{ (node.load15 ?? 0).toFixed(2) }}
         </div>
       </div>
       <div>

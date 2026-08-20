@@ -93,7 +93,7 @@ export function useNodePingDisplay(
       const lossText = `丢包 ${formatLoss(point.loss)}`
 
       return {
-        key: `${point.time}-${index}`,
+        key: `${metric}-${points.length - 1 - index}`,
         ...visual,
         valueText: metric === 'latency' ? latencyText : lossText,
         secondaryText: metric === 'latency' ? lossText : latencyText,

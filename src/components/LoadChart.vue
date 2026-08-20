@@ -5,6 +5,7 @@ import type { RecordFormat } from '@/utils/recordHelper'
 import type { MetricQueryParams, PingTaskInfo, StatusRecord } from '@/utils/rpc'
 import { Icon } from '@iconify/vue'
 import { useIntervalFn } from '@vueuse/core'
+import dayjs from 'dayjs'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, shallowRef, watch, watchEffect } from 'vue'
 import VChart from 'vue-echarts'
 import AsyncDataState from '@/components/AsyncDataState.vue'
@@ -26,7 +27,7 @@ import { createAsyncGeneration } from '@/utils/asyncGeneration'
 import { getChartSeriesPalette, getLoadChartPalette } from '@/utils/chartPalette'
 import { formatBytes, formatBytesSplit } from '@/utils/helper'
 import { getLoadChartThemeColors, getLoadChartTooltipConfig, LOAD_CHART_MARGIN, LOAD_CHART_MARGIN_WITH_LEGEND, LOAD_CHART_PRESET_VIEWS } from '@/utils/loadChartTheme'
-import { getGpuDeviceNames as formatGpuDeviceNames, LOAD_METRIC_KEYS, metricSeriesToChartRecords, metricValue, statusRecordsToChartRecords } from '@/utils/loadMetricRecords'
+import { getGpuDeviceNames as formatGpuDeviceNames, LOAD_METRIC_KEYS, metricSeriesToChartRecords, metricValue, recordHasLoadSample, statusRecordsToChartRecords } from '@/utils/loadMetricRecords'
 import { formatMetricAxisTime, formatMetricTooltipTime } from '@/utils/metricRange'
 import { comparePingTaskOrder, createPingTaskOrderMap, metricTags, normalizeMetricSeriesList } from '@/utils/metricSeries'
 import { fillMissingTimePoints } from '@/utils/recordHelper'
@@ -36,6 +37,18 @@ import '@/utils/echarts' // 共享 ECharts 配置
 const props = defineProps<{
   uuid: string
 }>()
+
+function resolveCapacityTotal(recordTotal: number | null | undefined, nodeTotal: number | undefined): number | null {
+  if (typeof recordTotal === 'number' && recordTotal > 0)
+    return recordTotal
+  if (typeof nodeTotal === 'number' && nodeTotal > 0)
+    return nodeTotal
+  return null
+}
+
+function formatCapacityBytes(value: number | null): string {
+  return value == null ? '-' : formatBytes(value)
+}
 
 const appStore = useAppStore()
 const nodesStore = useNodesStore()
@@ -289,6 +302,18 @@ async function fetchRecentData(request: LoadChartRequest): Promise<void> {
   }
 }
 
+function sliceTimedRecordsToCustomRange<T extends { time?: string }>(records: T[]): T[] {
+  const range = customRange.value
+  if (!isCustomRange.value || !range)
+    return records
+  const fromTs = range.start.valueOf()
+  const toTs = range.end.valueOf()
+  return records.filter((record) => {
+    const timestamp = dayjs(record.time ?? '').valueOf()
+    return timestamp >= fromTs && timestamp <= toTs
+  })
+}
+
 async function fetchHistoryData(request: LoadChartRequest): Promise<void> {
   if (isCustomRange.value && !customRange.value) {
     realtimeMetricRequests.invalidate()
@@ -305,6 +330,12 @@ async function fetchHistoryData(request: LoadChartRequest): Promise<void> {
   const metricParams: Pick<MetricQueryParams, 'hours' | 'start' | 'end'> = isCustomRange.value && range
     ? { start: range.start.toDate().toISOString(), end: range.end.toDate().toISOString() }
     : { hours }
+  const legacyHours = range
+    ? Math.min(
+        maxRecordPreserveTime.value,
+        Math.max(hours, Math.ceil(dayjs().diff(range.start, 'hour', true))),
+      )
+    : hours
 
   loading.value = true
   error.value = null
@@ -329,19 +360,19 @@ async function fetchHistoryData(request: LoadChartRequest): Promise<void> {
     if (metricResult)
       availableMetricKeys.value = metricResult.availableKeys
     const metricHistory = metricResult?.history ?? null
-    const hasCpuHistory = metricHistory?.records.some(record => record.cpu !== null && Number.isFinite(record.cpu)) ?? false
-    if (metricHistory && hasCpuHistory) {
-      metricData.value = metricHistory.records
+    const hasLoadHistory = metricHistory?.records.some(recordHasLoadSample) ?? false
+    if (metricHistory && hasLoadHistory) {
+      metricData.value = sliceTimedRecordsToCustomRange(metricHistory.records)
       rawMetricSeries.value = metricHistory.series
       remoteData.value = []
     }
     else {
-      const records = await loadNodeLoadRecords(request.uuid, hours, LOAD_RECORD_MAX_COUNT)
+      const records = await loadNodeLoadRecords(request.uuid, legacyHours, LOAD_RECORD_MAX_COUNT)
       if (!dataRequests.isCurrent(request.generation))
         return
       metricData.value = null
       rawMetricSeries.value = metricHistory?.series ?? []
-      remoteData.value = records
+      remoteData.value = sliceTimedRecordsToCustomRange(records)
     }
   }
   catch (err) {
@@ -411,7 +442,15 @@ const chartData = computed(() => {
     maxGap = minute * 30
   }
 
-  return fillMissingTimePoints(data, intervalSec, hours * 3600, maxGap)
+  const lastTs = dayjs(data.at(-1)?.time).valueOf()
+  const range = customRange.value
+  const customSeconds = isCustomRange.value && range && Number.isFinite(lastTs)
+    ? (lastTs - range.start.valueOf()) / 1000
+    : null
+  const totalSeconds = customSeconds != null && customSeconds > 0
+    ? Math.max(intervalSec, customSeconds)
+    : hours * 3600
+  return fillMissingTimePoints(data, intervalSec, totalSeconds, maxGap)
 })
 
 const latestStatus = computed(() => {
@@ -421,7 +460,19 @@ const latestStatus = computed(() => {
   return data.at(-1) ?? null
 })
 
-const hasGpuData = computed(() => chartData.value.some(record => record.gpu != null || record.gpu_usage != null || record.gpu_memory != null || record.gpu_detailed))
+const hasGpuData = computed(() => {
+  if (nodeInfo.value?.gpu_name?.trim())
+    return true
+  return chartData.value.some((record) => {
+    if (record.gpu_detailed)
+      return true
+    if (typeof record.gpu_usage === 'number' && record.gpu_usage > 0)
+      return true
+    if (typeof record.gpu_memory === 'number' && record.gpu_memory > 0)
+      return true
+    return typeof record.gpu === 'number' && record.gpu > 0
+  })
+})
 
 const metricSeriesColors = reactive(getChartSeriesPalette(appStore.colorVisionFriendly))
 
@@ -681,12 +732,12 @@ const memoryChartOption = computed(() => ({
       if (!record)
         return ''
 
-      const ramUsed = record.ram ?? 0
-      const ramTotal = record.ram_total ?? nodeInfo.value?.mem_total ?? 0
-      const swapUsed = record.swap ?? 0
-      const swapTotal = record.swap_total ?? nodeInfo.value?.swap_total ?? 0
-      const ramPercent = ramTotal > 0 ? ((ramUsed / ramTotal) * 100).toFixed(1) : '0'
-      const swapPercent = swapTotal > 0 ? ((swapUsed / swapTotal) * 100).toFixed(1) : '0'
+      const ramUsed = typeof record.ram === 'number' && Number.isFinite(record.ram) ? record.ram : null
+      const ramTotal = resolveCapacityTotal(record.ram_total, nodeInfo.value?.mem_total)
+      const swapUsed = typeof record.swap === 'number' && Number.isFinite(record.swap) ? record.swap : null
+      const swapTotal = resolveCapacityTotal(record.swap_total, nodeInfo.value?.swap_total)
+      const ramPercent = ramUsed != null && ramTotal != null ? ((ramUsed / ramTotal) * 100).toFixed(1) : '-'
+      const swapPercent = swapUsed != null && swapTotal != null ? ((swapUsed / swapTotal) * 100).toFixed(1) : '-'
 
       const timeStr = formatMetricTooltipTime(record.time, effectiveHistoryHours.value)
       let html = `<div style="font-weight:600;margin-bottom:6px;color:${chartThemeColors.value.textSecondary}">${timeStr}</div>`
@@ -695,16 +746,16 @@ const memoryChartOption = computed(() => ({
       for (const item of p) {
         const colorDot = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${item.color};margin-right:8px;flex-shrink:0"></span>`
         if (item.seriesName === 'RAM') {
-          html += `<div style="display:flex;align-items:center">${colorDot}<span>RAM</span><span style="margin-left:auto;font-weight:600;margin-left:16px">${formatBytes(ramUsed)} (${ramPercent}%)</span></div>`
+          html += `<div style="display:flex;align-items:center">${colorDot}<span>RAM</span><span style="margin-left:auto;font-weight:600;margin-left:16px">${formatCapacityBytes(ramUsed)} (${ramPercent}${ramPercent === '-' ? '' : '%'})</span></div>`
         }
         else if (item.seriesName === 'Swap') {
-          html += `<div style="display:flex;align-items:center">${colorDot}<span>Swap</span><span style="margin-left:auto;font-weight:600;margin-left:16px">${formatBytes(swapUsed)} (${swapPercent}%)</span></div>`
+          html += `<div style="display:flex;align-items:center">${colorDot}<span>Swap</span><span style="margin-left:auto;font-weight:600;margin-left:16px">${formatCapacityBytes(swapUsed)} (${swapPercent}${swapPercent === '-' ? '' : '%'})</span></div>`
         }
         else if (item.seriesName === 'RAM 总量') {
-          html += `<div style="display:flex;align-items:center">${colorDot}<span>RAM 总量</span><span style="margin-left:auto;font-weight:600;margin-left:16px">${formatBytes(ramTotal)}</span></div>`
+          html += `<div style="display:flex;align-items:center">${colorDot}<span>RAM 总量</span><span style="margin-left:auto;font-weight:600;margin-left:16px">${formatCapacityBytes(ramTotal)}</span></div>`
         }
         else if (item.seriesName === 'Swap 总量') {
-          html += `<div style="display:flex;align-items:center">${colorDot}<span>Swap 总量</span><span style="margin-left:auto;font-weight:600;margin-left:16px">${formatBytes(swapTotal)}</span></div>`
+          html += `<div style="display:flex;align-items:center">${colorDot}<span>Swap 总量</span><span style="margin-left:auto;font-weight:600;margin-left:16px">${formatCapacityBytes(swapTotal)}</span></div>`
         }
       }
       html += '</div>'
@@ -793,16 +844,16 @@ const diskChartOption = computed(() => ({
       if (!record)
         return ''
 
-      const diskUsed = record.disk ?? 0
-      const diskTotal = record.disk_total ?? nodeInfo.value?.disk_total ?? 0
-      const diskPercent = diskTotal > 0 ? ((diskUsed / diskTotal) * 100).toFixed(1) : '0'
+      const diskUsed = typeof record.disk === 'number' && Number.isFinite(record.disk) ? record.disk : null
+      const diskTotal = resolveCapacityTotal(record.disk_total, nodeInfo.value?.disk_total)
+      const diskPercent = diskUsed != null && diskTotal != null ? ((diskUsed / diskTotal) * 100).toFixed(1) : '-'
 
       const timeStr = formatMetricTooltipTime(record.time, effectiveHistoryHours.value)
       let html = `<div style="font-weight:600;margin-bottom:6px;color:${chartThemeColors.value.textSecondary}">${timeStr}</div>`
       html += '<div style="display:flex;flex-direction:column;gap:4px">'
       for (const item of p) {
         const colorDot = `<span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${item.color};margin-right:8px;flex-shrink:0"></span>`
-        const text = item.seriesName === '磁盘总量' ? formatBytes(diskTotal) : `${formatBytes(diskUsed)} (${diskPercent}%)`
+        const text = item.seriesName === '磁盘总量' ? formatCapacityBytes(diskTotal) : `${formatCapacityBytes(diskUsed)} (${diskPercent}${diskPercent === '-' ? '' : '%'})`
         html += `<div style="display:flex;align-items:center">${colorDot}<span>${item.seriesName}</span><span style="margin-left:auto;font-weight:600;margin-left:16px">${text}</span></div>`
       }
       html += '</div>'
@@ -883,7 +934,7 @@ const networkChartOption = computed(() => ({
       for (const item of p) {
         const colorDot = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${item.color};margin-right:8px;flex-shrink:0"></span>`
         const label = item.seriesName === '下载' ? '↓ 下载' : '↑ 上传'
-        html += `<div style="display:flex;align-items:center">${colorDot}<span>${label}</span><span style="margin-left:auto;font-weight:600;margin-left:16px">${formatBytes(item.value)}/s</span></div>`
+        html += `<div style="display:flex;align-items:center">${colorDot}<span>${label}</span><span style="margin-left:auto;font-weight:600;margin-left:16px">${typeof item.value === 'number' && Number.isFinite(item.value) ? `${formatBytes(item.value)}/s` : '-'}</span></div>`
       }
       html += '</div>'
       return html
@@ -913,7 +964,7 @@ const networkChartOption = computed(() => ({
     {
       name: '下载',
       type: 'line',
-      data: chartData.value.map(r => r.net_in ?? 0),
+      data: chartData.value.map(r => r.net_in),
 
       showSymbol: false,
       lineStyle: { width: 1.5, color: chartColors.quinary, cap: 'round' as const },
@@ -921,7 +972,7 @@ const networkChartOption = computed(() => ({
     {
       name: '上传',
       type: 'line',
-      data: chartData.value.map(r => r.net_out ?? 0),
+      data: chartData.value.map(r => r.net_out),
 
       showSymbol: false,
       lineStyle: { width: 1.5, color: chartColors.quaternary, cap: 'round' as const },
@@ -1110,7 +1161,7 @@ const connectionsChartOption = computed(() => ({
     {
       name: 'TCP',
       type: 'line',
-      data: chartData.value.map(r => r.connections ?? 0),
+      data: chartData.value.map(r => r.connections),
 
       showSymbol: false,
       lineStyle: { width: 1.5, color: chartColors.primary, cap: 'round' as const },
@@ -1118,7 +1169,7 @@ const connectionsChartOption = computed(() => ({
     {
       name: 'UDP',
       type: 'line',
-      data: chartData.value.map(r => r.connections_udp ?? 0),
+      data: chartData.value.map(r => r.connections_udp),
 
       showSymbol: false,
       lineStyle: { width: 1.5, color: chartColors.tertiary, cap: 'round' as const },
@@ -1170,7 +1221,7 @@ const processChartOption = computed(() => ({
     {
       name: '进程数',
       type: 'line',
-      data: chartData.value.map(r => r.process ?? 0),
+      data: chartData.value.map(r => r.process),
 
       showSymbol: false,
       lineStyle: { width: 1.5, color: chartColors.quaternary, cap: 'round' as const },

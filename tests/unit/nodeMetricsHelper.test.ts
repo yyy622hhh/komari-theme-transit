@@ -7,8 +7,11 @@ import {
   formatMetricDecimal,
   formatNodeCount,
   formatNodeNameList,
+  getCapacityPeakPercentage,
   getConnectionCount,
+  getDiskPercentage,
   getKnownNodeDistribution,
+  getMemoryPercentage,
   getNodeDistribution,
   normalizeConnectionCounts,
 } from '../../src/utils/nodeMetricsHelper'
@@ -71,7 +74,13 @@ describe('Komari latest connection normalization', () => {
   })
 
   test('clamps inconsistent backend values instead of exposing negative TCP counts', () => {
-    expect(normalizeConnectionCounts(5, 20)).toEqual({ tcp: 0, udp: 20 })
+    expect(normalizeConnectionCounts(5, 20)).toEqual({ tcp: 0, udp: 5 })
+    expect(getConnectionCount({ connections: 0, connections_udp: 5 })).toBe(5)
+  })
+
+  test('does not let a larger UDP count inflate the reported total', () => {
+    const connections = normalizeConnectionCounts(5, 20)
+    expect(connections.tcp + connections.udp).toBe(5)
   })
 })
 
@@ -135,6 +144,27 @@ describe('computeOnlineNodeStats', () => {
     ]
     const stats = computeOnlineNodeStats(nodes, 80)
     expect(stats.highLoadNodes.map(n => n.uuid)).toEqual(['a'])
+  })
+})
+
+describe('capacity percentages', () => {
+  test('treats an unavailable capacity total as unknown instead of a full disk or memory alert', () => {
+    const incomplete = node({ uuid: 'a', name: 'A', disk: 20, disk_total: 0, ram: 20, mem_total: 0 })
+
+    expect(getDiskPercentage(incomplete)).toBe(0)
+    expect(getMemoryPercentage(incomplete)).toBe(0)
+    expect(computeOnlineNodeStats([incomplete], 80).highLoadNodes).toEqual([])
+  })
+
+  test('does not invent a 100% peak when history rows omit capacity totals', () => {
+    expect(getCapacityPeakPercentage([
+      { used: 8_000_000_000, total: 0 },
+      { used: 4_000_000_000, total: null },
+    ], 0)).toBe(0)
+    expect(getCapacityPeakPercentage([
+      { used: 8, total: 0 },
+      { used: 4, total: 16 },
+    ], 16)).toBe(50)
   })
 })
 

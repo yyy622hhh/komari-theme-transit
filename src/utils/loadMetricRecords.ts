@@ -44,6 +44,32 @@ export function metricValue(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
+export function recordHasLoadSample(record: RecordFormat): boolean {
+  if (record.gpu_detailed && Object.keys(record.gpu_detailed).length)
+    return true
+  return [
+    record.cpu,
+    record.gpu,
+    record.gpu_usage,
+    record.gpu_memory,
+    record.ram,
+    record.swap,
+    record.load,
+    record.temp,
+    record.disk,
+    record.net_in,
+    record.net_out,
+    record.process,
+    record.connections,
+    record.connections_udp,
+  ].some(value => typeof value === 'number' && Number.isFinite(value))
+}
+
+function capacityTotal(value: unknown): number | null {
+  const total = metricValue(value)
+  return total != null && total > 0 ? total : null
+}
+
 function gpuDetailsFromStatus(record: StatusRecord): RecordFormat['gpu_detailed'] {
   if (!record.gpu_detailed_info?.length)
     return undefined
@@ -67,7 +93,7 @@ function gpuDetailsFromStatus(record: StatusRecord): RecordFormat['gpu_detailed'
 }
 
 export function statusRecordsToChartRecords(records: StatusRecord[]): RecordFormat[] {
-  return records.map((record) => {
+  return finalizeGpuRows(records.map((record) => {
     const gpuDetailed = gpuDetailsFromStatus(record)
     return {
       client: record.client,
@@ -78,13 +104,13 @@ export function statusRecordsToChartRecords(records: StatusRecord[]): RecordForm
       gpu_memory: null,
       gpu_detailed: gpuDetailed,
       ram: metricValue(record.ram),
-      ram_total: metricValue(record.ram_total),
+      ram_total: capacityTotal(record.ram_total),
       swap: metricValue(record.swap),
-      swap_total: metricValue(record.swap_total),
+      swap_total: capacityTotal(record.swap_total),
       load: metricValue(record.load),
       temp: metricValue(record.temp),
       disk: metricValue(record.disk),
-      disk_total: metricValue(record.disk_total),
+      disk_total: capacityTotal(record.disk_total),
       net_in: metricValue(record.net_in),
       net_out: metricValue(record.net_out),
       net_total_up: metricValue(record.net_total_up),
@@ -95,7 +121,7 @@ export function statusRecordsToChartRecords(records: StatusRecord[]): RecordForm
       connections: metricValue(record.connections),
       connections_udp: metricValue(record.connections_udp),
     }
-  })
+  }))
 }
 
 function getMetricDeviceKey(series: MetricSeries): string {
@@ -131,13 +157,13 @@ function ensureMetricRow(rows: Map<string, RecordFormat>, time: string, context:
     gpu_usage: null,
     gpu_memory: null,
     ram: null,
-    ram_total: context.memoryTotal ?? null,
+    ram_total: capacityTotal(context.memoryTotal),
     swap: null,
-    swap_total: context.swapTotal ?? null,
+    swap_total: capacityTotal(context.swapTotal),
     load: null,
     temp: null,
     disk: null,
-    disk_total: context.diskTotal ?? null,
+    disk_total: capacityTotal(context.diskTotal),
     net_in: null,
     net_out: null,
     net_total_up: null,
@@ -188,25 +214,33 @@ function applyMetricPoint(row: RecordFormat, key: LoadMetricKey, value: number |
   }
   const field = directFields[key]
   if (field) {
-    ;(row[field] as number | null | undefined) = value
+    const nextValue = field === 'ram_total' || field === 'swap_total' || field === 'disk_total'
+      ? capacityTotal(value)
+      : value
+    ;(row[field] as number | null | undefined) = nextValue
     return
   }
 
   if (key === 'gpu.usage') {
-    row.gpu = value
-    row.gpu_usage = value
+    // 0% 是合法空闲值，不能丢掉；但又不能挡住后面按设备卡平均。
+    // 正数聚合优先用官方平均值，0 只当占位，有设备序列时再覆盖。
+    if (value != null && value > 0) {
+      row.gpu = value
+      row.gpu_usage = value
+    }
+    else if (value === 0) {
+      row.gpu_usage ??= 0
+      row.gpu ??= 0
+    }
     return
   }
 
   const detail = ensureGpuDetail(row, series)
   if (key === 'gpu.device.usage') {
     detail.usage = value
-    row.gpu_usage ??= value
-    row.gpu ??= value
   }
   else if (key === 'gpu.memory.used') {
     detail.mem_used = value ?? undefined
-    row.gpu_memory ??= value
   }
   else if (key === 'gpu.memory.total') {
     detail.mem_total = value ?? undefined
@@ -230,8 +264,14 @@ function finalizeGpuRows(rows: RecordFormat[]): RecordFormat[] {
       if (typeof detail.memory === 'number' && Number.isFinite(detail.memory))
         memories.push(detail.memory)
     }
-    if (row.gpu_usage == null && usages.length)
-      row.gpu_usage = usages.reduce((sum, value) => sum + value, 0) / usages.length
+    if (usages.length) {
+      const average = usages.reduce((sum, value) => sum + value, 0) / usages.length
+      if (row.gpu_usage == null || row.gpu_usage === 0) {
+        row.gpu_usage = average
+        if (row.gpu == null || row.gpu === 0)
+          row.gpu = average
+      }
+    }
     row.gpu ??= row.gpu_usage
     if (row.gpu_memory == null && memories.length)
       row.gpu_memory = memories.reduce((sum, value) => sum + value, 0) / memories.length

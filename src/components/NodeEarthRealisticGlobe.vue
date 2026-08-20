@@ -260,7 +260,9 @@ async function startGlobe() {
     applyMaterialStyle()
     applyControls()
     resetPointOfView(0)
-    if (!shouldRender.value)
+    if (shouldRender.value)
+      globe.resumeAnimation()
+    else
       globe.pauseAnimation()
   }
   catch (error) {
@@ -321,15 +323,14 @@ watch(() => appStore.stopEarth, (stopped) => {
 watch(shouldRender, (visible) => {
   if (!globe)
     return
+  applyControls()
   if (visible) {
     globe.resumeAnimation()
-    applyControls()
     resizeGlobe()
     return
   }
   globe.pauseAnimation()
-  applyControls()
-})
+}, { immediate: true })
 </script>
 
 <template>

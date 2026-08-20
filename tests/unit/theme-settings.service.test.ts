@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import { setAuthSessionFromLogin } from '../../src/services/auth.service'
-import { createThemeSettingsSnapshot, saveManagedThemeSettings } from '../../src/services/theme-settings.service'
+import { assertManagedThemeSettingsCurrent, createThemeSettingsSnapshot, saveManagedThemeSettings, setManagedThemeSettingsPublisher } from '../../src/services/theme-settings.service'
 
 const originalFetch = globalThis.fetch
 
@@ -14,9 +14,87 @@ function jsonResponse(body: unknown, status = 200): Response {
 afterEach(() => {
   globalThis.fetch = originalFetch
   setAuthSessionFromLogin(false)
+  setManagedThemeSettingsPublisher()
 })
 
 describe('managed theme settings compatibility', () => {
+  test('publishes the authoritative settings before rejecting a stale topology editor', async () => {
+    const current = { topologyRoute: 'remote-route', topologyMetrics: '20,0' }
+    const synchronized: Array<Record<string, unknown> | null | undefined> = []
+    globalThis.fetch = (async (input) => {
+      const url = String(input)
+      if (url.endsWith('/api/me'))
+        return jsonResponse({ logged_in: true, username: 'admin' })
+      if (url.endsWith('/api/public'))
+        return jsonResponse({ status: 'success', message: '', data: { theme: 'Transit', theme_settings: current } })
+      return jsonResponse({ message: 'unexpected endpoint' }, 500)
+    }) as typeof fetch
+    setAuthSessionFromLogin(true, { logged_in: true, username: 'admin' })
+
+    await expect(assertManagedThemeSettingsCurrent({
+      theme: 'Transit',
+      expected: { topologyRoute: 'local-route', topologyMetrics: '10,0' },
+      permission: 'nodeTopology',
+      onPublicSettings: settings => synchronized.push(settings.theme_settings),
+    })).rejects.toThrow('其他会话修改')
+    expect(synchronized).toEqual([current])
+  })
+
+  test('publishes the authoritative public settings after a successful save', async () => {
+    const synchronized: string[] = []
+    let persisted: Record<string, unknown> = { preserved: 'server-value' }
+    globalThis.fetch = (async (input, init) => {
+      const url = String(input)
+      if (url.endsWith('/api/me'))
+        return jsonResponse({ logged_in: true, username: 'admin' })
+      if (url.endsWith('/api/public'))
+        return jsonResponse({ status: 'success', message: '', data: { theme: 'Transit', theme_settings: persisted } })
+      if (url.includes('/api/admin/theme/settings?theme=Transit')) {
+        persisted = { ...persisted, ...(JSON.parse(String(init?.body)) as Record<string, unknown>) }
+        return jsonResponse({ status: 'success', data: null })
+      }
+      return jsonResponse({ message: 'unexpected endpoint' }, 500)
+    }) as typeof fetch
+    setAuthSessionFromLogin(true, { logged_in: true, username: 'admin' })
+
+    await saveManagedThemeSettings({
+      theme: 'Transit',
+      patch: { topologyEnabled: true },
+      permission: 'nodeTopology',
+      requestKey: 'test:theme-settings:publish',
+      onPublicSettings: settings => synchronized.push(JSON.stringify(settings.theme_settings)),
+    })
+    expect(synchronized.length).toBeGreaterThanOrEqual(2)
+    expect(synchronized.at(-1)).toContain('topologyEnabled')
+  })
+
+  test('publishes through the registered publisher even when a caller forgets onPublicSettings', async () => {
+    const synchronized: Array<Record<string, unknown> | null | undefined> = []
+    let persisted: Record<string, unknown> = { preserved: 'server-value' }
+    setManagedThemeSettingsPublisher(settings => synchronized.push(settings.theme_settings))
+    globalThis.fetch = (async (input, init) => {
+      const url = String(input)
+      if (url.endsWith('/api/me'))
+        return jsonResponse({ logged_in: true, username: 'admin' })
+      if (url.endsWith('/api/public'))
+        return jsonResponse({ status: 'success', message: '', data: { theme: 'Transit', theme_settings: persisted } })
+      if (url.includes('/api/admin/theme/settings?theme=Transit')) {
+        persisted = { ...persisted, ...(JSON.parse(String(init?.body)) as Record<string, unknown>) }
+        return jsonResponse({ status: 'success', data: null })
+      }
+      return jsonResponse({ message: 'unexpected endpoint' }, 500)
+    }) as typeof fetch
+    setAuthSessionFromLogin(true, { logged_in: true, username: 'admin' })
+
+    await saveManagedThemeSettings({
+      theme: 'Transit',
+      patch: { topologyEnabled: true },
+      permission: 'nodeTopology',
+      requestKey: 'test:theme-settings:publisher',
+    })
+    expect(synchronized.some(settings => settings && settings.topologyEnabled === true)).toBe(true)
+  })
+
   test('uses the Komari 1.4 settings endpoint', async () => {
     const calls: Array<{ method?: string, url: string }> = []
     let persisted: Record<string, unknown> = { preserved: 'server-value' }

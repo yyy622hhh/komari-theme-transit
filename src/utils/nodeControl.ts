@@ -36,6 +36,58 @@ export function serializeNodeControls(value: NodeControls): string {
   return JSON.stringify(value)
 }
 
+function readNodeControlMap(value: unknown): Record<string, unknown> | null {
+  try {
+    const parsed = typeof value === 'string' ? JSON.parse(value) as unknown : value
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+      return null
+    return parsed as Record<string, unknown>
+  }
+  catch {
+    return null
+  }
+}
+
+function overlayNodeControl(raw: unknown, next: NodeControl): Record<string, unknown> {
+  const base = raw && typeof raw === 'object' && !Array.isArray(raw)
+    ? { ...(raw as Record<string, unknown>) }
+    : {}
+  if (next.maintenanceUntil)
+    base.maintenanceUntil = next.maintenanceUntil
+  else
+    delete base.maintenanceUntil
+  if (next.silenceUntil)
+    base.silenceUntil = next.silenceUntil
+  else
+    delete base.silenceUntil
+  return base
+}
+
+/** 在服务端原图上做增量修改，保留当前主题不认识的节点条目和额外字段。 */
+export function mergeNodeControls(
+  raw: unknown,
+  apply: (current: NodeControls) => NodeControls,
+  now = Date.now(),
+): Record<string, unknown> {
+  const rawMap = readNodeControlMap(raw) ?? {}
+  const current = parseNodeControls(rawMap, now)
+  const next = apply(current)
+  const merged: Record<string, unknown> = {}
+
+  for (const [uuid, value] of Object.entries(rawMap)) {
+    if (!uuid.trim())
+      continue
+    if (Object.hasOwn(current, uuid) && !Object.hasOwn(next, uuid))
+      continue
+    merged[uuid] = Object.hasOwn(next, uuid) ? overlayNodeControl(value, next[uuid]!) : value
+  }
+  for (const [uuid, control] of Object.entries(next)) {
+    if (!Object.hasOwn(merged, uuid))
+      merged[uuid] = control
+  }
+  return merged
+}
+
 export function updateNodeControl(
   controls: NodeControls,
   uuid: string,

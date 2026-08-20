@@ -40,7 +40,6 @@ let targetTheta = INITIAL_THETA
 let isPointerDown = false
 let lastPointerX = 0
 let lastPointerY = 0
-let staticRedrawUntil = 0
 let rebuildGeneration = 0
 const labelElements = new Map<string, HTMLElement>()
 
@@ -63,19 +62,6 @@ function resetStoppedView() {
   targetPhi = DEFAULT_PHI
   theta = INITIAL_THETA
   targetTheta = INITIAL_THETA
-}
-
-function triggerStaticRedrawWindow(duration = 1500) {
-  if (typeof performance === 'undefined') {
-    staticRedrawUntil = Date.now() + duration
-    return
-  }
-  staticRedrawUntil = performance.now() + duration
-}
-
-function shouldKeepStaticRedraw(): boolean {
-  const now = typeof performance === 'undefined' ? Date.now() : performance.now()
-  return now < staticRedrawUntil
 }
 
 const {
@@ -232,10 +218,9 @@ const { pause: pauseRaf, resume: resumeRaf } = useRafFn(
       Math.abs(phi - prevPhi) < ORIENTATION_IDLE_EPSILON
       && Math.abs(theta - prevTheta) < ORIENTATION_IDLE_EPSILON
     ) {
-      if (!shouldAutoRotate.value && shouldKeepStaticRedraw()) {
-        updateGlobeFrame()
-        applyLabelStyles()
-      }
+      // preserveDrawingBuffer 为 false：停转后不 update 会被合成器清成空白。
+      updateGlobeFrame()
+      applyLabelStyles()
       return
     }
     updateGlobeFrame()
@@ -244,20 +229,22 @@ const { pause: pauseRaf, resume: resumeRaf } = useRafFn(
   { immediate: false },
 )
 
+function wakeGlobe(): void {
+  if (shouldRender.value)
+    resumeRaf()
+}
+
 function startGlobe() {
   if (!canvasRef.value)
     return
-  if (appStore.stopEarth) {
+  if (appStore.stopEarth)
     resetStoppedView()
-    triggerStaticRedrawWindow()
-  }
   globe = createGlobe(canvasRef.value, buildInitialOptions())
   requestAnimationFrame(() => {
     updateGlobeFrame()
     applyLabelStyles()
   })
-  if (documentVisibility.value === 'visible')
-    resumeRaf()
+  wakeGlobe()
 }
 
 async function stopGlobe() {
@@ -302,10 +289,9 @@ watch(
   ([width, height]) => {
     if (!globe || width <= 0 || height <= 0)
       return
-    if (!shouldAutoRotate.value)
-      triggerStaticRedrawWindow(600)
     updateGlobeFrame()
     applyLabelStyles()
+    wakeGlobe()
   },
 )
 
@@ -314,9 +300,9 @@ watch(
   (stopped) => {
     if (stopped)
       resetStoppedView()
-    triggerStaticRedrawWindow()
     updateGlobeFrame()
     applyLabelStyles()
+    wakeGlobe()
   },
 )
 
@@ -327,8 +313,7 @@ watch(
       return
     globe.update({ markers: markers.value })
     applyLabelStyles()
-    if (!shouldAutoRotate.value)
-      triggerStaticRedrawWindow(600)
+    wakeGlobe()
   },
 )
 
@@ -336,14 +321,11 @@ watch(shouldRender, (visible) => {
   if (!globe)
     return
   if (visible) {
-    if (!shouldAutoRotate.value)
-      triggerStaticRedrawWindow()
-    resumeRaf()
+    wakeGlobe()
+    return
   }
-  else {
-    pauseRaf()
-  }
-})
+  pauseRaf()
+}, { immediate: true })
 
 function onPointerDown(e: PointerEvent) {
   isPointerDown = true
@@ -351,6 +333,7 @@ function onPointerDown(e: PointerEvent) {
   lastPointerY = e.clientY
   const target = e.currentTarget as HTMLElement
   target.setPointerCapture(e.pointerId)
+  wakeGlobe()
 }
 function onPointerMove(e: PointerEvent) {
   if (!isPointerDown)
@@ -382,7 +365,7 @@ function onPointerUp(e: PointerEvent) {
       v-for="label in cobeLabels"
       :key="label.id"
       :ref="bindLabelRef(label.id)"
-      class="absolute left-0 top-0 z-3 rounded-[0.18rem] transition-[opacity,filter] duration-300"
+      class="pointer-events-none absolute left-0 top-0 z-3 rounded-[0.18rem] transition-[opacity,filter] duration-300"
     >
       <img
         :src="`/images/flags/${label.code}.svg`" :alt="label.code"

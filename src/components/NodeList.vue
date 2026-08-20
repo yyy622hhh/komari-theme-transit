@@ -16,7 +16,7 @@ import { UI_CONFIG } from '@/constants/ui'
 import { useAppStore } from '@/stores/app'
 import { formatCityNameZh } from '@/utils/cityNameHelper'
 import { formatBytesPerSecondWithConfig, formatBytesWithConfig, formatDateTime, formatUptimeWithFormat, getStatus } from '@/utils/helper'
-import { getRealtimeTotalSpeed, getTrafficUsed, getTrafficUsedPercentage, hasTrafficLimit } from '@/utils/nodeMetricsHelper'
+import { getDiskPercentage, getMemoryPercentage, getRealtimeTotalSpeed, getTrafficUsed, getTrafficUsedPercentage, hasTrafficLimit } from '@/utils/nodeMetricsHelper'
 import { getOSImage, getOSName } from '@/utils/osImageHelper'
 import { getRegionCode, getRegionDisplayName } from '@/utils/regionHelper'
 import { formatPriceWithCycle, getDaysUntilExpired, getExpireStatus, parseTags } from '@/utils/tagHelper'
@@ -145,8 +145,8 @@ const sortedNodes = computed(() => {
         return dir * (va < vb ? -1 : va > vb ? 1 : 0)
       }
       case 'cpu': return dir * ((a.cpu ?? 0) - (b.cpu ?? 0))
-      case 'mem': return dir * ((a.ram ?? 0) / (a.mem_total || 1) - (b.ram ?? 0) / (b.mem_total || 1))
-      case 'disk': return dir * ((a.disk ?? 0) / (a.disk_total || 1) - (b.disk ?? 0) / (b.disk_total || 1))
+      case 'mem': return dir * (getMemoryPercentage(a) - getMemoryPercentage(b))
+      case 'disk': return dir * (getDiskPercentage(a) - getDiskPercentage(b))
       case 'traffic':
       case 'rate':
         return dir * (getRealtimeTotalSpeed(a) - getRealtimeTotalSpeed(b))
@@ -581,15 +581,15 @@ function buildNodeMetadataItems(node: NodeData): NodeMetadataItem[] {
                   <div class="space-y-1">
                     <div class="text-[11px] font-medium text-foreground/75 truncate">
                       <span class="inline group-hover:hidden">
-                        {{ ((node.ram ?? 0) / (node.mem_total || 1) * 100).toFixed(1) }}%
+                        {{ getMemoryPercentage(node).toFixed(1) }}%
                       </span>
                       <span class="hidden group-hover:inline">
                         {{ formatBytes(node.ram ?? 0) }} / {{ formatBytes(node.mem_total ?? 0) }}
                       </span>
                     </div>
                     <ProgressThin
-                      :percentage="(node.ram ?? 0) / (node.mem_total || 1) * 100"
-                      :status="getStatus((node.ram ?? 0) / (node.mem_total || 1) * 100)" :height="4"
+                      :percentage="getMemoryPercentage(node)"
+                      :status="getStatus(getMemoryPercentage(node))" :height="4"
                     />
                   </div>
                 </div>
@@ -599,15 +599,15 @@ function buildNodeMetadataItems(node: NodeData): NodeMetadataItem[] {
                   <div class="space-y-1">
                     <div class="text-[11px] font-medium text-foreground/75 truncate">
                       <span class="inline group-hover:hidden">
-                        {{ ((node.disk ?? 0) / (node.disk_total || 1) * 100).toFixed(1) }}%
+                        {{ getDiskPercentage(node).toFixed(1) }}%
                       </span>
                       <span class="hidden group-hover:inline">
                         {{ formatBytes(node.disk ?? 0) }} / {{ formatBytes(node.disk_total ?? 0) }}
                       </span>
                     </div>
                     <ProgressThin
-                      :percentage="(node.disk ?? 0) / (node.disk_total || 1) * 100"
-                      :status="getStatus((node.disk ?? 0) / (node.disk_total || 1) * 100)" :height="4"
+                      :percentage="getDiskPercentage(node)"
+                      :status="getStatus(getDiskPercentage(node))" :height="4"
                     />
                   </div>
                 </div>

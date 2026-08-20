@@ -71,6 +71,23 @@ const useAppStore = defineStore('app', () => {
   const themeMode = useStorageAsync<ThemeMode>('themeMode', 'auto', localStorage)
   const lang = ref<Lang>('zh-CN')
   const publicSettings = ref<PublicSettings>()
+  const publicSettingsEpoch = ref(0)
+
+  /** `/api/public` 的权威值。主题没变才覆盖，避免把另一个主题的配置混进来。 */
+  function applyPublicSettings(settings: PublicSettings): void {
+    const current = publicSettings.value
+    if (!current || current.theme === settings.theme) {
+      publicSettings.value = settings
+      publicSettingsEpoch.value += 1
+    }
+  }
+
+  /** 启动 GET 前记下代数；返回后若中间发生过主题写入则丢弃这份过期响应。 */
+  function applyFetchedPublicSettings(settings: PublicSettings, readEpoch: number): void {
+    if (readEpoch !== publicSettingsEpoch.value)
+      return
+    applyPublicSettings(settings)
+  }
   const nodeSelectedGroup = useStorageAsync<string>('nodeSelectedGroup', 'all', localStorage)
   const favoriteNodeIds = useStorageAsync<string[]>('theme:favorite-nodes:v1', [], localStorage)
   const isLoggedIn = ref<boolean>(getAuthSession().authenticated)
@@ -585,6 +602,9 @@ const useAppStore = defineStore('app', () => {
     authStatus,
     privateFeaturesAllowed,
     publicSettings,
+    publicSettingsEpoch,
+    applyPublicSettings,
+    applyFetchedPublicSettings,
     connectionError,
     homeScrollPosition,
     updateThemeMode,

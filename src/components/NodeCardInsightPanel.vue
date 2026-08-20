@@ -130,7 +130,7 @@ function lossTone(loss: string): string {
 
       <div v-if="effectiveMode === 'system'" class="grid grid-cols-3 gap-1 text-center text-[8px]">
         <div class="min-w-0 rounded-md bg-slate-500/[0.05] px-1 py-1.5">
-          <span class="block text-slate-500">Load</span><strong class="mt-1 block truncate tabular-nums">{{ node.load.toFixed(2) }}</strong>
+          <span class="block text-slate-500">Load</span><strong class="mt-1 block truncate tabular-nums">{{ (node.load ?? 0).toFixed(2) }}</strong>
         </div>
         <div class="min-w-0 rounded-md bg-slate-500/[0.05] px-1 py-1.5">
           <span class="block text-slate-500">温度</span><strong class="mt-1 block truncate tabular-nums">{{ node.temp > 0 ? `${node.temp.toFixed(1)}°C` : '-' }}</strong>
@@ -139,7 +139,7 @@ function lossTone(loss: string): string {
           <span class="block text-slate-500">Swap</span><strong class="mt-1 block truncate tabular-nums">{{ node.swap_total > 0 ? `${swapPercentage.toFixed(1)}%` : '无' }}</strong>
         </div>
         <div class="col-span-3 flex items-center justify-between px-1 text-slate-500">
-          <span>进程 {{ node.process }}</span><span>连接 {{ totalConnections }}</span><span>Load5 {{ node.load5.toFixed(2) }}</span>
+          <span>进程 {{ node.process }}</span><span>连接 {{ totalConnections }}</span><span>Load5 {{ (node.load5 ?? 0).toFixed(2) }}</span>
         </div>
       </div>
 

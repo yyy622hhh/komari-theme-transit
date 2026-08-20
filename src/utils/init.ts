@@ -6,6 +6,7 @@
 import type { Client, KomariRpc, NodeStatus } from '@/utils/rpc'
 import { KOMARI_ADMIN_SERVERS_PATH } from '@/constants/navigation'
 import { REALTIME_CONFIG } from '@/constants/realtime'
+import { setManagedThemeSettingsPublisher } from '@/services/theme-settings.service'
 import { useAppStore } from '@/stores/app'
 import { useNodesStore } from '@/stores/nodes'
 import { getSharedApi } from '@/utils/api'
@@ -166,6 +167,7 @@ export class InitManager {
     this.navigate = dependencies.navigate ?? ((path: string) => {
       location.href = path
     })
+    setManagedThemeSettingsPublisher(settings => this.appStore.applyPublicSettings?.(settings))
   }
 
   private isLifecycleCurrent(generation: number): boolean {
@@ -337,10 +339,14 @@ export class InitManager {
    */
   private async fetchPublicSettings(signal: AbortSignal, canCommit: CommitGuard): Promise<void> {
     try {
+      const readEpoch = this.appStore.publicSettingsEpoch ?? 0
       const publicSettings = await this.api.getPublicSettings(signal)
       if (!canCommit())
         return
-      this.appStore.publicSettings = publicSettings
+      if (typeof this.appStore.applyFetchedPublicSettings === 'function')
+        this.appStore.applyFetchedPublicSettings(publicSettings, readEpoch)
+      else
+        this.appStore.publicSettings = publicSettings
     }
     catch (error) {
       if (signal.aborted || !canCommit())
@@ -363,9 +369,8 @@ export class InitManager {
     catch (error) {
       if (signal.aborted || !canCommit())
         return
-      this.appStore.updateLoginState(false)
       logAppError('Failed to fetch user info', error)
-      // 非关键错误，继续初始化
+      // 网络失败不能写成 guest：verifyLogin 会把 guest 缓存 60s，后台自愈被误拒。
     }
   }
 
@@ -778,6 +783,7 @@ export class InitManager {
     this.refreshAfterCurrentPoll = false
     this.nodesStore.clearNodes()
     this.isInitialized = false
+    setManagedThemeSettingsPublisher()
   }
 }
 

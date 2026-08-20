@@ -15,14 +15,20 @@ const props = withDefaults(defineProps<{
 
 const root = ref<HTMLElement | null>(null)
 const activeIndex = ref<number | null>(null)
+const activeSampleKey = ref<string | null>(null)
 const pinned = ref(false)
 const tooltipId = useId()
 const sampleListId = useId()
 const tooltipPosition = ref({ left: 0, top: 0, below: false })
 let stopViewportRefresh: (() => void) | null = null
 
-const activeSample = computed(() => activeIndex.value === null ? null : props.samples[activeIndex.value] ?? null)
-const activeSampleId = computed(() => activeIndex.value === null ? undefined : `${sampleListId}-sample-${activeIndex.value}`)
+const activeSample = computed(() => activeSampleKey.value === null
+  ? null
+  : props.samples.find(sample => sample.key === activeSampleKey.value) ?? null)
+const activeSampleIndex = computed(() => activeSampleKey.value === null
+  ? -1
+  : props.samples.findIndex(sample => sample.key === activeSampleKey.value))
+const activeSampleId = computed(() => activeSampleIndex.value < 0 ? undefined : `${sampleListId}-sample-${activeSampleIndex.value}`)
 
 const rootClass = computed(() => props.variant === 'ticks'
   ? 'absolute inset-x-2 bottom-0 flex h-4 items-center justify-between outline-none focus-visible:ring-1 focus-visible:ring-emerald-500/70 dark:focus-visible:ring-emerald-300/70'
@@ -50,6 +56,7 @@ const activeTextClass = computed(() => {
 
 function closeTooltip(): void {
   activeIndex.value = null
+  activeSampleKey.value = null
   pinned.value = false
 }
 
@@ -64,7 +71,13 @@ function positionTooltip(target: HTMLElement): void {
 }
 
 function openTooltip(index: number, target: HTMLElement): void {
+  const sample = props.samples[index]
+  if (!sample) {
+    closeTooltip()
+    return
+  }
   activeIndex.value = index
+  activeSampleKey.value = sample.key
   positionTooltip(target)
 }
 
@@ -85,12 +98,12 @@ function handlePointerEnter(event: PointerEvent, index: number): void {
 
 function handlePointerLeave(): void {
   if (!pinned.value && !root.value?.matches(':focus-within'))
-    activeIndex.value = null
+    closeTooltip()
 }
 
 function toggleSample(event: MouseEvent, index: number): void {
   event.stopPropagation()
-  if (pinned.value && activeIndex.value === index) {
+  if (pinned.value && props.samples[index]?.key === activeSampleKey.value) {
     closeTooltip()
     return
   }
@@ -105,7 +118,7 @@ function handleFocus(): void {
 
 function handleFocusOut(event: FocusEvent): void {
   if (!pinned.value && !root.value?.contains(event.relatedTarget as Node | null))
-    activeIndex.value = null
+    closeTooltip()
 }
 
 function handleKeyboard(event: KeyboardEvent): void {
@@ -113,7 +126,7 @@ function handleKeyboard(event: KeyboardEvent): void {
     return
 
   const lastIndex = props.samples.length - 1
-  const currentIndex = activeIndex.value ?? lastIndex
+  const currentIndex = activeSampleIndex.value >= 0 ? activeSampleIndex.value : lastIndex
   let nextIndex = currentIndex
 
   if (event.key === 'ArrowLeft') {
@@ -150,9 +163,21 @@ function handleKeyboard(event: KeyboardEvent): void {
 }
 
 function refreshTooltipPosition(): void {
-  if (activeIndex.value !== null)
-    showSample(activeIndex.value)
+  if (activeSampleIndex.value >= 0)
+    showSample(activeSampleIndex.value)
 }
+
+watch(() => props.samples.map(sample => sample.key).join('\0'), () => {
+  if (activeSampleKey.value === null)
+    return
+  const index = activeSampleIndex.value
+  if (index < 0) {
+    closeTooltip()
+    return
+  }
+  activeIndex.value = index
+  refreshTooltipPosition()
+}, { flush: 'post' })
 
 watch(activeIndex, (index) => {
   if (index !== null && !stopViewportRefresh) {

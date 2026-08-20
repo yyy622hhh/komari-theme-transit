@@ -2,7 +2,7 @@
 import type { NodeData } from '@/stores/nodes'
 import type { PingRecord, StatusRecord } from '@/utils/rpc'
 import { Icon } from '@iconify/vue'
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { CardX } from '@/components/ui/card-x'
@@ -12,7 +12,7 @@ import { loadLoadRecords, loadPingRecords } from '@/services/history.service'
 import { analyzeDiskPrediction } from '@/services/prediction.service'
 import { useAppStore } from '@/stores/app'
 import { formatBytesPerSecondWithConfig, formatBytesWithConfig } from '@/utils/helper'
-import { getTrafficUsed, getTrafficUsedPercentage, hasTrafficLimit } from '@/utils/nodeMetricsHelper'
+import { getCapacityPeakPercentage, getDiskPercentage, getTrafficUsed, getTrafficUsedPercentage, hasTrafficLimit } from '@/utils/nodeMetricsHelper'
 
 interface HealthRangeOption {
   key: 'day' | 'week' | 'month' | 'all'
@@ -81,7 +81,13 @@ const rangeOptions = computed<HealthRangeOption[]>(() => {
   return options.filter(option => option.key === 'all' || allHours >= option.hours)
 })
 
-const selectedHours = computed(() => rangeOptions.value.find(option => option.key === selectedRange.value)?.hours ?? 168)
+watch(rangeOptions, (options) => {
+  if (options.some(option => option.key === selectedRange.value))
+    return
+  selectedRange.value = options[0]?.key ?? 'all'
+}, { immediate: true })
+
+const selectedHours = computed(() => rangeOptions.value.find(option => option.key === selectedRange.value)?.hours ?? rangeOptions.value[0]?.hours ?? 24)
 const HEALTH_LIST_LIMIT = 10
 const HEALTH_LOAD_MAX_COUNT = LOAD_RECORD_MAX_COUNT
 const HEALTH_PING_MAX_COUNT = PING_RECORD_MAX_COUNT
@@ -95,12 +101,10 @@ function formatSpeed(bytes: number): string {
 }
 
 function getMemoryPeak(records: StatusRecord[], fallbackTotal: number): number {
-  let peak = 0
-  for (const record of records) {
-    const total = record.ram_total || fallbackTotal || 1
-    peak = Math.max(peak, (record.ram || 0) / total * 100)
-  }
-  return peak
+  return getCapacityPeakPercentage(
+    records.map(record => ({ used: record.ram, total: record.ram_total })),
+    fallbackTotal,
+  )
 }
 
 function getCpuPeak(records: StatusRecord[], fallback: number): number {
@@ -118,12 +122,13 @@ function getLoadPeak(records: StatusRecord[], fallback: number): number {
 }
 
 function getDiskUsagePeak(records: StatusRecord[], fallbackUsed: number, fallbackTotal: number): number {
-  let peak = fallbackTotal > 0 ? fallbackUsed / fallbackTotal * 100 : 0
-  for (const record of records) {
-    const total = record.disk_total || fallbackTotal || 1
-    peak = Math.max(peak, (record.disk || 0) / total * 100)
-  }
-  return peak
+  return Math.max(
+    getDiskPercentage({ disk: fallbackUsed, disk_total: fallbackTotal }),
+    getCapacityPeakPercentage(
+      records.map(record => ({ used: record.disk, total: record.disk_total })),
+      fallbackTotal,
+    ),
+  )
 }
 
 function getTrafficBurnSpeed(node: NodeData): number {

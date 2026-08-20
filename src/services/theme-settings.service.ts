@@ -1,4 +1,5 @@
 import type { PermissionKey } from '@/services/auth.service'
+import type { PublicSettings } from '@/utils/api'
 import { requirePermission } from '@/services/auth.service'
 import { requestManager } from '@/services/request.service'
 import { getSharedApi } from '@/utils/api'
@@ -13,6 +14,8 @@ type ThemeSettingsPatch
   = | Record<string, unknown>
     | ((currentSettings: Record<string, unknown>) => Record<string, unknown>)
 
+export type PublicSettingsUpdater = (settings: PublicSettings) => void
+
 interface SaveThemeSettingsOptions {
   theme: string
   patch: ThemeSettingsPatch
@@ -20,10 +23,28 @@ interface SaveThemeSettingsOptions {
   permission: PermissionKey
   requestKey: string
   lockHeld?: boolean
+  onPublicSettings?: PublicSettingsUpdater
 }
 
 const themeSaveTails = new Map<string, Promise<void>>()
 const EXPECTED_MISSING = Symbol('transit expected missing theme setting')
+let publicSettingsPublisher: PublicSettingsUpdater | undefined
+
+export const STALE_MANAGED_THEME_SETTINGS_MESSAGE = '拓扑配置已被其他会话修改，请重新打开管理器后再保存。'
+
+/** 应用启动时注册，这样新的保存路径就算忘了传 onPublicSettings 也会写回 store。 */
+export function setManagedThemeSettingsPublisher(updater?: PublicSettingsUpdater): void {
+  publicSettingsPublisher = updater
+}
+
+function publishPublicSettings(settings: PublicSettings, extra?: PublicSettingsUpdater): void {
+  publicSettingsPublisher?.(settings)
+  extra?.(settings)
+}
+
+export function isStaleManagedThemeSettingsError(error: unknown): boolean {
+  return error instanceof Error && error.message === STALE_MANAGED_THEME_SETTINGS_MESSAGE
+}
 
 export function createThemeSettingsSnapshot(settings: Record<string, unknown>, keys: string[]): Record<string, unknown> {
   return Object.fromEntries(keys.map(key => [
@@ -59,16 +80,17 @@ export async function withManagedThemeSettingsLock<T>(theme: string, save: () =>
   return navigator.locks.request(`transit:theme-settings:${theme}`, save)
 }
 
-export async function assertManagedThemeSettingsCurrent(options: Pick<SaveThemeSettingsOptions, 'theme' | 'expected' | 'permission'>): Promise<void> {
+export async function assertManagedThemeSettingsCurrent(options: Pick<SaveThemeSettingsOptions, 'theme' | 'expected' | 'permission' | 'onPublicSettings'>): Promise<void> {
   const permission = await requirePermission(options.permission, { force: true })
   if (!permission.granted)
     throw new Error('登录状态已过期，请重新登录后保存。')
   const current = await getSharedApi().getPublicSettings()
+  publishPublicSettings(current, options.onPublicSettings)
   if (current.theme !== options.theme)
     throw new Error('当前主题已改变，请刷新页面后重试。')
   const currentSettings = validateServerThemeSettings(current.theme_settings)
   if (options.expected && !persistedPatchMatches(currentSettings, options.expected))
-    throw new Error('拓扑配置已被其他会话修改，请重新打开管理器后再保存。')
+    throw new Error(STALE_MANAGED_THEME_SETTINGS_MESSAGE)
 }
 
 async function serializeThemeSave<T>(theme: string, save: () => Promise<T>): Promise<T> {
@@ -131,13 +153,14 @@ export async function saveManagedThemeSettings(options: SaveThemeSettingsOptions
       // Transit tabs; Komari does not expose a revision/CAS API, so an official
       // admin write in this very small GET-to-POST window cannot be detected.
       const current = await getSharedApi().getPublicSettings(signal)
+      publishPublicSettings(current, options.onPublicSettings)
       if (current.theme !== options.theme)
         throw new Error('当前主题已改变，请刷新页面后重试。')
       const currentSettings = validateServerThemeSettings(current.theme_settings)
       if (typeof options.patch === 'function')
         patch = validateThemeSettings(options.patch(currentSettings))
       if (options.expected && !persistedPatchMatches(currentSettings, options.expected))
-        throw new Error('拓扑配置已被其他会话修改，请重新打开管理器后再保存。')
+        throw new Error(STALE_MANAGED_THEME_SETTINGS_MESSAGE)
       savedSettings = {
         ...currentSettings,
         ...patch,
@@ -169,6 +192,7 @@ export async function saveManagedThemeSettings(options: SaveThemeSettingsOptions
     }, { retryAttempts: 0 })
 
     const persisted = await getSharedApi().getPublicSettings()
+    publishPublicSettings(persisted, options.onPublicSettings)
     const persistedSettings = validateServerThemeSettings(persisted.theme_settings)
     if (persisted.theme !== options.theme || !persistedPatchMatches(persistedSettings, patch))
       throw new Error('服务器未保留本次主题配置，请刷新后重试。')

@@ -40,6 +40,8 @@ let authSession: AuthSession = {
   lastVerifiedAt: 0,
 }
 let verifyPromise: Promise<AuthSession> | null = null
+let verifyPromiseForced = false
+let verifyGeneration = 0
 let authSessionRevision = 0
 const authSessionListeners = new Set<(session: AuthSession) => void>()
 
@@ -93,6 +95,7 @@ export function getCurrentUser(): MeInfo | null {
 export function setAuthSessionFromLogin(loggedIn: boolean, user: MeInfo | null = null): AuthSession {
   authSessionRevision += 1
   verifyPromise = null
+  verifyPromiseForced = false
   return updateAuthSession({
     status: loggedIn ? 'authenticated' : 'guest',
     authenticated: loggedIn,
@@ -104,20 +107,23 @@ export function setAuthSessionFromLogin(loggedIn: boolean, user: MeInfo | null =
 export async function verifyLogin(options: VerifyLoginOptions = {}): Promise<AuthSession> {
   const now = Date.now()
   const freshEnough = now - authSession.lastVerifiedAt < SECURITY_CONFIG.auth.verifyTtl
-  if (!options.force && authSession.status !== 'unknown' && freshEnough)
+  if (!options.force && authSession.status !== 'unknown' && authSession.status !== 'error' && freshEnough)
     return authSession
 
-  if (verifyPromise)
+  const force = Boolean(options.force)
+  // 非强制请求可以复用在途结果；强制校验不能加入一次可能已过期的普通 /me。
+  if (verifyPromise && (!force || verifyPromiseForced))
     return verifyPromise
 
   const revision = authSessionRevision
+  const generation = ++verifyGeneration
   const pendingVerification = getSharedApi().getMe().then((user) => {
-    if (revision !== authSessionRevision)
+    if (revision !== authSessionRevision || generation !== verifyGeneration)
       return authSession
 
     return updateAuthSession(createSessionFromMe(user))
   }).catch((error) => {
-    if (revision !== authSessionRevision)
+    if (revision !== authSessionRevision || generation !== verifyGeneration)
       return authSession
 
     return updateAuthSession({
@@ -133,6 +139,7 @@ export async function verifyLogin(options: VerifyLoginOptions = {}): Promise<Aut
   })
 
   verifyPromise = pendingVerification
+  verifyPromiseForced = force
   return pendingVerification
 }
 

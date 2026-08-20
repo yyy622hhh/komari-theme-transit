@@ -36,6 +36,24 @@ describe('fillMissingTimePoints', () => {
     expect(grid10?.cpu).toBe(10)
   })
 
+  test('does not assign a sample to an earlier grid slot when the next slot is closer', () => {
+    const data = [{ time: iso(90), cpu: 90 }, { time: iso(180), cpu: 180 }]
+    const filled = fillMissingTimePoints(data, 60, 240, 120)
+
+    expect(filled.find(point => point.time === iso(0))?.cpu).toBeNull()
+    expect(filled.find(point => point.time === iso(60))?.cpu).toBe(90)
+    expect(filled.find(point => point.time === iso(180))?.cpu).toBe(180)
+  })
+
+  test('uses the nearest sample once so the latest history point is retained', () => {
+    const data = [0, 10, 20, 30].map(offset => ({ time: iso(offset), cpu: offset }))
+
+    const filled = fillMissingTimePoints(data, 10, 30)
+
+    expect(filled.map(point => point.cpu)).toEqual([10, 20, 30])
+    expect(filled.at(-1)?.time).toBe(iso(30))
+  })
+
   test('fills a genuinely missing point with a null-valued template, preserving non-numeric fields', () => {
     const data = [{ time: iso(0), client: 'node-a', cpu: 10 }, { time: iso(300), client: 'node-a', cpu: 90 }]
     const filled = fillMissingTimePoints(data, 60, 300, 5)

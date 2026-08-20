@@ -78,7 +78,7 @@ function buildHistoryBars(
     const lossText = `丢包 ${formatLoss(point.loss)}`
 
     return {
-      key: `${carrierKey}-${metric}-${point.time}-${index}`,
+      key: `${carrierKey}-${metric}-${history.length - 1 - index}`,
       ...visual,
       valueText: metric === 'latency' ? latencyText : lossText,
       secondaryText: metric === 'latency' ? lossText : latencyText,

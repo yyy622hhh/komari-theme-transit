@@ -55,27 +55,73 @@ function normalizePingTasks(value: unknown): string[] {
     .slice(0, MAX_PING_TASKS)
 }
 
-export function parseNodeCardPanelConfigs(value: unknown): NodeCardPanelConfigs {
+function readNodeCardPanelMap(value: unknown): Record<string, unknown> | null {
   try {
     const parsed = typeof value === 'string' ? JSON.parse(value) as unknown : value
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
-      return {}
-
-    const result: NodeCardPanelConfigs = {}
-    for (const [uuid, raw] of Object.entries(parsed).slice(0, MAX_NODE_PANEL_CONFIGS)) {
-      if (!uuid.trim() || UNSAFE_CONFIG_KEYS.has(uuid) || !raw || typeof raw !== 'object' || Array.isArray(raw))
-        continue
-      const source = raw as Record<string, unknown>
-      if (!isNodeCardPanelMode(source.mode))
-        continue
-      const pingTasks = normalizePingTasks(source.pingTasks)
-      result[uuid] = pingTasks.length ? { mode: source.mode, pingTasks } : { mode: source.mode }
-    }
-    return result
+      return null
+    return parsed as Record<string, unknown>
   }
   catch {
-    return {}
+    return null
   }
+}
+
+export function parseNodeCardPanelConfigs(value: unknown): NodeCardPanelConfigs {
+  const parsed = readNodeCardPanelMap(value)
+  if (!parsed)
+    return {}
+
+  const result: NodeCardPanelConfigs = {}
+  for (const [uuid, raw] of Object.entries(parsed).slice(0, MAX_NODE_PANEL_CONFIGS)) {
+    if (!uuid.trim() || UNSAFE_CONFIG_KEYS.has(uuid) || !raw || typeof raw !== 'object' || Array.isArray(raw))
+      continue
+    const source = raw as Record<string, unknown>
+    if (!isNodeCardPanelMode(source.mode))
+      continue
+    const pingTasks = normalizePingTasks(source.pingTasks)
+    result[uuid] = pingTasks.length ? { mode: source.mode, pingTasks } : { mode: source.mode }
+  }
+  return result
+}
+
+/**
+ * 在服务端原图上做增量修改：能识别的 UUID 走规范化，无法识别的条目原样保留。
+ * 保存路径如果先 parse 再整表写回，新版本存下来的未知 mode 会被旧版本一次抹掉。
+ */
+function overlayNodeCardPanelConfig(raw: unknown, next: NodeCardPanelConfig): Record<string, unknown> {
+  const base = raw && typeof raw === 'object' && !Array.isArray(raw)
+    ? { ...(raw as Record<string, unknown>) }
+    : {}
+  base.mode = next.mode
+  if (next.pingTasks?.length)
+    base.pingTasks = next.pingTasks
+  else
+    delete base.pingTasks
+  return base
+}
+
+export function mergeNodeCardPanelConfigs(
+  raw: unknown,
+  apply: (current: NodeCardPanelConfigs) => NodeCardPanelConfigs,
+): Record<string, unknown> {
+  const rawMap = readNodeCardPanelMap(raw) ?? {}
+  const current = parseNodeCardPanelConfigs(rawMap)
+  const next = apply(current)
+  const merged: Record<string, unknown> = {}
+
+  for (const [uuid, value] of Object.entries(rawMap)) {
+    if (!uuid.trim() || UNSAFE_CONFIG_KEYS.has(uuid))
+      continue
+    if (Object.hasOwn(current, uuid) && !Object.hasOwn(next, uuid))
+      continue
+    merged[uuid] = Object.hasOwn(next, uuid) ? overlayNodeCardPanelConfig(value, next[uuid]!) : value
+  }
+  for (const [uuid, config] of Object.entries(next)) {
+    if (!Object.hasOwn(merged, uuid))
+      merged[uuid] = config
+  }
+  return merged
 }
 
 export function serializeNodeCardPanelConfigs(configs: NodeCardPanelConfigs): string {

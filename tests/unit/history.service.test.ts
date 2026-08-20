@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { loadNodeLoadRecords, normalizeStatusRecord } from '../../src/services/history.service'
+import { loadNodeLoadRecords, loadRecentNodeStatus, normalizeStatusRecord } from '../../src/services/history.service'
 import { resetSharedApi } from '../../src/utils/api'
 import { normalizeConnectionCounts } from '../../src/utils/nodeMetricsHelper'
 import { resetSharedRpc } from '../../src/utils/rpc'
@@ -70,7 +70,47 @@ describe('normalizeStatusRecord connection counts', () => {
   test('never reports a negative TCP count when the backend is inconsistent', () => {
     const record = normalizeStatusRecord({ ...base, connections: 5, connections_udp: 20 })
     expect(record?.connections).toBe(0)
-    expect(record?.connections_udp).toBe(20)
+    expect(record?.connections_udp).toBe(5)
+  })
+
+  test('normalizes recent realtime status so the TCP series does not include UDP', async () => {
+    globalThis.fetch = (async (input, init) => {
+      const url = String(input)
+      if (url.includes('/rpc2')) {
+        const request = JSON.parse(String(init?.body)) as { id: number }
+        return new Response(JSON.stringify({
+          jsonrpc: '2.0',
+          id: request.id,
+          result: {
+            count: 1,
+            records: [{
+              client: 'node-a',
+              time: '2026-08-18T00:00:00.000Z',
+              connections: 120,
+              connections_udp: 20,
+            }],
+          },
+        }), { headers: { 'Content-Type': 'application/json' } })
+      }
+      return new Response('unexpected', { status: 500 })
+    }) as typeof fetch
+
+    const records = await loadRecentNodeStatus('node-a', 10)
+    expect(records).toHaveLength(1)
+    expect(records[0]?.connections).toBe(100)
+    expect(records[0]?.connections_udp).toBe(20)
+  })
+
+  test('keeps GPU detail fields so history charts can draw device series', () => {
+    const record = normalizeStatusRecord({
+      ...base,
+      gpu: 0,
+      gpu_average_usage: 42,
+      gpu_detailed_info: [{ device_index: 0, utilization: 40, memory_used: 4, memory_total: 8 }],
+    })
+    expect(record?.gpu).toBe(42)
+    expect(record?.gpu_average_usage).toBe(42)
+    expect(record?.gpu_detailed_info?.[0]).toMatchObject({ utilization: 40 })
   })
 
   test('treats missing connection fields as zero', () => {

@@ -106,11 +106,11 @@ async function savePanel(): Promise<void> {
     : { mode: panelMode.value, pingTasks: panelMode.value === 'ping' ? selectedPingTasks.value : undefined }
   savingPanel.value = true
   try {
-    const payload = await saveNodeCardPanelConfigs({
+    await saveNodeCardPanelConfigs({
       theme: publicSettings.theme,
       apply: current => updateNodeCardPanelConfig(current, node.uuid, nextConfig),
+      onPublicSettings: appStore.applyPublicSettings,
     })
-    appStore.publicSettings = { ...publicSettings, theme_settings: payload }
     window.$message?.success(panelMode.value === 'inherit' ? '节点已恢复跟随全局面板。' : '节点卡片面板已保存。')
   }
   catch (error) {
@@ -130,11 +130,11 @@ async function updateControl(key: keyof NodeControl, durationMinutes?: number): 
   const until = durationMinutes ? Date.now() + durationMinutes * 60_000 : undefined
   saving.value = key === 'maintenanceUntil' ? 'maintenance' : 'silence'
   try {
-    const payload = await saveNodeControls({
+    await saveNodeControls({
       theme: publicSettings.theme,
       apply: current => updateNodeControl(current, node.uuid, key, until),
+      onPublicSettings: appStore.applyPublicSettings,
     })
-    appStore.publicSettings = { ...publicSettings, theme_settings: payload }
 
     if (key === 'maintenanceUntil') {
       recordControlEvent(

@@ -64,19 +64,42 @@ export function getConnectionCount(node: Pick<NodeData, 'connections' | 'connect
  * 是拆开的定义，不需要也不能再相减（见 utils/loadMetricRecords.ts）。
  */
 export function normalizeConnectionCounts(connections: number, connectionsUdp: number): { tcp: number, udp: number } {
-  const udp = Math.max(0, connectionsUdp || 0)
+  const total = Math.max(0, connections || 0)
+  // UDP 是合计里的一部分。后端偶发 udp > connections 时不能把多出来的
+  // 部分再加进总数，否则卡片/图表会凭空变大。
+  const udp = Math.min(Math.max(0, connectionsUdp || 0), total)
   return {
-    tcp: Math.max(0, (connections || 0) - udp),
+    tcp: total - udp,
     udp,
   }
 }
 
 export function getMemoryPercentage(node: Pick<NodeData, 'ram' | 'mem_total'>): number {
-  return clampPercentage((node.ram || 0) / (node.mem_total || 1) * 100)
+  return getCapacityPercentage(node.ram, node.mem_total)
 }
 
 export function getDiskPercentage(node: Pick<NodeData, 'disk' | 'disk_total'>): number {
-  return clampPercentage((node.disk || 0) / (node.disk_total || 1) * 100)
+  return getCapacityPercentage(node.disk, node.disk_total)
+}
+
+function getCapacityPercentage(used: number | undefined, total: number | undefined): number {
+  if (total === undefined || !Number.isFinite(total) || total <= 0)
+    return 0
+  const safeUsed = typeof used === 'number' && Number.isFinite(used) ? used : 0
+  return clampPercentage(safeUsed / total * 100)
+}
+
+/** 一段历史记录里的容量占用峰值。总量缺失时不当成 100%。 */
+export function getCapacityPeakPercentage(
+  samples: ReadonlyArray<{ used?: number | null, total?: number | null }>,
+  fallbackTotal = 0,
+): number {
+  let peak = 0
+  for (const sample of samples) {
+    const total = typeof sample.total === 'number' && sample.total > 0 ? sample.total : fallbackTotal
+    peak = Math.max(peak, getCapacityPercentage(sample.used ?? undefined, total))
+  }
+  return peak
 }
 
 export function getHighLoadMetrics(node: NodeData, threshold: number): HighLoadMetric[] {

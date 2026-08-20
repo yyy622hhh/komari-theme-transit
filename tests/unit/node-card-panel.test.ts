@@ -1,6 +1,7 @@
 import type { NodeData } from '../../src/stores/nodes'
 import { describe, expect, test } from 'bun:test'
 import {
+  mergeNodeCardPanelConfigs,
   parseNodeCardPanelConfigs,
   resolveNodeCardPanelMode,
   serializeNodeCardPanelConfigs,
@@ -35,6 +36,33 @@ describe('node card panel configuration', () => {
       'node-3': null,
     }))).toEqual({
       'node-1': { mode: 'ping', pingTasks: ['Tokyo', 'Local', 'Exit'] },
+    })
+  })
+
+  test('keeps unknown panel modes when merging a single-node update onto the raw map', () => {
+    const raw = {
+      'node-1': { mode: 'carrier' },
+      'node-2': { mode: 'future-mode', pingTasks: ['Keep'] },
+    }
+    const merged = mergeNodeCardPanelConfigs(raw, current => updateNodeCardPanelConfig(current, 'node-1', { mode: 'system' }))
+    expect(merged).toEqual({
+      'node-1': { mode: 'system' },
+      'node-2': { mode: 'future-mode', pingTasks: ['Keep'] },
+    })
+    expect(mergeNodeCardPanelConfigs(merged, current => updateNodeCardPanelConfig(current, 'node-1'))).toEqual({
+      'node-2': { mode: 'future-mode', pingTasks: ['Keep'] },
+    })
+  })
+
+  test('keeps extra fields on a known panel mode when another node is updated', () => {
+    const raw = {
+      'node-1': { mode: 'system', variant: 'wide' },
+      'node-2': { mode: 'carrier' },
+    }
+    const merged = mergeNodeCardPanelConfigs(raw, current => updateNodeCardPanelConfig(current, 'node-2', { mode: 'compact' }))
+    expect(merged).toEqual({
+      'node-1': { mode: 'system', variant: 'wide' },
+      'node-2': { mode: 'compact' },
     })
   })
 

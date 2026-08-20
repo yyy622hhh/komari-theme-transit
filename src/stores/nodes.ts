@@ -79,11 +79,12 @@ interface StatusData {
   time: string
   cpu: number
   gpu: number
+  gpu_average_usage?: number
   ram: number
   swap: number
   load: number
-  load5: number
-  load15: number
+  load5?: number
+  load15?: number
   temp: number
   disk: number
   net_in: number
@@ -231,43 +232,65 @@ const useNodesStore = defineStore('nodes', () => {
    * 汇总卡片 / 地球）每轮轮询都整体重渲染。就地按字段变更后，Vue 的细粒度响应式
    * 只会重算真正变化的字段所对应的视图；未变化的字段连依赖都不会触发。
    */
+  function finiteStatusNumber(value: number | undefined): number | null {
+    return typeof value === 'number' && Number.isFinite(value) ? value : null
+  }
+
   function applyStatus(node: NodeData, status: StatusData): void {
-    if (node.online !== status.online)
-      node.online = status.online
-    if (node.time !== status.time)
-      node.time = status.time
-    if (node.cpu !== status.cpu)
-      node.cpu = status.cpu
-    if (node.gpu !== status.gpu)
-      node.gpu = status.gpu
-    if (node.ram !== status.ram)
-      node.ram = status.ram
-    if (node.swap !== status.swap)
-      node.swap = status.swap
-    if (node.load !== status.load)
-      node.load = status.load
-    if (node.load5 !== status.load5)
-      node.load5 = status.load5
-    if (node.load15 !== status.load15)
-      node.load15 = status.load15
-    if (node.temp !== status.temp)
-      node.temp = status.temp
-    if (node.disk !== status.disk)
-      node.disk = status.disk
-    if (node.net_in !== status.net_in)
-      node.net_in = status.net_in
-    if (node.net_out !== status.net_out)
-      node.net_out = status.net_out
-    if (node.net_total_up !== status.net_total_up)
-      node.net_total_up = status.net_total_up
-    if (node.net_total_down !== status.net_total_down)
-      node.net_total_down = status.net_total_down
-    if (node.traffic_up !== status.traffic_up)
-      node.traffic_up = status.traffic_up
-    if (node.traffic_down !== status.traffic_down)
-      node.traffic_down = status.traffic_down
-    if (node.process !== status.process)
-      node.process = status.process
+    const online = Boolean(status.online)
+    if (node.online !== online)
+      node.online = online
+    const time = typeof status.time === 'string' ? status.time : ''
+    if (node.time !== time)
+      node.time = time
+    const cpu = finiteStatusNumber(status.cpu) ?? 0
+    if (node.cpu !== cpu)
+      node.cpu = cpu
+    const gpuUsage = finiteStatusNumber(status.gpu_average_usage) ?? finiteStatusNumber(status.gpu) ?? 0
+    if (node.gpu !== gpuUsage)
+      node.gpu = gpuUsage
+    const ram = finiteStatusNumber(status.ram) ?? 0
+    if (node.ram !== ram)
+      node.ram = ram
+    const swap = finiteStatusNumber(status.swap) ?? 0
+    if (node.swap !== swap)
+      node.swap = swap
+    const load = finiteStatusNumber(status.load) ?? 0
+    if (node.load !== load)
+      node.load = load
+    const load5 = finiteStatusNumber(status.load5) ?? load
+    const load15 = finiteStatusNumber(status.load15) ?? load5
+    if (node.load5 !== load5)
+      node.load5 = load5
+    if (node.load15 !== load15)
+      node.load15 = load15
+    const temp = finiteStatusNumber(status.temp) ?? 0
+    if (node.temp !== temp)
+      node.temp = temp
+    const disk = finiteStatusNumber(status.disk) ?? 0
+    if (node.disk !== disk)
+      node.disk = disk
+    const netIn = finiteStatusNumber(status.net_in) ?? 0
+    if (node.net_in !== netIn)
+      node.net_in = netIn
+    const netOut = finiteStatusNumber(status.net_out) ?? 0
+    if (node.net_out !== netOut)
+      node.net_out = netOut
+    const netTotalUp = finiteStatusNumber(status.net_total_up) ?? 0
+    if (node.net_total_up !== netTotalUp)
+      node.net_total_up = netTotalUp
+    const netTotalDown = finiteStatusNumber(status.net_total_down) ?? 0
+    if (node.net_total_down !== netTotalDown)
+      node.net_total_down = netTotalDown
+    const trafficUp = finiteStatusNumber(status.traffic_up) ?? 0
+    if (node.traffic_up !== trafficUp)
+      node.traffic_up = trafficUp
+    const trafficDown = finiteStatusNumber(status.traffic_down) ?? 0
+    if (node.traffic_down !== trafficDown)
+      node.traffic_down = trafficDown
+    const process = finiteStatusNumber(status.process) ?? 0
+    if (node.process !== process)
+      node.process = process
     const { tcp: tcpConnections, udp: udpConnections } = normalizeConnectionCounts(
       status.connections,
       status.connections_udp,
@@ -276,8 +299,9 @@ const useNodesStore = defineStore('nodes', () => {
       node.connections = tcpConnections
     if (node.connections_udp !== udpConnections)
       node.connections_udp = udpConnections
-    if (node.uptime !== status.uptime)
-      node.uptime = status.uptime
+    const uptime = finiteStatusNumber(status.uptime) ?? 0
+    if (node.uptime !== uptime)
+      node.uptime = uptime
     if (node.message !== status.message)
       node.message = status.message
     if (node.status_updated_at !== status.updated_at)

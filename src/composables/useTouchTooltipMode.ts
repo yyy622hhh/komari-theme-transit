@@ -10,9 +10,18 @@ export function createTouchTooltipState() {
   const smoothInfoTooltipOpen = ref(false)
 
   function setTaskTooltipOpen(taskId: number, open: boolean): void {
+    // 触屏由 toggle 关；忽略 reka 在第一次点开后立刻发出的 blur/onClose。
+    if (isTouchTooltipMode.value && !open)
+      return
     activeTaskTooltipId.value = open
       ? taskId
       : activeTaskTooltipId.value === taskId ? null : activeTaskTooltipId.value
+  }
+
+  function setSmoothInfoOpen(open: boolean): void {
+    if (isTouchTooltipMode.value && !open)
+      return
+    smoothInfoTooltipOpen.value = open
   }
 
   function toggleTaskTooltip(taskId: number): void {
@@ -43,6 +52,7 @@ export function createTouchTooltipState() {
     activeTaskTooltipId,
     smoothInfoTooltipOpen,
     setTaskTooltipOpen,
+    setSmoothInfoOpen,
     toggleTaskTooltip,
     toggleSmoothInfoTooltip,
     reset,
@@ -65,9 +75,7 @@ export function useTouchTooltipMode() {
       return
     }
 
-    const hasCoarsePointer = window.matchMedia('(pointer: coarse)').matches
-    const hasTouchPoints = typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0
-    state.isTouchTooltipMode.value = hasCoarsePointer || hasTouchPoints
+    state.isTouchTooltipMode.value = window.matchMedia('(pointer: coarse)').matches
   }
 
   onMounted(() => {

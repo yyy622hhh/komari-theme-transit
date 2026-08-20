@@ -62,6 +62,7 @@ const panel = ref<HTMLElement | null>(null)
 const bulkPanelOpen = ref(false)
 const bulkPanelMode = ref<'inherit' | NodeCardPanelDefaultMode>('inherit')
 const savingBulkPanel = ref(false)
+
 const bulkPanelOptions = NODE_CARD_PANEL_OPTIONS.filter(option => option.value !== 'ping') as Array<{ value: NodeCardPanelDefaultMode, label: string }>
 const {
   announcement: orderAnnouncement,
@@ -194,7 +195,7 @@ async function saveBulkPanel(): Promise<void> {
 
   savingBulkPanel.value = true
   try {
-    const payload = await saveNodeCardPanelConfigs({
+    await saveNodeCardPanelConfigs({
       theme: publicSettings.theme,
       apply: (current) => {
         const nextConfigs = { ...current }
@@ -206,8 +207,8 @@ async function saveBulkPanel(): Promise<void> {
         }
         return nextConfigs
       },
+      onPublicSettings: appStore.applyPublicSettings,
     })
-    appStore.publicSettings = { ...publicSettings, theme_settings: payload }
     bulkPanelOpen.value = false
     window.$message?.success(`已更新 ${props.nodes.length} 台节点的卡片面板。`)
   }

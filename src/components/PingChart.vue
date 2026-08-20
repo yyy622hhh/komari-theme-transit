@@ -111,6 +111,7 @@ const {
   activeTaskTooltipId,
   smoothInfoTooltipOpen,
   setTaskTooltipOpen,
+  setSmoothInfoOpen,
   toggleTaskTooltip,
   toggleSmoothInfoTooltip,
   reset: resetTouchTooltipMode,
@@ -749,6 +750,7 @@ onBeforeUnmount(() => {
                   <div class="flex-1" />
                   <Tooltip
                     :open="isTouchTooltipMode ? activeTaskTooltipId === task.id : undefined"
+                    :disable-closing-trigger="isTouchTooltipMode"
                     @update:open="(open) => setTaskTooltipOpen(task.id, open)"
                   >
                     <TooltipTrigger as-child>
@@ -845,7 +847,8 @@ onBeforeUnmount(() => {
               </Button>
               <Tooltip
                 :open="isTouchTooltipMode ? smoothInfoTooltipOpen : undefined"
-                @update:open="(open) => smoothInfoTooltipOpen = open"
+                :disable-closing-trigger="isTouchTooltipMode"
+                @update:open="setSmoothInfoOpen"
               >
                 <TooltipTrigger as-child>
                   <Button
