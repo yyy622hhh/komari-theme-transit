@@ -4,6 +4,17 @@
 
 ## [Unreleased]
 
+## [1.0.44] - 2026-08-20
+
+### Changed
+
+- 节点卡左侧状态提示从 3px 边框升级为 7px 全高状态轨，贴齐卡片边缘并随圆角裁切，在紧凑布局中也能快速扫出节点状态。
+- 状态轨继续复用现有健康语义：正常为绿色，维护或一般告警为黄色，严重告警或离线为红色；不改变告警判断、健康分或卡片交互。
+
+### Testing
+
+- 更新桌面亮色、桌面暗色和移动端权威视觉基线，并补充状态轨宽度、贴边、在线、告警与离线状态断言。
+
 ## [1.0.43] - 2026-08-20
 
 ### Added
@@ -650,7 +661,8 @@
 - 亮暗主题、桌面/移动布局和 Transit 风格内嵌 Komari 管理端。
 - Playwright 视觉与交互回归、自动构建和 GitHub Release 发布流程。
 
-[Unreleased]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.43...HEAD
+[Unreleased]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.44...HEAD
+[1.0.44]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.43...v1.0.44
 [1.0.43]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.42...v1.0.43
 [1.0.42]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.41...v1.0.42
 [1.0.41]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.40...v1.0.41
