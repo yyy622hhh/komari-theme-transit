@@ -4,11 +4,13 @@
 
 ## [Unreleased]
 
+## [1.0.40] - 2026-08-20
+
 ### Fixed
 
-- README 的「高级文本格式」一节改为以 `topologyConfig`（JSON）为准。此前它仍在教人直接编辑 `topologyRoute` / `topologyMetrics`，而那两个已是兼容字段，照做会在下次保存时被覆盖；节点格式也还写着三段，没跟上新增的 UUID。
-- README 补上落地机可选、以及 Ping 数据两级新鲜度（10 分钟提示、30 分钟回退）的说明。
-- 主题设置里 `topologyRoute` / `topologyMetrics` 的帮助文本标明为兼容字段、不要手工编辑。
+- 主题设置里 `topologyRoute` / `topologyMetrics` 的帮助文本标明为兼容字段、不要手工编辑。此前只看设置面板的人没有任何提示，按上面写的格式改完会在下次保存时被静默覆盖。
+- README 的「高级文本格式」一节改为以 `topologyConfig`（JSON）为准。此前它仍在教人直接编辑那两个兼容字段，节点格式也还写着三段，没跟上 1.0.39 新增的 UUID。
+- README 补上落地机可选、以及 Ping 数据两级新鲜度（10 分钟提示更新时间、30 分钟才回退基线）的说明。
 
 ## [1.0.39] - 2026-08-20
 
