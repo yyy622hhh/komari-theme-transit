@@ -1,5 +1,6 @@
 import type { Locator, Page } from '@playwright/test'
 import { Buffer } from 'node:buffer'
+import { readFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { expect, test } from '@playwright/test'
@@ -7,6 +8,7 @@ import { installKomariFixture } from './fixtures/komari'
 
 const LIGHT_NODE_SURFACE = /^(?:rgba\(248, 250, 252, 0\.9\)|oklch\(0\.965 0\.008 252\))$/
 const WALLPAPER_FIXTURE = fileURLToPath(new URL('../../docs/preview.png', import.meta.url))
+const THEME_VERSION = (JSON.parse(readFileSync(fileURLToPath(new URL('../../komari-theme.json', import.meta.url)), 'utf8')) as { version: string }).version
 
 const STABLE_STYLE = `
   @font-face {
@@ -643,7 +645,7 @@ test('Transit exposes topology insights without changing public route health', a
   await dialog.locator('[data-copy-topology-diagnostic]').click()
   await expect(page.getByText('线路诊断已复制')).toBeVisible()
   const copiedReport = await page.evaluate(() => (window as typeof window & { __copiedTopologyReport?: string }).__copiedTopologyReport ?? '')
-  expect(copiedReport).toContain('Transit v1.0.44 线路诊断')
+  expect(copiedReport).toContain(`Transit v${THEME_VERSION} 线路诊断`)
   expect(copiedReport).toContain('晚高峰延迟高 60 ms')
   expect(copiedReport).not.toContain('00000000-0000-4000-8000-000000000001')
   expect(copiedReport).not.toContain('PandaOps-Local-Hop')
