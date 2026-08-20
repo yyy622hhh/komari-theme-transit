@@ -70,6 +70,22 @@ describe('useTopologyTaskCatalog', () => {
     }
   })
 
+  test('loads tasks for a renamed node using the uuid stored in the topology config', async () => {
+    const { restore } = mockAdminTaskList([
+      { id: 1, name: 'Transit-Relay-JP-to-Exit-SG', clients: [relay.uuid], type: 'icmp', target: '203.0.113.20', interval: 30 },
+    ])
+    try {
+      // 节点在 Komari 里被改名成 Relay-Tokyo，配置里存的还是旧名字加 uuid。
+      const catalog = useTopologyTaskCatalog([{ ...relay, name: 'Relay-Tokyo' }], noAmbiguity)
+      const result = await catalog.loadTasks('Relay-JP-old', relay.uuid)
+      expect(result).toEqual({ tasks: ['Transit-Relay-JP-to-Exit-SG'], error: '' })
+      expect(catalog.taskOptions.value[relay.uuid]).toEqual(['Transit-Relay-JP-to-Exit-SG'])
+    }
+    finally {
+      restore()
+    }
+  })
+
   test('is a silent no-op for an unresolved, non-ambiguous name', async () => {
     const { restore, calls } = mockAdminTaskList([])
     try {

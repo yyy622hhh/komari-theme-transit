@@ -808,7 +808,7 @@ test('Transit empty topology guides an authenticated operator into the manager',
   await expect(page.getByRole('heading', { name: '拓扑管理' })).toBeVisible()
 })
 
-test('Transit topology manager creates the entry probe and selected hop when no task exists', async ({ page }) => {
+test('Transit topology manager creates both the entry and hop tasks when no task exists', async ({ page }) => {
   const saves: unknown[] = []
   await page.setViewportSize({ width: 1440, height: 900 })
   await installKomariFixture(page, { opsDashboard: true, authenticated: true, emptyTopology: true, quickTopologyNoTasks: true })
@@ -824,10 +824,13 @@ test('Transit topology manager creates the entry probe and selected hop when no 
   await expect(dialog.getByLabel('第 1 条线路入口探测')).toHaveValue('beijing-telecom')
   await expectSelectedNode(dialog.getByLabel('第 1 条线路线路机'), '主控-洛杉矶')
   await expectSelectedNode(dialog.getByLabel('第 1 条线路落地机'), '香港边缘节点-超长名称布局测试')
+  // 入口段线路机上没有名为「北京电信」的任务时，Transit 会自动建一个指向该
+  // 运营商落地测速点的 ICMP 任务并绑定，不再停留在静态基线。
   await expect(route).toHaveAttribute('data-topology-entry-task', '北京电信')
   await expect(route).toHaveAttribute('data-topology-hop-task', 'Transit-主控-洛杉矶-to-香港边缘节点-超长名称布局测试')
   await expect(dialog).toBeVisible()
   await expect.poll(() => saves.length).toBe(1)
+  // 线路机/落地机的 uuid 也写进配置，只比名称部分。
   const saved = saves[0] as { topologyRoute: string, topologyMetrics: string }
   expect(saved.topologyRoute.split(';').map(node => node.split('|')[0])).toEqual([
     '北京电信',
@@ -1012,6 +1015,90 @@ test('Transit topology retires only a probe task created in the current session'
   await expect.poll(() => deletedTaskIds.flat()).toContain(hopTaskIds[0]!)
 })
 
+test('Transit topology switches the entry probe once ICMP is proven dead, retiring the task it created', async ({ page }) => {
+  const probeStats: Array<{ task_id: number, total: number, valid: number }> = []
+  const deletedTaskIds: number[][] = []
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, {
+    opsDashboard: true,
+    authenticated: true,
+    emptyTopology: true,
+    quickTopologyNoTasks: true,
+    topologyProbeStats: probeStats,
+  })
+  page.on('request', (request) => {
+    if (request.method() !== 'POST' || !request.url().endsWith('/api/rpc2'))
+      return
+    const payload = request.postDataJSON() as { method: string, params?: Record<string, unknown> }
+    if (payload.method === 'admin:deletePingTask')
+      deletedTaskIds.push((payload.params?.id as number[] | undefined) ?? [])
+  })
+  await openStablePage(page)
+
+  const dialog = await openTopologyManager(page, 'empty')
+  await dialog.getByRole('button', { name: '添加线路' }).click()
+  const route = dialog.locator('[data-topology-route-id]').first()
+  await expect(route).toHaveAttribute('data-topology-entry-task', '北京电信')
+  await expect(route).toHaveAttribute('data-topology-entry-hop-probe', 'ICMP')
+
+  // 没有其它任务的情况下，线路机建的第一个任务是入口（第 1 段先建），第二个
+  // 是 hop（第 2 段）；mock 按创建顺序从 101 起分配 id，所以入口任务是 102。
+  probeStats.push({ task_id: 102, total: 48, valid: 0 })
+  await dialog.getByRole('button', { name: '重新检测' }).click()
+  await expect(route).toHaveAttribute('data-topology-entry-hop-probe', 'TCP 443')
+  await expect(route).toHaveAttribute('data-topology-entry-task', '北京电信')
+  await expect.poll(() => deletedTaskIds.flat()).toContain(102)
+})
+
+test('Transit topology creates the replacement entry task even when deleting the old one keeps failing', async ({ page }) => {
+  // 两阶段提交的关键属性：新任务的创建不依赖旧任务先删除成功。
+  const probeStats: Array<{ task_id: number, total: number, valid: number }> = []
+  const addedTasks: Array<Record<string, unknown>> = []
+  let deleteAttempts = 0
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, {
+    opsDashboard: true,
+    authenticated: true,
+    emptyTopology: true,
+    quickTopologyNoTasks: true,
+    topologyProbeStats: probeStats,
+  })
+  await page.route('**/api/rpc2', async (route) => {
+    const payload = route.request().postDataJSON() as { id: number, method: string }
+    if (payload.method !== 'admin:deletePingTask') {
+      await route.fallback()
+      return
+    }
+    deleteAttempts += 1
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ jsonrpc: '2.0', id: payload.id, error: { code: -32000, message: '模拟删除失败' } }),
+    })
+  })
+  page.on('request', (request) => {
+    if (request.method() !== 'POST' || !request.url().endsWith('/api/rpc2'))
+      return
+    const payload = request.postDataJSON() as { method: string, params?: Record<string, unknown> }
+    if (payload.method === 'admin:addPingTask')
+      addedTasks.push(payload.params as Record<string, unknown>)
+  })
+  await openStablePage(page)
+
+  const dialog = await openTopologyManager(page, 'empty')
+  await dialog.getByRole('button', { name: '添加线路' }).click()
+  const route = dialog.locator('[data-topology-route-id]').first()
+  await expect(route).toHaveAttribute('data-topology-entry-task', '北京电信')
+  await expect(route).toHaveAttribute('data-topology-entry-hop-probe', 'ICMP')
+
+  probeStats.push({ task_id: 102, total: 48, valid: 0 })
+  await dialog.getByRole('button', { name: '重新检测' }).click()
+  // 删除持续失败，但新任务照样建成功、探测方式照样换过去。
+  await expect(route).toHaveAttribute('data-topology-entry-hop-probe', 'TCP 443')
+  await expect(route).toHaveAttribute('data-topology-entry-task', '北京电信')
+  await expect.poll(() => deleteAttempts).toBeGreaterThan(0)
+  await expect.poll(() => addedTasks.filter(task => task.name === '北京电信').length).toBe(2)
+})
+
 test('Transit topology quick generation uses the selected source and landing nodes', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await installKomariFixture(page, { opsDashboard: true, authenticated: true, emptyTopology: true })
@@ -1042,11 +1129,15 @@ test('Transit topology discards a planned task when the landing is cleared', asy
   const dialog = await openTopologyManager(page, 'empty')
   await dialog.getByRole('button', { name: '添加线路' }).click()
   await expect.poll(() => saves.length).toBe(1)
-  expect(addTaskCalls).toBeGreaterThanOrEqual(1)
+  // 没有匹配任务时入口和第 2 段各自建一个任务：「北京电信」和 Transit 生成的
+  // hop 任务。
+  expect(addTaskCalls).toBe(2)
   await dialog.getByLabel('第 1 条线路落地机').selectOption('')
   await expect.poll(() => saves.length).toBe(2)
-  expect(addTaskCalls).toBeGreaterThanOrEqual(1)
-  expect((saves[1] as { topologyMetrics: string }).topologyMetrics).toMatch(/^live@主控-洛杉矶@北京电信@-@-/)
+  // 清空落地机只丢弃第 2 段的规划中任务；入口段已经创建并保存的任务不受影响，
+  // 不应该再触发新的创建请求。
+  expect(addTaskCalls).toBe(2)
+  expect((saves[1] as { topologyMetrics: string }).topologyMetrics).toBe('live@主控-洛杉矶@北京电信@-@-')
   await expect(dialog).toBeVisible()
 })
 

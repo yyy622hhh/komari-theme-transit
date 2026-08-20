@@ -1,11 +1,13 @@
 import type { PingTaskMutation } from '@/utils/rpc'
+import type { TopologyProbeOption } from '@/utils/topologyHelper'
 import { CACHE_CONFIG } from '@/constants/cache'
 import { isAuthenticated, requirePermission, setAuthSessionFromLogin, subscribeAuthSession } from '@/services/auth.service'
 import { SharedCache } from '@/services/cache.service'
 import { invalidatePublicPingTasksCache } from '@/services/metrics.service'
 import { requestManager } from '@/services/request.service'
 import { getSharedRpc, isRpcPermissionError, RpcError } from '@/utils/rpc'
-import { findTopologyProbeKey, getTopologyProbe } from '@/utils/topologyHelper'
+import { logAppWarning } from '@/utils/safeError'
+import { findTopologyProbeKey, getTopologyProbeTarget, normalizePingTaskName, topologyEntryTaskName } from '@/utils/topologyHelper'
 
 export interface AdminPingTask {
   id?: number
@@ -245,47 +247,6 @@ export function findTopologyPingTaskByName(
 function isSupportedEntryPingTask(task: Pick<AdminPingTask, 'type' | 'target'>): boolean {
   return SUPPORTED_PING_TASK_TYPES.has(task.type.trim().toLowerCase())
     && Boolean(pingTaskTargetHost(task.target))
-}
-
-function listAssignedPresetEntryTasks(
-  tasks: readonly AdminPingTask[],
-  sourceUuid: string,
-  probeKey: string,
-): AdminPingTask[] {
-  if (!sourceUuid.trim() || !probeKey.trim())
-    return []
-  return tasks.filter(task => isPingTaskAssignedToSource(task, sourceUuid)
-    && isSupportedEntryPingTask(task)
-    && findTopologyProbeKey(task.name) === probeKey)
-}
-
-function pickPreferredAssignedPresetEntryTask(
-  matches: readonly AdminPingTask[],
-  probeKey: string,
-): AdminPingTask | undefined {
-  if (!matches.length)
-    return undefined
-  const probe = getTopologyProbe(probeKey)
-  return matches.find(task => task.name.trim() === probe.taskFilter)
-    ?? matches.find(task => task.name.trim() === probe.label)
-    ?? [...matches].sort((left, right) => (left.id ?? Number.MAX_SAFE_INTEGER) - (right.id ?? Number.MAX_SAFE_INTEGER))[0]
-}
-
-/**
- * 这台线路机上已经绑好、且名字对应某个入口预设的任务。
- *
- * 别名可以同时存在（`北京电信` / `北京-电信`）。只要已经绑在这台线路机上，
- * 就复用其中一个，不要因为不唯一就再创建一个。
- */
-export function findAssignedPresetEntryTask(
-  tasks: readonly AdminPingTask[],
-  sourceUuid: string,
-  probeKey: string,
-): AdminPingTask | undefined {
-  return pickPreferredAssignedPresetEntryTask(
-    listAssignedPresetEntryTasks(tasks, sourceUuid, probeKey),
-    probeKey,
-  )
 }
 
 /**
@@ -595,115 +556,117 @@ function pingTaskMutationFromAdmin(task: AdminPingTask, clients: string[]): Ping
   }
 }
 
-const DEFAULT_ENTRY_PING_INTERVAL = 60
+function entryTaskMatchesName(
+  task: AdminPingTask,
+  sourceUuid: string,
+  taskName: string,
+): boolean {
+  return isPingTaskAssignedToSource(task, sourceUuid) && task.name.trim() === taskName.trim()
+}
 
-function draftPresetEntryPingTask(
+function findUniqueEntryTaskByName(
+  tasks: readonly AdminPingTask[],
+  sourceUuid: string,
+  taskName: string,
+): AdminPingTask | undefined {
+  const matches = tasks.filter(task => entryTaskMatchesName(task, sourceUuid, taskName))
+  return matches.length === 1 ? matches[0] : undefined
+}
+
+function findTopologyEntryProbeTask(
+  tasks: readonly AdminPingTask[],
+  sourceUuid: string,
+  probe: TopologyProbeOption,
+  hopProbe: TopologyHopProbe,
+  requestedName = '',
+): AdminPingTask | undefined {
+  if (requestedName)
+    return findUniqueEntryTaskByName(tasks, sourceUuid, requestedName)
+
+  const generated = findUniqueEntryTaskByName(tasks, sourceUuid, topologyEntryTaskName(probe, hopProbe))
+  if (generated)
+    return generated
+
+  const canonicalNames = new Set([probe.taskFilter, probe.label].map(normalizePingTaskName))
+  const canonical = tasks.filter(task => isPingTaskAssignedToSource(task, sourceUuid)
+    && canonicalNames.has(normalizePingTaskName(task.name)))
+  return canonical.length === 1 ? canonical[0] : undefined
+}
+
+function buildTopologyEntryProbeDraft(
   source: TopologyPingEndpoint,
-  probeKey: string,
-): AdminPingTask | null {
-  const probe = getTopologyProbe(probeKey)
-  if (probe.key !== probeKey || !probe.target.trim())
-    return null
+  probe: TopologyProbeOption,
+  hopProbe: TopologyHopProbe,
+  taskName: string,
+): AdminPingTask {
+  const targetHost = getTopologyProbeTarget(probe, hopProbe)
+  if (!targetHost)
+    throw new Error(`${probe.label}没有配置 ${describeTopologyHopProbe(hopProbe)} 探测目标，请手动创建并绑定任务。`)
   return {
-    name: probe.taskFilter,
-    type: 'icmp',
-    target: probe.target,
+    name: taskName,
+    type: hopProbe.type,
+    target: buildTopologyHopTarget({ ipv4: targetHost }, hopProbe),
     default_on: false,
     clients: [source.uuid],
-    interval: DEFAULT_ENTRY_PING_INTERVAL,
+    interval: 30,
   }
 }
 
-/**
- * 保证线路机上有对应入口探测。
- *
- * 1. 已经绑在这台线路机上 → 直接用
- * 2. 全站已有目标一致的同名任务 → 把线路机加进 clients（不是主题建的，不记所有权）
- * 3. 都没有 → 按预设测试点自动创建 ICMP 任务（主题建的，可清理）
- */
-export async function ensureTopologyEntryPingTask(
-  source: TopologyPingEndpoint,
-  probeKey: string,
-  options: { signal?: AbortSignal } = {},
-): Promise<{ task: AdminPingTask, assigned: boolean, created: boolean } | null> {
-  const { signal } = options
-  if (!source.uuid.trim() || !probeKey.trim())
-    return null
-  throwIfAborted(signal)
-  return withCrossTabPingLock(`entry:${probeKey}`, async () => {
-    throwIfAborted(signal)
-    await assertPingTaskPermission()
-    throwIfAborted(signal)
-    const listKey = `admin:ping:list:entry:${source.uuid}:${probeKey}`
-    let tasks = await fetchAdminPingTasks(signal, `${listKey}:before`)
-    const existing = findAssignedPresetEntryTask(tasks, source.uuid, probeKey)
-    if (existing)
-      return { task: existing, assigned: false, created: false }
-
-    const template = findPresetEntryTaskTemplate(tasks, probeKey)
-    if (template && Number.isInteger(template.id)) {
-      const clients = [...new Set([...(template.clients ?? []), source.uuid])]
-      if ((template.clients ?? []).includes(source.uuid))
-        return { task: template, assigned: false, created: false }
-
-      try {
-        await requestManager.run(
-          `admin:ping:edit:entry:${source.uuid}:${probeKey}`,
-          requestSignal => getSharedRpc().editPingTasks([pingTaskMutationFromAdmin(template, clients)], requestSignal),
-          { retryAttempts: 0 },
-        )
-        invalidatePublicPingTasksCache()
-        invalidateAdminPingTasksCache()
-      }
-      catch (error) {
-        if (isMissingPingMethodError(error))
-          return createPresetEntryPingTask(source, probeKey, `${listKey}:create-after-edit`, tasks)
-        if (isRpcPermissionError(error))
-          handlePingPermissionError(error)
-        tasks = await fetchAdminPingTasks(undefined, `${listKey}:retry`)
-        const concurrent = findAssignedPresetEntryTask(tasks, source.uuid, probeKey)
-        if (concurrent)
-          return { task: concurrent, assigned: false, created: false }
-        throw error
-      }
-
-      tasks = await fetchAdminPingTasks(undefined, `${listKey}:after-edit`)
-      const assigned = tasks.find(task => task.id === template.id && isPingTaskAssignedToSource(task, source.uuid))
-        ?? findAssignedPresetEntryTask(tasks, source.uuid, probeKey)
-      if (!assigned)
-        throw new Error('入口探测任务已提交，但服务器未把线路机加入任务，请稍后重试。')
-      return { task: assigned, assigned: true, created: false }
-    }
-
-    return createPresetEntryPingTask(source, probeKey, `${listKey}:create`, tasks)
-  })
+function entryTaskIds(
+  tasks: readonly AdminPingTask[],
+  sourceUuid: string,
+  taskName: string,
+): Set<number> {
+  return new Set(tasks
+    .filter(task => entryTaskMatchesName(task, sourceUuid, taskName) && Number.isInteger(task.id))
+    .map(task => task.id!))
 }
 
-async function createPresetEntryPingTask(
+function findNewEntryTask(
+  tasks: readonly AdminPingTask[],
+  sourceUuid: string,
+  taskName: string,
+  hopProbe: TopologyHopProbe,
+  previousIds: ReadonlySet<number>,
+): AdminPingTask | undefined {
+  return tasks
+    .filter(task => entryTaskMatchesName(task, sourceUuid, taskName))
+    .filter((task) => {
+      const taskProbe = topologyHopProbeFromTask(task)
+      return taskProbe !== null && isSameTopologyHopProbe(taskProbe, hopProbe)
+    })
+    .filter(task => Number.isInteger(task.id) && !previousIds.has(task.id!))
+    .sort((left, right) => (right.id ?? 0) - (left.id ?? 0))[0]
+}
+
+/**
+ * 复用站内已有的同名入口任务：只把线路机加进 clients，不新建。
+ *
+ * 复用来的任务不是主题建的，因此不记所有权，阶梯换挡时也不会被清理。探测方式
+ * 必须和本次要用的一致，否则 ICMP 的老任务会被当成 TCP 那一档用。
+ */
+async function adoptExistingEntryTask(
+  tasks: readonly AdminPingTask[],
   source: TopologyPingEndpoint,
-  probeKey: string,
+  probe: TopologyProbeOption,
+  hopProbe: TopologyHopProbe,
+  taskName: string,
   requestKey: string,
-  knownTasks: readonly AdminPingTask[] = [],
-): Promise<{ task: AdminPingTask, assigned: boolean, created: boolean } | null> {
-  const draft = draftPresetEntryPingTask(source, probeKey)
-  if (!draft)
+): Promise<AdminPingTask | null> {
+  const template = findPresetEntryTaskTemplate(tasks, probe.key)
+  if (!template || !Number.isInteger(template.id) || template.name.trim() !== taskName)
     return null
-  const previousIds = new Set(
-    knownTasks
-      .map(task => task.id)
-      .filter((id): id is number => typeof id === 'number' && Number.isInteger(id)),
-  )
+  const templateProbe = topologyHopProbeFromTask(template)
+  if (!templateProbe || !isSameTopologyHopProbe(templateProbe, hopProbe))
+    return null
+  if (isPingTaskAssignedToSource(template, source.uuid))
+    return template
+
+  const clients = [...new Set([...(template.clients ?? []), source.uuid])]
   try {
     await requestManager.run(
-      `admin:ping:add:entry:${source.uuid}:${probeKey}`,
-      requestSignal => getSharedRpc().addPingTask({
-        name: draft.name,
-        type: draft.type,
-        target: draft.target,
-        default_on: false,
-        clients: [source.uuid],
-        interval: draft.interval,
-      }, requestSignal),
+      `admin:ping:edit:entry:${requestKey}`,
+      requestSignal => getSharedRpc().editPingTasks([pingTaskMutationFromAdmin(template, clients)], requestSignal),
       { retryAttempts: 0 },
     )
     invalidatePublicPingTasksCache()
@@ -712,25 +675,130 @@ async function createPresetEntryPingTask(
   catch (error) {
     if (isRpcPermissionError(error))
       handlePingPermissionError(error)
-    const tasks = await fetchAdminPingTasks(undefined, `${requestKey}:retry`)
-    const concurrent = findAssignedPresetEntryTask(tasks, source.uuid, probeKey)
-    if (concurrent)
-      return { task: concurrent, assigned: false, created: false }
-    throw error
+    // 站点没有 admin:editPingTask 时退回新建；其它失败也一样，新建总能兜住。
+    if (!isMissingPingMethodError(error))
+      logAppWarning('Failed to adopt an existing entry ping task; creating a new one', error)
+    return null
   }
 
-  const tasks = await fetchAdminPingTasks(undefined, `${requestKey}:after`)
-  const createdIds = new Set(
-    tasks
-      .map(task => task.id)
-      .filter((id): id is number => typeof id === 'number' && Number.isInteger(id) && !previousIds.has(id)),
-  )
-  const created = pickPreferredAssignedPresetEntryTask(
-    listAssignedPresetEntryTasks(tasks, source.uuid, probeKey)
-      .filter(task => !createdIds.size || (Number.isInteger(task.id) && createdIds.has(task.id!))),
-    probeKey,
-  ) ?? findAssignedPresetEntryTask(tasks, source.uuid, probeKey)
-  if (!created)
-    throw new Error('入口探测任务已提交，但服务器未返回对应任务，请稍后重试。')
-  return { task: created, assigned: true, created: true }
+  const refreshed = await fetchAdminPingTasks(undefined, `admin:ping:list:entry:${requestKey}:after-edit`)
+  return refreshed.find(task => task.id === template.id && isPingTaskAssignedToSource(task, source.uuid)) ?? null
+}
+
+/**
+ * 按名字复用入口任务；没有匹配时才新建。换挡必须走 `createTopologyEntryProbeTask`，
+ * 否则会把同名的判死任务当成已存在。
+ */
+export async function ensureTopologyEntryProbeTask(
+  source: TopologyPingEndpoint,
+  probe: TopologyProbeOption,
+  options: { hopProbe?: TopologyHopProbe, signal?: AbortSignal, taskName?: string } = {},
+): Promise<{ task: AdminPingTask, created: boolean }> {
+  const { signal } = options
+  const hopProbe = normalizeTopologyHopProbe(options.hopProbe)
+  throwIfAborted(signal)
+  const requestKey = `entry:${source.uuid}:${probe.key}`
+  return withCrossTabPingLock(requestKey, async () => {
+    if (!source.uuid.trim())
+      throw new Error('线路机已失效，请重新选择。')
+    throwIfAborted(signal)
+    await assertPingTaskPermission()
+    throwIfAborted(signal)
+    let tasks = await fetchAdminPingTasks(signal, `admin:ping:list:entry:${requestKey}:before`)
+    const requestedName = options.taskName?.trim() ?? ''
+    const existing = findTopologyEntryProbeTask(tasks, source.uuid, probe, hopProbe, requestedName)
+    if (existing)
+      return { task: existing, created: false }
+
+    throwIfAborted(signal)
+    const taskName = requestedName || probe.taskFilter
+
+    // 站里已经有这个运营商的任务、只是没把这台线路机算进去时，把线路机加进
+    // clients 而不是再建一个同名任务。Komari 的 default_on 只对之后新注册的
+    // 节点生效，所以「站长早就建好了三网任务」是最常见的情况。
+    const adopted = await adoptExistingEntryTask(tasks, source, probe, hopProbe, taskName, requestKey)
+    if (adopted)
+      return { task: adopted, created: false }
+
+    const draft = buildTopologyEntryProbeDraft(source, probe, hopProbe, taskName)
+    const body = { ...draft, default_on: draft.default_on ?? false }
+    const previousIds = entryTaskIds(tasks, source.uuid, taskName)
+    try {
+      await requestManager.run(
+        `admin:ping:add:entry:${requestKey}`,
+        requestSignal => getSharedRpc().addPingTask(body, requestSignal),
+        { retryAttempts: 0 },
+      )
+      invalidatePublicPingTasksCache()
+      invalidateAdminPingTasksCache()
+    }
+    catch (error) {
+      if (isRpcPermissionError(error))
+        handlePingPermissionError(error)
+      tasks = await fetchAdminPingTasks(undefined, `admin:ping:list:entry:${requestKey}:retry`)
+      const committed = findNewEntryTask(tasks, source.uuid, taskName, hopProbe, previousIds)
+      if (committed)
+        return { task: committed, created: true }
+      throw error
+    }
+
+    tasks = await fetchAdminPingTasks(undefined, `admin:ping:list:entry:${requestKey}:after`)
+    const created = findNewEntryTask(tasks, source.uuid, taskName, hopProbe, previousIds)
+    if (!created)
+      throw new Error('Ping 任务已提交，但服务器未返回对应任务，请稍后重试。')
+    return { task: created, created: true }
+  })
+}
+
+/**
+ * 入口换挡专用：不按同名复用，直接新建。与 `ensureTopologyEntryProbeTask` 共用同一把锁。
+ */
+export async function createTopologyEntryProbeTask(
+  source: TopologyPingEndpoint,
+  probe: TopologyProbeOption,
+  hopProbe: TopologyHopProbe,
+  options: { signal?: AbortSignal, taskName?: string } = {},
+): Promise<AdminPingTask> {
+  const { signal } = options
+  const normalized = normalizeTopologyHopProbe(hopProbe)
+  throwIfAborted(signal)
+  const requestKey = `entry:${source.uuid}:${probe.key}`
+  return withCrossTabPingLock(requestKey, async () => {
+    if (!source.uuid.trim())
+      throw new Error('线路机已失效，请重新选择。')
+    throwIfAborted(signal)
+    await assertPingTaskPermission()
+    throwIfAborted(signal)
+    const taskName = options.taskName?.trim() || probe.taskFilter
+    let tasks = await fetchAdminPingTasks(signal, `admin:ping:list:entry:switch:${requestKey}:before`)
+    const previousIds = entryTaskIds(tasks, source.uuid, taskName)
+    const draft = buildTopologyEntryProbeDraft(source, probe, normalized, taskName)
+    const body = { ...draft, default_on: draft.default_on ?? false }
+    try {
+      await requestManager.run(
+        `admin:ping:add:entry:switch:${requestKey}:${describeTopologyHopProbe(normalized)}`,
+        requestSignal => getSharedRpc().addPingTask(body, requestSignal),
+        { retryAttempts: 0 },
+      )
+      invalidatePublicPingTasksCache()
+      invalidateAdminPingTasksCache()
+    }
+    catch (error) {
+      if (isRpcPermissionError(error))
+        handlePingPermissionError(error)
+      tasks = await fetchAdminPingTasks(undefined, `admin:ping:list:entry:switch:${requestKey}:retry`)
+      const committed = findNewEntryTask(tasks, source.uuid, taskName, normalized, previousIds)
+      if (committed)
+        return committed
+      throw error
+    }
+
+    // The caller may abort after the server commits. Reconcile without that
+    // signal and identify the new ID relative to the pre-mutation snapshot.
+    tasks = await fetchAdminPingTasks(undefined, `admin:ping:list:entry:switch:${requestKey}:after`)
+    const created = findNewEntryTask(tasks, source.uuid, taskName, normalized, previousIds)
+    if (!created)
+      throw new Error('Ping 任务已提交，但服务器未返回对应任务，请稍后重试。')
+    return created
+  })
 }

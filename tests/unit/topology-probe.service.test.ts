@@ -6,9 +6,11 @@ import {
   assessHopTask,
   chooseInitialHopProbe,
   loadSourceProbeProfile,
+  planEntryProbeTask,
   planWorkingHopTask,
 } from '../../src/services/topology-probe.service'
 import { resetSharedRpc } from '../../src/utils/rpc'
+import { getTopologyProbe } from '../../src/utils/topologyHelper'
 
 const source = { uuid: 'relay-uuid', name: 'Relay-JP', ipv4: '192.0.2.10' }
 const landing = { uuid: 'exit-uuid', name: 'Exit-SG', ipv4: '203.0.113.20' }
@@ -565,5 +567,207 @@ describe('topology hop task planning', () => {
 
   test('rejects planning when the landing has no pingable address', async () => {
     await expect(planWorkingHopTask(source, { uuid: 'bad', name: 'No-IP' })).rejects.toThrow('没有可用于 Ping')
+  })
+})
+
+describe('planEntryProbeTask', () => {
+  const beijingTelecom = getTopologyProbe('beijing-telecom')
+  const guangzhouTelecom = getTopologyProbe('guangzhou-telecom')
+
+  test('creates a fresh ICMP task named after the taskFilter, targeting the landmark address, when nothing exists', async () => {
+    const restore = mockKomari([], [])
+    try {
+      const planned = await planEntryProbeTask(source, beijingTelecom)
+      expect(planned.needsCreation).toBe(true)
+      expect(planned.probe).toEqual({ type: 'icmp' })
+      expect(planned.retiredTasks).toEqual([])
+      expect(planned.switchedFrom).toBeNull()
+      expect(planned.task).toMatchObject({ name: '北京电信', type: 'icmp', target: beijingTelecom.landmarkAddress, clients: [source.uuid] })
+    }
+    finally {
+      restore()
+    }
+  })
+
+  test('reuses an existing task matched by name regardless of its actual target', async () => {
+    const restore = mockKomari(
+      [{ id: 5, name: '北京电信', clients: [source.uuid], type: 'icmp', target: '198.51.100.50', interval: 30 }],
+      [{ task_id: '5', total: 40, valid: 40 }],
+    )
+    try {
+      const planned = await planEntryProbeTask(source, beijingTelecom)
+      expect(planned.needsCreation).toBe(false)
+      expect(planned.verdict).toBe('healthy')
+      expect(planned.task).toMatchObject({ id: 5, name: '北京电信', target: '198.51.100.50' })
+    }
+    finally {
+      restore()
+    }
+  })
+
+  test('keeps the matched display-label name when escalating a dead labeled task to TCP', async () => {
+    const restore = mockKomari(
+      [{ id: 16, name: '广州电信', clients: [source.uuid], type: 'icmp', target: guangzhouTelecom.landmarkAddress, interval: 30 }],
+      [{ task_id: '16', total: 40, valid: 0 }],
+    )
+    try {
+      const planned = await planEntryProbeTask(source, guangzhouTelecom)
+      expect(planned.needsCreation).toBe(true)
+      expect(planned.probe).toEqual({ type: 'tcp', port: 443 })
+      expect(planned.task.name).toBe('广州电信')
+      expect(planned.task.target).toBe(`${guangzhouTelecom.landmarkAddress}:443`)
+    }
+    finally {
+      restore()
+    }
+  })
+
+  test('matches an existing task named after the display label instead of the community taskFilter', async () => {
+    // 广州入口标签是「广州电信」，惯用任务名是「广东电信」；站长照界面标签建的
+    // 任务也必须能被认领，不能重复创建。
+    const restore = mockKomari(
+      [{ id: 6, name: '广州电信', clients: [source.uuid], type: 'icmp', target: '198.51.100.60', interval: 30 }],
+      [{ task_id: '6', total: 10, valid: 5 }],
+    )
+    try {
+      const planned = await planEntryProbeTask(source, guangzhouTelecom)
+      expect(planned.needsCreation).toBe(false)
+      expect(planned.task.id).toBe(6)
+    }
+    finally {
+      restore()
+    }
+  })
+
+  test('escalates to the next probe once the bound task is proven dead, and flags the old one for retirement', async () => {
+    const restore = mockKomari(
+      [{ id: 7, name: '北京电信', clients: [source.uuid], type: 'icmp', target: beijingTelecom.landmarkAddress, interval: 30 }],
+      [{ task_id: '7', total: 40, valid: 0 }],
+    )
+    try {
+      const planned = await planEntryProbeTask(source, beijingTelecom)
+      expect(planned.switchedFrom).toEqual({ type: 'icmp' })
+      expect(planned.probe).toEqual({ type: 'tcp', port: 443 })
+      expect(planned.needsCreation).toBe(true)
+      expect(planned.retiredTasks.map(task => task.id)).toEqual([7])
+      expect(planned.exhausted).toBe(false)
+      // 换挡后任务名必须保持不变——不像第 2 段那样另起带后缀的新名字，否则
+      // 站长在 Komari 里按名字识别的入口探测就找不到了。
+      expect(planned.task.name).toBe('北京电信')
+      expect(planned.task.target).toBe(`${beijingTelecom.landmarkAddress}:443`)
+    }
+    finally {
+      restore()
+    }
+  })
+
+  test('reports exhaustion once the last ladder rung is also dead, and does not propose retiring it', async () => {
+    const restore = mockKomari(
+      [{ id: 8, name: '北京电信', clients: [source.uuid], type: 'tcp', target: `${beijingTelecom.landmarkAddress}:22`, interval: 30 }],
+      [{ task_id: '8', total: 40, valid: 0 }],
+    )
+    try {
+      const planned = await planEntryProbeTask(source, beijingTelecom)
+      expect(planned.exhausted).toBe(true)
+      expect(planned.verdict).toBe('dead')
+      expect(planned.needsCreation).toBe(false)
+      expect(planned.retiredTasks).toEqual([])
+      expect(planned.task.id).toBe(8)
+    }
+    finally {
+      restore()
+    }
+  })
+
+  test('picks an already-healthy TCP port for the initial creation instead of defaulting to ICMP', async () => {
+    const restore = mockKomari(
+      [{ id: 9, name: 'unrelated-task', clients: [source.uuid], type: 'tcp', target: '198.51.100.9:443', interval: 30 }],
+      [{ task_id: '9', total: 40, valid: 40 }],
+    )
+    try {
+      const planned = await planEntryProbeTask(source, beijingTelecom)
+      expect(planned.needsCreation).toBe(true)
+      expect(planned.probe).toEqual({ type: 'tcp', port: 443 })
+      expect(planned.task.target).toBe(`${beijingTelecom.landmarkAddress}:443`)
+    }
+    finally {
+      restore()
+    }
+  })
+
+  test('rejects planning when the source is invalid', async () => {
+    await expect(planEntryProbeTask({ uuid: '', name: 'Ghost' }, beijingTelecom)).rejects.toThrow('线路机已失效')
+  })
+
+  test('binds the healthy one among duplicate same-named tasks and flags the dead one for cleanup, without proposing a new one', async () => {
+    // 换挡新建成功、旧的还没删掉时会短暂出现两个同名任务；这里必须稳定选中
+    // 健康的那个继续用，而不是把"看到两个"误判成"一个都不存在"又建第三个。
+    const restore = mockKomari(
+      [
+        { id: 10, name: '北京电信', clients: [source.uuid], type: 'icmp', target: beijingTelecom.landmarkAddress, interval: 30 },
+        { id: 11, name: '北京电信', clients: [source.uuid], type: 'tcp', target: `${beijingTelecom.landmarkAddress}:443`, interval: 30 },
+      ],
+      [
+        { task_id: '10', total: 40, valid: 0 },
+        { task_id: '11', total: 40, valid: 40 },
+      ],
+    )
+    try {
+      const planned = await planEntryProbeTask(source, beijingTelecom)
+      expect(planned.needsCreation).toBe(false)
+      expect(planned.verdict).toBe('healthy')
+      expect(planned.task.id).toBe(11)
+      expect(planned.retiredTasks.map(task => task.id)).toEqual([10])
+    }
+    finally {
+      restore()
+    }
+  })
+
+  test('stays on the same pick across repeated re-planning while cleanup has not caught up yet', async () => {
+    const restore = mockKomari(
+      [
+        { id: 12, name: '北京电信', clients: [source.uuid], type: 'icmp', target: beijingTelecom.landmarkAddress, interval: 30 },
+        { id: 13, name: '北京电信', clients: [source.uuid], type: 'tcp', target: `${beijingTelecom.landmarkAddress}:443`, interval: 30 },
+      ],
+      [
+        { task_id: '12', total: 40, valid: 0 },
+        { task_id: '13', total: 40, valid: 40 },
+      ],
+    )
+    try {
+      const first = await planEntryProbeTask(source, beijingTelecom)
+      const second = await planEntryProbeTask(source, beijingTelecom, { fresh: true })
+      expect(first.task.id).toBe(13)
+      expect(second.task.id).toBe(13)
+      expect(first.needsCreation).toBe(false)
+      expect(second.needsCreation).toBe(false)
+    }
+    finally {
+      restore()
+    }
+  })
+
+  test('escalates past duplicate dead tasks, retiring all of them, when every candidate is dead', async () => {
+    const restore = mockKomari(
+      [
+        { id: 14, name: '北京电信', clients: [source.uuid], type: 'icmp', target: beijingTelecom.landmarkAddress, interval: 30 },
+        { id: 15, name: '北京电信', clients: [source.uuid], type: 'icmp', target: beijingTelecom.landmarkAddress, interval: 30 },
+      ],
+      [
+        { task_id: '14', total: 40, valid: 0 },
+        { task_id: '15', total: 40, valid: 0 },
+      ],
+    )
+    try {
+      const planned = await planEntryProbeTask(source, beijingTelecom)
+      expect(planned.needsCreation).toBe(true)
+      expect(planned.switchedFrom).toEqual({ type: 'icmp' })
+      expect(planned.probe).toEqual({ type: 'tcp', port: 443 })
+      expect(planned.retiredTasks.map(task => task.id).sort()).toEqual([14, 15])
+    }
+    finally {
+      restore()
+    }
   })
 })

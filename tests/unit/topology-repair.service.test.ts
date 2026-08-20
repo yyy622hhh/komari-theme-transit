@@ -1,28 +1,51 @@
 import type { TopologyHopProbe, TopologyPingEndpoint } from '../../src/services/ping-task.service'
-import type { HopTaskPlan } from '../../src/services/topology-probe.service'
+import type { EntryProbePlan, HopTaskPlan } from '../../src/services/topology-probe.service'
 import type { TopologyRepairDeps, TopologyRepairManagerLike } from '../../src/services/topology-repair.service'
 import type { NodeData } from '../../src/stores/nodes'
 import type { TopologyRouteConfig } from '../../src/utils/topologyHelper'
 import { describe, expect, test } from 'bun:test'
 import { canRunTopologyProbeRepair, listOwnedRetiredTaskIds, listOwnedUnboundTaskIds, liveTopologyTaskNames, runTopologyProbeRepair } from '../../src/services/topology-repair.service'
+import { getTopologyProbe } from '../../src/utils/topologyHelper'
 
 const relay: NodeData = { uuid: 'relay-uuid', name: 'Relay-JP', ipv4: '192.0.2.10' } as NodeData
 const landing: NodeData = { uuid: 'exit-uuid', name: 'Exit-SG', ipv4: '203.0.113.20' } as NodeData
 const nodes = [relay, landing]
+const beijingTelecom = getTopologyProbe('beijing-telecom')
 
-function route(overrides: Partial<{ id: number, sourceName: string, landingName: string, taskFilter: string, nodeName: string, live: boolean }> = {}): TopologyRouteConfig {
+function route(overrides: Partial<{
+  id: number
+  sourceName: string
+  landingName: string
+  taskFilter: string
+  nodeName: string
+  live: boolean
+  /**
+   * 默认用一个不对应任何预设的自定义入口，避免意外触发入口段自愈——那部分
+   * 有自己独立的测试套件（见 `describe('runTopologyProbeRepair entry segment')`）。
+   */
+  entryLabel: string
+  entryLive: boolean
+  entryNodeName: string
+  entryTaskFilter: string
+}> = {}): TopologyRouteConfig {
   const sourceName = overrides.sourceName ?? relay.name
   const landingName = overrides.landingName ?? landing.name
   return {
     id: overrides.id ?? 1,
     enabled: true,
     nodes: [
-      { name: '北京电信', region: 'CN', role: '入口' },
+      { name: overrides.entryLabel ?? '自定义入口', region: 'CN', role: '入口' },
       { name: sourceName, region: '', role: '线路机' },
       { name: landingName, region: '', role: '落地机' },
     ],
     metrics: [
-      { live: false, nodeName: '', taskFilter: '', fallbackLatency: null, fallbackLoss: null },
+      {
+        live: overrides.entryLive ?? false,
+        nodeName: overrides.entryNodeName ?? '',
+        taskFilter: overrides.entryTaskFilter ?? '',
+        fallbackLatency: null,
+        fallbackLoss: null,
+      },
       {
         live: overrides.live ?? true,
         nodeName: overrides.nodeName ?? sourceName,
@@ -43,6 +66,19 @@ function hopPlan(overrides: Partial<HopTaskPlan> = {}): HopTaskPlan {
     exhausted: false,
     switchedFrom: null,
     targetAddress: landing.ipv4!,
+    retiredTasks: [],
+    ...overrides,
+  }
+}
+
+function entryPlan(overrides: Partial<EntryProbePlan> = {}): EntryProbePlan {
+  return {
+    task: { name: '北京电信', type: 'icmp', target: beijingTelecom.landmarkAddress, clients: [relay.uuid], interval: 30, default_on: false },
+    probe: { type: 'icmp' },
+    verdict: 'healthy',
+    needsCreation: false,
+    exhausted: false,
+    switchedFrom: null,
     retiredTasks: [],
     ...overrides,
   }
@@ -87,6 +123,8 @@ function createDeps(overrides: Partial<TopologyRepairDeps> & { manager: Topology
     planWorkingHopTask: async () => hopPlan(),
     ensureTopologyPingTask: async () => ({ task: hopPlan().task, created: false }),
     deleteTopologyPingTasks: async () => true,
+    planEntryProbeTask: async () => entryPlan(),
+    ensureTopologyEntryProbeTask: async () => ({ task: entryPlan().task, created: false }),
     ...overrides,
   }
 }
@@ -686,5 +724,237 @@ describe('runTopologyProbeRepair resilience', () => {
     expect(deleted).toEqual([])
     expect(routeA.metrics[1]?.taskFilter).toBe('fixed-a')
     expect(log.saveCalls).toEqual([{ lockHeld: true }])
+  })
+})
+
+describe('runTopologyProbeRepair entry segment', () => {
+  test('does not plan an entry repair for a custom entry that matches no preset', async () => {
+    const staleRoute = route({ taskFilter: 'Transit-Relay-JP-to-Exit-SG' })
+    const { manager, log } = createManager([staleRoute])
+    let entryPlanCalls = 0
+    const outcome = await runTopologyProbeRepair(createDeps({
+      manager,
+      planEntryProbeTask: async () => {
+        entryPlanCalls += 1
+        return entryPlan()
+      },
+    }))
+    expect(outcome).toBe('no-op')
+    expect(entryPlanCalls).toBe(0)
+    expect(log.saveCalls).toEqual([])
+  })
+
+  test('rewrites a bound community taskFilter to the matched display-label task name', async () => {
+    const staleRoute = route({
+      taskFilter: 'Transit-Relay-JP-to-Exit-SG',
+      entryLabel: '广州电信',
+      entryLive: true,
+      entryNodeName: relay.name,
+      entryTaskFilter: '广东电信',
+    })
+    const { manager, log } = createManager([staleRoute])
+    const outcome = await runTopologyProbeRepair(createDeps({
+      manager,
+      planEntryProbeTask: async () => entryPlan({
+        needsCreation: false,
+        task: { name: '广州电信', type: 'icmp', target: getTopologyProbe('guangzhou-telecom').landmarkAddress, clients: [relay.uuid], interval: 30, default_on: false },
+      }),
+    }))
+    expect(outcome).toBe('repaired')
+    expect(log.saveCalls).toEqual([{ lockHeld: true }])
+    expect(staleRoute.metrics[0]).toMatchObject({ live: true, nodeName: relay.name, taskFilter: '广州电信' })
+  })
+
+  test('creates a missing entry task for a preset label and saves it', async () => {
+    const staleRoute = route({
+      taskFilter: 'Transit-Relay-JP-to-Exit-SG',
+      entryLabel: '北京电信',
+    })
+    const { manager, log } = createManager([staleRoute])
+    let ensureCalls = 0
+    const outcome = await runTopologyProbeRepair(createDeps({
+      manager,
+      planEntryProbeTask: async () => entryPlan({ needsCreation: true }),
+      ensureTopologyEntryProbeTask: async (_source, _probe, options) => {
+        ensureCalls += 1
+        expect(options?.hopProbe).toEqual({ type: 'icmp' })
+        return { task: { id: 55, name: '北京电信', type: 'icmp', target: beijingTelecom.landmarkAddress, clients: [relay.uuid], interval: 30 }, created: true }
+      },
+    }))
+    expect(outcome).toBe('repaired')
+    expect(ensureCalls).toBe(1)
+    expect(log.saveCalls).toEqual([{ lockHeld: true }])
+    expect(staleRoute.metrics[0]).toMatchObject({ live: true, nodeName: relay.name, taskFilter: '北京电信' })
+  })
+
+  test('escalates a dead entry task the current session created, creating the replacement before cleaning up the old one', async () => {
+    const staleRoute = route({
+      taskFilter: 'Transit-Relay-JP-to-Exit-SG',
+      entryLabel: '北京电信',
+      entryLive: true,
+      entryNodeName: relay.name,
+      entryTaskFilter: '北京电信',
+    })
+    const { manager, log } = createManager([staleRoute])
+    const deleted: number[][] = []
+    let createCalls = 0
+    let ensureCalls = 0
+    const oldTask = { id: 55, name: '北京电信', type: 'icmp', target: beijingTelecom.landmarkAddress, clients: [relay.uuid], interval: 30 }
+    const outcome = await runTopologyProbeRepair(createDeps({
+      manager,
+      sessionCreatedTaskIds: new Set([55]),
+      planEntryProbeTask: async () => entryPlan({
+        needsCreation: true,
+        probe: { type: 'tcp', port: 443 },
+        switchedFrom: { type: 'icmp' },
+        retiredTasks: [oldTask],
+      }),
+      deleteTopologyPingTasks: async (ids) => {
+        deleted.push([...ids])
+        return true
+      },
+      ensureTopologyEntryProbeTask: async () => {
+        ensureCalls += 1
+        throw new Error('a ladder switch must force-create, not find-and-reuse the dead task by name')
+      },
+      createTopologyEntryProbeTask: async (_source, _probe, hopProbe) => {
+        createCalls += 1
+        expect(hopProbe).toEqual({ type: 'tcp', port: 443 })
+        return { id: 56, name: '北京电信', type: 'tcp', target: `${beijingTelecom.landmarkAddress}:443`, clients: [relay.uuid], interval: 30 }
+      },
+    }))
+    // 换挡前后 metrics[0] 的 nodeName/taskFilter 都是「北京电信」不变——探测方式
+    // 本来就不写进持久化的 topologyMetrics，只是背后指向的 Ping 任务从 ICMP 换
+    // 成了 TCP 443——所以 `manager.dirty` 判不出变化，不需要保存，复用了和第 2
+    // 段一样的既有约定（见 `else if (!deps.manager.dirty)` 分支的注释）：只创建
+    // /清理了 Ping 任务、没有触发保存的修复，`outcome` 仍报告为 'no-op'。真正的
+    // 修复效果由下面对 createCalls/deleted/metrics 的断言验证。
+    expect(outcome).toBe('no-op')
+    expect(log.saveCalls).toEqual([])
+    expect(ensureCalls).toBe(0)
+    expect(createCalls).toBe(1)
+    // 新任务先建成功，旧任务的清理是后一步、独立于创建结果。
+    expect(deleted).toEqual([[55]])
+    expect(staleRoute.metrics[0]).toMatchObject({ live: true, taskFilter: '北京电信' })
+  })
+
+  test('does not clean up a duplicate entry task that was not created by this session', async () => {
+    const staleRoute = route({
+      taskFilter: 'Transit-Relay-JP-to-Exit-SG',
+      entryLabel: '北京电信',
+      entryLive: true,
+      entryNodeName: relay.name,
+      entryTaskFilter: '北京电信',
+    })
+    const { manager } = createManager([staleRoute])
+    const deleted: number[][] = []
+    const outcome = await runTopologyProbeRepair(createDeps({
+      manager,
+      sessionCreatedTaskIds: new Set(),
+      planEntryProbeTask: async () => entryPlan({
+        needsCreation: false,
+        retiredTasks: [{ id: 55, name: '北京电信', type: 'icmp', target: beijingTelecom.landmarkAddress, clients: [relay.uuid], interval: 30 }],
+      }),
+      deleteTopologyPingTasks: async (ids) => {
+        deleted.push([...ids])
+        return true
+      },
+    }))
+    expect(outcome).toBe('no-op')
+    expect(deleted).toEqual([])
+  })
+
+  test('creating the replacement does not depend on the old task being cleaned up first, even if cleanup keeps failing', async () => {
+    const staleRoute = route({
+      taskFilter: 'Transit-Relay-JP-to-Exit-SG',
+      entryLabel: '北京电信',
+      entryLive: true,
+      entryNodeName: relay.name,
+      entryTaskFilter: '北京电信',
+    })
+    const { manager } = createManager([staleRoute])
+    let createCalls = 0
+    const outcome = await runTopologyProbeRepair(createDeps({
+      manager,
+      sessionCreatedTaskIds: new Set([55]),
+      planEntryProbeTask: async () => entryPlan({
+        needsCreation: true,
+        probe: { type: 'tcp', port: 443 },
+        switchedFrom: { type: 'icmp' },
+        retiredTasks: [{ id: 55, name: '北京电信', type: 'icmp', target: beijingTelecom.landmarkAddress, clients: [relay.uuid], interval: 30 }],
+      }),
+      // 旧任务删除持续失败——不该让新任务因此创建不了。
+      deleteTopologyPingTasks: async () => false,
+      createTopologyEntryProbeTask: async () => {
+        createCalls += 1
+        return { id: 56, name: '北京电信', type: 'tcp', target: `${beijingTelecom.landmarkAddress}:443`, clients: [relay.uuid], interval: 30 }
+      },
+    }))
+    expect(outcome).toBe('no-op')
+    expect(createCalls).toBe(1)
+    expect(staleRoute.metrics[0]).toMatchObject({ live: true, taskFilter: '北京电信' })
+  })
+
+  test('does not attempt anything once the entry ladder is exhausted', async () => {
+    const staleRoute = route({
+      taskFilter: 'Transit-Relay-JP-to-Exit-SG',
+      entryLabel: '北京电信',
+      entryLive: true,
+      entryNodeName: relay.name,
+      entryTaskFilter: '北京电信',
+    })
+    const { manager, log } = createManager([staleRoute])
+    const outcome = await runTopologyProbeRepair(createDeps({
+      manager,
+      planEntryProbeTask: async () => entryPlan({ verdict: 'dead', exhausted: true }),
+    }))
+    expect(outcome).toBe('no-op')
+    expect(log.saveCalls).toEqual([])
+  })
+
+  test('repairs the entry and hop segments together in one save', async () => {
+    const staleRoute = route({
+      taskFilter: 'stale-hop',
+      entryLabel: '北京电信',
+    })
+    const { manager, log } = createManager([staleRoute])
+    const outcome = await runTopologyProbeRepair(createDeps({
+      manager,
+      planWorkingHopTask: async () => hopPlan({ needsCreation: false, task: { ...hopPlan().task, name: 'Transit-Relay-JP-to-Exit-SG' } }),
+      planEntryProbeTask: async () => entryPlan({ needsCreation: true }),
+      ensureTopologyEntryProbeTask: async () => ({ task: { id: 60, name: '北京电信', type: 'icmp', target: beijingTelecom.landmarkAddress, clients: [relay.uuid], interval: 30 }, created: true }),
+    }))
+    expect(outcome).toBe('repaired')
+    expect(log.saveCalls).toEqual([{ lockHeld: true }])
+    expect(staleRoute.metrics[0]).toMatchObject({ live: true, taskFilter: '北京电信' })
+    expect(staleRoute.metrics[1]).toMatchObject({ taskFilter: 'Transit-Relay-JP-to-Exit-SG' })
+  })
+
+  test('removes a newly created entry task if the save is cancelled mid-flight', async () => {
+    const staleRoute = route({
+      taskFilter: 'Transit-Relay-JP-to-Exit-SG',
+      entryLabel: '北京电信',
+    })
+    const { manager, log } = createManager([staleRoute])
+    let available = true
+    const deleted: number[][] = []
+    const outcome = await runTopologyProbeRepair(createDeps({
+      manager,
+      canRepair: () => available,
+      planEntryProbeTask: async () => entryPlan({ needsCreation: true }),
+      ensureTopologyEntryProbeTask: async () => {
+        // 模拟创建完成的同一时刻对话框被打开——下一次 canContinue() 检查就会
+        // 发现自愈已经不再被允许运行。
+        available = false
+        return { task: { id: 61, name: '北京电信', type: 'icmp', target: beijingTelecom.landmarkAddress, clients: [relay.uuid], interval: 30 }, created: true }
+      },
+      deleteTopologyPingTasks: async (ids) => {
+        deleted.push([...ids])
+        return true
+      },
+    }))
+    expect(outcome).toBe('no-op')
+    expect(log.saveCalls).toEqual([])
+    expect(deleted).toEqual([[61]])
   })
 })

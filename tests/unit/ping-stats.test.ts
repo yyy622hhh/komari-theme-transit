@@ -1,7 +1,7 @@
 import type { MetricLossPoint } from '../../src/utils/pingStats'
 import type { MetricQueryResponse, MetricSeries, PingMetricStatsResponse, PingMetricTaskStats, PingRecord } from '../../src/utils/rpc'
 import { describe, expect, test } from 'bun:test'
-import { buildPingMetricState, collectNodePingTaskIds } from '../../src/composables/useNodePingStats'
+import { buildPingMetricState, collectNodePingTaskIds, pickPreferredExactPingTaskId } from '../../src/composables/useNodePingStats'
 import { buildNodePingStats, createEmptyNodePingStats, matchesPingTaskName, normalizePingTaskFilter } from '../../src/utils/pingStats'
 
 const nodeUuid = 'node-a'
@@ -237,5 +237,26 @@ describe('buildPingMetricState (Metric Store vs. legacy fallback gate)', () => {
     // The only loss point is non-finite, so metricLossTaskIds never gets '1'
     // and the series is treated as missing.
     expect(result).toBeNull()
+  })
+})
+
+describe('pickPreferredExactPingTaskId', () => {
+  test('prefers the healthy duplicate over a dead same-named task', () => {
+    expect(pickPreferredExactPingTaskId(new Set([10, 11]), {
+      metricStats: [
+        pingStat({ task_id: '10', total: 40, valid: 0 }),
+        pingStat({ task_id: '11', total: 40, valid: 40 }),
+      ],
+    })).toBe(11)
+  })
+
+  test('prefers a pending replacement over a dead original when stats only cover the original', () => {
+    expect(pickPreferredExactPingTaskId(new Set([10, 11]), {
+      metricStats: [pingStat({ task_id: '10', total: 40, valid: 0 })],
+    })).toBe(11)
+  })
+
+  test('breaks remaining ties with the higher task id', () => {
+    expect(pickPreferredExactPingTaskId(new Set([10, 12, 11]))).toBe(12)
   })
 })

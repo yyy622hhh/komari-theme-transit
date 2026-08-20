@@ -4,8 +4,8 @@ import { onScopeDispose, ref, toValue, watch } from 'vue'
 import { useTopologyManager } from '@/composables/useTopologyManager'
 import { OPS_TOPOLOGY_HOP_PROBE } from '@/constants/ops'
 import { TIME_MS } from '@/constants/time'
-import { deleteTopologyPingTasks, ensureTopologyPingTask } from '@/services/ping-task.service'
-import { planWorkingHopTask } from '@/services/topology-probe.service'
+import { createTopologyEntryProbeTask, deleteTopologyPingTasks, ensureTopologyEntryProbeTask, ensureTopologyPingTask } from '@/services/ping-task.service'
+import { planEntryProbeTask, planWorkingHopTask } from '@/services/topology-probe.service'
 import { canRunTopologyProbeRepair, runTopologyProbeRepair } from '@/services/topology-repair.service'
 import { useAppStore } from '@/stores/app'
 import { logAppWarning } from '@/utils/safeError'
@@ -83,6 +83,9 @@ export function useTopologyProbeRepair(
         ensureTopologyPingTask,
         deleteTopologyPingTasks,
         sessionCreatedTaskIds,
+        planEntryProbeTask,
+        ensureTopologyEntryProbeTask,
+        createTopologyEntryProbeTask,
         signal: controller.signal,
       })
       lastError.value = ''

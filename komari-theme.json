@@ -30,7 +30,7 @@
       { "key": "opsDashboardEnabled", "name": "启用 Transit 首页", "type": "switch", "default": true, "help": "使用紧凑资产栏、多线路拓扑和三网节点卡；关闭后恢复上游首页。" },
       { "key": "topologyEnabled", "name": "显示多线路拓扑", "type": "switch", "default": true, "help": "首页显示入口、线路机与落地机链路；登录后可在拓扑右上角可视化管理。" },
       { "key": "carrierPingRegion", "name": "节点卡三网地区", "type": "select", "default": "beijing", "options": "beijing,shanghai,guangdong,all", "help": "beijing=北京；shanghai=上海；guangdong=广东；all=全部地区。" },
-      { "key": "topologyAutoRepairEnabled", "name": "自动修复拓扑探测", "type": "switch", "default": true, "help": "默认开启。登录管理员打开首页时，每分钟自动检查第 2 段探测是否还通；不通会自动新建 Ping 任务、切换探测方式并写回拓扑绑定。关闭后只保留拓扑管理对话框里的手动操作。" },
+      { "key": "topologyAutoRepairEnabled", "name": "自动修复拓扑探测", "type": "switch", "default": true, "help": "默认开启。登录管理员打开首页时，每分钟自动检查入口和第 2 段探测是否还通；不通会自动新建 Ping 任务、切换探测方式并写回拓扑绑定，只会删除本次浏览器会话自己创建的旧任务。关闭后只保留拓扑管理对话框里的手动操作。" },
       { "key": "topologyRoute", "name": "拓扑线路数据", "type": "richtext", "default": "", "help": "新安装默认为空。登录后使用首页配置引导创建线路；高级格式：|| 分隔线路，分号分隔节点，节点为 名称|地区|角色。" },
       { "key": "topologyMetrics", "name": "拓扑指标数据", "type": "richtext", "default": "", "help": "与拓扑线路同时由可视化管理器生成。静态格式：延迟,丢包；实时格式：live@来源节点@Ping任务名称@备用延迟@备用丢包。" },
       { "key": "glassColorPreset", "name": "毛玻璃配色方案", "type": "select", "default": "翡翠", "options": "翡翠,柔和,高对比,午夜,自定义", "help": "选择“自定义”后读取下方 JSON。" },
