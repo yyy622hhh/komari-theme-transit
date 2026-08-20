@@ -2,10 +2,9 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import process from 'node:process'
 import { gzipSync } from 'node:zlib'
+import { formatKiB, formatKiBRounded, INITIAL_GZIP_HARD_LIMIT, INITIAL_GZIP_TARGET, judgeInitialGzip } from './bundle-budget'
 
 const DIST_DIR = resolve(process.cwd(), 'dist')
-const INITIAL_GZIP_TARGET = 145 * 1024
-const INITIAL_GZIP_HARD_LIMIT = 165 * 1024
 const FORBIDDEN_PRELOADS = ['v3-history', 'echarts', 'globe', 'VisitorInfo', 'visitorFingerprint']
 const FORBIDDEN_INITIAL_SNIPPETS = [
   { label: 'visitor IP provider', value: 'https://ipwho.is/' },
@@ -48,26 +47,27 @@ if (forbiddenInitialCode.length) {
   throw new Error(`Bundle audit failed: optional visitor code is present in initial assets: ${forbiddenInitialCode.join(', ')}`)
 }
 
-if (totalGzipBytes > INITIAL_GZIP_HARD_LIMIT) {
+// 两级语义的定义和阈值都在 ./bundle-budget，audit-performance.ts 用的是同一份。
+const assetBreakdown = assets.map(asset => `${formatKiB(asset.gzipBytes)} ${asset.url}`)
+const verdict = judgeInitialGzip(totalGzipBytes)
+
+if (verdict === 'fail') {
   throw new Error([
-    `Bundle audit failed: initial assets are ${(totalGzipBytes / 1024).toFixed(1)} KiB gzip`,
-    `Hard limit: ${(INITIAL_GZIP_HARD_LIMIT / 1024).toFixed(0)} KiB gzip`,
-    ...assets.map(asset => `${(asset.gzipBytes / 1024).toFixed(1)} KiB ${asset.url}`),
+    `Bundle audit failed: initial assets are ${formatKiB(totalGzipBytes)} gzip`,
+    `Hard limit: ${formatKiBRounded(INITIAL_GZIP_HARD_LIMIT)} gzip`,
+    ...assetBreakdown,
   ].join('\n'))
 }
 
-// 目标线是警告，硬限才是失败。两者都 throw 的话低的那条永远先触发，硬限就成了
-// 死代码，而目标线只剩不到 2 KiB 余量——下一个特性就会把构建顶红，逼着做与该特性
-// 无关的瘦身。这里恢复两级语义：越过目标线立刻可见，但只有越过硬限才拦住发布。
-if (totalGzipBytes > INITIAL_GZIP_TARGET) {
+if (verdict === 'warn') {
   console.warn([
-    `Bundle audit warning: initial assets are ${(totalGzipBytes / 1024).toFixed(1)} KiB gzip`,
-    `Optimization target: ${(INITIAL_GZIP_TARGET / 1024).toFixed(0)} KiB gzip; hard limit: ${(INITIAL_GZIP_HARD_LIMIT / 1024).toFixed(0)} KiB gzip`,
-    ...assets.map(asset => `${(asset.gzipBytes / 1024).toFixed(1)} KiB ${asset.url}`),
+    `Bundle audit warning: initial assets are ${formatKiB(totalGzipBytes)} gzip`,
+    `Optimization target: ${formatKiBRounded(INITIAL_GZIP_TARGET)} gzip; hard limit: ${formatKiBRounded(INITIAL_GZIP_HARD_LIMIT)} gzip`,
+    ...assetBreakdown,
   ].join('\n'))
 }
 
 console.log([
-  `Bundle audit passed: ${(totalGzipBytes / 1024).toFixed(1)} KiB / ${(INITIAL_GZIP_TARGET / 1024).toFixed(0)} KiB target (${(INITIAL_GZIP_HARD_LIMIT / 1024).toFixed(0)} KiB hard limit)`,
+  `Bundle audit passed: ${formatKiB(totalGzipBytes)} / ${formatKiBRounded(INITIAL_GZIP_TARGET)} target (${formatKiBRounded(INITIAL_GZIP_HARD_LIMIT)} hard limit)`,
   `Initial assets: ${assets.length}; module preloads: ${preloadUrls.length}`,
 ].join('\n'))

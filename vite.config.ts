@@ -2,7 +2,7 @@ import type { Plugin } from 'vite'
 import { execSync } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { resolve } from 'node:path'
+import { relative, resolve } from 'node:path'
 import process from 'node:process'
 import { fileURLToPath, URL } from 'node:url'
 import tailwindcss from '@tailwindcss/vite'
@@ -25,6 +25,54 @@ interface ThemeManifest {
 interface ArchiveFile {
   absolutePath: string
   archivePath: string
+}
+
+/**
+ * 按 chunk 打印模块级构成，只在 `TRANSIT_ANALYZE=1` 时启用。
+ *
+ * 存在的理由：初始包有硬预算，但一旦顶红，没有工具就只能靠猜是谁把它撑大的。
+ * 这里用 rollup 自带的 `chunk.modules` 元数据，不引第三方分析插件——分析工具
+ * 本身不应该出现在依赖树和体积审计里。
+ */
+function bundleComposition(): Plugin {
+  const TOP_MODULES_PER_CHUNK = 20
+  return {
+    name: 'transit-bundle-composition',
+    apply: 'build',
+    generateBundle(_options, bundle) {
+      const chunks = Object.values(bundle)
+        .filter(asset => asset.type === 'chunk')
+        .map((chunk) => {
+          const modules = Object.entries(chunk.modules)
+            .map(([id, info]) => ({
+              id: relative(__dirname, id.replace(/^\0/, '')),
+              bytes: info.renderedLength,
+            }))
+            .filter(module => module.bytes > 0)
+            .sort((left, right) => right.bytes - left.bytes)
+          return {
+            file: chunk.fileName,
+            isEntry: chunk.isEntry,
+            bytes: chunk.code.length,
+            moduleCount: modules.length,
+            modules: modules.slice(0, TOP_MODULES_PER_CHUNK),
+          }
+        })
+        .sort((left, right) => right.bytes - left.bytes)
+
+      for (const chunk of chunks.filter(chunk => chunk.isEntry)) {
+        console.warn(`\n[composition] ${chunk.file} — ${(chunk.bytes / 1024).toFixed(1)} KiB raw, ${chunk.moduleCount} modules`)
+        for (const module of chunk.modules)
+          console.warn(`  ${(module.bytes / 1024).toFixed(1).padStart(7)} KiB  ${module.id}`)
+      }
+
+      this.emitFile({
+        type: 'asset',
+        fileName: 'bundle-composition.json',
+        source: `${JSON.stringify(chunks, null, 2)}\n`,
+      })
+    },
+  }
 }
 
 const themeJsonPath = resolve(__dirname, 'komari-theme.json')
@@ -177,6 +225,7 @@ export default defineConfig({
     vue(),
     vueDevTools(),
     tailwindcss(),
+    ...(process.env.TRANSIT_ANALYZE === '1' ? [bundleComposition()] : []),
     ...(!isFunctionalTestBuild ? [komariThemeZip()] : []),
   ],
   resolve: {

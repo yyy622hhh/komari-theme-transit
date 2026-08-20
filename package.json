@@ -16,6 +16,7 @@
     "build": "run-p type-check \"build-only {@}\" --",
     "preview": "vite preview",
     "build-only": "vite build",
+    "analyze": "TRANSIT_ANALYZE=1 vite build",
     "audit:bundle": "bun scripts/audit-bundle.ts",
     "audit:performance": "bun scripts/audit-performance.ts",
     "audit:reproducible": "bun scripts/audit-reproducible.ts",

@@ -3,9 +3,9 @@ import { Icon } from '@iconify/vue'
 import { defineAsyncComponent, onMounted, onUnmounted, ref } from 'vue'
 import { Alert, AlertAction, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
-import { Toaster } from '@/components/ui/sonner'
 import { useVisitorPageAudit } from '@/composables/useVisitorAudit'
 import { useAppStore } from '@/stores/app'
+import { markToastContainerMounted, toastContainerRequested } from '@/utils/message'
 import { logAppError } from '@/utils/safeError'
 import Background from './components/Background.vue'
 import ComponentErrorBoundary from './components/ComponentErrorBoundary.vue'
@@ -13,6 +13,9 @@ import Footer from './components/Footer.vue'
 import Header from './components/Header.vue'
 import LoadingCover from './components/LoadingCover.vue'
 import Provider from './components/Provider.vue'
+
+// Toaster 只在第一次要弹提示时才加载，见 utils/message.ts。
+const Toaster = defineAsyncComponent(() => import('@/components/ui/sonner').then(module => module.Toaster))
 
 const appStore = useAppStore()
 useVisitorPageAudit()
@@ -151,6 +154,12 @@ onUnmounted(() => {
         <Footer />
       </div>
     </Transition>
-    <Toaster rich-colors close-button position="top-center" />
+    <Toaster
+      v-if="toastContainerRequested"
+      rich-colors
+      close-button
+      position="top-center"
+      @vue:mounted="markToastContainerMounted"
+    />
   </Provider>
 </template>

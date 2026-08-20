@@ -2,6 +2,7 @@ import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'n
 import { basename, resolve } from 'node:path'
 import process from 'node:process'
 import { gzipSync } from 'node:zlib'
+import { formatKiB, formatKiBRounded, INITIAL_ENTRY_GZIP_BUDGET, INITIAL_GZIP_HARD_LIMIT, INITIAL_GZIP_TARGET, judgeInitialGzip } from './bundle-budget'
 
 interface AssetBudget {
   gzipBytes: number
@@ -20,7 +21,6 @@ interface AssetMeasurement {
 
 const DIST_DIR = resolve(process.cwd(), 'dist')
 const REPORT_DIR = resolve(process.cwd(), process.env.TRANSIT_PERF_REPORT_DIR ?? 'test-results/performance')
-const INITIAL_GZIP_BUDGET = 145 * 1024
 const ASSET_TAG_PATTERN = /<(?:script|link)\s[^>]*>/gi
 const ASSET_URL_PATTERN = /(?:src|href)=["']([^"']+)["']/i
 const LEADING_SLASH_PATTERN = /^\//
@@ -71,19 +71,26 @@ const initialEntry: AssetMeasurement = {
   label: 'initial-entry',
   rawBytes: initialEntryContent.byteLength,
 }
-const initialEntryBudget = 86 * 1024
 const initialGzipBytes = initialAssets.reduce((total, path) => total + gzipSync(readFileSync(path)).byteLength, 0)
 const failures: string[] = []
-if (initialGzipBytes > INITIAL_GZIP_BUDGET)
-  failures.push(`initial assets ${(initialGzipBytes / 1024).toFixed(1)} KiB > ${(INITIAL_GZIP_BUDGET / 1024).toFixed(0)} KiB`)
-if (initialEntry.gzipBytes > initialEntryBudget)
-  failures.push(`initial-entry gzip ${(initialEntry.gzipBytes / 1024).toFixed(1)} KiB > ${(initialEntryBudget / 1024).toFixed(0)} KiB`)
+const warnings: string[] = []
+
+// 聚合初始体积走和 audit:bundle 同一套两级判定：目标线只警告，硬限才失败。
+// 单 chunk 预算保持一条硬线——它们各自有明确余量，越过就是真的回归。
+const initialVerdict = judgeInitialGzip(initialGzipBytes)
+if (initialVerdict === 'fail')
+  failures.push(`initial assets ${formatKiB(initialGzipBytes)} > ${formatKiBRounded(INITIAL_GZIP_HARD_LIMIT)} hard limit`)
+else if (initialVerdict === 'warn')
+  warnings.push(`initial assets ${formatKiB(initialGzipBytes)} > ${formatKiBRounded(INITIAL_GZIP_TARGET)} target`)
+
+if (initialEntry.gzipBytes > INITIAL_ENTRY_GZIP_BUDGET)
+  failures.push(`initial-entry gzip ${formatKiB(initialEntry.gzipBytes)} > ${formatKiBRounded(INITIAL_ENTRY_GZIP_BUDGET)}`)
 
 for (const { budget, measurement } of measured) {
   if (measurement.gzipBytes > budget.gzipBytes)
-    failures.push(`${budget.label} gzip ${(measurement.gzipBytes / 1024).toFixed(1)} KiB > ${(budget.gzipBytes / 1024).toFixed(0)} KiB`)
+    failures.push(`${budget.label} gzip ${formatKiB(measurement.gzipBytes)} > ${formatKiBRounded(budget.gzipBytes)}`)
   if (budget.rawBytes && measurement.rawBytes > budget.rawBytes)
-    failures.push(`${budget.label} raw ${(measurement.rawBytes / 1024).toFixed(1)} KiB > ${(budget.rawBytes / 1024).toFixed(0)} KiB`)
+    failures.push(`${budget.label} raw ${formatKiB(measurement.rawBytes)} > ${formatKiBRounded(budget.rawBytes)}`)
 }
 
 const report = {
@@ -92,10 +99,11 @@ const report = {
   initial: {
     assetCount: initialAssets.length,
     gzipBytes: initialGzipBytes,
-    gzipBudgetBytes: INITIAL_GZIP_BUDGET,
+    gzipTargetBytes: INITIAL_GZIP_TARGET,
+    gzipBudgetBytes: INITIAL_GZIP_HARD_LIMIT,
   },
   assets: [
-    { ...initialEntry, gzipBudgetBytes: initialEntryBudget, rawBudgetBytes: null },
+    { ...initialEntry, gzipBudgetBytes: INITIAL_ENTRY_GZIP_BUDGET, rawBudgetBytes: null },
     ...measured.map(({ budget, measurement }) => ({
       ...measurement,
       gzipBudgetBytes: budget.gzipBytes,
@@ -104,6 +112,7 @@ const report = {
   ],
   passed: failures.length === 0,
   failures,
+  warnings,
 }
 
 mkdirSync(REPORT_DIR, { recursive: true })
@@ -111,10 +120,13 @@ const reportPath = resolve(REPORT_DIR, 'bundle-performance.json')
 writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`)
 
 console.log(`Performance trend report: ${basename(reportPath)}`)
-console.log(`Initial gzip: ${(initialGzipBytes / 1024).toFixed(1)} KiB / ${(INITIAL_GZIP_BUDGET / 1024).toFixed(0)} KiB`)
-console.log(`initial-entry: ${(initialEntry.gzipBytes / 1024).toFixed(1)} KiB gzip (${initialEntry.file})`)
+console.log(`Initial gzip: ${formatKiB(initialGzipBytes)} / ${formatKiBRounded(INITIAL_GZIP_TARGET)} target (${formatKiBRounded(INITIAL_GZIP_HARD_LIMIT)} hard limit)`)
+console.log(`initial-entry: ${formatKiB(initialEntry.gzipBytes)} gzip / ${formatKiBRounded(INITIAL_ENTRY_GZIP_BUDGET)} (${initialEntry.file})`)
 for (const { budget, measurement } of measured)
-  console.log(`${budget.label}: ${(measurement.gzipBytes / 1024).toFixed(1)} KiB gzip (${measurement.file})`)
+  console.log(`${budget.label}: ${formatKiB(measurement.gzipBytes)} gzip (${measurement.file})`)
+
+for (const warning of warnings)
+  console.warn(`Performance audit warning: ${warning}`)
 
 if (failures.length)
   throw new Error(`Performance audit failed:\n${failures.join('\n')}`)
