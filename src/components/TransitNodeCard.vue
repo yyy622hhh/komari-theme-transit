@@ -64,6 +64,8 @@ const alertTone = computed(() => visibleAlert.value?.severity === 'critical'
   ? 'text-rose-600 dark:text-rose-400'
   : 'text-amber-700 dark:text-amber-300')
 const statusEdgeTone = computed(() => {
+  if (!props.node.online)
+    return 'var(--destructive)'
   if (isMaintenance.value)
     return 'var(--warning)'
   if (visibleAlert.value?.severity === 'critical')
@@ -72,9 +74,7 @@ const statusEdgeTone = computed(() => {
     return 'var(--warning)'
   return 'var(--success)'
 })
-const statusEdgeStyle = computed(() => props.node.online
-  ? { borderLeftColor: statusEdgeTone.value, borderLeftWidth: '3px' }
-  : undefined)
+const statusEdgeStyle = computed(() => ({ '--node-status-tone': statusEdgeTone.value }))
 </script>
 
 <template>
@@ -86,6 +86,8 @@ const statusEdgeStyle = computed(() => props.node.online
     :class="!node.online ? 'opacity-75' : ''"
     :style="statusEdgeStyle"
   >
+    <span aria-hidden="true" data-node-status-rail class="transit-node-card__status-rail" />
+
     <button
       type="button"
       class="absolute inset-0 z-0 cursor-pointer rounded-2xl border-0 bg-transparent p-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-emerald-400/70"
@@ -245,6 +247,17 @@ const statusEdgeStyle = computed(() => props.node.online
 
 .transit-node-card {
   container-type: inline-size;
+}
+
+.transit-node-card__status-rail {
+  position: absolute;
+  z-index: 3;
+  inset-block: 0;
+  inset-inline-start: 0;
+  width: 0.4375rem;
+  pointer-events: none;
+  background: var(--node-status-tone);
+  box-shadow: inset -1px 0 0 rgb(255 255 255 / 0.18);
 }
 
 .node-card-name {
