@@ -369,15 +369,17 @@ interface PingTaskRecord {
  * 单独验证是因为入口任务复用走的是 `admin:editPingTask`（把线路机加进已有任务的
  * clients），而这个方法比另外三个晚出现。主题在它缺失时会退回新建，但「退回」这条
  * 路只有单测覆盖，没有任何证据说明矩阵里最老的版本到底有没有它——不知道就等于
- * 每次改这块都在赌。这里把答案固定下来：缺失是可接受的（记录并跳过），而存在却
- * 语义不符不可接受。
+ * 每次改这块都在赌。这里把答案固定下来：存在但语义不符直接失败；缺失时不能只
+ * 跳过，实验室要照主题的兜底路径再新建一条
+ * 同名任务，并确认第二台真实客户端确实绑定成功。
  */
-async function verifyPingTaskRpcSurface(baseUrl: string, clientUuid: string): Promise<void> {
+async function verifyPingTaskRpcSurface(baseUrl: string, clientIds: { first: string, second: string }): Promise<void> {
+  const taskName = 'Transit Lab Probe'
   const created = await rpc(baseUrl, 'admin:addPingTask', {
-    name: 'Transit Lab Probe',
+    name: taskName,
     type: 'icmp',
     target: '203.0.113.9',
-    clients: [clientUuid],
+    clients: [clientIds.first],
     interval: 60,
     default_on: false,
   })
@@ -385,30 +387,47 @@ async function verifyPingTaskRpcSurface(baseUrl: string, clientUuid: string): Pr
     throw new Error(`admin:addPingTask failed with RPC ${created.error.code ?? 'unknown'}`)
 
   const listed = requireResult(await rpc<PingTaskRecord[]>(baseUrl, 'admin:getAllPingTasks'), 'admin:getAllPingTasks')
-  const task = listed.find(entry => entry.name === 'Transit Lab Probe')
+  const task = listed.find(entry => entry.name === taskName && entry.clients?.includes(clientIds.first))
   if (!task || !Number.isInteger(task.id))
-    throw new Error('admin:getAllPingTasks did not return the task just created')
+    throw new Error('entry-task creation path did not return the task just created')
 
   const edited = await rpc(baseUrl, 'admin:editPingTask', {
-    tasks: [{ ...task, clients: [...(task.clients ?? []), 'transit-lab-second-client'] }],
+    tasks: [{ ...task, clients: [...new Set([...(task.clients ?? []), clientIds.second])] }],
   })
+  const taskIds = [task.id!]
   if (edited.error) {
-    // 方法不存在是已知且被主题容忍的情况：ensureTopologyEntryProbeTask 会退回新建。
+    // 与 ensureTopologyEntryProbeTask 相同：不能把第二台线路机并入既有任务时，
+    // 新建一条同名任务兜底。矩阵必须验证兜底真的落库，不能只记 warning 跳过。
     console.warn(`[komari-lab] admin:editPingTask unavailable on ${version} (RPC ${edited.error.code ?? 'unknown'}); the theme falls back to creating a task`)
+    const fallback = await rpc(baseUrl, 'admin:addPingTask', {
+      name: taskName,
+      type: task.type,
+      target: task.target,
+      clients: [clientIds.second],
+      interval: task.interval ?? 60,
+      default_on: false,
+    })
+    if (fallback.error)
+      throw new Error(`entry-task fallback creation failed with RPC ${fallback.error.code ?? 'unknown'}`)
+    const afterFallback = requireResult(await rpc<PingTaskRecord[]>(baseUrl, 'admin:getAllPingTasks'), 'admin:getAllPingTasks')
+    const fallbackTask = afterFallback.find(entry => entry.name === taskName && entry.clients?.includes(clientIds.second))
+    if (!fallbackTask || !Number.isInteger(fallbackTask.id))
+      throw new Error('entry-task fallback creation reported success but did not persist')
+    taskIds.push(fallbackTask.id!)
   }
   else {
     const afterEdit = requireResult(await rpc<PingTaskRecord[]>(baseUrl, 'admin:getAllPingTasks'), 'admin:getAllPingTasks')
     const updated = afterEdit.find(entry => entry.id === task.id)
-    if (!updated?.clients?.includes('transit-lab-second-client'))
-      throw new Error('admin:editPingTask reported success but did not persist the added client')
+    if (!updated?.clients?.includes(clientIds.first) || !updated.clients.includes(clientIds.second))
+      throw new Error('entry-task reuse path reported success but did not persist both real clients')
   }
 
-  const deleted = await rpc(baseUrl, 'admin:deletePingTask', { id: [task.id] })
+  const deleted = await rpc(baseUrl, 'admin:deletePingTask', { id: taskIds })
   if (deleted.error)
     throw new Error(`admin:deletePingTask failed with RPC ${deleted.error.code ?? 'unknown'}`)
   const afterDelete = requireResult(await rpc<PingTaskRecord[]>(baseUrl, 'admin:getAllPingTasks'), 'admin:getAllPingTasks')
-  if (afterDelete.some(entry => entry.id === task.id))
-    throw new Error('admin:deletePingTask reported success but the task is still listed')
+  if (afterDelete.some(entry => taskIds.includes(entry.id ?? -1)))
+    throw new Error('admin:deletePingTask reported success but a lab task is still listed')
 }
 
 async function verifyOrder(baseUrl: string, ids: { first: string, second: string }, label: string): Promise<void> {
@@ -552,7 +571,7 @@ async function main(): Promise<void> {
   await verifyThemeAndAdminRoutes(baseUrl, 'after initial installation')
   await verifyThemeInBrowser(baseUrl, 'after initial installation')
   const ids = await saveAndVerify(baseUrl)
-  await verifyPingTaskRpcSurface(baseUrl, ids.first)
+  await verifyPingTaskRpcSurface(baseUrl, ids)
   createRollbackSnapshot()
   await uploadTheme(baseUrl, zipPath, 'Same-package theme upgrade')
   if (existsSync(rollbackMarker))

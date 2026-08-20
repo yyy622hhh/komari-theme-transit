@@ -67,6 +67,7 @@ rewrites the authoritative set with this machine's rendering.
 - [.github/workflows/release-on-version-bump.yml](.github/workflows/release-on-version-bump.yml) — release automation.
 - [vite.config.ts](vite.config.ts) — Vite config, build constants, manual chunks, zip packaging.
 - [package.json](package.json) — bun scripts and dependencies; intentionally no top-level `version`.
+- [scripts/audit-source-size.ts](scripts/audit-source-size.ts) — non-data source files stay at or below 600 lines. `.vue` counts its `<script>` blocks only: the rule is about how much logic has to be understood, not how long a template is. Never move a template or style out of the SFC to satisfy it — `vue-tsc` does not type-check `<template src="…">`, so that trade buys lines with silent template bugs. Split the script instead.
 - [docs/DependencyPins.md](docs/DependencyPins.md) — majors that were tried, measured and rolled back, each with a checkable exit condition. Read it before starting a dependency bump; do not re-litigate a pin from memory.
 
 ## Architecture anchor

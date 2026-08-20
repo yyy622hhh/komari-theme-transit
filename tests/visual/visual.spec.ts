@@ -40,6 +40,10 @@ async function expectSelectedNode(select: Locator, label: string): Promise<void>
   await expect(select.locator('option:checked')).toHaveText(label)
 }
 
+async function selectQuickLanding(dialog: Locator, label = '香港边缘节点-超长名称布局测试'): Promise<void> {
+  await dialog.getByLabel('添加线路落地机').selectOption({ label })
+}
+
 async function openTopologyManager(page: Page, trigger: 'manage' | 'empty' = 'manage'): Promise<Locator> {
   if (trigger === 'empty')
     await page.getByRole('button', { name: '配置第一条线路' }).click()
@@ -837,6 +841,7 @@ test('Transit topology manager creates both the entry and hop tasks when no task
   await openStablePage(page)
 
   const dialog = await openTopologyManager(page, 'empty')
+  await selectQuickLanding(dialog)
   await dialog.getByRole('button', { name: '添加线路' }).click()
   const route = dialog.locator('[data-topology-route-id]').first()
   await expect(dialog.getByLabel('第 1 条线路入口探测')).toHaveValue('beijing-telecom')
@@ -862,6 +867,37 @@ test('Transit topology manager creates both the entry and hop tasks when no task
   await expect(writeLog).toBeVisible()
   await expect(writeLog).toContainText('创建入口探测任务 北京电信')
   await expect(writeLog).toContainText('手动操作')
+})
+
+test('Transit topology manager adds a relay-only route when the optional landing is not selected', async ({ page }) => {
+  const saves: Array<{ topologyRoute?: string, topologyMetrics?: string }> = []
+  const addedTasks: Array<Record<string, unknown>> = []
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, { opsDashboard: true, authenticated: true, emptyTopology: true, quickTopologyNoTasks: true })
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && request.url().includes('/api/admin/theme/settings?theme=Transit'))
+      saves.push(request.postDataJSON())
+    if (request.method() === 'POST' && request.url().endsWith('/api/rpc2') && request.postDataJSON().method === 'admin:addPingTask')
+      addedTasks.push(request.postDataJSON().params as Record<string, unknown>)
+  })
+  await openStablePage(page)
+
+  const dialog = await openTopologyManager(page, 'empty')
+  await expect(dialog.getByLabel('添加线路落地机')).toHaveValue('')
+  await expect(dialog.getByLabel('添加线路落地机').locator('option:checked')).toHaveText('不选（仅入口 → 线路机）')
+  await dialog.getByRole('button', { name: '添加线路' }).click()
+
+  const route = dialog.locator('[data-topology-route-id]').first()
+  await expectSelectedNode(dialog.getByLabel('第 1 条线路线路机'), '主控-洛杉矶')
+  await expect(dialog.getByLabel('第 1 条线路落地机')).toHaveValue('')
+  await expect(route).toHaveAttribute('data-topology-entry-task', '北京电信')
+  await expect(route).toHaveAttribute('data-topology-hop-task', '')
+  await expect(route.locator('[data-topology-hop-hint]')).toHaveCount(0)
+  await expect.poll(() => saves.length).toBe(1)
+  expect(saves[0]?.topologyRoute?.split(';').map(node => node.split('|')[0])).toEqual(['北京电信', '主控-洛杉矶'])
+  expect(saves[0]?.topologyMetrics).toBe('live@主控-洛杉矶@北京电信@-@-')
+  expect(addedTasks).toHaveLength(1)
+  expect(addedTasks[0]?.name).toBe('北京电信')
 })
 
 test('Transit topology creates a TCP hop when the relay cannot use ICMP', async ({ page }) => {
@@ -1028,6 +1064,7 @@ test('Transit topology retires only a probe task created in the current session'
   await openStablePage(page)
 
   const dialog = await openTopologyManager(page, 'empty')
+  await selectQuickLanding(dialog)
   await dialog.getByRole('button', { name: '添加线路' }).click()
   const route = dialog.locator('[data-topology-route-id]').first()
   await expect(route).toHaveAttribute('data-topology-hop-probe', 'ICMP')
@@ -1060,6 +1097,7 @@ test('Transit topology switches the entry probe once ICMP is proven dead, retiri
   await openStablePage(page)
 
   const dialog = await openTopologyManager(page, 'empty')
+  await selectQuickLanding(dialog)
   await dialog.getByRole('button', { name: '添加线路' }).click()
   const route = dialog.locator('[data-topology-route-id]').first()
   await expect(route).toHaveAttribute('data-topology-entry-task', '北京电信')
@@ -1109,6 +1147,7 @@ test('Transit topology creates the replacement entry task even when deleting the
   await openStablePage(page)
 
   const dialog = await openTopologyManager(page, 'empty')
+  await selectQuickLanding(dialog)
   await dialog.getByRole('button', { name: '添加线路' }).click()
   const route = dialog.locator('[data-topology-route-id]').first()
   await expect(route).toHaveAttribute('data-topology-entry-task', '北京电信')
@@ -1151,6 +1190,7 @@ test('Transit topology discards a planned task when the landing is cleared', asy
   await openStablePage(page)
 
   const dialog = await openTopologyManager(page, 'empty')
+  await selectQuickLanding(dialog)
   await dialog.getByRole('button', { name: '添加线路' }).click()
   await expect.poll(() => saves.length).toBe(1)
   // 没有匹配任务时入口和第 2 段各自建一个任务：「北京电信」和 Transit 生成的
@@ -1208,6 +1248,7 @@ test('Transit topology adding the same source and landing updates the existing r
   await openStablePage(page)
 
   const dialog = await openTopologyManager(page, 'empty')
+  await selectQuickLanding(dialog)
   await dialog.getByRole('button', { name: '添加线路' }).click()
   await expectSelectedNode(dialog.getByLabel('第 1 条线路线路机'), '主控-洛杉矶')
   await expectSelectedNode(dialog.getByLabel('第 1 条线路落地机'), '香港边缘节点-超长名称布局测试')
@@ -1266,7 +1307,7 @@ test('Transit topology manager can delete every route and persist an empty topol
   await expect(dialog.locator('[data-topology-route-id]')).toHaveCount(2)
   while (await dialog.locator('[data-topology-route-id]').count())
     await dialog.getByRole('button', { name: '删除线路' }).first().click()
-  await expect(dialog.getByText('还没有线路。选入口、线路机和落地机后点击“添加线路”，会立即保存。')).toBeVisible()
+  await expect(dialog.getByText('还没有线路。选择入口和线路机即可添加；落地机可选，添加后会立即保存。')).toBeVisible()
   await expect.poll(() => saves.some(item => (item as { topologyRoute?: string }).topologyRoute === '')).toBe(true)
   const emptied = [...saves].reverse().find(item => (item as { topologyRoute?: string }).topologyRoute === '')
   expect(emptied).toMatchObject({
@@ -1298,6 +1339,7 @@ test('Transit topology quick generation waits for task loading and creates the s
   await openStablePage(page)
 
   const dialog = await openTopologyManager(page)
+  await selectQuickLanding(dialog, '东京-高负载')
   const addButton = dialog.getByRole('button', { name: '添加线路' })
   await addButton.evaluate((element) => {
     element.click()
@@ -1314,7 +1356,7 @@ test('Transit topology quick generation waits for task loading and creates the s
   await expectSelectedNode(dialog.getByLabel('第 3 条线路落地机'), '东京-高负载')
   await expect(generated).toHaveAttribute('data-topology-entry-task', '北京电信')
   await expect(generated).toHaveAttribute('data-topology-hop-task', 'Transit-主控-洛杉矶-to-东京-高负载')
-  await expect(dialog.getByLabel('添加线路落地机').locator('option:checked')).toHaveText('新加坡-A100')
+  await expect(dialog.getByLabel('添加线路落地机').locator('option:checked')).toHaveText('不选（仅入口 → 线路机）')
   await expect(dialog.locator('[data-topology-route-id]')).toHaveCount(3)
   await expect(dialog).toBeVisible()
   await expect.poll(() => {
@@ -1490,6 +1532,7 @@ test('Transit topology quick generation discards delayed work after closing', as
   await openStablePage(page)
 
   let dialog = await openTopologyManager(page)
+  await selectQuickLanding(dialog, '东京-高负载')
   await dialog.getByRole('button', { name: '添加线路' }).evaluate(element => (element as HTMLButtonElement).click())
   await expect.poll(async () => Promise.all([
     dialog.getByRole('button', { name: '添加中' }).isVisible(),
@@ -1536,6 +1579,7 @@ test('Transit topology removes a task committed while its editor is closing', as
   await openStablePage(page)
 
   const dialog = await openTopologyManager(page, 'empty')
+  await selectQuickLanding(dialog)
   const mutationStarted = page.waitForRequest(request => request.method() === 'POST'
     && request.url().endsWith('/api/rpc2')
     && request.postDataJSON().method === 'admin:addPingTask'
@@ -1589,6 +1633,7 @@ test('Transit topology quick generation keeps preset task semantics when the sou
   await openStablePage(page)
 
   const dialog = await openTopologyManager(page, 'empty')
+  await selectQuickLanding(dialog)
   await dialog.getByRole('button', { name: '添加线路' }).click()
   await expect(dialog.getByLabel('第 1 条线路入口探测')).toHaveValue('beijing-telecom')
   await expectSelectedNode(dialog.getByLabel('第 1 条线路线路机'), '北京电信')

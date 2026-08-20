@@ -20,7 +20,14 @@ export const OPS_ALERT_LIMITS = {
   mobileCollapsed: 2,
 } as const
 
-export const OPS_PING_STALE_AFTER_MS = 2.5 * TIME_MS.minute
+export const OPS_PING_FRESHNESS = {
+  /** 超过这个时间仍未成功刷新时，只提示“可能不是最新”，继续显示最后数据。 */
+  delayedAfterMs: 10 * TIME_MS.minute,
+  /** 超过这个时间仍未成功刷新时，才判定不可用并切换到备用数据。 */
+  staleAfterMs: 30 * TIME_MS.minute,
+  /** 页面从后台恢复后留给立即刷新请求的宽限时间。 */
+  resumeGraceMs: TIME_MS.minute,
+} as const
 
 /**
  * 拓扑第 2 段（线路机 → 落地机）自动挑选探测方式的参数。

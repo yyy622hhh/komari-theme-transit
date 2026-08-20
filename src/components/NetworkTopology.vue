@@ -54,6 +54,18 @@ interface RouteDirection {
   count: number
 }
 
+defineOptions({
+  components: {
+    Icon,
+    IncidentTimelineDialog,
+    TopologyEdgeMetric,
+    TopologyManagerDialog,
+    TopologyProbeSelect,
+    TopologyRouteDetailDialog,
+    TopologySegmentReliabilityObserver,
+  },
+})
+
 const props = withDefaults(defineProps<{ nodes: NodeData[], embedded?: boolean }>(), { embedded: false })
 const appStore = useAppStore()
 const router = useRouter()
@@ -501,7 +513,10 @@ function routeRankingLabel(route: RouteRow): string {
                 @click="openRouteDetail(route)"
               >
                 {{ getRouteScore(route).score }} 分 {{ getRouteScore(route).label }}
-                <span v-if="routeRankingLabel(route)" class="ml-1 rounded border border-current/20 px-1 py-px text-[8px] no-underline">
+                <span
+                  v-if="routeRankingLabel(route)"
+                  class="ml-1 rounded border border-current/20 px-1 py-px text-[8px] no-underline"
+                >
                   {{ routeRankingLabel(route) }}
                 </span>
               </button>
@@ -525,7 +540,10 @@ function routeRankingLabel(route: RouteRow): string {
               :disabled="!route.nodes[1]?.node"
               @click="route.nodes[1] && openNode(route.nodes[1])"
             >
-              <span class="transit-dot-ring size-1.5 shrink-0 rounded-full ring-4" :class="!route.nodes[1]?.node ? 'bg-amber-400' : route.nodes[1].node.online ? 'bg-emerald-400' : 'bg-rose-400'" />
+              <span
+                class="transit-dot-ring size-1.5 shrink-0 rounded-full ring-4"
+                :class="!route.nodes[1]?.node ? 'bg-amber-400' : route.nodes[1].node.online ? 'bg-emerald-400' : 'bg-rose-400'"
+              />
               <img
                 v-if="route.nodes[1]?.region"
                 :src="`/images/flags/${getRegionCode(route.nodes[1].region)}.svg`"
@@ -557,7 +575,10 @@ function routeRankingLabel(route: RouteRow): string {
                 :disabled="!route.nodes[2]?.node"
                 @click="route.nodes[2] && openNode(route.nodes[2])"
               >
-                <span class="transit-dot-ring size-1.5 shrink-0 rounded-full ring-4" :class="!route.nodes[2]?.node ? 'bg-amber-400' : route.nodes[2].node.online ? 'bg-emerald-400' : 'bg-rose-400'" />
+                <span
+                  class="transit-dot-ring size-1.5 shrink-0 rounded-full ring-4"
+                  :class="!route.nodes[2]?.node ? 'bg-amber-400' : route.nodes[2].node.online ? 'bg-emerald-400' : 'bg-rose-400'"
+                />
                 <img
                   v-if="route.nodes[2]?.region"
                   :src="`/images/flags/${getRegionCode(route.nodes[2].region)}.svg`"
@@ -639,7 +660,10 @@ function routeRankingLabel(route: RouteRow): string {
             @click="route.nodes[1] && openNode(route.nodes[1])"
           >
             <span class="grid place-items-center">
-              <span class="transit-dot-ring size-1.5 rounded-full ring-4" :class="!route.nodes[1]?.node ? 'bg-amber-400' : route.nodes[1].node.online ? 'bg-emerald-400' : 'bg-rose-400'" />
+              <span
+                class="transit-dot-ring size-1.5 rounded-full ring-4"
+                :class="!route.nodes[1]?.node ? 'bg-amber-400' : route.nodes[1].node.online ? 'bg-emerald-400' : 'bg-rose-400'"
+              />
             </span>
             <span class="flex min-w-0 items-center gap-2.5">
               <img
@@ -680,7 +704,10 @@ function routeRankingLabel(route: RouteRow): string {
               @click="route.nodes[2] && openNode(route.nodes[2])"
             >
               <span class="grid place-items-center">
-                <span class="transit-dot-ring size-1.5 rounded-full ring-4" :class="!route.nodes[2]?.node ? 'bg-amber-400' : route.nodes[2].node.online ? 'bg-emerald-400' : 'bg-rose-400'" />
+                <span
+                  class="transit-dot-ring size-1.5 rounded-full ring-4"
+                  :class="!route.nodes[2]?.node ? 'bg-amber-400' : route.nodes[2].node.online ? 'bg-emerald-400' : 'bg-rose-400'"
+                />
               </span>
               <span class="flex min-w-0 items-center gap-2.5">
                 <img
@@ -735,9 +762,13 @@ function routeRankingLabel(route: RouteRow): string {
     class="relative z-1 scroll-mt-20 pointer-events-auto"
     aria-labelledby="topology-empty-title"
   >
-    <div class="transit-panel flex flex-col gap-3 rounded-2xl px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+    <div
+      class="transit-panel flex flex-col gap-3 rounded-2xl px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-5"
+    >
       <div class="flex min-w-0 items-start gap-3">
-        <span class="grid size-9 shrink-0 place-items-center rounded-lg border border-emerald-500/20 bg-emerald-500/[0.07] text-emerald-600 dark:text-emerald-300">
+        <span
+          class="grid size-9 shrink-0 place-items-center rounded-lg border border-emerald-500/20 bg-emerald-500/[0.07] text-emerald-600 dark:text-emerald-300"
+        >
           <Icon icon="tabler:route-square-2" :width="18" />
         </span>
         <div class="min-w-0">
@@ -745,7 +776,7 @@ function routeRankingLabel(route: RouteRow): string {
             还没有配置线路
           </h2>
           <p class="mt-1 text-xs leading-5 text-slate-600 dark:text-slate-400">
-            选入口、线路机和落地机即可添加第一条线路。添加和修改都会立即保存，并自动创建探测任务。
+            选择入口和线路机即可添加第一条线路；落地机可选。添加和修改都会立即保存，并自动创建探测任务。
           </p>
         </div>
       </div>

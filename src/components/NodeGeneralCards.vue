@@ -1,48 +1,40 @@
 <script setup lang="ts">
+import type { NodeGeneralCardContext } from '@/components/nodeGeneralCards.definitions'
+import type { GeneralMetricCard } from '@/components/nodeGeneralCards.helpers'
 import type { GeneralCardKey } from '@/stores/app'
 import type { NodeData } from '@/stores/nodes'
 import type { CurrencyCode } from '@/utils/financeHelper'
-import type { OnlineNodeStats, TopNodeMetric } from '@/utils/nodeMetricsHelper'
 import { Icon } from '@iconify/vue'
 import { useNow } from '@vueuse/core'
 import { computed, defineAsyncComponent, onMounted, ref, watch } from 'vue'
 import ComponentErrorBoundary from '@/components/ComponentErrorBoundary.vue'
 import NodeEarthGlobe from '@/components/NodeEarthGlobe.vue'
+import { getNodeGeneralCardDefinition } from '@/components/nodeGeneralCards.definitions'
+import {
+  createNodeGeneralFormatters,
+  formatNodeGeneralDate,
+  formatNodeGeneralTime,
+  GENERAL_CARD_CLASS,
+  GENERAL_CARD_UNIT_CLASS,
+  getMetricSwitchStyle,
+  getNodeGeneralCardPositionClass,
+} from '@/components/nodeGeneralCards.helpers'
 import { CardX } from '@/components/ui/card-x'
 import { DataTooltip } from '@/components/ui/data-tooltip'
 import { useDailyExchangeRates } from '@/composables/useDailyExchangeRates'
-import { UI_CONFIG } from '@/constants/ui'
+import { useNodeGeneralFinance } from '@/composables/useNodeGeneralFinance'
+import { useNodeGeneralSummary } from '@/composables/useNodeGeneralSummary'
 import { useAppStore } from '@/stores/app'
 import { useNodesStore } from '@/stores/nodes'
 import * as financeHelper from '@/utils/financeHelper'
-import { formatBytesPerSecondSplit, formatBytesSplit } from '@/utils/helper'
+import { formatBytesSplit } from '@/utils/helper'
 import {
-  computeOnlineNodeStats,
-  formatDistributionTooltip,
-  formatExpiryNodeLine,
   formatMetricDecimal,
   formatNodeCount,
   formatNodeNameList,
-  getHighLoadMetrics,
-  getKnownNodeDistribution,
-  getNodeDistribution,
-  getTrafficUsed,
-  getTrafficUsedPercentage,
-  isExpiringNode,
-  isTrafficWarningNode,
 } from '@/utils/nodeMetricsHelper'
-import { getRegionDisplayName } from '@/utils/regionHelper'
-import { isFreeNode } from '@/utils/tagHelper'
 
-interface GeneralMetricCard {
-  key: GeneralCardKey
-  label: string
-  icon: string
-  value: string
-  unit?: string
-  tooltip?: string
-  action?: 'financeDetails'
-}
+defineOptions({ components: { CardX, ComponentErrorBoundary, DataTooltip, FinanceDetailsDialog: defineAsyncComponent(() => import('@/components/FinanceDetailsDialog.vue')), Icon, NodeEarthGlobe } })
 
 const props = withDefaults(defineProps<{
   nodes?: NodeData[]
@@ -54,7 +46,6 @@ const props = withDefaults(defineProps<{
 })
 const appStore = useAppStore()
 const nodesStore = useNodesStore()
-const FinanceDetailsDialog = defineAsyncComponent(() => import('@/components/FinanceDetailsDialog.vue'))
 // 未登录且开启「未登录隐藏价格」时，屏蔽金额类信息
 const showPrice = computed(() => appStore.privateFeaturesAllowed || !appStore.hidePriceWhenLoggedOut)
 const financeCardKeys = new Set<GeneralCardKey>(['remainingValue', 'monthlyCost', 'yearlyCost'])
@@ -62,6 +53,7 @@ const needsExchangeRates = computed(() => showPrice.value && (
   appStore.generalCardOrder.some(key => financeCardKeys.has(key))
   || (!appStore.hideEarth && appStore.earthRenderer === 'tiled')
 ))
+
 const {
   rates: exchangeRates,
   dailyRates: dailyExchangeRates,
@@ -95,513 +87,49 @@ const metricSwitchTransitionProps = computed(() => ({
     : { name: 'metric-switch', mode: 'out-in' as const }),
 }))
 
-function getMetricSwitchStyle(index: number): Record<string, string> {
-  return {
-    '--metric-switch-delay': `${index * UI_CONFIG.motion.staggerMs}ms`,
-  }
-}
-
 function formatBytesText(bytes: number): string {
   const formatted = formatBytesSplit(bytes, appStore.byteDecimals)
   return `${formatted.value} ${formatted.unit}`
 }
 
-function formatSpeedText(bytes: number): string {
-  const formatted = formatBytesPerSecondSplit(bytes, appStore.byteDecimals)
-  return `${formatted.value} ${formatted.unit}`
-}
+const { formatTopNodeSpeed, formatTopNodePercentage } = createNodeGeneralFormatters(() => appStore.byteDecimals)
+const formatCount = formatNodeCount
+const formatDecimal = formatMetricDecimal
+const formatNodeNames = formatNodeNameList
 
-function formatCount(value: number): string {
-  return formatNodeCount(value)
-}
+const summary = useNodeGeneralSummary(summaryNodes)
 
-function formatDecimal(value: number, digits = 1): string {
-  return formatMetricDecimal(value, digits)
-}
-
-function formatTopNodeSpeed(metric: TopNodeMetric | null, fallback = '-'): { value: string, unit?: string, tooltip?: string } {
-  if (!metric || metric.value <= 0)
-    return { value: fallback }
-
-  const formatted = formatBytesPerSecondSplit(metric.value, appStore.byteDecimals)
-  return {
-    value: formatted.value,
-    unit: formatted.unit,
-    tooltip: `${metric.node.name}\n↑ ${formatSpeedText(metric.node.net_out || 0)}\n↓ ${formatSpeedText(metric.node.net_in || 0)}`,
-  }
-}
-
-function formatTopNodePercentage(metric: TopNodeMetric | null): { value: string, unit?: string, tooltip?: string } {
-  if (!metric)
-    return { value: '-' }
-
-  const gpuName = metric.node.gpu_name?.trim()
-  return {
-    value: formatDecimal(metric.value),
-    unit: '%',
-    tooltip: [metric.node.name, gpuName, `GPU ${formatDecimal(metric.value)}%`].filter(Boolean).join('\n'),
-  }
-}
-
-function formatNodeNames(nodes: NodeData[], formatter?: (node: NodeData) => string, max = 8): string {
-  return formatNodeNameList(nodes, formatter, max)
-}
-
-function getDistribution(nodes: NodeData[], selector: (node: NodeData) => string | null | undefined): Array<[string, number]> {
-  return getNodeDistribution(nodes, selector)
-}
-
-function getKnownDistribution(nodes: NodeData[], selector: (node: NodeData) => string | null | undefined): Array<[string, number]> {
-  return getKnownNodeDistribution(nodes, selector)
-}
-
-function getNodePeriodCostCNY(node: NodeData, periodDays: number): number {
-  if (excludeFreeNodes.value && isFreeNode(node))
-    return 0
-
-  return financeHelper.calculatePeriodCostCNY(node, exchangeRates.value, periodDays)
-}
-
-function formatCostCard(amountCNY: number): { value: string, unit?: string } {
-  if (!showPrice.value)
-    return { value: '***' }
-
-  const targetRate = exchangeRates.value[financeCurrency.value] || 1
-  const formatted = financeHelper.formatFinanceAmount(amountCNY * targetRate, financeCurrency.value)
-  return {
-    value: `${formatted.symbol}${formatted.value}`,
-  }
-}
-
-const onlineStats = computed<OnlineNodeStats>(() => computeOnlineNodeStats(summaryNodes.value, appStore.homeHighLoadThreshold))
-
-const totalSpeed = computed(() => onlineStats.value.totalSpeed)
-
-const totalTraffic = computed(() => {
-  const up = summaryNodes.value.reduce((sum, node) => sum + (node.net_total_up || 0), 0)
-  const down = summaryNodes.value.reduce((sum, node) => sum + (node.net_total_down || 0), 0)
-  return { up, down }
+const { formattedRemainingValue, totalValueTooltip, monthlyCostCard, yearlyCostCard } = useNodeGeneralFinance({
+  nodes: summaryNodes,
+  exchangeRates,
+  currency: financeCurrency,
+  excludeFreeNodes,
+  showPrice,
 })
 
-const formattedTrafficUp = computed(() => formatBytesSplit(totalTraffic.value.up, appStore.byteDecimals))
-const formattedTrafficDown = computed(() => formatBytesSplit(totalTraffic.value.down, appStore.byteDecimals))
-const totalTrafficTooltip = computed(() => formatBytesSplit(totalTraffic.value.up + totalTraffic.value.down, appStore.byteDecimals))
-
-const formattedSpeedUp = computed(() => formatBytesPerSecondSplit(totalSpeed.value.up, appStore.byteDecimals))
-const formattedSpeedDown = computed(() => formatBytesPerSecondSplit(totalSpeed.value.down, appStore.byteDecimals))
-
-// ==================== 内存 / 硬盘 / 交换内存 汇总 ====================
-// 离线节点的 ram / disk / swap 为 0，不影响 used 求和；total 是静态库存信息，按全量统计
-const totalMemory = computed(() => {
-  let used = 0
-  let total = 0
-  for (const node of summaryNodes.value) {
-    used += node.ram || 0
-    total += node.mem_total || 0
-  }
-  return { used, total }
-})
-
-const totalDisk = computed(() => {
-  let used = 0
-  let total = 0
-  for (const node of summaryNodes.value) {
-    used += node.disk || 0
-    total += node.disk_total || 0
-  }
-  return { used, total }
-})
-
-const totalSwap = computed(() => {
-  let used = 0
-  let total = 0
-  for (const node of summaryNodes.value) {
-    used += node.swap || 0
-    total += node.swap_total || 0
-  }
-  return { used, total }
-})
-
-const formattedMemoryUsed = computed(() => formatBytesSplit(totalMemory.value.used, appStore.byteDecimals))
-const formattedMemoryTotal = computed(() => formatBytesSplit(totalMemory.value.total, appStore.byteDecimals))
-const formattedDiskUsed = computed(() => formatBytesSplit(totalDisk.value.used, appStore.byteDecimals))
-const formattedDiskTotal = computed(() => formatBytesSplit(totalDisk.value.total, appStore.byteDecimals))
-const formattedSwapUsed = computed(() => formatBytesSplit(totalSwap.value.used, appStore.byteDecimals))
-const formattedSwapTotal = computed(() => formatBytesSplit(totalSwap.value.total, appStore.byteDecimals))
-
-const onlineNodeCount = computed(() => onlineStats.value.count)
-const totalNodeCount = computed(() => summaryNodes.value.length)
-const avgCpu = computed(() => onlineStats.value.avgCpu)
-const avgGpu = computed(() => onlineStats.value.gpuNodeCount > 0
-  ? onlineStats.value.totalGpu / onlineStats.value.gpuNodeCount
-  : null)
-const gpuNodes = computed(() => summaryNodes.value.filter(node => Boolean(node.gpu_name?.trim()) || (node.gpu || 0) > 0))
-const onlineGpuNodes = computed(() => gpuNodes.value.filter(node => node.online))
-const gpuPeakNode = computed(() => onlineStats.value.gpuPeakNode)
-const avgLoad = computed(() => onlineStats.value.avgLoad)
-const avgLoad5 = computed(() => onlineStats.value.avgLoad5)
-const avgLoad15 = computed(() => onlineStats.value.avgLoad15)
-const totalProcesses = computed(() => onlineStats.value.totalProcesses)
-const totalConnectionsTcp = computed(() => onlineStats.value.totalConnectionsTcp)
-const totalConnectionsUdp = computed(() => onlineStats.value.totalConnectionsUdp)
-const totalCpuCores = computed(() => summaryNodes.value.reduce((sum, node) => sum + (node.cpu_cores || 0), 0))
-const trafficQuota = computed(() => {
-  let used = 0
-  let limit = 0
-
-  for (const node of summaryNodes.value) {
-    if ((node.traffic_limit || 0) <= 0)
-      continue
-    used += getTrafficUsed(node)
-    limit += node.traffic_limit || 0
-  }
-
-  return { used, limit }
-})
-const trafficQuotaPercentage = computed(() => {
-  if (trafficQuota.value.limit <= 0)
-    return 0
-  return trafficQuota.value.used / trafficQuota.value.limit * 100
-})
-
-const trafficPeak = computed(() => onlineStats.value.trafficPeak)
-const uploadPeakNode = computed(() => onlineStats.value.uploadPeakNode)
-const downloadPeakNode = computed(() => onlineStats.value.downloadPeakNode)
-const connectionPeakNode = computed(() => onlineStats.value.connectionPeakNode)
-const offlineNodes = computed(() => summaryNodes.value.filter(node => !node.online))
-const highLoadNodes = computed(() => onlineStats.value.highLoadNodes)
-const expiringNodes = computed(() => summaryNodes.value.filter(node => isExpiringNode(node, appStore.homeExpiringDays)))
-const trafficWarningNodes = computed(() => summaryNodes.value.filter(node => isTrafficWarningNode(node, appStore.homeTrafficWarningThreshold)))
-const regionDistribution = computed(() => getKnownDistribution(summaryNodes.value, node => getRegionDisplayName(node.region)))
-const systemDistribution = computed(() => getDistribution(summaryNodes.value, node => node.os))
-const virtualizationDistribution = computed(() => getDistribution(summaryNodes.value, node => node.virtualization))
-const monthlyCostCNY = computed(() => summaryNodes.value.reduce((sum, node) => sum + getNodePeriodCostCNY(node, 30), 0))
-const yearlyCostCNY = computed(() => summaryNodes.value.reduce((sum, node) => sum + getNodePeriodCostCNY(node, 365), 0))
-
-const remainingValueCNY = computed(() => {
-  return financeHelper.calculateTotalRemainingValueCNY(summaryNodes.value, exchangeRates.value, excludeFreeNodes.value)
-})
-const remainingValue = computed(() => {
-  const targetRate = exchangeRates.value[financeCurrency.value] || 1
-  return remainingValueCNY.value * targetRate
-})
-const formattedRemainingValue = computed(() => {
-  return financeHelper.formatFinanceAmount(remainingValue.value, financeCurrency.value)
-})
-const totalValueCNY = computed(() => {
-  return financeHelper.calculateTotalValueCNY(summaryNodes.value, exchangeRates.value, excludeFreeNodes.value)
-})
-const totalValue = computed(() => {
-  const targetRate = exchangeRates.value[financeCurrency.value] || 1
-  return totalValueCNY.value * targetRate
-})
-const formattedTotalValue = computed(() => {
-  return financeHelper.formatFinanceAmount(totalValue.value, financeCurrency.value)
-})
-const totalValueTooltip = computed(() => {
-  if (!showPrice.value)
-    return '总价值\n***'
-  return `总价值\n${formattedTotalValue.value.symbol}${formattedTotalValue.value.value}`
-})
-
-const trafficPeakCard = computed(() => formatTopNodeSpeed(trafficPeak.value))
-const uploadPeakCard = computed(() => formatTopNodeSpeed(uploadPeakNode.value))
-const downloadPeakCard = computed(() => formatTopNodeSpeed(downloadPeakNode.value))
-const gpuPeakCard = computed(() => formatTopNodePercentage(gpuPeakNode.value))
-const currentTimeText = computed(() => currentTime.value.toLocaleTimeString('zh-CN', {
-  hour: '2-digit',
-  minute: '2-digit',
-  second: '2-digit',
-  hour12: false,
-}))
-const currentDateText = computed(() => currentTime.value.toLocaleDateString('zh-CN', {
-  year: 'numeric',
-  month: 'long',
-  day: 'numeric',
-  weekday: 'short',
-}))
+const trafficPeakCard = computed(() => formatTopNodeSpeed(summary.trafficPeak.value))
+const uploadPeakCard = computed(() => formatTopNodeSpeed(summary.uploadPeakNode.value))
+const downloadPeakCard = computed(() => formatTopNodeSpeed(summary.downloadPeakNode.value))
+const gpuPeakCard = computed(() => formatTopNodePercentage(summary.gpuPeakNode.value))
+const currentTimeText = computed(() => formatNodeGeneralTime(currentTime.value))
+const currentDateText = computed(() => formatNodeGeneralDate(currentTime.value))
 const connectionPeakTooltip = computed(() => {
-  const metric = connectionPeakNode.value
+  const metric = summary.connectionPeakNode.value
   if (!metric)
     return '暂无数据'
   return `${metric.node.name}\nTCP ${formatCount(metric.node.connections || 0)}\nUDP ${formatCount(metric.node.connections_udp || 0)}`
 })
-const monthlyCostCard = computed(() => formatCostCard(monthlyCostCNY.value))
-const yearlyCostCard = computed(() => formatCostCard(yearlyCostCNY.value))
+const cardContext = computed<NodeGeneralCardContext>(() => ({
+  summary,
+  finance: { formattedRemainingValue, totalValueTooltip, monthlyCostCard, yearlyCostCard },
+  derived: { trafficPeakCard, uploadPeakCard, downloadPeakCard, gpuPeakCard, currentTimeText, currentDateText, connectionPeakTooltip },
+  format: { bytes: formatBytesText, count: formatCount, decimal: formatDecimal, nodeNames: formatNodeNames },
+  showPrice,
+  highLoadThreshold: () => appStore.homeHighLoadThreshold,
+}))
 
 function getCardDefinition(key: GeneralCardKey): GeneralMetricCard {
-  switch (key) {
-    case 'currentTime':
-      return {
-        key: 'currentTime',
-        label: '当前时间',
-        icon: 'tabler:clock',
-        value: currentTimeText.value,
-        tooltip: currentDateText.value,
-      }
-    case 'memory':
-      return {
-        key: 'memory',
-        label: '内存用量',
-        icon: 'icon-park-outline:memory',
-        value: formattedMemoryUsed.value.value,
-        unit: `${formattedMemoryUsed.value.unit} / ${formattedMemoryTotal.value.value} ${formattedMemoryTotal.value.unit}`,
-      }
-    case 'disk':
-      return {
-        key: 'disk',
-        label: '硬盘用量',
-        icon: 'tabler:server-2',
-        value: formattedDiskUsed.value.value,
-        unit: `${formattedDiskUsed.value.unit} / ${formattedDiskTotal.value.value} ${formattedDiskTotal.value.unit}`,
-      }
-    case 'remainingValue':
-      return {
-        key: 'remainingValue',
-        label: '剩余价值',
-        icon: 'tabler:cash',
-        value: showPrice.value ? `${formattedRemainingValue.value.symbol}${formattedRemainingValue.value.value}` : '***',
-        tooltip: totalValueTooltip.value,
-        action: showPrice.value ? 'financeDetails' : undefined,
-      }
-    case 'totalTraffic':
-      return {
-        key: 'totalTraffic',
-        label: '累计流量',
-        icon: 'tabler:download',
-        value: totalTrafficTooltip.value.value,
-        unit: totalTrafficTooltip.value.unit,
-        tooltip: `↑ ${formattedTrafficUp.value.value} ${formattedTrafficUp.value.unit}\n↓ ${formattedTrafficDown.value.value} ${formattedTrafficDown.value.unit}`,
-      }
-    case 'uploadSpeed':
-      return {
-        key: 'uploadSpeed',
-        label: '实时上行',
-        icon: 'tabler:chevrons-up',
-        value: formattedSpeedUp.value.value,
-        unit: formattedSpeedUp.value.unit,
-      }
-    case 'downloadSpeed':
-      return {
-        key: 'downloadSpeed',
-        label: '实时下行',
-        icon: 'tabler:chevrons-down',
-        value: formattedSpeedDown.value.value,
-        unit: formattedSpeedDown.value.unit,
-      }
-    case 'onlineNodes':
-      return {
-        key: 'onlineNodes',
-        label: '在线节点',
-        icon: 'tabler:activity-heartbeat',
-        value: formatCount(onlineNodeCount.value),
-        unit: `/ ${formatCount(totalNodeCount.value)}`,
-      }
-    case 'avgCpu':
-      return {
-        key: 'avgCpu',
-        label: '平均 CPU',
-        icon: 'tabler:cpu',
-        value: formatDecimal(avgCpu.value),
-        unit: '%',
-      }
-    case 'avgGpu':
-      return {
-        key: 'avgGpu',
-        label: '平均 GPU',
-        icon: 'tabler:device-desktop-analytics',
-        value: avgGpu.value === null ? '-' : formatDecimal(avgGpu.value),
-        unit: avgGpu.value === null ? undefined : '%',
-        tooltip: formatNodeNames(onlineGpuNodes.value, node => `${node.name}: ${formatDecimal(node.gpu || 0)}%`),
-      }
-    case 'avgLoad':
-      return {
-        key: 'avgLoad',
-        label: '平均负载',
-        icon: 'tabler:chart-line',
-        value: formatDecimal(avgLoad.value, 2),
-        tooltip: `1m ${formatDecimal(avgLoad.value, 2)}\n5m ${formatDecimal(avgLoad5.value, 2)}\n15m ${formatDecimal(avgLoad15.value, 2)}`,
-      }
-    case 'swap':
-      return {
-        key: 'swap',
-        label: '交换内存',
-        icon: 'icon-park-outline:switch',
-        value: formattedSwapUsed.value.value,
-        unit: `${formattedSwapUsed.value.unit} / ${formattedSwapTotal.value.value} ${formattedSwapTotal.value.unit}`,
-      }
-    case 'processes':
-      return {
-        key: 'processes',
-        label: '进程总数',
-        icon: 'tabler:list-numbers',
-        value: formatCount(totalProcesses.value),
-      }
-    case 'connections':
-      return {
-        key: 'connections',
-        label: '连接数',
-        icon: 'tabler:plug-connected',
-        value: formatCount(totalConnectionsTcp.value + totalConnectionsUdp.value),
-        tooltip: `TCP ${formatCount(totalConnectionsTcp.value)}\nUDP ${formatCount(totalConnectionsUdp.value)}`,
-      }
-    case 'cpuCores':
-      return {
-        key: 'cpuCores',
-        label: 'CPU 核心',
-        icon: 'tabler:cpu',
-        value: formatCount(totalCpuCores.value),
-        unit: 'Core',
-      }
-    case 'gpuNodes':
-      return {
-        key: 'gpuNodes',
-        label: 'GPU 节点',
-        icon: 'tabler:device-imac',
-        value: formatCount(gpuNodes.value.length),
-        unit: `/ ${formatCount(totalNodeCount.value)}`,
-        tooltip: formatNodeNames(gpuNodes.value, node => `${node.name}: ${node.gpu_name?.trim() || 'GPU'}`),
-      }
-    case 'gpuPeakNode':
-      return {
-        key: 'gpuPeakNode',
-        label: 'GPU 峰值',
-        icon: 'tabler:chart-histogram',
-        value: gpuPeakCard.value.value,
-        unit: gpuPeakCard.value.unit,
-        tooltip: gpuPeakCard.value.tooltip,
-      }
-    case 'trafficQuota':
-      return {
-        key: 'trafficQuota',
-        label: '流量配额',
-        icon: 'tabler:gauge',
-        value: trafficQuota.value.limit > 0 ? formatDecimal(trafficQuotaPercentage.value) : '-',
-        unit: trafficQuota.value.limit > 0 ? '%' : undefined,
-        tooltip: trafficQuota.value.limit > 0
-          ? `${formatBytesText(trafficQuota.value.used)} / ${formatBytesText(trafficQuota.value.limit)}`
-          : '无限流量',
-      }
-    case 'trafficPeak':
-      return {
-        key: 'trafficPeak',
-        label: '实时峰值',
-        icon: 'tabler:activity',
-        value: trafficPeakCard.value.value,
-        unit: trafficPeakCard.value.unit,
-        tooltip: trafficPeakCard.value.tooltip,
-      }
-    case 'uploadPeakNode':
-      return {
-        key: 'uploadPeakNode',
-        label: '上行最高',
-        icon: 'tabler:arrow-big-up-lines',
-        value: uploadPeakCard.value.value,
-        unit: uploadPeakCard.value.unit,
-        tooltip: uploadPeakCard.value.tooltip,
-      }
-    case 'downloadPeakNode':
-      return {
-        key: 'downloadPeakNode',
-        label: '下行最高',
-        icon: 'tabler:arrow-big-down-lines',
-        value: downloadPeakCard.value.value,
-        unit: downloadPeakCard.value.unit,
-        tooltip: downloadPeakCard.value.tooltip,
-      }
-    case 'offlineNodes':
-      return {
-        key: 'offlineNodes',
-        label: '离线节点',
-        icon: 'tabler:plug-connected-x',
-        value: formatCount(offlineNodes.value.length),
-        unit: `/ ${formatCount(totalNodeCount.value)}`,
-        tooltip: formatNodeNames(offlineNodes.value),
-      }
-    case 'highLoadNodes':
-      return {
-        key: 'highLoadNodes',
-        label: '高负载节点',
-        icon: 'tabler:alert-triangle',
-        value: formatCount(highLoadNodes.value.length),
-        unit: `/ ${formatCount(onlineNodeCount.value)}`,
-        tooltip: formatNodeNames(highLoadNodes.value, (node) => {
-          const metrics = getHighLoadMetrics(node, appStore.homeHighLoadThreshold)
-          return `${node.name}: ${metrics.map(metric => `${metric.label} ${formatDecimal(metric.percentage)}%`).join(' / ')}`
-        }),
-      }
-    case 'expiringNodes':
-      return {
-        key: 'expiringNodes',
-        label: '即将到期',
-        icon: 'tabler:calendar-exclamation',
-        value: formatCount(expiringNodes.value.length),
-        unit: '台',
-        tooltip: formatNodeNames(expiringNodes.value, formatExpiryNodeLine),
-      }
-    case 'trafficWarnings':
-      return {
-        key: 'trafficWarnings',
-        label: '流量预警',
-        icon: 'tabler:traffic-cone',
-        value: formatCount(trafficWarningNodes.value.length),
-        unit: '台',
-        tooltip: formatNodeNames(trafficWarningNodes.value, node => `${node.name}: ${formatDecimal(getTrafficUsedPercentage(node))}%`),
-      }
-    case 'connectionPeakNode':
-      return {
-        key: 'connectionPeakNode',
-        label: '连接峰值',
-        icon: 'tabler:plug-connected',
-        value: connectionPeakNode.value ? formatCount(connectionPeakNode.value.value) : '-',
-        tooltip: connectionPeakTooltip.value,
-      }
-    case 'regionDistribution':
-      return {
-        key: 'regionDistribution',
-        label: '地区分布',
-        icon: 'tabler:map-pin',
-        value: formatCount(regionDistribution.value.length),
-        unit: '个',
-        tooltip: formatDistributionTooltip(regionDistribution.value),
-      }
-    case 'systemDistribution':
-      return {
-        key: 'systemDistribution',
-        label: '系统分布',
-        icon: 'tabler:device-desktop',
-        value: systemDistribution.value[0]?.[0] ?? '-',
-        unit: systemDistribution.value[0] ? `${systemDistribution.value[0][1]} 台` : undefined,
-        tooltip: formatDistributionTooltip(systemDistribution.value),
-      }
-    case 'virtualizationDistribution':
-      return {
-        key: 'virtualizationDistribution',
-        label: '虚拟化',
-        icon: 'tabler:box-multiple',
-        value: virtualizationDistribution.value[0]?.[0] ?? '-',
-        unit: virtualizationDistribution.value[0] ? `${virtualizationDistribution.value[0][1]} 台` : undefined,
-        tooltip: formatDistributionTooltip(virtualizationDistribution.value),
-      }
-    case 'monthlyCost':
-      return {
-        key: 'monthlyCost',
-        label: '月费用估算',
-        icon: 'tabler:calendar-dollar',
-        value: monthlyCostCard.value.value,
-        unit: monthlyCostCard.value.unit,
-      }
-    case 'yearlyCost':
-      return {
-        key: 'yearlyCost',
-        label: '年费用估算',
-        icon: 'tabler:receipt-2',
-        value: yearlyCostCard.value.value,
-        unit: yearlyCostCard.value.unit,
-      }
-    default:
-      return getCardDefinition('memory')
-  }
+  return getNodeGeneralCardDefinition(key, cardContext.value)
 }
 
 const tiledDefaultCardKeys: GeneralCardKey[] = [
@@ -647,35 +175,11 @@ const cardGridClass = computed(() => {
     ? 'h-auto -mt-42 md:mt-0 col-span-12 row-start-3 z-9 md:h-auto md:col-span-6 md:row-start-1 grid grid-cols-12 auto-rows-[5rem] md:auto-rows-[7rem] gap-2'
     : 'h-42 -mt-42 md:mt-0 col-span-12 row-start-3 z-9 md:h-auto md:col-span-6 md:row-start-1 grid grid-cols-12 grid-rows-2 gap-2'
 })
-const cardClass = 'group relative z-10 h-full bg-background/50 border-none hover:bg-background backdrop-blur-sm md:backdrop-blur-none transition-all'
-const cardPositionClasses = [
-  'col-span-4 row-span-1 col-start-1 row-start-1',
-  'col-span-4 row-span-1 col-start-1 row-start-2',
-  'col-span-4 row-span-1 col-start-5 row-start-1',
-  'col-span-4 row-span-1 col-start-5 row-start-2',
-  'col-span-4 row-span-1 col-start-9 row-start-1',
-  'col-span-4 row-span-1 col-start-9 row-start-2',
-]
-const tiledCardPositionClasses = [
-  'col-span-6 sm:col-span-3 row-span-1 sm:col-start-1 row-start-1',
-  'col-span-6 sm:col-span-3 row-span-1 sm:col-start-4 row-start-1',
-  'col-span-6 sm:col-span-3 row-span-1 sm:col-start-7 row-start-2 sm:row-start-1',
-  'col-span-6 sm:col-span-3 row-span-1 sm:col-start-10 row-start-2 sm:row-start-1',
-  'col-span-6 sm:col-span-3 row-span-1 sm:col-start-1 row-start-3 sm:row-start-2',
-  'col-span-6 sm:col-span-3 row-span-1 sm:col-start-4 row-start-3 sm:row-start-2',
-  'col-span-6 sm:col-span-3 row-span-1 sm:col-start-7 row-start-4 sm:row-start-2',
-  'col-span-6 sm:col-span-3 row-span-1 sm:col-start-10 row-start-4 sm:row-start-2',
-]
-const unitClass = 'text-[11px] md:text-xs font-medium text-muted-foreground truncate'
+const cardClass = GENERAL_CARD_CLASS
+const unitClass = GENERAL_CARD_UNIT_CLASS
 
 function getCardPositionClass(index: number): string {
-  if (!showEarth.value)
-    return 'col-span-1 min-h-18 md:min-h-28'
-
-  if (isTiledEarth.value)
-    return tiledCardPositionClasses[index] ?? 'col-span-6 sm:col-span-3 row-span-1'
-
-  return cardPositionClasses[index] ?? 'col-span-4 row-span-1'
+  return getNodeGeneralCardPositionClass(index, showEarth.value, isTiledEarth.value)
 }
 
 function activateCard(card: GeneralMetricCard) {
@@ -719,10 +223,7 @@ onMounted(() => {
 <template>
   <div v-if="shouldRenderHeader" :class="wrapperClass">
     <ComponentErrorBoundary v-if="showEarth" label="节点地图" :reset-key="appStore.earthRenderer">
-      <NodeEarthGlobe
-        :nodes="globeNodes"
-        :class="earthClass"
-      />
+      <NodeEarthGlobe :nodes="globeNodes" :class="earthClass" />
     </ComponentErrorBoundary>
 
     <div v-if="visibleCards.length > 0" :class="cardGridClass">
@@ -742,7 +243,9 @@ onMounted(() => {
           <div class="flex items-start justify-between gap-2">
             <span class="text-xs font-medium tracking-wider text-muted-foreground truncate">{{ card.label }}</span>
             <Icon
-              :icon="card.icon" :width="20" :height="20"
+              :icon="card.icon"
+              :width="20"
+              :height="20"
               class="shrink-0 text-slate-500/20 group-hover:text-slate-500 transition-colors"
             />
           </div>
@@ -759,12 +262,8 @@ onMounted(() => {
                 class="flex items-baseline gap-1 min-w-0"
                 :style="getMetricSwitchStyle(index)"
               >
-                <span class="text-md md:text-2xl font-bold leading-none tracking-tight truncate">
-                  {{ card.value }}
-                </span>
-                <span v-if="card.unit" :class="unitClass">
-                  {{ card.unit }}
-                </span>
+                <span class="text-md md:text-2xl font-bold leading-none tracking-tight truncate"> {{ card.value }} </span>
+                <span v-if="card.unit" :class="unitClass"> {{ card.unit }} </span>
               </div>
             </Transition>
           </DataTooltip>
@@ -802,13 +301,11 @@ onMounted(() => {
 .metric-switch-enter-active {
   transition-delay: var(--metric-switch-delay, 0ms);
 }
-
 .metric-switch-enter-from {
   opacity: 0;
   transform: translateY(6px);
   filter: blur(3px);
 }
-
 .metric-switch-leave-to {
   opacity: 0;
   transform: translateY(-4px);

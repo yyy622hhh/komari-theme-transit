@@ -16,8 +16,10 @@ const appStore = useAppStore()
 const config = computed(() => appStore.nodeCardPanels[props.node.uuid] ?? { mode: appStore.nodeCardPanelDefault })
 const {
   carrierDisplays,
-  carrierScopeLabel,
+  freshnessLabel: carrierFreshnessLabel,
+  freshnessTitle: carrierFreshnessTitle,
   loading: carrierStatsLoading,
+  delayed: carrierStatsDelayed,
   stale: carrierStatsStale,
 } = useNodeCarrierPingDisplay(() => props.node.uuid)
 const carrierTasksAvailable = computed(() => carrierDisplays.value.some(carrier => carrier.taskNames.length > 0))
@@ -48,6 +50,7 @@ const customPingRows = Array.from({ length: 3 }, (_, index) => {
   return {
     taskName,
     loading: ping.loading,
+    delayed: ping.delayed,
     stale: ping.stale,
     latency: computed(() => ping.stale.value
       ? '过期'
@@ -62,6 +65,14 @@ const customPingRows = Array.from({ length: 3 }, (_, index) => {
   }
 })
 const visibleCustomPingRows = computed(() => customPingRows.filter(row => row.taskName.value))
+const customPingFreshnessLabel = computed(() => {
+  if (visibleCustomPingRows.value.some(row => row.stale.value))
+    return '数据过期'
+  if (visibleCustomPingRows.value.some(row => row.delayed.value))
+    return '可能不是最新'
+  return '自定义 Ping'
+})
+const customPingFreshnessDelayed = computed(() => visibleCustomPingRows.value.some(row => row.delayed.value || row.stale.value))
 
 const diskPercentage = computed(() => getDiskPercentage(props.node))
 const diskFree = computed(() => Math.max(0, props.node.disk_total - props.node.disk))
@@ -95,7 +106,7 @@ function lossTone(loss: string): string {
   >
     <template v-if="effectiveMode === 'carrier'">
       <div class="mb-1 flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5 text-[9px] text-slate-500">
-        <span>三网质量</span><span :class="carrierStatsStale && 'text-amber-700 dark:text-amber-300'">{{ carrierStatsStale ? `${carrierScopeLabel} 数据过期` : carrierScopeLabel }}</span>
+        <span>三网质量</span><span :title="carrierFreshnessTitle" :class="(carrierStatsDelayed || carrierStatsStale) && 'text-amber-700 dark:text-amber-300'">{{ carrierFreshnessLabel }}</span>
       </div>
       <div class="space-y-1">
         <div v-for="carrier in carrierDisplays" :key="carrier.key" data-node-carrier-row class="grid min-w-0 grid-cols-[26px_minmax(24px,1fr)_minmax(38px,auto)_minmax(34px,auto)] items-center gap-1 text-[8px] leading-none">
@@ -109,7 +120,7 @@ function lossTone(loss: string): string {
 
     <template v-else-if="effectiveMode === 'ping'">
       <div class="mb-1 flex items-center justify-between gap-2 text-[9px] text-slate-500">
-        <span>线路质量</span><span>自定义 Ping</span>
+        <span>线路质量</span><span :class="customPingFreshnessDelayed && 'text-amber-700 dark:text-amber-300'">{{ customPingFreshnessLabel }}</span>
       </div>
       <div v-if="visibleCustomPingRows.length" class="space-y-1">
         <div v-for="row in visibleCustomPingRows" :key="row.taskName.value" data-node-custom-ping-row class="grid min-w-0 grid-cols-[minmax(0,1fr)_52px_38px] items-center gap-1 text-[8px] leading-none">

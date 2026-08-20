@@ -114,6 +114,8 @@ const status = computed(() => {
     return { label: '读取中', tone: 'text-slate-500 dark:text-slate-400', dot: 'bg-slate-500' }
   if (config.value.live && ping.stale.value)
     return { label: '数据已过期', tone: 'text-amber-700 dark:text-amber-300', dot: 'bg-amber-400' }
+  if (config.value.live && ping.delayed.value)
+    return { label: '数据可能不是最新', tone: 'text-amber-700 dark:text-amber-300', dot: 'bg-amber-400' }
   if (!hasLiveData.value)
     return { label: config.value.live ? '等待任务数据' : '静态基线', tone: 'text-slate-500 dark:text-slate-400', dot: 'bg-slate-500' }
   if ((loss.value ?? 0) > 3 || ping.avgVolatility.value > 1.8)

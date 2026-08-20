@@ -2,6 +2,7 @@ import type { MetricLossPoint } from '../../src/utils/pingStats'
 import type { MetricQueryResponse, MetricSeries, PingMetricStatsResponse, PingMetricTaskStats, PingRecord } from '../../src/utils/rpc'
 import { describe, expect, test } from 'bun:test'
 import { buildPingMetricState, collectNodePingTaskIds, pickPreferredExactPingTaskId } from '../../src/composables/useNodePingStats'
+import { formatPingFreshnessAge, resolvePingFreshness } from '../../src/utils/pingFreshness'
 import { buildNodePingStats, createEmptyNodePingStats, matchesPingTaskName, normalizePingTaskFilter } from '../../src/utils/pingStats'
 
 const nodeUuid = 'node-a'
@@ -19,7 +20,7 @@ function pingStat(overrides: Partial<PingMetricTaskStats> = {}): PingMetricTaskS
   }
 }
 
-function lossSeries(taskId: string, points: Array<{ time: string, value: number }> = [{ time: '2026-08-15T00:00:00.000Z', value: 0 }]): MetricSeries {
+function lossSeries(taskId: string, points: Array<{ time: string, value: number, count?: number }> = [{ time: '2026-08-15T00:00:00.000Z', value: 0 }]): MetricSeries {
   return {
     metric_key: 'ping.loss',
     entity_id: nodeUuid,
@@ -29,7 +30,7 @@ function lossSeries(taskId: string, points: Array<{ time: string, value: number 
   }
 }
 
-function latencySeries(taskId: string, points: Array<{ time: string, value: number | null }> = [{ time: '2026-08-15T00:00:00.000Z', value: 50 }]): MetricSeries {
+function latencySeries(taskId: string, points: Array<{ time: string, value: number | null, count?: number }> = [{ time: '2026-08-15T00:00:00.000Z', value: 50 }]): MetricSeries {
   return {
     metric_key: 'ping.latency_ms',
     entity_id: nodeUuid,
@@ -56,6 +57,26 @@ function hashTaskId(taskId: string): number {
 }
 
 describe('ping statistics helpers', () => {
+  test('uses a soft delay before declaring Ping data unusable', () => {
+    const now = Date.parse('2026-08-20T12:00:00.000Z')
+    expect(resolvePingFreshness(now - 9 * 60_000, now, { hasData: true })).toBe('fresh')
+    expect(resolvePingFreshness(now - 10 * 60_000, now, { hasData: true })).toBe('delayed')
+    expect(resolvePingFreshness(now - 30 * 60_000, now, { hasData: true })).toBe('stale')
+  })
+
+  test('resume grace and empty data suppress misleading stale states', () => {
+    const now = Date.parse('2026-08-20T12:00:00.000Z')
+    const fetchedAt = now - 60 * 60_000
+    expect(resolvePingFreshness(fetchedAt, now, { hasData: false })).toBe('fresh')
+    expect(resolvePingFreshness(fetchedAt, now, { hasData: true, graceUntil: now + 60_000 })).toBe('fresh')
+    expect(formatPingFreshnessAge(now - 12 * 60_000, now, 'zh-CN')).toBe('12 分钟前')
+  })
+
+  test('treats data with an unknown sample time as stale', () => {
+    const now = Date.parse('2026-08-20T12:00:00.000Z')
+    expect(resolvePingFreshness(0, now, { hasData: true })).toBe('stale')
+  })
+
   test('builds legacy latency, loss, percentile and availability values', () => {
     const records: PingRecord[] = [
       { client: 'node-a', task_id: 1, time: '2026-08-15T00:00:00.000Z', value: 100 },
@@ -204,6 +225,34 @@ describe('buildPingMetricState (Metric Store vs. legacy fallback gate)', () => {
     )
     expect(result?.source).toBe('metric')
     expect(result?.metricLossPoints).toHaveLength(1)
+  })
+
+  test('keeps the latest real sample time instead of the query response time', () => {
+    const sampleTime = '2026-08-15T00:12:00.000Z'
+    const result = buildPingMetricState(
+      nodeUuid,
+      statsResponse([pingStat({ task_id: '1' })]),
+      metricsResponse([latencySeries('1', [{ time: sampleTime, value: 50 }]), lossSeries('1', [{ time: sampleTime, value: 0 }])]),
+    )
+
+    expect(result?.sampleUpdatedAtByTaskId.get(1)).toBe(Date.parse(sampleTime))
+    expect(result?.sampleUpdatedAtByTaskId.get(1)).not.toBe(Date.parse('2026-08-15T01:00:00.000Z'))
+  })
+
+  test('does not let a filled empty bucket advance the sample time', () => {
+    const sampleTime = '2026-08-15T00:12:00.000Z'
+    const emptyBucketTime = '2026-08-15T01:00:00.000Z'
+    const latency = latencySeries('1', [
+      { time: sampleTime, value: 50 },
+      { time: emptyBucketTime, value: 0, count: 0 },
+    ])
+    const loss = lossSeries('1', [
+      { time: sampleTime, value: 0 },
+      { time: emptyBucketTime, value: 0, count: 0 },
+    ])
+    const result = buildPingMetricState(nodeUuid, statsResponse([pingStat({ task_id: '1' })]), metricsResponse([latency, loss]))
+
+    expect(result?.sampleUpdatedAtByTaskId.get(1)).toBe(Date.parse(sampleTime))
   })
 
   test('does not require a matching series for an approximate-loss task', () => {

@@ -9,8 +9,12 @@
  * 声明的两级语义推翻了。实际后果是余量从「离硬限 22 KiB」变成「离 CI 红
  * 2.4 KiB」，而没有人知道，直到下一个特性把构建顶红。
  */
-export const INITIAL_GZIP_TARGET = 145 * 1024
-export const INITIAL_GZIP_HARD_LIMIT = 165 * 1024
+/**
+ * 130 KiB 是日常优化目标，145 KiB 是发布硬线。二者之间保留 15 KiB，避免下一个
+ * 正常功能刚落地就把 CI 顶红；达到目标线后两个审计都会报警，达到硬线才失败。
+ */
+export const INITIAL_GZIP_TARGET = 130 * 1024
+export const INITIAL_GZIP_HARD_LIMIT = 145 * 1024
 
 /**
  * 入口 chunk 单独的上限。聚合值可以靠拆 chunk 摊薄，入口却是首屏必须同步下载

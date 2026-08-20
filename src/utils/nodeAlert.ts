@@ -81,7 +81,7 @@ export function getCarrierNodeAlert(
 
   const prefix = scopePrefix(scopeLabel)
   const issues = carriers.flatMap((carrier) => {
-    if (carrier.stale)
+    if (carrier.delayed || carrier.stale)
       return []
     const loss = Number.parseFloat(carrier.lossDisplay)
     const latency = Number.parseFloat(carrier.latencyDisplay)

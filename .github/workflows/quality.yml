@@ -38,6 +38,9 @@ jobs:
       - name: Type-check
         run: bun run type-check
 
+      - name: Audit source file size
+        run: bun run audit:source-size
+
       - name: Unit tests
         run: bun run test:unit
 

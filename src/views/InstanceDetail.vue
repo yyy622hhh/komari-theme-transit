@@ -27,8 +27,22 @@ import { getRegionCode, getRegionDisplayName } from '@/utils/regionHelper'
 
 import { formatPrice, formatPriceWithCycle, getExpireStatus, getExpireText, isFreePrice, parseTags } from '@/utils/tagHelper'
 
-const LoadChart = defineAsyncComponent(() => import('@/components/LoadChart.vue'))
-const PingChart = defineAsyncComponent(() => import('@/components/PingChart.vue'))
+defineOptions({
+  components: {
+    Badge,
+    UiButton: Button,
+    CardX,
+    ComponentErrorBoundary,
+    DataTooltip,
+    Empty,
+    Icon,
+    LoadChart: defineAsyncComponent(() => import('@/components/LoadChart.vue')),
+    PingChart: defineAsyncComponent(() => import('@/components/PingChart.vue')),
+    Tabs,
+    TabsList,
+    TabsTrigger,
+  },
+})
 
 const route = useRoute()
 const router = useRouter()
@@ -499,9 +513,9 @@ const metricCards = computed<MetricCard[]>(() => appStore.detailMetricCardOrder.
       <CardX>
         <Empty description="节点不存在或已被删除">
           <template #extra>
-            <Button @click="router.push('/')">
+            <UiButton @click="router.push('/')">
               返回首页
-            </Button>
+            </UiButton>
           </template>
         </Empty>
       </CardX>
@@ -510,11 +524,21 @@ const metricCards = computed<MetricCard[]>(() => appStore.detailMetricCardOrder.
     <template v-else>
       <!-- 顶部导航 -->
       <div class="px-4 flex flex-wrap gap-2 items-center sm:gap-4">
-        <Button variant="ghost" size="icon-sm" class="bg-background/50 hover:bg-background" aria-label="返回上一页" @click="returnFromDetail">
+        <UiButton
+          variant="ghost"
+          size="icon-sm"
+          class="bg-background/50 hover:bg-background"
+          aria-label="返回上一页"
+          @click="returnFromDetail"
+        >
           <Icon icon="tabler:arrow-left" :width="16" :height="16" />
-        </Button>
+        </UiButton>
         <div class="min-w-0 text-lg font-bold flex gap-2 items-center">
-          <img :src="`/images/flags/${getRegionCode(data.region)}.svg`" :alt="getRegionAltText(data.region)" class="size-6">
+          <img
+            :src="`/images/flags/${getRegionCode(data.region)}.svg`"
+            :alt="getRegionAltText(data.region)"
+            class="size-6"
+          >
           <span class="truncate">{{ data.name }}</span>
         </div>
         <Badge :variant="data.online ? 'default' : 'destructive'" class="text-xs !rounded">
@@ -523,15 +547,18 @@ const metricCards = computed<MetricCard[]>(() => appStore.detailMetricCardOrder.
         <!-- 节点自定义标签 -->
         <div v-if="customTags.length" class="flex flex-wrap gap-1">
           <Badge
-            v-for="(tag, i) in customTags" :key="i" variant="outline"
+            v-for="(tag, i) in customTags"
+            :key="i"
+            variant="outline"
             class="!text-[11px] rounded text-muted-foreground border-muted-foreground/15 px-1.5 py-0"
           >
             {{ tag }}
           </Badge>
         </div>
         <div class="ml-auto flex h-8 shrink-0 items-center gap-1 rounded-md bg-background/50 p-0.5 backdrop-blur-xs">
-          <Button
-            variant="ghost" size="icon-sm"
+          <UiButton
+            variant="ghost"
+            size="icon-sm"
             class="size-7 rounded-sm shadow-none"
             :class="isFavoriteNode && 'text-amber-500'"
             :aria-label="isFavoriteNode ? '取消收藏当前节点' : '收藏当前节点'"
@@ -539,15 +566,18 @@ const metricCards = computed<MetricCard[]>(() => appStore.detailMetricCardOrder.
             @click="toggleCurrentFavorite"
           >
             <Icon :icon="isFavoriteNode ? 'tabler:star-filled' : 'tabler:star'" :width="14" :height="14" />
-          </Button>
-          <Button
-            variant="ghost" size="icon-sm" class="size-7 rounded-sm shadow-none"
+          </UiButton>
+          <UiButton
+            variant="ghost"
+            size="icon-sm"
+            class="size-7 rounded-sm shadow-none"
             :disabled="detailNodes.length < 2"
-            aria-label="上一个节点" title="上一个节点"
+            aria-label="上一个节点"
+            title="上一个节点"
             @click="navigateDetailNode(-1)"
           >
             <Icon icon="tabler:chevron-left" :width="14" :height="14" />
-          </Button>
+          </UiButton>
           <select
             :value="data.uuid"
             class="h-7 max-w-34 rounded-sm border-0 bg-transparent px-1 text-xs text-foreground outline-none sm:max-w-48"
@@ -558,14 +588,17 @@ const metricCards = computed<MetricCard[]>(() => appStore.detailMetricCardOrder.
               {{ node.name }}
             </option>
           </select>
-          <Button
-            variant="ghost" size="icon-sm" class="size-7 rounded-sm shadow-none"
+          <UiButton
+            variant="ghost"
+            size="icon-sm"
+            class="size-7 rounded-sm shadow-none"
             :disabled="detailNodes.length < 2"
-            aria-label="下一个节点" title="下一个节点"
+            aria-label="下一个节点"
+            title="下一个节点"
             @click="navigateDetailNode(1)"
           >
             <Icon icon="tabler:chevron-right" :width="14" :height="14" />
-          </Button>
+          </UiButton>
         </div>
         <!-- 厂商标识 -->
         <DataTooltip
@@ -576,7 +609,9 @@ const metricCards = computed<MetricCard[]>(() => appStore.detailMetricCardOrder.
           class="max-w-full"
           content-class="w-72 whitespace-pre-wrap break-words px-2 py-1.5 text-left leading-relaxed"
         >
-          <div class="flex max-w-full items-center gap-1.5 rounded-full bg-background/50 px-3 py-1 text-xs text-muted-foreground">
+          <div
+            class="flex max-w-full items-center gap-1.5 rounded-full bg-background/50 px-3 py-1 text-xs text-muted-foreground"
+          >
             <Icon :icon="vpsProvider.primary.icon" :width="14" :height="14" class="shrink-0" />
             <span class="whitespace-normal break-words leading-snug">{{ vpsProvider.displayName }}</span>
           </div>
@@ -586,15 +621,24 @@ const metricCards = computed<MetricCard[]>(() => appStore.detailMetricCardOrder.
       <div v-if="appStore.nodeDetailSectionTabsEnabled" class="px-4 overflow-x-auto">
         <Tabs v-model="activeDetailSection" class="w-full">
           <TabsList class="w-max h-8 bg-background/50 backdrop-blur-xl rounded-md">
-            <TabsTrigger value="overview" class="h-6.5 flex-none shrink-0 gap-1 text-xs border-none data-[state=active]:text-selection shadow-none rounded-sm">
+            <TabsTrigger
+              value="overview"
+              class="h-6.5 flex-none shrink-0 gap-1 text-xs border-none data-[state=active]:text-selection shadow-none rounded-sm"
+            >
               <Icon icon="tabler:layout-dashboard" :width="12" :height="12" />
               概览
             </TabsTrigger>
-            <TabsTrigger value="load" class="h-6.5 flex-none shrink-0 gap-1 text-xs border-none data-[state=active]:text-selection shadow-none rounded-sm">
+            <TabsTrigger
+              value="load"
+              class="h-6.5 flex-none shrink-0 gap-1 text-xs border-none data-[state=active]:text-selection shadow-none rounded-sm"
+            >
               <Icon icon="tabler:activity" :width="12" :height="12" />
               负载
             </TabsTrigger>
-            <TabsTrigger value="ping" class="h-6.5 flex-none shrink-0 gap-1 text-xs border-none data-[state=active]:text-selection shadow-none rounded-sm">
+            <TabsTrigger
+              value="ping"
+              class="h-6.5 flex-none shrink-0 gap-1 text-xs border-none data-[state=active]:text-selection shadow-none rounded-sm"
+            >
               <Icon icon="tabler:timeline" :width="12" :height="12" />
               延迟
             </TabsTrigger>
@@ -603,16 +647,27 @@ const metricCards = computed<MetricCard[]>(() => appStore.detailMetricCardOrder.
       </div>
 
       <!-- 价格指标卡片 -->
-      <div v-if="!appStore.nodeDetailSectionTabsEnabled || activeDetailSection === 'overview'" class="px-4 grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-4">
+      <div
+        v-if="!appStore.nodeDetailSectionTabsEnabled || activeDetailSection === 'overview'"
+        class="px-4 grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-4"
+      >
         <CardX
-          v-for="item in metricCards" :key="item.key" hoverable size="small"
+          v-for="item in metricCards"
+          :key="item.key"
+          hoverable
+          size="small"
           class="group h-full bg-background/50 border-none hover:bg-background transition-all rounded-md"
           content-class="h-full !p-3"
         >
           <div :title="item.tooltip" class="flex h-full min-h-10 md:min-h-18 flex-col justify-between gap-3">
             <div class="flex items-center justify-between gap-2">
               <span class="text-xs font-medium tracking-wider text-muted-foreground">{{ item.label }}</span>
-              <Icon :icon="item.icon" :width="20" :height="20" class="text-slate-500/25 transition-colors group-hover:text-slate-500" />
+              <Icon
+                :icon="item.icon"
+                :width="20"
+                :height="20"
+                class="text-slate-500/25 transition-colors group-hover:text-slate-500"
+              />
             </div>
             <div class="min-w-0 space-y-1">
               <div class="flex min-w-0 items-baseline gap-1 truncate font-semibold leading-none" :class="item.valueClass">
@@ -625,9 +680,14 @@ const metricCards = computed<MetricCard[]>(() => appStore.detailMetricCardOrder.
       </div>
 
       <!-- 硬件信息 -->
-      <div v-if="!appStore.nodeDetailSectionTabsEnabled || activeDetailSection === 'overview'" class="px-4 gap-4 grid grid-cols-1 lg:grid-cols-2">
+      <div
+        v-if="!appStore.nodeDetailSectionTabsEnabled || activeDetailSection === 'overview'"
+        class="px-4 gap-4 grid grid-cols-1 lg:grid-cols-2"
+      >
         <CardX
-          title="硬件信息" size="small" content-class="flex-1"
+          title="硬件信息"
+          size="small"
+          content-class="flex-1"
           class="group h-full bg-background/50 border-none hover:bg-background transition-all rounded-md"
         >
           <div class="flex flex-col gap-3 h-full">
@@ -669,9 +729,13 @@ const metricCards = computed<MetricCard[]>(() => appStore.detailMetricCardOrder.
             </div>
 
             <!-- IP/架构 · 虚拟化 · GPU(仅在存在时)，列数随数量自适应避免留空，整体撑满高度 -->
-            <div class="grid gap-3 flex-1 auto-rows-fr" :class="hardwareSmallItems.length <= 2 ? 'grid-cols-2' : 'grid-cols-3'">
+            <div
+              class="grid gap-3 flex-1 auto-rows-fr"
+              :class="hardwareSmallItems.length <= 2 ? 'grid-cols-2' : 'grid-cols-3'"
+            >
               <div
-                v-for="item in hardwareSmallItems" :key="item.label"
+                v-for="item in hardwareSmallItems"
+                :key="item.label"
                 class="min-w-0 flex flex-col gap-1 rounded-sm bg-slate-500/5 p-2"
               >
                 <div class="flex gap-1 items-center text-muted-foreground">
@@ -685,12 +749,15 @@ const metricCards = computed<MetricCard[]>(() => appStore.detailMetricCardOrder.
         </CardX>
 
         <CardX
-          title="系统信息" size="small" content-class="flex-1"
+          title="系统信息"
+          size="small"
+          content-class="flex-1"
           class="group h-full bg-background/50 border-none hover:bg-background transition-all rounded-md"
         >
           <div class="gap-3 grid grid-cols-1 sm:grid-cols-2 h-full sm:auto-rows-fr">
             <div
-              v-for="item in systemInfo" :key="item.label"
+              v-for="item in systemInfo"
+              :key="item.label"
               class="min-w-0 flex flex-col gap-1 rounded-sm bg-slate-500/5 p-2"
             >
               <div class="flex gap-1 items-center text-muted-foreground">
@@ -698,7 +765,12 @@ const metricCards = computed<MetricCard[]>(() => appStore.detailMetricCardOrder.
                 <span class="text-xs sm:text-sm">{{ item.label }}</span>
               </div>
               <div class="flex min-w-0 gap-2 items-center">
-                <img v-if="item.label === '操作系统'" :src="getOSImage(data.os)" :alt="getOSName(data.os)" class="size-5 shrink-0">
+                <img
+                  v-if="item.label === '操作系统'"
+                  :src="getOSImage(data.os)"
+                  :alt="getOSName(data.os)"
+                  class="size-5 shrink-0"
+                >
                 <span class="text-xs sm:text-sm break-words">{{ item.value }}</span>
               </div>
             </div>
@@ -706,12 +778,14 @@ const metricCards = computed<MetricCard[]>(() => appStore.detailMetricCardOrder.
         </CardX>
 
         <CardX
-          title="存储信息" size="small"
+          title="存储信息"
+          size="small"
           class="group h-full bg-background/50 border-none hover:bg-background transition-all rounded-md"
         >
           <div class="gap-3 grid grid-cols-3">
             <div
-              v-for="item in storageInfo" :key="item.label"
+              v-for="item in storageInfo"
+              :key="item.label"
               class="min-w-0 flex flex-col gap-1 rounded-sm bg-slate-500/5 p-2"
             >
               <div class="flex gap-1 items-center text-muted-foreground">
@@ -724,7 +798,8 @@ const metricCards = computed<MetricCard[]>(() => appStore.detailMetricCardOrder.
         </CardX>
 
         <CardX
-          title="网络信息" size="small"
+          title="网络信息"
+          size="small"
           class="group h-full bg-background/50 border-none hover:bg-background transition-all rounded-md"
           content-class="pt-0"
         >
@@ -741,7 +816,9 @@ const metricCards = computed<MetricCard[]>(() => appStore.detailMetricCardOrder.
                   <Icon icon="icon-park-outline:transfer-data" :width="14" :height="14" />
                   <span class="text-xs sm:text-sm">总流量</span>
                   <Badge
-                    v-for="proto in ipSupport" :key="proto" variant="outline"
+                    v-for="proto in ipSupport"
+                    :key="proto"
+                    variant="outline"
                     class="!text-[10px] rounded text-emerald-600 border-emerald-600/25 px-1 py-0 leading-none"
                   >
                     {{ proto }}

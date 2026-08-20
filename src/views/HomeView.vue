@@ -40,22 +40,38 @@ interface HomeToolOption {
   description: string
 }
 
-defineOptions({ name: 'HomeView' })
-
-const AuditLogPanel = defineAsyncComponent(() => import('@/components/AuditLogPanel.vue'))
-const HealthSummaryPanel = defineAsyncComponent(() => import('@/components/HealthSummaryPanel.vue'))
-const NodeCard = defineAsyncComponent(() => import('@/components/NodeCard.vue'))
-const NodeGeneralCards = defineAsyncComponent(() => import('@/components/NodeGeneralCards.vue'))
-const NodeList = defineAsyncComponent(() => import('@/components/NodeList.vue'))
-const NodeComparePanel = defineAsyncComponent(() => import('@/components/NodeComparePanel.vue'))
-const TransitDashboard = defineAsyncComponent(() => import('@/components/TransitDashboard.vue'))
-const NodeControlDialog = defineAsyncComponent(() => import('@/components/NodeControlDialog.vue'))
-const TransitNodeCard = defineAsyncComponent(() => import('@/components/TransitNodeCard.vue'))
-const PingMonitorDialog = defineAsyncComponent(() => import('@/components/PingMonitorDialog.vue'))
-const NodeTopologyPanel = defineAsyncComponent(() => import('@/components/NodeTopologyPanel.vue'))
-const ProviderValuePanel = defineAsyncComponent(() => import('@/components/ProviderValuePanel.vue'))
-const SnapshotExportPanel = defineAsyncComponent(() => import('@/components/SnapshotExportPanel.vue'))
-const ServerListPanel = defineAsyncComponent(() => import('@/components/ServerListPanel.vue'))
+defineOptions({
+  name: 'HomeView',
+  components: {
+    Alert,
+    AlertDescription,
+    AlertTitle,
+    AuditLogPanel: defineAsyncComponent(() => import('@/components/AuditLogPanel.vue')),
+    UiButton: Button,
+    DeferredRender,
+    Empty,
+    HealthSummaryPanel: defineAsyncComponent(() => import('@/components/HealthSummaryPanel.vue')),
+    Icon,
+    UiInput: Input,
+    MarkdownRenderer,
+    NodeCard: defineAsyncComponent(() => import('@/components/NodeCard.vue')),
+    NodeComparePanel: defineAsyncComponent(() => import('@/components/NodeComparePanel.vue')),
+    NodeControlDialog: defineAsyncComponent(() => import('@/components/NodeControlDialog.vue')),
+    NodeGeneralCards: defineAsyncComponent(() => import('@/components/NodeGeneralCards.vue')),
+    NodeList: defineAsyncComponent(() => import('@/components/NodeList.vue')),
+    NodeTopologyPanel: defineAsyncComponent(() => import('@/components/NodeTopologyPanel.vue')),
+    PingMonitorDialog: defineAsyncComponent(() => import('@/components/PingMonitorDialog.vue')),
+    ProviderValuePanel: defineAsyncComponent(() => import('@/components/ProviderValuePanel.vue')),
+    ServerListPanel: defineAsyncComponent(() => import('@/components/ServerListPanel.vue')),
+    SnapshotExportPanel: defineAsyncComponent(() => import('@/components/SnapshotExportPanel.vue')),
+    Tabs,
+    TabsContent,
+    TabsList,
+    TabsTrigger,
+    TransitDashboard: defineAsyncComponent(() => import('@/components/TransitDashboard.vue')),
+    TransitNodeCard: defineAsyncComponent(() => import('@/components/TransitNodeCard.vue')),
+  },
+})
 
 const nodeItemStaggerMs = UI_CONFIG.motion.staggerMs
 const nodeItemStaggerLimit = UI_CONFIG.motion.staggerLimit
@@ -505,15 +521,22 @@ const nodeCardGridClass = computed(() => {
 
     <TransitDashboard v-if="appStore.opsDashboardEnabled && isViewActive" :nodes="nodesStore.visibleNodes" />
 
-    <div class="node-info p-3 pt-0 sm:p-4 sm:pt-0 flex flex-col gap-4 relative z-1 pointer-events-none" :class="!appStore.opsDashboardEnabled && !!appStore.hideGeneralCard && 'pt-4'">
+    <div
+      class="node-info p-3 pt-0 sm:p-4 sm:pt-0 flex flex-col gap-4 relative z-1 pointer-events-none"
+      :class="!appStore.opsDashboardEnabled && !!appStore.hideGeneralCard && 'pt-4'"
+    >
       <div class="nodes min-w-0">
         <Tabs v-model="appStore.nodeSelectedGroup" class="w-full flex-col gap-4">
           <div class="flex flex-col gap-2 xl:flex-row xl:items-center">
-            <div class="home-controls-scroll min-w-0 overflow-x-auto overscroll-x-contain rounded-sm pointer-events-auto touch-pan-x">
+            <div
+              class="home-controls-scroll min-w-0 overflow-x-auto overscroll-x-contain rounded-sm pointer-events-auto touch-pan-x"
+            >
               <div class="flex w-max gap-2">
                 <TabsList class="w-max h-8 bg-background/50 backdrop-blur-xl rounded-md pointer-events-auto">
                   <TabsTrigger
-                    v-for="g in groups" :key="g.name" :value="g.name"
+                    v-for="g in groups"
+                    :key="g.name"
+                    :value="g.name"
                     :disabled="homeOrder.editingOrder.value"
                     class="h-6.5 flex-none shrink-0 text-xs border-none data-[state=active]:text-selection shadow-none rounded-sm"
                   >
@@ -526,7 +549,8 @@ const nodeCardGridClass = computed(() => {
                   class="flex h-8 w-max items-center gap-1 rounded-md bg-background/50 px-1 backdrop-blur-xl pointer-events-auto"
                 >
                   <button
-                    v-for="control in quickControls" :key="control.key"
+                    v-for="control in quickControls"
+                    :key="control.key"
                     type="button"
                     :disabled="homeOrder.editingOrder.value"
                     class="inline-flex h-6.5 flex-none shrink-0 items-center gap-1 rounded-sm px-2 text-xs text-muted-foreground transition-colors hover:text-foreground"
@@ -544,12 +568,19 @@ const nodeCardGridClass = computed(() => {
                 </div>
               </div>
             </div>
-            <div class="search flex min-w-0 flex-wrap gap-2 items-center justify-end pointer-events-auto max-sm:justify-start xl:ml-auto">
-              <div v-if="homeTools.length && appStore.homeAdvancedToolsVisible" class="flex h-8 items-center gap-1 rounded-md bg-background/50 p-0.5 backdrop-blur-xs">
-                <Button
-                  v-for="tool in homeTools" :key="tool.key"
+            <div
+              class="search flex min-w-0 flex-wrap gap-2 items-center justify-end pointer-events-auto max-sm:justify-start xl:ml-auto"
+            >
+              <div
+                v-if="homeTools.length && appStore.homeAdvancedToolsVisible"
+                class="flex h-8 items-center gap-1 rounded-md bg-background/50 p-0.5 backdrop-blur-xs"
+              >
+                <UiButton
+                  v-for="tool in homeTools"
+                  :key="tool.key"
                   :disabled="homeOrder.editingOrder.value"
-                  variant="ghost" size="icon"
+                  variant="ghost"
+                  size="icon"
                   class="size-7 rounded-sm text-muted-foreground shadow-none hover:bg-background/60"
                   :class="[activeHomeTool === tool.key ? '!text-selection !bg-background' : '']"
                   :aria-label="`${tool.label}：${tool.description}`"
@@ -558,43 +589,49 @@ const nodeCardGridClass = computed(() => {
                   @click="toggleHomeTool(tool.key)"
                 >
                   <Icon :icon="tool.icon" :width="14" :height="14" />
-                </Button>
+                </UiButton>
               </div>
 
-              <Button
+              <UiButton
                 v-if="activeHomeTool === 'nodes' && displayedNodeList.length > 1 && !homeOrder.editingOrder.value"
                 data-home-order-edit-trigger
-                variant="outline" size="sm"
+                variant="outline"
+                size="sm"
                 class="h-8 border-none bg-background/50 px-2.5 text-xs shadow-none backdrop-blur-xs hover:bg-background/60"
                 title="直接拖动首页节点并同步官方后台顺序"
                 @click="startHomeOrderEdit"
               >
                 <Icon icon="tabler:arrows-move-vertical" :width="14" :height="14" />
                 编辑首页顺序
-              </Button>
+              </UiButton>
 
-              <Button
-                variant="outline" size="icon" aria-label="卡片视图"
+              <UiButton
+                variant="outline"
+                size="icon"
+                aria-label="卡片视图"
                 :aria-pressed="appStore.nodeViewMode === 'card'"
                 class="w-8 h-8 border-none bg-background/50 backdrop-blur-xs shadow-none hover:bg-background/60 rounded-md"
                 :class="[appStore.nodeViewMode === 'card' ? '!text-selection !bg-background' : '']"
                 @click="setNodeViewMode('card')"
               >
                 <Icon icon="tabler:layout-grid" :width="14" :height="14" />
-              </Button>
-              <Button
-                variant="outline" size="icon" aria-label="列表视图"
+              </UiButton>
+              <UiButton
+                variant="outline"
+                size="icon"
+                aria-label="列表视图"
                 :aria-pressed="appStore.nodeViewMode === 'list'"
                 class="w-8 h-8 border-none bg-background/50 backdrop-blur-xs shadow-none hover:bg-background/60 rounded-md"
                 :class="[appStore.nodeViewMode === 'list' ? '!text-selection !bg-background' : '']"
                 @click="setNodeViewMode('list')"
               >
                 <Icon icon="tabler:table" :width="14" :height="14" />
-              </Button>
+              </UiButton>
               <div class="relative z-1 h-8" :class="searchText ? 'w-full sm:w-60' : 'w-8'">
                 <div class="absolute top-0 right-0 w-full">
-                  <Input
-                    v-model="searchText" placeholder="搜索名称、地区、IP、CPU"
+                  <UiInput
+                    v-model="searchText"
+                    placeholder="搜索名称、地区、IP、CPU"
                     :disabled="homeOrder.editingOrder.value"
                     aria-label="搜索节点"
                     class="transition-all border-none shadow-none h-8 bg-background/50 backdrop-blur-xs rounded-md hover:!bg-background/60 focus:!pl-7.5 focus:placeholder:!text-muted-foreground focus:!bg-background/80 focus:!ring-slate-500/10"
@@ -602,7 +639,9 @@ const nodeCardGridClass = computed(() => {
                     @keydown.esc.prevent="clearSearch"
                   />
                   <Icon
-                    icon="tabler:search" :width="14" :height="14"
+                    icon="tabler:search"
+                    :width="14"
+                    :height="14"
                     class="absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none"
                   />
                   <button
@@ -626,7 +665,12 @@ const nodeCardGridClass = computed(() => {
           >
             <div class="min-w-0">
               <p class="flex items-center gap-1.5 text-xs font-medium text-foreground">
-                <Icon icon="tabler:grip-vertical" :width="15" :height="15" class="text-emerald-600 dark:text-emerald-300" />
+                <Icon
+                  icon="tabler:grip-vertical"
+                  :width="15"
+                  :height="15"
+                  class="text-emerald-600 dark:text-emerald-300"
+                />
                 拖动每台服务器右上角的抓手调整首页顺序
               </p>
               <p class="mt-0.5 text-[11px] text-muted-foreground">
@@ -634,13 +678,20 @@ const nodeCardGridClass = computed(() => {
               </p>
             </div>
             <div class="flex shrink-0 gap-2">
-              <Button variant="ghost" size="sm" :disabled="homeOrder.savingOrder.value" @click="cancelHomeOrderEdit">
+              <UiButton variant="ghost" size="sm" :disabled="homeOrder.savingOrder.value" @click="cancelHomeOrderEdit">
                 取消
-              </Button>
-              <Button size="sm" :disabled="homeOrder.savingOrder.value || !homeOrder.orderDirty.value" @click="saveHomeOrder">
-                <Icon :icon="homeOrder.savingOrder.value ? 'tabler:loader-2' : 'tabler:device-floppy'" :class="homeOrder.savingOrder.value && 'animate-spin'" />
+              </UiButton>
+              <UiButton
+                size="sm"
+                :disabled="homeOrder.savingOrder.value || !homeOrder.orderDirty.value"
+                @click="saveHomeOrder"
+              >
+                <Icon
+                  :icon="homeOrder.savingOrder.value ? 'tabler:loader-2' : 'tabler:device-floppy'"
+                  :class="homeOrder.savingOrder.value && 'animate-spin'"
+                />
                 {{ homeOrder.savingOrder.value ? '保存中' : '保存顺序' }}
-              </Button>
+              </UiButton>
             </div>
             <p id="home-order-instructions" class="sr-only">
               使用拖动抓手调整顺序；键盘用户可用上下方向键逐项移动，或用 Home 和 End 移到首尾。
@@ -650,7 +701,10 @@ const nodeCardGridClass = computed(() => {
             </p>
           </div>
           <TabsContent v-for="g in groups" :key="g.name" :value="g.name" class="pointer-events-auto">
-            <div v-if="activeHomeTool !== 'nodes'" class="mb-4 rounded-lg bg-background/50 px-3 py-2 text-sm text-muted-foreground">
+            <div
+              v-if="activeHomeTool !== 'nodes'"
+              class="mb-4 rounded-lg bg-background/50 px-3 py-2 text-sm text-muted-foreground"
+            >
               {{ activeToolTitle }} · 当前分组：{{ g.tab }}（{{ groupNodeList.length }} 台）
             </div>
             <NodeTopologyPanel v-if="activeHomeTool === 'topology'" :nodes="groupNodeList" />
@@ -697,7 +751,9 @@ const nodeCardGridClass = computed(() => {
                 >
                   <Icon icon="tabler:grip-vertical" :width="17" :height="17" />
                 </button>
-                <div :class="[appStore.opsDashboardEnabled && 'h-full', homeOrder.editingOrder.value && 'pointer-events-none']">
+                <div
+                  :class="[appStore.opsDashboardEnabled && 'h-full', homeOrder.editingOrder.value && 'pointer-events-none']"
+                >
                   <DeferredRender
                     :enabled="deferNodeCards"
                     :min-height="deferredNodeCardHeight"

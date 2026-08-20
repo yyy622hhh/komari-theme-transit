@@ -21,6 +21,7 @@
     "audit:performance": "bun scripts/audit-performance.ts",
     "audit:reproducible": "bun scripts/audit-reproducible.ts",
     "audit:dependencies": "bun scripts/audit-dependencies.ts",
+    "audit:source-size": "bun scripts/audit-source-size.ts",
     "audit:release": "bun scripts/audit-release.ts",
     "type-check": "vue-tsc --build",
     "publish": "bun scripts/publish.ts",
@@ -54,8 +55,7 @@
     "three": "0.185.1",
     "vue": "^3.5.28",
     "vue-echarts": "^8.0.1",
-    "vue-router": "^5.0.2",
-    "vue-sonner": "^2.0.9"
+    "vue-router": "^5.0.2"
   },
   "devDependencies": {
     "@antfu/eslint-config": "9.3.0",

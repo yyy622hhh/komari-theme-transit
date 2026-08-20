@@ -4,7 +4,6 @@ import { computed, defineAsyncComponent, inject, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { useVisitorAudit } from '@/composables/useVisitorAudit'
 import { KOMARI_ADMIN_SERVERS_PATH } from '@/constants'
 import { useAppStore } from '@/stores/app'
@@ -119,27 +118,23 @@ const sitename = computed(() => appStore.publicSettings?.sitename || 'Komari Mon
           {{ sitename }}
         </h3>
       </RouterLink>
-      <TooltipProvider :delay-duration="200">
-        <div class="ml-2 flex shrink-0 items-center gap-1 sm:gap-2">
-          <Tooltip v-for="button in actionButtons" :key="button.action">
-            <TooltipTrigger as-child>
-              <Button
-                :as="button.href ? 'a' : 'button'"
-                :href="button.href"
-                variant="ghost"
-                size="icon-sm"
-                :aria-label="button.title"
-                :aria-pressed="button.pressed"
-                :class="button.pressed && 'bg-background/70 text-selection'"
-                @click="handleButtonClick(button.action)"
-              >
-                <Icon :icon="button.icon" :width="18" :height="18" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{{ button.title }}</TooltipContent>
-          </Tooltip>
-        </div>
-      </TooltipProvider>
+      <div class="ml-2 flex shrink-0 items-center gap-1 sm:gap-2">
+        <Button
+          v-for="button in actionButtons"
+          :key="button.action"
+          :as="button.href ? 'a' : 'button'"
+          :href="button.href"
+          variant="ghost"
+          size="icon-sm"
+          :title="button.title"
+          :aria-label="button.title"
+          :aria-pressed="button.pressed"
+          :class="button.pressed && 'bg-background/70 text-selection'"
+          @click="handleButtonClick(button.action)"
+        >
+          <Icon :icon="button.icon" :width="18" :height="18" />
+        </Button>
+      </div>
     </div>
   </header>
 </template>

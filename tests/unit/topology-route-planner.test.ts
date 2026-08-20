@@ -49,9 +49,9 @@ describe('formatTopologyRouteHint', () => {
       .toBe('请选择线路机。')
   })
 
-  test('asks for a landing once a relay is picked', () => {
+  test('stays quiet when a relay-only topology intentionally has no landing', () => {
     expect(formatTopologyRouteHint({ ...baseInput, hasLanding: false }))
-      .toBe('请选择落地机。')
+      .toBe('')
   })
 
   test('is silent until the first plan resolves', () => {

@@ -40,6 +40,7 @@ bun run dev
 bun run lint:check
 bun run icons:check
 bun run type-check
+bun run audit:source-size
 bun run test:unit
 bun run build-only
 bun run audit:bundle

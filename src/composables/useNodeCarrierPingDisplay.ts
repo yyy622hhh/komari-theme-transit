@@ -5,6 +5,7 @@ import { computed } from 'vue'
 import { useNodeCarrierPingStats } from '@/composables/useNodePingStats'
 import { useAppStore } from '@/stores/app'
 import { formatDateTime } from '@/utils/helper'
+import { formatPingFreshnessAge } from '@/utils/pingFreshness'
 
 export type CarrierPingBar = TelemetrySample
 
@@ -20,6 +21,7 @@ export interface CarrierPingDisplay {
   lossBars: CarrierPingBar[]
   latencyTooltip: string
   lossTooltip: string
+  delayed: boolean
   stale: boolean
 }
 
@@ -209,15 +211,41 @@ export function useNodeCarrierPingDisplay(uuid: MaybeRefOrGetter<string>) {
       lossBars,
       latencyTooltip,
       lossTooltip,
+      delayed: carrier.delayed,
       stale: carrier.stale,
     }
   }))
 
+  const freshnessAge = computed(() => carrierStats.lastFetchedAt.value > 0
+    ? formatPingFreshnessAge(
+        carrierStats.lastFetchedAt.value,
+        carrierStats.lastFetchedAt.value + carrierStats.freshnessAgeMs.value,
+        appStore.lang,
+      )
+    : '')
+  const freshnessLabel = computed(() => {
+    if (carrierStats.stale.value)
+      return appStore.lang === 'zh-CN' ? `${carrierScopeLabel.value} 数据过期` : `${carrierScopeLabel.value} data stale`
+    if (carrierStats.delayed.value)
+      return `${carrierScopeLabel.value} · ${freshnessAge.value}`
+    return carrierScopeLabel.value
+  })
+  const freshnessTitle = computed(() => {
+    if (!carrierStats.delayed.value && !carrierStats.stale.value)
+      return ''
+    return appStore.lang === 'zh-CN'
+      ? `数据可能不是最新，上次成功更新于 ${freshnessAge.value}`
+      : `Data may not be current. Last successful update: ${freshnessAge.value}`
+  })
+
   return {
     carrierDisplays,
     carrierScopeLabel,
+    freshnessLabel,
+    freshnessTitle,
     loading: carrierStats.loading,
     error: carrierStats.error,
+    delayed: carrierStats.delayed,
     stale: carrierStats.stale,
   }
 }

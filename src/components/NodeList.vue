@@ -39,6 +39,10 @@ interface NodeMetadataItem {
   style?: CSSProperties
 }
 
+defineOptions({
+  components: { Badge, DataTooltip, Icon, NodePingListCell, ProgressThin, TrafficProgress },
+})
+
 const props = withDefaults(defineProps<{
   nodes: NodeData[]
   transitionKey?: string
@@ -427,7 +431,8 @@ function buildNodeMetadataItems(node: NodeData): NodeMetadataItem[] {
       <!-- 表头 -->
       <div class="grid px-2.5 py-2 bg-background/70 rounded-lg backdrop-blur-sm gap-2" :style="gridStyle">
         <div
-          v-for="col in columns" :key="col.key"
+          v-for="col in columns"
+          :key="col.key"
           :class="[['status', 'os'].includes(col.key) ? 'text-center' : 'text-left']"
         >
           <button
@@ -485,11 +490,17 @@ function buildNodeMetadataItems(node: NodeData): NodeMetadataItem[] {
                 </div>
 
                 <!-- 节点名称 -->
-                <div v-else-if="col.key === 'name'" class="space-y-0.5 min-w-0" :class="[!node.online && 'blur-sm opacity-30']">
+                <div
+                  v-else-if="col.key === 'name'"
+                  class="space-y-0.5 min-w-0"
+                  :class="[!node.online && 'blur-sm opacity-30']"
+                >
                   <div class="flex gap-1.5 items-center text-[13px] font-semibold text-foreground min-w-0">
                     <img
-                      v-if="hasRegion(node.region)" :src="getFlagSrc(node.region)"
-                      :alt="getRegionAltText(node.region)" class="size-5 rounded-sm shrink-0"
+                      v-if="hasRegion(node.region)"
+                      :src="getFlagSrc(node.region)"
+                      :alt="getRegionAltText(node.region)"
+                      class="size-5 rounded-sm shrink-0"
                     >
                     <span class="truncate">{{ node.name }}</span>
                     <button
@@ -502,7 +513,11 @@ function buildNodeMetadataItems(node: NodeData): NodeMetadataItem[] {
                       @click.stop="toggleFavorite(node)"
                       @keydown.stop
                     >
-                      <Icon :icon="appStore.isFavoriteNode(node.uuid) ? 'tabler:star-filled' : 'tabler:star'" width="13" height="13" />
+                      <Icon
+                        :icon="appStore.isFavoriteNode(node.uuid) ? 'tabler:star-filled' : 'tabler:star'"
+                        width="13"
+                        height="13"
+                      />
                     </button>
                     <DataTooltip
                       v-if="getNodeMessage(node)"
@@ -527,16 +542,25 @@ function buildNodeMetadataItems(node: NodeData): NodeMetadataItem[] {
 
                 <!-- 信息 / 标签 -->
                 <div v-else-if="col.key === 'metadata'" class="min-w-0 overflow-hidden">
-                  <div v-if="getNodeMetadataItems(node).length > 0" class="flex flex-wrap gap-1 items-center max-h-11 overflow-hidden">
+                  <div
+                    v-if="getNodeMetadataItems(node).length > 0"
+                    class="flex flex-wrap gap-1 items-center max-h-11 overflow-hidden"
+                  >
                     <Badge
-                      v-for="item in getNodeMetadataItems(node)" :key="item.key"
+                      v-for="item in getNodeMetadataItems(node)"
+                      :key="item.key"
                       :variant="item.variant ?? 'secondary'"
                       :title="item.title ?? item.value"
                       :style="item.style"
                       class="min-w-0 overflow-hidden whitespace-nowrap rounded-md px-1.5 text-[11px] font-medium shadow-none"
                       :class="item.class"
                     >
-                      <img v-if="item.flagSrc" :src="item.flagSrc" :alt="item.value" class="size-3.5 rounded-[2px] shrink-0">
+                      <img
+                        v-if="item.flagSrc"
+                        :src="item.flagSrc"
+                        :alt="item.value"
+                        class="size-3.5 rounded-[2px] shrink-0"
+                      >
                       <Icon v-else-if="item.icon" :icon="item.icon" width="12" height="12" class="shrink-0" />
                       <span class="truncate">{{ item.value }}</span>
                     </Badge>
@@ -553,7 +577,13 @@ function buildNodeMetadataItems(node: NodeData): NodeMetadataItem[] {
                   <span class="text-[11px] font-medium text-foreground/70 truncate">
                     {{ formatUptime(node.uptime ?? 0) }}
                   </span>
-                  <NodePingListCell v-if="!props.orderEditing" :uuid="node.uuid" :online="node.online" :enabled="props.pingEnabled" @click="emit('pingClick', node)" />
+                  <NodePingListCell
+                    v-if="!props.orderEditing"
+                    :uuid="node.uuid"
+                    :online="node.online"
+                    :enabled="props.pingEnabled"
+                    @click="emit('pingClick', node)"
+                  />
                 </div>
 
                 <!-- 操作系统 -->
@@ -565,11 +595,10 @@ function buildNodeMetadataItems(node: NodeData): NodeMetadataItem[] {
                 <div v-else-if="col.key === 'cpu'" class="group min-w-0">
                   <div class="space-y-1">
                     <div class="text-[11px] font-medium text-foreground/75 truncate">
-                      <span class="inline group-hover:hidden">
-                        {{ (node.cpu ?? 0).toFixed(1) }}%
-                      </span>
+                      <span class="inline group-hover:hidden"> {{ (node.cpu ?? 0).toFixed(1) }}% </span>
                       <span class="hidden group-hover:inline">
-                        {{ (node.load ?? 0).toFixed(2) }}, {{ (node.load5 ?? 0).toFixed(2) }}, {{ (node.load15 ?? 0).toFixed(2) }}
+                        {{ (node.load ?? 0).toFixed(2) }}, {{ (node.load5 ?? 0).toFixed(2) }}, {{ (node.load15
+                          ?? 0).toFixed(2) }}
                       </span>
                     </div>
                     <ProgressThin :percentage="node.cpu ?? 0" :status="getStatus(node.cpu ?? 0)" :height="4" />
@@ -580,16 +609,15 @@ function buildNodeMetadataItems(node: NodeData): NodeMetadataItem[] {
                 <div v-else-if="col.key === 'mem'" class="group min-w-0">
                   <div class="space-y-1">
                     <div class="text-[11px] font-medium text-foreground/75 truncate">
-                      <span class="inline group-hover:hidden">
-                        {{ getMemoryPercentage(node).toFixed(1) }}%
-                      </span>
+                      <span class="inline group-hover:hidden"> {{ getMemoryPercentage(node).toFixed(1) }}% </span>
                       <span class="hidden group-hover:inline">
                         {{ formatBytes(node.ram ?? 0) }} / {{ formatBytes(node.mem_total ?? 0) }}
                       </span>
                     </div>
                     <ProgressThin
                       :percentage="getMemoryPercentage(node)"
-                      :status="getStatus(getMemoryPercentage(node))" :height="4"
+                      :status="getStatus(getMemoryPercentage(node))"
+                      :height="4"
                     />
                   </div>
                 </div>
@@ -598,16 +626,15 @@ function buildNodeMetadataItems(node: NodeData): NodeMetadataItem[] {
                 <div v-else-if="col.key === 'disk'" class="group min-w-0">
                   <div class="space-y-1">
                     <div class="text-[11px] font-medium text-foreground/75 truncate">
-                      <span class="inline group-hover:hidden">
-                        {{ getDiskPercentage(node).toFixed(1) }}%
-                      </span>
+                      <span class="inline group-hover:hidden"> {{ getDiskPercentage(node).toFixed(1) }}% </span>
                       <span class="hidden group-hover:inline">
                         {{ formatBytes(node.disk ?? 0) }} / {{ formatBytes(node.disk_total ?? 0) }}
                       </span>
                     </div>
                     <ProgressThin
                       :percentage="getDiskPercentage(node)"
-                      :status="getStatus(getDiskPercentage(node))" :height="4"
+                      :status="getStatus(getDiskPercentage(node))"
+                      :height="4"
                     />
                   </div>
                 </div>
@@ -620,18 +647,18 @@ function buildNodeMetadataItems(node: NodeData): NodeMetadataItem[] {
                 >
                   <div class="space-y-1 w-full">
                     <div class="text-[11px] font-medium text-foreground/75 truncate">
-                      <span class="inline group-hover:hidden">
-                        {{ getTrafficUsedPercentage(node).toFixed(1) }}%
-                      </span>
+                      <span class="inline group-hover:hidden"> {{ getTrafficUsedPercentage(node).toFixed(1) }}% </span>
                       <span class="hidden group-hover:inline">
                         {{ formatBytes(getTrafficUsed(node)) }} /
-                        <template v-if="hasTrafficLimit(node)">{{ formatBytes(node.traffic_limit) }}</template>
+                        <template v-if="hasTrafficLimit(node)">{{ formatBytes(node.traffic_limit) }} </template>
                         <template v-else>∞</template>
                       </span>
                     </div>
                     <TrafficProgress
-                      :upload="node.net_total_up ?? 0" :download="node.net_total_down ?? 0"
-                      :traffic-limit="node.traffic_limit" :traffic-limit-type="(node.traffic_limit_type || 'sum')"
+                      :upload="node.net_total_up ?? 0"
+                      :download="node.net_total_down ?? 0"
+                      :traffic-limit="node.traffic_limit"
+                      :traffic-limit-type="(node.traffic_limit_type || 'sum')"
                       height="4px"
                     />
                   </div>
@@ -654,7 +681,8 @@ function buildNodeMetadataItems(node: NodeData): NodeMetadataItem[] {
             </div>
 
             <div
-              v-if="!node.online" class="absolute inset-0 z-2 p-2 bg-background/10 rounded-lg flex items-center"
+              v-if="!node.online"
+              class="absolute inset-0 z-2 p-2 bg-background/10 rounded-lg flex items-center"
               aria-hidden="true"
             >
               <div class="grid gap-2 items-center justify-center" :style="gridStyle">

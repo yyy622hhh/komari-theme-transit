@@ -58,6 +58,8 @@ const sourceState = computed(() => {
     return { label: '实时任务读取失败', line: 'bg-rose-400/55' }
   if (ping.stale.value)
     return { label: '实时数据已过期，当前显示备用基线', line: 'bg-amber-400/55' }
+  if (ping.delayed.value)
+    return { label: '实时数据可能不是最新，继续显示最后数据', line: 'bg-amber-400/55' }
   if (!ping.hasData.value)
     return { label: '暂无匹配的实时数据，当前显示备用基线', line: 'bg-amber-400/55' }
   // 有采样但一次都没成功：探测确实打不通，不是没数据，两者要能分辨。

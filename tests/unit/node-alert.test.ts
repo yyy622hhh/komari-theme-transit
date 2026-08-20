@@ -32,6 +32,7 @@ function carrier(overrides: Partial<CarrierPingDisplay> = {}): CarrierPingDispla
     lossBars: [],
     latencyTooltip: '',
     lossTooltip: '',
+    delayed: false,
     stale: false,
     ...overrides,
   } as CarrierPingDisplay
@@ -80,6 +81,11 @@ describe('getCarrierNodeAlert', () => {
   test('stale carrier samples never raise an alert', () => {
     const stale = carrier({ stale: true, lossDisplay: '100', latencyDisplay: '900' })
     expect(getCarrierNodeAlert(node(), [stale], '北京三网')).toBeNull()
+  })
+
+  test('delayed carrier samples stay visible but never raise a new alert', () => {
+    const delayed = carrier({ delayed: true, lossDisplay: '100', latencyDisplay: '900' })
+    expect(getCarrierNodeAlert(node(), [delayed], '北京三网')).toBeNull()
   })
 
   test('an offline node reports no carrier alert', () => {

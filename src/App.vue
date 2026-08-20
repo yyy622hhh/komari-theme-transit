@@ -151,6 +151,6 @@ onUnmounted(() => {
         <Footer />
       </div>
     </Transition>
-    <Toaster rich-colors close-button position="top-center" />
+    <Toaster />
   </Provider>
 </template>

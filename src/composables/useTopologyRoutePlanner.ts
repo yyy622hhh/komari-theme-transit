@@ -85,7 +85,7 @@ export function formatTopologyRouteHint(input: TopologyRouteHintInput): string {
   if (!input.hasSource)
     return '请选择线路机。'
   if (!input.hasLanding)
-    return '请选择落地机。'
+    return ''
   const state = input.state
   if (!state)
     return ''

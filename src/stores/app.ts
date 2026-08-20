@@ -16,12 +16,13 @@ import type {
   ThemeMode,
 } from './app.types'
 import type { PermissionKey, VerifyLoginOptions } from '@/services/auth.service'
-import type { MeInfo, PublicSettings } from '@/utils/api'
+import type { MeInfo } from '@/utils/api'
 import type { ByteDecimalsConfig } from '@/utils/helper'
 import { useNow, useStorageAsync } from '@vueuse/core'
 import { defineStore } from 'pinia'
 import { computed, onScopeDispose, ref, watch } from 'vue'
 import { getAuthSession, requirePermission, setAuthSessionFromLogin, subscribeAuthSession, verifyLogin } from '@/services/auth.service'
+import { usePublicSettingsState } from '@/stores/app.publicSettings'
 import { isNodeCardPanelDefaultMode, parseNodeCardPanelConfigs } from '@/utils/nodeCardPanel'
 import { parseNodeControls } from '@/utils/nodeControl'
 import { normalizeThemeSettings, resolveThemeBackgroundSource } from '@/utils/themeSettings'
@@ -67,27 +68,9 @@ import {
 const useAppStore = defineStore('app', () => {
   const loading = ref<boolean>(true)
 
-  // 使用 VueUse 的 useStorageAsync 实现自动持久化
   const themeMode = useStorageAsync<ThemeMode>('themeMode', 'auto', localStorage)
   const lang = ref<Lang>('zh-CN')
-  const publicSettings = ref<PublicSettings>()
-  const publicSettingsEpoch = ref(0)
-
-  /** `/api/public` 的权威值。主题没变才覆盖，避免把另一个主题的配置混进来。 */
-  function applyPublicSettings(settings: PublicSettings): void {
-    const current = publicSettings.value
-    if (!current || current.theme === settings.theme) {
-      publicSettings.value = settings
-      publicSettingsEpoch.value += 1
-    }
-  }
-
-  /** 启动 GET 前记下代数；返回后若中间发生过主题写入则丢弃这份过期响应。 */
-  function applyFetchedPublicSettings(settings: PublicSettings, readEpoch: number): void {
-    if (readEpoch !== publicSettingsEpoch.value)
-      return
-    applyPublicSettings(settings)
-  }
+  const { publicSettings, publicSettingsEpoch, applyPublicSettings, applyFetchedPublicSettings } = usePublicSettingsState()
   const nodeSelectedGroup = useStorageAsync<string>('nodeSelectedGroup', 'all', localStorage)
   const favoriteNodeIds = useStorageAsync<string[]>('theme:favorite-nodes:v1', [], localStorage)
   const isLoggedIn = ref<boolean>(getAuthSession().authenticated)
@@ -125,13 +108,10 @@ const useAppStore = defineStore('app', () => {
   const visitorAuditSupported = computed(() => typeof publicSettings.value?.visitor_audit_enabled === 'boolean')
   const visitorAuditEnabled = computed(() => publicSettings.value?.visitor_audit_enabled === true)
 
-  // 首页滚动位置记忆
   const homeScrollPosition = ref<number>(0)
 
-  // 使用 null 表示未设置，等待主题配置加载后决定
   const storedViewMode = useStorageAsync<NodeViewMode | null>('nodeViewMode', null, localStorage)
 
-  // 计算属性：从主题配置获取默认视图模式
   const defaultViewMode = computed<NodeViewMode>(() => {
     const settings = themeSettings.value
     if (typeof settings.defaultViewMode === 'string') {
@@ -143,7 +123,6 @@ const useAppStore = defineStore('app', () => {
     return 'card'
   })
 
-  // 校验视图模式是否为合法值
   function isValidViewMode(value: string | null): value is NodeViewMode {
     return value === 'card' || value === 'list'
   }
@@ -163,7 +142,6 @@ const useAppStore = defineStore('app', () => {
     return 'compact'
   })
 
-  // 当前实际使用的视图模式
   const nodeViewMode = computed<NodeViewMode>({
     get: () => {
       // 校验 storedViewMode 是否为合法值，非法值时使用默认值
@@ -619,14 +597,4 @@ const useAppStore = defineStore('app', () => {
 })
 
 export { useAppStore }
-export type {
-  ChartDashboardCardKey,
-  ChartDashboardTemplate,
-  DetailMetricCardKey,
-  GeneralCardKey,
-  GlassCustomColors,
-  HomeQuickControlKey,
-  ManagedThemeMode,
-  NodeListMetadataField,
-  ThemeMode,
-} from './app.types'
+export type * from './app.types'
