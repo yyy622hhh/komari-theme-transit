@@ -21,19 +21,10 @@ import { getNodeRole } from '@/utils/nodeRoleHelper'
 import { getRegionCode } from '@/utils/regionHelper'
 import { readTopologyRoutes } from '@/utils/topologyConfig'
 import { calculateTopologyRouteScore } from '@/utils/topologyHealth'
-import {
-  findTopologyProbeKey,
-  formatTopologyMetric,
-  formatTopologyMetricForProbe,
-  getTopologyProbe,
-  getTopologyProbeStorageKey,
-  listTopologyProbeTaskNamesForSource,
-  parseTopologyMetric,
-  resolveTopologyNode,
-  serializeTopologyRoutes,
-  TOPOLOGY_PROBE_OPTIONS,
-} from '@/utils/topologyHelper'
+import { resolveTopologyNode } from '@/utils/topologyHelper'
 import { aggregateTopologyRouteReliability, rankTopologyRoutes } from '@/utils/topologyIntelligence'
+import { formatTopologyMetric, formatTopologyMetricForProbe, getTopologyProbeStorageKey, parseTopologyMetric, serializeTopologyRoutes } from '@/utils/topologyLegacyFormat'
+import { findTopologyProbeKey, getTopologyProbe, listTopologyProbeTaskNamesForSource, TOPOLOGY_PROBE_OPTIONS } from '@/utils/topologyPresets'
 
 interface RouteNode {
   key: string

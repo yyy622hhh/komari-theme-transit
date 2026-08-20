@@ -1,6 +1,6 @@
 import type { MaybeRefOrGetter } from 'vue'
 import type { NodeData } from '@/stores/nodes'
-import type { TopologyMetricConfig, TopologyNodeConfig, TopologyRouteConfig } from '@/utils/topologyHelper'
+import type { TopologyMetricConfig, TopologyNodeConfig, TopologyRouteConfig } from '@/utils/topologyModel'
 import { computed, ref, toValue } from 'vue'
 import { assertManagedThemeSettingsCurrent, createThemeSettingsSnapshot, withManagedThemeSettingsLock } from '@/services/theme-settings.service'
 import { saveTopologyConfiguration } from '@/services/topology.service'
@@ -8,7 +8,8 @@ import { useAppStore } from '@/stores/app'
 import { normalizeThemeSettings } from '@/utils/themeSettings'
 import { readTopologyRoutes } from '@/utils/topologyConfig'
 import { adoptTopologyCreatedTaskIds, parseTopologyOwnedPingTaskIds } from '@/utils/topologyCreatedTasks'
-import { buildQuickTopologyRoute, findDuplicateTopologyRouteIndex, getQuickTopologySourceNode, hydrateTopologyRouteNodes, listQuickTopologyNodes, resolveTopologyNode, TOPOLOGY_LIMITS, validateTopologyRoutes } from '@/utils/topologyHelper'
+import { buildQuickTopologyRoute, findDuplicateTopologyRouteIndex, getQuickTopologySourceNode, hydrateTopologyRouteNodes, listQuickTopologyNodes, resolveTopologyNode, validateTopologyRoutes } from '@/utils/topologyHelper'
+import { TOPOLOGY_LIMITS } from '@/utils/topologyModel'
 
 function nodeConfig(node?: NodeData, role = '节点'): TopologyNodeConfig {
   return { name: node?.name ?? '', region: node?.region ?? '', role, uuid: node?.uuid }

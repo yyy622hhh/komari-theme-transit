@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { parseTopologyConfig, readTopologyRoutes, serializeTopologyConfig, TOPOLOGY_CONFIG_VERSION } from '../../src/utils/topologyConfig'
-import { createTopologyRoute } from '../../src/utils/topologyHelper'
+import { createTopologyRoute } from '../../src/utils/topologyModel'
 
 const LEGACY_ROUTE = '北京电信|CN|入口;主控-洛杉矶|US|线路机|relay-uuid;香港边缘|HK|落地机|exit-uuid'
 const LEGACY_METRICS = 'live@主控-洛杉矶@北京电信@-@-;51,0'

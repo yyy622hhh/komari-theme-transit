@@ -10,7 +10,7 @@ import {
   planWorkingHopTask,
 } from '../../src/services/topology-probe.service'
 import { resetSharedRpc } from '../../src/utils/rpc'
-import { getTopologyProbe } from '../../src/utils/topologyHelper'
+import { getTopologyProbe } from '../../src/utils/topologyPresets'
 
 const source = { uuid: 'relay-uuid', name: 'Relay-JP', ipv4: '192.0.2.10' }
 const landing = { uuid: 'exit-uuid', name: 'Exit-SG', ipv4: '203.0.113.20' }

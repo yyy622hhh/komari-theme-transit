@@ -1,5 +1,6 @@
-import type { TopologyMetricConfig, TopologyNodeConfig, TopologyRouteConfig } from '@/utils/topologyHelper'
-import { createTopologyRoute, parseTopologyRoutes, TOPOLOGY_LIMITS } from '@/utils/topologyHelper'
+import type { TopologyMetricConfig, TopologyNodeConfig, TopologyRouteConfig } from '@/utils/topologyModel'
+import { parseTopologyRoutes } from '@/utils/topologyLegacyFormat'
+import { createTopologyRoute, TOPOLOGY_LIMITS } from '@/utils/topologyModel'
 
 /**
  * 拓扑配置的 JSON 存储格式。

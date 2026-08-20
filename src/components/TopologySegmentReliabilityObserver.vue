@@ -4,8 +4,9 @@ import type { TopologySegmentTelemetry } from '@/utils/topologyHealth'
 import type { TopologyReliabilityWindow, TopologySegmentReliabilitySnapshot } from '@/utils/topologyIntelligence'
 import { computed, watch } from 'vue'
 import { useNodePingStats } from '@/composables/useNodePingStats'
-import { parseTopologyMetric, resolveTopologyMetricSource } from '@/utils/topologyHelper'
+import { resolveTopologyMetricSource } from '@/utils/topologyHelper'
 import { calculateAdaptiveBaseline } from '@/utils/topologyIntelligence'
+import { parseTopologyMetric } from '@/utils/topologyLegacyFormat'
 
 const props = defineProps<{
   metric: string

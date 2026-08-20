@@ -1,5 +1,5 @@
 import type { PingTaskMutation } from '@/utils/rpc'
-import type { TopologyProbeOption } from '@/utils/topologyHelper'
+import type { TopologyProbeOption } from '@/utils/topologyPresets'
 import { CACHE_CONFIG } from '@/constants/cache'
 import { isAuthenticated, requirePermission, setAuthSessionFromLogin, subscribeAuthSession } from '@/services/auth.service'
 import { SharedCache } from '@/services/cache.service'
@@ -7,7 +7,7 @@ import { invalidatePublicPingTasksCache } from '@/services/metrics.service'
 import { requestManager } from '@/services/request.service'
 import { getSharedRpc, isRpcPermissionError, RpcError } from '@/utils/rpc'
 import { logAppWarning } from '@/utils/safeError'
-import { findTopologyProbeKey, getTopologyProbeTarget, normalizePingTaskName, topologyEntryTaskName } from '@/utils/topologyHelper'
+import { findTopologyProbeKey, getTopologyProbeTarget, normalizePingTaskName, topologyEntryTaskName } from '@/utils/topologyPresets'
 
 export interface AdminPingTask {
   id?: number

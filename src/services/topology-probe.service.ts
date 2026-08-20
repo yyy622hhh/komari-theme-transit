@@ -1,6 +1,6 @@
 import type { AdminPingTask, TopologyHopProbe, TopologyPingEndpoint } from '@/services/ping-task.service'
 import type { PingMetricTaskStats } from '@/utils/rpc'
-import type { TopologyProbeOption } from '@/utils/topologyHelper'
+import type { TopologyProbeOption } from '@/utils/topologyPresets'
 import { OPS_TOPOLOGY_ENTRY_PROBE_LADDER, OPS_TOPOLOGY_HOP_PROBE, OPS_TOPOLOGY_HOP_PROBE_LADDER } from '@/constants/ops'
 import { loadPingRecordsWithTasks } from '@/services/history.service'
 import { loadPingMetricStats, partitionMetricEntityIds } from '@/services/metrics.service'
@@ -20,7 +20,7 @@ import {
   topologyHopTaskNameCandidates,
   topologyPingTargets,
 } from '@/services/ping-task.service'
-import { getTopologyProbeTarget, normalizePingTaskName, topologyEntryTaskName } from '@/utils/topologyHelper'
+import { getTopologyProbeTarget, normalizePingTaskName, topologyEntryTaskName } from '@/utils/topologyPresets'
 
 /** 一个任务在回看窗口内的采样情况。 */
 export interface HopTaskSamples {

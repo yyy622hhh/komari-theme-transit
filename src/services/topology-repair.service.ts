@@ -1,9 +1,11 @@
 import type { AdminPingTask, TopologyHopProbe, TopologyPingEndpoint } from '@/services/ping-task.service'
 import type { EntryProbePlan, HopTaskPlan } from '@/services/topology-probe.service'
 import type { NodeData } from '@/stores/nodes'
-import type { TopologyProbeOption, TopologyRouteConfig } from '@/utils/topologyHelper'
+import type { TopologyRouteConfig } from '@/utils/topologyModel'
+import type { TopologyProbeOption } from '@/utils/topologyPresets'
 import { isStaleManagedThemeSettingsError } from '@/services/theme-settings.service'
-import { getTopologyProbe, getTopologyRouteProbeKey, resolveTopologyNode, shouldAutoApplyTopologyProbe } from '@/utils/topologyHelper'
+import { getTopologyRouteProbeKey, resolveTopologyNode, shouldAutoApplyTopologyProbe } from '@/utils/topologyHelper'
+import { getTopologyProbe } from '@/utils/topologyPresets'
 
 /**
  * `useTopologyManager()` 的最小切面：只暴露自愈流程需要读写的部分，且用取值

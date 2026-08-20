@@ -1,9 +1,10 @@
 import type { PublicSettingsUpdater } from '@/services/theme-settings.service'
-import type { TopologyRouteConfig } from '@/utils/topologyHelper'
+import type { TopologyRouteConfig } from '@/utils/topologyModel'
 import { saveManagedThemeSettings } from '@/services/theme-settings.service'
 import { serializeTopologyConfig } from '@/utils/topologyConfig'
 import { getTopologyCreatedTaskIds, serializeTopologyOwnedPingTaskIds } from '@/utils/topologyCreatedTasks'
-import { serializeTopologyRoutes, validateTopologyRoutes } from '@/utils/topologyHelper'
+import { validateTopologyRoutes } from '@/utils/topologyHelper'
+import { serializeTopologyRoutes } from '@/utils/topologyLegacyFormat'
 
 interface SaveTopologyOptions {
   theme: string

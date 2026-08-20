@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { NodeData } from '@/stores/nodes'
-import type { TopologyMetricConfig, TopologyNodeConfig, TopologyQuickNode, TopologyRouteConfig } from '@/utils/topologyHelper'
+import type { TopologyMetricConfig, TopologyNodeConfig, TopologyQuickNode, TopologyRouteConfig } from '@/utils/topologyModel'
 import { Icon } from '@iconify/vue'
 import { computed, nextTick, onScopeDispose, reactive, ref, watch } from 'vue'
 import { AppDialog } from '@/components/ui/app-dialog'
@@ -13,7 +13,8 @@ import { createTopologyEntryProbeTask, deleteTopologyPingTasks, describeTopology
 import { planWorkingHopTask } from '@/services/topology-probe.service'
 import { listOwnedRetiredTaskIds, listOwnedUnboundTaskIds, liveTopologyTaskNames } from '@/services/topology-repair.service'
 import { getTopologyCreatedTaskIds, persistTopologyCreatedTaskIds } from '@/utils/topologyCreatedTasks'
-import { applyTopologyProbeToRoute, getTopologyProbe, getTopologyRouteProbeKey, listUnusedQuickLandingUuids, nextQuickLandingUuid, resolveTopologyNode, TOPOLOGY_PROBE_OPTIONS } from '@/utils/topologyHelper'
+import { applyTopologyProbeToRoute, getTopologyRouteProbeKey, listUnusedQuickLandingUuids, nextQuickLandingUuid, resolveTopologyNode } from '@/utils/topologyHelper'
+import { getTopologyProbe, TOPOLOGY_PROBE_OPTIONS } from '@/utils/topologyPresets'
 
 const props = defineProps<{ nodes: NodeData[], open: boolean }>()
 const emit = defineEmits<{ 'update:open': [open: boolean] }>()

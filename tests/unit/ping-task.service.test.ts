@@ -3,7 +3,7 @@ import { afterEach, describe, expect, mock, test } from 'bun:test'
 import { isAuthenticated, setAuthSessionFromLogin } from '../../src/services/auth.service'
 import { buildTopologyHopTarget, createTopologyEntryProbeTask, deleteTopologyPingTasks, ensureTopologyEntryProbeTask, ensureTopologyPingTask, findTopologyPingTask, findTopologyPingTaskByName, invalidateAdminPingTasksCache, isPingTaskAssignedToSource, loadAdminPingTaskNamesForNode, loadAdminPingTasks, pingTaskTargetHost, pingTaskTargetPort, planTopologyPingTask, topologyHopTaskName, topologyPingTargets } from '../../src/services/ping-task.service'
 import { resetSharedRpc } from '../../src/utils/rpc'
-import { getTopologyProbe } from '../../src/utils/topologyHelper'
+import { getTopologyProbe } from '../../src/utils/topologyPresets'
 
 const source = { uuid: 'relay-uuid', name: 'Relay-JP', ipv4: '192.0.2.10' }
 const target = { uuid: 'exit-uuid', name: 'Exit-SG', ipv4: '203.0.113.20', ipv6: '2001:db8::20' }

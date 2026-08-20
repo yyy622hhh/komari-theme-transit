@@ -2,10 +2,10 @@ import type { TopologyHopProbe, TopologyPingEndpoint } from '../../src/services/
 import type { EntryProbePlan, HopTaskPlan } from '../../src/services/topology-probe.service'
 import type { TopologyRepairDeps, TopologyRepairManagerLike } from '../../src/services/topology-repair.service'
 import type { NodeData } from '../../src/stores/nodes'
-import type { TopologyRouteConfig } from '../../src/utils/topologyHelper'
+import type { TopologyRouteConfig } from '../../src/utils/topologyModel'
 import { describe, expect, test } from 'bun:test'
 import { canRunTopologyProbeRepair, listOwnedRetiredTaskIds, listOwnedUnboundTaskIds, liveTopologyTaskNames, runTopologyProbeRepair } from '../../src/services/topology-repair.service'
-import { getTopologyProbe } from '../../src/utils/topologyHelper'
+import { getTopologyProbe } from '../../src/utils/topologyPresets'
 
 const relay: NodeData = { uuid: 'relay-uuid', name: 'Relay-JP', ipv4: '192.0.2.10' } as NodeData
 const landing: NodeData = { uuid: 'exit-uuid', name: 'Exit-SG', ipv4: '203.0.113.20' } as NodeData

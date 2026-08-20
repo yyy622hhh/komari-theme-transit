@@ -7,7 +7,8 @@ import TopologyEdgeSamples from '@/components/TopologyEdgeSamples.vue'
 import { useNodePingStats } from '@/composables/useNodePingStats'
 import { formatDateTime } from '@/utils/helper'
 import { resolveTopologySegmentHealth } from '@/utils/topologyHealth'
-import { calculateTopologyLatencyBaseline, formatTopologyLatency, formatTopologyLoss, formatTopologyTelemetryLabel, parseTopologyMetric, resolveTopologyMetricSource, resolveTopologySampleTone } from '@/utils/topologyHelper'
+import { calculateTopologyLatencyBaseline, formatTopologyLatency, formatTopologyLoss, resolveTopologyMetricSource, resolveTopologySampleTone } from '@/utils/topologyHelper'
+import { formatTopologyTelemetryLabel, parseTopologyMetric } from '@/utils/topologyLegacyFormat'
 
 const props = defineProps<{
   metric: string

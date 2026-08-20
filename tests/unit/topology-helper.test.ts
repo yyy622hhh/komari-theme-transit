@@ -1,38 +1,8 @@
 import { describe, expect, test } from 'bun:test'
-import {
-  applyTopologyProbeToRoute,
-  buildQuickTopologyRoute,
-  calculateTopologyLatencyBaseline,
-  createTopologyRoute,
-  findDuplicateTopologyRouteIndex,
-  findTopologyProbeKey,
-  findUniqueTopologyNode,
-  formatTopologyLatency,
-  formatTopologyMetricForProbe,
-  formatTopologyTelemetryLabel,
-  getQuickTopologySourceNode,
-  getTopologyProbe,
-  getTopologyProbeStorageKey,
-  getTopologyProbeTarget,
-  getTopologyRouteProbeKey,
-  hydrateTopologyRouteNodes,
-  listTopologyProbeTaskNamesForSource,
-  listUnusedQuickLandingUuids,
-  nextQuickLandingUuid,
-  parseTopologyMetric,
-  parseTopologyRoutes,
-  pickQuickHopTaskName,
-  pickQuickTopologyTaskName,
-  resolveTopologyMetricSource,
-  resolveTopologyNode,
-  resolveTopologySampleTone,
-  serializeTopologyRoutes,
-  shouldAutoApplyTopologyProbe,
-  splitTopologyGroups,
-  TOPOLOGY_LIMITS,
-  TOPOLOGY_PROBE_OPTIONS,
-  validateTopologyRoutes,
-} from '@/utils/topologyHelper'
+import { applyTopologyProbeToRoute, buildQuickTopologyRoute, calculateTopologyLatencyBaseline, findDuplicateTopologyRouteIndex, findUniqueTopologyNode, formatTopologyLatency, getQuickTopologySourceNode, getTopologyRouteProbeKey, hydrateTopologyRouteNodes, listUnusedQuickLandingUuids, nextQuickLandingUuid, pickQuickHopTaskName, resolveTopologyMetricSource, resolveTopologyNode, resolveTopologySampleTone, shouldAutoApplyTopologyProbe, validateTopologyRoutes } from '@/utils/topologyHelper'
+import { formatTopologyMetricForProbe, formatTopologyTelemetryLabel, getTopologyProbeStorageKey, parseTopologyMetric, parseTopologyRoutes, serializeTopologyRoutes, splitTopologyGroups } from '@/utils/topologyLegacyFormat'
+import { createTopologyRoute, TOPOLOGY_LIMITS } from '@/utils/topologyModel'
+import { findTopologyProbeKey, getTopologyProbe, getTopologyProbeTarget, listTopologyProbeTaskNamesForSource, pickQuickTopologyTaskName, TOPOLOGY_PROBE_OPTIONS } from '@/utils/topologyPresets'
 
 describe('topology telemetry direction labels', () => {
   test('describes live metrics by their real Komari probe source and task', () => {

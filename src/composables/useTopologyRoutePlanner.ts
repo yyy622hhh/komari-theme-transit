@@ -3,12 +3,14 @@ import type { TopologyTaskLoadResult } from '@/composables/useTopologyTaskCatalo
 import type { TopologyHopProbe, TopologyPingEndpoint } from '@/services/ping-task.service'
 import type { HopTaskVerdict } from '@/services/topology-probe.service'
 import type { NodeData } from '@/stores/nodes'
-import type { TopologyProbeOption, TopologyRouteConfig } from '@/utils/topologyHelper'
+import type { TopologyRouteConfig } from '@/utils/topologyModel'
+import type { TopologyProbeOption } from '@/utils/topologyPresets'
 import { ref, toValue } from 'vue'
 import { OPS_TOPOLOGY_ENTRY_PROBE_LADDER, OPS_TOPOLOGY_HOP_PROBE_LADDER } from '@/constants/ops'
 import { describeTopologyHopProbe, normalizeTopologyHopProbe } from '@/services/ping-task.service'
 import { planEntryProbeTask, planWorkingHopTask } from '@/services/topology-probe.service'
-import { applyTopologyProbeToRoute, findTopologyProbeKey, getTopologyProbe, getTopologyProbeTarget, getTopologyRouteProbeKey, resolveTopologyNode, shouldAutoApplyTopologyProbe } from '@/utils/topologyHelper'
+import { applyTopologyProbeToRoute, getTopologyRouteProbeKey, resolveTopologyNode, shouldAutoApplyTopologyProbe } from '@/utils/topologyHelper'
+import { findTopologyProbeKey, getTopologyProbe, getTopologyProbeTarget } from '@/utils/topologyPresets'
 
 export interface TopologyRouteProbeState {
   probe: TopologyHopProbe

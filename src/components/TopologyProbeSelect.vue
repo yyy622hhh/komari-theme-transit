@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { Icon } from '@iconify/vue'
 import { computed } from 'vue'
-import { TOPOLOGY_PROBE_OPTIONS } from '@/utils/topologyHelper'
+import { TOPOLOGY_PROBE_OPTIONS } from '@/utils/topologyPresets'
 
 const props = withDefaults(defineProps<{ modelValue: string, customLabel?: string, disabled?: boolean, resettable?: boolean }>(), {
   customLabel: '',
