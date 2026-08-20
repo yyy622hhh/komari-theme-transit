@@ -15,6 +15,7 @@ import { listOwnedRetiredTaskIds, listOwnedUnboundTaskIds, liveTopologyTaskNames
 import { getTopologyCreatedTaskIds, persistTopologyCreatedTaskIds } from '@/utils/topologyCreatedTasks'
 import { applyTopologyProbeToRoute, getTopologyRouteProbeKey, listUnusedQuickLandingUuids, nextQuickLandingUuid, resolveTopologyNode } from '@/utils/topologyHelper'
 import { getTopologyProbe, TOPOLOGY_PROBE_OPTIONS } from '@/utils/topologyPresets'
+import { readTopologyWriteLog, recordTopologyWrite } from '@/utils/topologyWriteLog'
 
 const props = defineProps<{ nodes: NodeData[], open: boolean }>()
 const emit = defineEmits<{ 'update:open': [open: boolean] }>()
@@ -88,6 +89,18 @@ let dialogSession = 0
 let persistTail: Promise<unknown> = Promise.resolve()
 let saveTaskController: AbortController | null = null
 const persisting = ref(false)
+
+/**
+ * 主题对后端做过什么的本地流水。空的时候整块不渲染——绝大多数会话不会有写操作，
+ * 没有理由给对话框加一段常驻的空白区。
+ */
+const writeLog = ref(readTopologyWriteLog())
+function refreshWriteLog(): void {
+  writeLog.value = readTopologyWriteLog()
+}
+function formatWriteLogTime(at: number): string {
+  return new Date(at).toLocaleString('zh-CN', { hour12: false })
+}
 
 const quickLandingOptions = computed(() => manager.quickNodes.filter(node => node.uuid !== quickSourceUuid.value))
 /** 能作为落地机的候选：必须有可 Ping 的地址，否则不能拿来当默认选中项。 */
@@ -178,6 +191,7 @@ const isOpen = computed({
 
 watch(() => props.open, (value) => {
   dialogSession += 1
+  refreshWriteLog()
   const session = dialogSession
   if (!value) {
     rematching.value = false
@@ -316,9 +330,18 @@ async function retireReplacedTasks(): Promise<void> {
   catch {
     // 任务列表读失败时仍按规划阶段记下的候选清理。
   }
-  if (ids.size && await deleteTopologyPingTasks([...ids])) {
-    for (const id of ids)
-      sessionCreatedTaskIds.delete(id)
+  if (ids.size) {
+    const removed = await deleteTopologyPingTasks([...ids])
+    if (removed) {
+      for (const id of ids)
+        sessionCreatedTaskIds.delete(id)
+    }
+    recordTopologyWrite({
+      trigger: 'manual',
+      action: `清理不再使用的探测任务（${ids.size} 个）`,
+      outcome: removed ? 'ok' : 'failed',
+      detail: removed ? undefined : '删除请求未成功，绑定不受影响',
+    })
   }
   persistTopologyCreatedTaskIds(sessionCreatedTaskIds)
 }
@@ -542,6 +565,7 @@ async function persistRoutes(options: {
               sessionCreatedTaskIds.add(ensured.task.id!)
               persistTopologyCreatedTaskIds()
               createdTaskIds.add(ensured.task.id!)
+              recordTopologyWrite({ trigger: 'manual', action: `创建第 2 段探测任务 ${ensured.task.name}`, outcome: 'ok' })
             }
             if (runId !== quickConfigurationRun || session !== dialogSession || !props.open) {
               await cleanupCreatedTasks(createdTaskIds)
@@ -588,6 +612,7 @@ async function persistRoutes(options: {
             sessionCreatedTaskIds.add(ensured.task.id!)
             persistTopologyCreatedTaskIds()
             createdTaskIds.add(ensured.task.id!)
+            recordTopologyWrite({ trigger: 'manual', action: `创建入口探测任务 ${ensured.task.name}`, outcome: 'ok' })
           }
           if (runId !== quickConfigurationRun || session !== dialogSession || !props.open) {
             await cleanupCreatedTasks(createdTaskIds)
@@ -636,6 +661,7 @@ async function persistRoutes(options: {
         return 'cancelled'
       if (result === 'saved') {
         await retireReplacedTasks()
+        refreshWriteLog()
         window.$message?.success(options.successMessage ?? '拓扑配置已保存。')
         if (!options.keepOpen)
           isOpen.value = false
@@ -1057,6 +1083,20 @@ function nodeOption(option: TopologyQuickNode, role: 'source' | 'landing', other
       <div v-if="!manager.routes.length" class="rounded-xl border border-dashed border-border px-4 py-12 text-center text-sm text-muted-foreground">
         还没有线路。选入口、线路机和落地机后点击“添加线路”，会立即保存。
       </div>
+
+      <details v-if="writeLog.length" data-topology-write-log class="rounded-xl border border-border/60 px-4 py-3">
+        <summary class="cursor-pointer text-xs text-muted-foreground">
+          本次会话的后端写入记录（{{ writeLog.length }} 条）
+        </summary>
+        <ul class="mt-2 flex flex-col gap-1.5">
+          <li v-for="(entry, index) in writeLog" :key="`${entry.at}-${index}`" class="flex flex-wrap items-baseline gap-x-2 text-[11px]">
+            <span class="font-mono text-muted-foreground">{{ formatWriteLogTime(entry.at) }}</span>
+            <span class="text-muted-foreground">{{ entry.trigger === 'auto' ? '自动修复' : '手动操作' }}</span>
+            <span :class="entry.outcome === 'failed' ? 'text-destructive' : ''">{{ entry.action }}</span>
+            <span v-if="entry.detail" class="text-muted-foreground">— {{ entry.detail }}</span>
+          </li>
+        </ul>
+      </details>
 
       <footer class="sticky bottom-0 flex flex-wrap justify-end gap-2 border-t border-border/60 bg-card/95 pt-3 backdrop-blur-xl" :aria-busy="managerBusy">
         <Button variant="outline" :disabled="managerBusy" @click="reset">

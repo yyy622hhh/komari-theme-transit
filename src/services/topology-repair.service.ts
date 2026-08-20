@@ -6,6 +6,7 @@ import type { TopologyProbeOption } from '@/utils/topologyPresets'
 import { isStaleManagedThemeSettingsError } from '@/services/theme-settings.service'
 import { getTopologyRouteProbeKey, resolveTopologyNode, shouldAutoApplyTopologyProbe } from '@/utils/topologyHelper'
 import { getTopologyProbe } from '@/utils/topologyPresets'
+import { recordTopologyWrite, summarizeTaskNames } from '@/utils/topologyWriteLog'
 
 /**
  * `useTopologyManager()` 的最小切面：只暴露自愈流程需要读写的部分，且用取值
@@ -262,6 +263,8 @@ export async function runTopologyProbeRepair(deps: TopologyRepairDeps): Promise<
 
   let outcome: TopologyRepairOutcome = 'no-op'
   const createdTaskIds = new Set<number>()
+  /** 用于流水记录：本轮实际建过哪些任务，按名字记，操作者在 Komari 里看到的就是名字。 */
+  const createdTaskNames: string[] = []
   const appliedRetiredTasks: TopologyRetiredTask[] = []
   let saveAttempted = false
   let bindingPersisted = false
@@ -308,6 +311,7 @@ export async function runTopologyProbeRepair(deps: TopologyRepairDeps): Promise<
             taskName = ensured.task.name
             if (ensured.created && Number.isInteger(ensured.task.id)) {
               createdTaskIds.add(ensured.task.id!)
+              createdTaskNames.push(ensured.task.name)
               sessionCreatedTaskIds.add(ensured.task.id!)
             }
           }
@@ -353,6 +357,7 @@ export async function runTopologyProbeRepair(deps: TopologyRepairDeps): Promise<
           taskName = ensured.task.name
           if (ensured.created && Number.isInteger(ensured.task.id)) {
             createdTaskIds.add(ensured.task.id!)
+            createdTaskNames.push(ensured.task.name)
             sessionCreatedTaskIds.add(ensured.task.id!)
           }
         }
@@ -414,8 +419,23 @@ export async function runTopologyProbeRepair(deps: TopologyRepairDeps): Promise<
     })
   }
   finally {
-    if (!saveAttempted && createdTaskIds.size)
+    if (!saveAttempted && createdTaskIds.size) {
       await deps.deleteTopologyPingTasks([...createdTaskIds])
+      recordTopologyWrite({
+        trigger: 'auto',
+        action: `回滚本轮新建的探测任务 ${summarizeTaskNames(createdTaskNames)}`,
+        outcome: 'ok',
+        detail: '配置未能保存，已把刚建的任务删掉',
+      })
+    }
+  }
+
+  if (bindingPersisted && createdTaskNames.length) {
+    recordTopologyWrite({
+      trigger: 'auto',
+      action: `创建探测任务 ${summarizeTaskNames(createdTaskNames)} 并写回拓扑绑定`,
+      outcome: 'ok',
+    })
   }
 
   if (bindingPersisted) {
@@ -424,9 +444,18 @@ export async function runTopologyProbeRepair(deps: TopologyRepairDeps): Promise<
       sessionCreatedTaskIds,
       liveTopologyTaskNames(deps.manager.routes),
     )
-    if (retiredIds.length && await deps.deleteTopologyPingTasks(retiredIds)) {
-      for (const id of retiredIds)
-        sessionCreatedTaskIds.delete(id)
+    if (retiredIds.length) {
+      const removed = await deps.deleteTopologyPingTasks(retiredIds)
+      if (removed) {
+        for (const id of retiredIds)
+          sessionCreatedTaskIds.delete(id)
+      }
+      recordTopologyWrite({
+        trigger: 'auto',
+        action: `清理已换掉的旧探测任务 ${summarizeTaskNames(appliedRetiredTasks.filter(task => retiredIds.includes(task.id)).map(task => task.name))}`,
+        outcome: removed ? 'ok' : 'failed',
+        detail: removed ? undefined : '删除请求未成功，新任务不受影响，下一轮会重试',
+      })
     }
   }
 

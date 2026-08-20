@@ -856,6 +856,12 @@ test('Transit topology manager creates both the entry and hop tasks when no task
     '香港边缘节点-超长名称布局测试',
   ])
   expect(saved.topologyMetrics).toBe('live@主控-洛杉矶@北京电信@-@-;live@主控-洛杉矶@Transit-主控-洛杉矶-to-香港边缘节点-超长名称布局测试@-@-')
+
+  // 主题替操作者建了两个后端任务，事后必须能查到是什么时候、由什么触发建的。
+  const writeLog = dialog.locator('[data-topology-write-log]')
+  await expect(writeLog).toBeVisible()
+  await expect(writeLog).toContainText('创建入口探测任务 北京电信')
+  await expect(writeLog).toContainText('手动操作')
 })
 
 test('Transit topology creates a TCP hop when the relay cannot use ICMP', async ({ page }) => {
