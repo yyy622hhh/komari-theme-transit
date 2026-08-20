@@ -1,7 +1,7 @@
 import type { AdminPingTask, TopologyHopProbe, TopologyPingEndpoint } from '@/services/ping-task.service'
 import type { PingMetricTaskStats } from '@/utils/rpc'
 import type { TopologyProbeOption } from '@/utils/topologyHelper'
-import { OPS_TOPOLOGY_HOP_PROBE, OPS_TOPOLOGY_HOP_PROBE_LADDER } from '@/constants/ops'
+import { OPS_TOPOLOGY_ENTRY_PROBE_LADDER, OPS_TOPOLOGY_HOP_PROBE, OPS_TOPOLOGY_HOP_PROBE_LADDER } from '@/constants/ops'
 import { loadPingRecordsWithTasks } from '@/services/history.service'
 import { loadPingMetricStats, partitionMetricEntityIds } from '@/services/metrics.service'
 import {
@@ -58,6 +58,7 @@ export interface HopTaskPlan {
 }
 
 const LADDER: TopologyHopProbe[] = OPS_TOPOLOGY_HOP_PROBE_LADDER.map(rung => normalizeTopologyHopProbe(rung))
+const ENTRY_LADDER: TopologyHopProbe[] = OPS_TOPOLOGY_ENTRY_PROBE_LADDER.map(rung => normalizeTopologyHopProbe(rung))
 
 function readSamples(stat: PingMetricTaskStats): HopTaskSamples {
   return {
@@ -161,8 +162,8 @@ export function assessHopTask(profile: SourceProbeProfile, task: Pick<AdminPingT
   return samples.total >= OPS_TOPOLOGY_HOP_PROBE.deadSamples ? 'dead' : 'pending'
 }
 
-function ladderIndex(probe: TopologyHopProbe): number {
-  return LADDER.findIndex(rung => isSameTopologyHopProbe(rung, probe))
+function ladderIndex(probe: TopologyHopProbe, ladder: readonly TopologyHopProbe[] = LADDER): number {
+  return ladder.findIndex(rung => isSameTopologyHopProbe(rung, probe))
 }
 
 /**
@@ -203,10 +204,11 @@ function nextLadderProbe(
   profile: SourceProbeProfile,
   current: TopologyHopProbe,
   existingTasks: readonly AdminPingTask[],
+  ladder: readonly TopologyHopProbe[] = LADDER,
 ): TopologyHopProbe | null {
-  const startIndex = ladderIndex(current)
-  for (let index = startIndex + 1; index < LADDER.length; index++) {
-    const rung = LADDER[index]!
+  const startIndex = ladderIndex(current, ladder)
+  for (let index = startIndex + 1; index < ladder.length; index++) {
+    const rung = ladder[index]!
     const existing = existingTasks.find((task) => {
       const probe = topologyHopProbeFromTask(task)
       return probe !== null && isSameTopologyHopProbe(probe, rung)
@@ -269,12 +271,28 @@ function isThemeGeneratedHopTask(
 }
 
 function entryTaskNameCandidates(probe: TopologyProbeOption): Set<string> {
+  // 旧版 Transit-entry-* 命名要连第 2 段阶梯的端口一起认：早先入口沿用的就是
+  // 那份阶梯，站里可能还留着 tcp-443 之类的旧任务。
+  const legacyRungs = [...new Set([...LADDER, ...ENTRY_LADDER])].filter(rung => rung.type === 'tcp')
   return new Set([
     probe.taskFilter,
     probe.label,
     topologyEntryTaskName(probe, { type: 'icmp' }),
-    ...LADDER.filter(rung => rung.type === 'tcp').map(rung => topologyEntryTaskName(probe, rung)),
+    ...legacyRungs.map(rung => topologyEntryTaskName(probe, rung)),
   ].map(normalizePingTaskName))
+}
+
+/**
+ * 入口首档：只借用「这台线路机能不能发 ICMP」这一个结论。
+ *
+ * `chooseInitialHopProbe` 会返回第 2 段阶梯上的端口（443/80/22），那些端口在
+ * 运营商测速点上没有意义，必须落回入口阶梯自己的档位。
+ */
+function chooseInitialEntryProbe(profile: SourceProbeProfile): TopologyHopProbe {
+  const initial = chooseInitialHopProbe(profile)
+  if (initial.type === 'icmp')
+    return initial
+  return ENTRY_LADDER.find(rung => rung.type !== 'icmp') ?? DEFAULT_TOPOLOGY_HOP_PROBE
 }
 
 function entryProbeTarget(probe: TopologyProbeOption, hopProbe: TopologyHopProbe): string {
@@ -473,7 +491,7 @@ export async function planEntryProbeTask(
   }
 
   if (!candidates.length) {
-    const initialProbe = chooseInitialHopProbe(profile)
+    const initialProbe = chooseInitialEntryProbe(profile)
     return {
       task: draftAt(initialProbe),
       probe: initialProbe,
@@ -507,7 +525,7 @@ export async function planEntryProbeTask(
     }
   }
 
-  const nextRung = nextLadderProbe(profile, currentProbe, candidates)
+  const nextRung = nextLadderProbe(profile, currentProbe, candidates, ENTRY_LADDER)
   const nextProbe = nextRung && entryProbeTarget(probe, nextRung) ? nextRung : null
   if (!nextProbe) {
     return {

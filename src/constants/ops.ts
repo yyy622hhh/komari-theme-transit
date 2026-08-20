@@ -37,10 +37,23 @@ export const OPS_TOPOLOGY_HOP_PROBE = {
   recheckIntervalMs: TIME_MS.minute,
 } as const
 
-/** 探测方式阶梯：ICMP 不通就依次退到常见的 TCP 端口。 */
+/** 第 2 段（线路机 → 落地机）探测方式阶梯：ICMP 不通就依次退到常见的 TCP 端口。 */
 export const OPS_TOPOLOGY_HOP_PROBE_LADDER = [
   { type: 'icmp' },
   { type: 'tcp', port: 443 },
   { type: 'tcp', port: 80 },
   { type: 'tcp', port: 22 },
+] as const
+
+/**
+ * 第 1 段（入口）专用阶梯，比第 2 段短。
+ *
+ * 第 2 段打的是操作者自己的落地机，443/80/22 上通常真有服务在听；入口打的是
+ * 运营商公网测速点，那是骨干网关和 DNS 解析器，不会接 443/80/22。沿用第 2 段
+ * 的阶梯只会白建三个任务、各等一个采样窗口再全部判死。DNS over TCP 是这类地址
+ * 真正会应答的端口，所以 ICMP 之后只保留 TCP 53 这一档。
+ */
+export const OPS_TOPOLOGY_ENTRY_PROBE_LADDER = [
+  { type: 'icmp' },
+  { type: 'tcp', port: 53 },
 ] as const

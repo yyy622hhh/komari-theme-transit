@@ -30,6 +30,7 @@ import {
   shouldAutoApplyTopologyProbe,
   splitTopologyGroups,
   TOPOLOGY_LIMITS,
+  TOPOLOGY_PROBE_OPTIONS,
   validateTopologyRoutes,
 } from '@/utils/topologyHelper'
 
@@ -178,13 +179,22 @@ describe('topology route and metric alignment', () => {
 })
 
 describe('topology probe targets', () => {
-  test('registers ICMP and TCP 443/80/22 against the landmark host', () => {
+  test('sends ICMP to the backbone landmark and TCP 53 to the carrier resolver', () => {
     const probe = getTopologyProbe('beijing-telecom')
     expect(getTopologyProbeTarget(probe, { type: 'icmp' })).toBe(probe.landmarkAddress)
-    expect(getTopologyProbeTarget(probe, { type: 'tcp', port: 443 })).toBe(probe.landmarkAddress)
-    expect(getTopologyProbeTarget(probe, { type: 'tcp', port: 80 })).toBe(probe.landmarkAddress)
-    expect(getTopologyProbeTarget(probe, { type: 'tcp', port: 22 })).toBe(probe.landmarkAddress)
+    expect(getTopologyProbeTarget(probe, { type: 'tcp', port: 53 })).toBe(probe.dnsAddress)
+    // 骨干网关不接这些端口，入口阶梯不走它们，也不能给出目标地址。
+    expect(getTopologyProbeTarget(probe, { type: 'tcp', port: 443 })).toBe('')
+    expect(getTopologyProbeTarget(probe, { type: 'tcp', port: 80 })).toBe('')
+    expect(getTopologyProbeTarget(probe, { type: 'tcp', port: 22 })).toBe('')
     expect(getTopologyProbeTarget(probe, { type: 'tcp', port: 8080 })).toBe('')
+  })
+
+  test('every preset carries both an ICMP landmark and a TCP resolver', () => {
+    for (const probe of TOPOLOGY_PROBE_OPTIONS) {
+      expect(getTopologyProbeTarget(probe, { type: 'icmp' })).toBeTruthy()
+      expect(getTopologyProbeTarget(probe, { type: 'tcp', port: 53 })).toBeTruthy()
+    }
   })
 })
 

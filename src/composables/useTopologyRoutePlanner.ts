@@ -5,7 +5,7 @@ import type { HopTaskVerdict } from '@/services/topology-probe.service'
 import type { NodeData } from '@/stores/nodes'
 import type { TopologyProbeOption, TopologyRouteConfig } from '@/utils/topologyHelper'
 import { ref, toValue } from 'vue'
-import { OPS_TOPOLOGY_HOP_PROBE_LADDER } from '@/constants/ops'
+import { OPS_TOPOLOGY_ENTRY_PROBE_LADDER, OPS_TOPOLOGY_HOP_PROBE_LADDER } from '@/constants/ops'
 import { describeTopologyHopProbe, normalizeTopologyHopProbe } from '@/services/ping-task.service'
 import { planEntryProbeTask, planWorkingHopTask } from '@/services/topology-probe.service'
 import { applyTopologyProbeToRoute, findTopologyProbeKey, getTopologyProbe, getTopologyProbeTarget, getTopologyRouteProbeKey, resolveTopologyNode, shouldAutoApplyTopologyProbe } from '@/utils/topologyHelper'
@@ -57,9 +57,13 @@ export function findUniquePresetEntryTask(taskNames: readonly string[], entryNam
   return matches.length === 1 ? matches[0]! : ''
 }
 
-const HOP_PROBE_LADDER_TEXT = OPS_TOPOLOGY_HOP_PROBE_LADDER
-  .map(rung => describeTopologyHopProbe(normalizeTopologyHopProbe(rung)))
-  .join('、')
+function ladderText(ladder: readonly TopologyHopProbe[]): string {
+  return ladder.map(rung => describeTopologyHopProbe(normalizeTopologyHopProbe(rung))).join('、')
+}
+
+const HOP_PROBE_LADDER_TEXT = ladderText(OPS_TOPOLOGY_HOP_PROBE_LADDER)
+/** 入口阶梯比第 2 段短，提示里不能把 443/80/22 说成试过了。 */
+const ENTRY_PROBE_LADDER_TEXT = ladderText(OPS_TOPOLOGY_ENTRY_PROBE_LADDER)
 
 export interface TopologyRouteHintInput {
   planning: boolean
@@ -132,7 +136,7 @@ export function formatTopologyEntryHint(input: TopologyEntryHintInput): string {
     return `正在为入口自动创建探测任务“${input.expectedTaskName}”…`
   }
   if (input.state?.exhausted)
-    return `“${input.expectedTaskName}”按 ${HOP_PROBE_LADDER_TEXT} 都探测不通，需要手动处理（检查线路机是否能连到 ${input.state.targetAddress}，或换一个入口）。`
+    return `“${input.expectedTaskName}”按 ${ENTRY_PROBE_LADDER_TEXT} 都探测不通，需要手动处理（检查线路机是否能连到 ${input.state.targetAddress}，或换一个入口）。`
   if (input.live) {
     return input.probeLabel
       ? `入口探测：${input.probeLabel} · 实时（线路机主动探测运营商落地点，不代表该运营商用户访问这台线路机的真实体验）`

@@ -1045,7 +1045,7 @@ test('Transit topology switches the entry probe once ICMP is proven dead, retiri
   // 是 hop（第 2 段）；mock 按创建顺序从 101 起分配 id，所以入口任务是 102。
   probeStats.push({ task_id: 102, total: 48, valid: 0 })
   await dialog.getByRole('button', { name: '重新检测' }).click()
-  await expect(route).toHaveAttribute('data-topology-entry-hop-probe', 'TCP 443')
+  await expect(route).toHaveAttribute('data-topology-entry-hop-probe', 'TCP 53')
   await expect(route).toHaveAttribute('data-topology-entry-task', '北京电信')
   await expect.poll(() => deletedTaskIds.flat()).toContain(102)
 })
@@ -1093,7 +1093,7 @@ test('Transit topology creates the replacement entry task even when deleting the
   probeStats.push({ task_id: 102, total: 48, valid: 0 })
   await dialog.getByRole('button', { name: '重新检测' }).click()
   // 删除持续失败，但新任务照样建成功、探测方式照样换过去。
-  await expect(route).toHaveAttribute('data-topology-entry-hop-probe', 'TCP 443')
+  await expect(route).toHaveAttribute('data-topology-entry-hop-probe', 'TCP 53')
   await expect(route).toHaveAttribute('data-topology-entry-task', '北京电信')
   await expect.poll(() => deleteAttempts).toBeGreaterThan(0)
   await expect.poll(() => addedTasks.filter(task => task.name === '北京电信').length).toBe(2)

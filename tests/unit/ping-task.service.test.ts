@@ -806,6 +806,29 @@ describe('ensureTopologyEntryProbeTask', () => {
     }
   })
 
+  test('refuses a rung the preset has no target for instead of guessing an address', async () => {
+    // 入口阶梯只有 ICMP 和 TCP 53；443 在骨干网关上没有意义，宁可报错也不能
+    // 拿 ICMP 的地址凑一个 443 任务出来。
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = mock(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (!init?.body)
+        return new Response(JSON.stringify({ logged_in: true, username: 'admin' }))
+      const request = JSON.parse(String(init.body)) as { id: number, method: string }
+      if (request.method === 'admin:getAllPingTasks')
+        return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: [] }), { headers: { 'Content-Type': 'application/json' } })
+      throw new Error(`Unexpected RPC method: ${request.method}`)
+    }) as typeof fetch
+
+    try {
+      await expect(ensureTopologyEntryProbeTask(source, probe, { hopProbe: { type: 'tcp', port: 443 } }))
+        .rejects
+        .toThrow('没有配置 TCP 443 探测目标')
+    }
+    finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
   test('creates at the requested ladder rung when a hopProbe is given', async () => {
     const originalFetch = globalThis.fetch
     let addedTask: AdminPingTask | undefined
@@ -823,10 +846,10 @@ describe('ensureTopologyEntryProbeTask', () => {
     }) as typeof fetch
 
     try {
-      const ensured = await ensureTopologyEntryProbeTask(source, probe, { hopProbe: { type: 'tcp', port: 443 } })
+      const ensured = await ensureTopologyEntryProbeTask(source, probe, { hopProbe: { type: 'tcp', port: 53 } })
       expect(ensured).toMatchObject({
         created: true,
-        task: { name: '北京电信', type: 'tcp', target: `${probe.landmarkAddress}:443` },
+        task: { name: '北京电信', type: 'tcp', target: `${probe.dnsAddress}:53` },
       })
     }
     finally {
@@ -855,11 +878,11 @@ describe('createTopologyEntryProbeTask', () => {
     }) as typeof fetch
 
     try {
-      const created = await createTopologyEntryProbeTask(source, probe, { type: 'tcp', port: 443 }, { taskName: '广州电信' })
+      const created = await createTopologyEntryProbeTask(source, probe, { type: 'tcp', port: 53 }, { taskName: '广州电信' })
       expect(created).toMatchObject({
         name: '广州电信',
         type: 'tcp',
-        target: `${probe.landmarkAddress}:443`,
+        target: `${probe.dnsAddress}:53`,
         clients: [source.uuid],
       })
     }

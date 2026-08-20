@@ -613,9 +613,10 @@ describe('planEntryProbeTask', () => {
     try {
       const planned = await planEntryProbeTask(source, guangzhouTelecom)
       expect(planned.needsCreation).toBe(true)
-      expect(planned.probe).toEqual({ type: 'tcp', port: 443 })
+      expect(planned.probe).toEqual({ type: 'tcp', port: 53 })
       expect(planned.task.name).toBe('广州电信')
-      expect(planned.task.target).toBe(`${guangzhouTelecom.landmarkAddress}:443`)
+      // 换到 TCP 后目标也换成同运营商同城市的解析器：骨干网关不接 TCP。
+      expect(planned.task.target).toBe(`${guangzhouTelecom.dnsAddress}:53`)
     }
     finally {
       restore()
@@ -647,14 +648,14 @@ describe('planEntryProbeTask', () => {
     try {
       const planned = await planEntryProbeTask(source, beijingTelecom)
       expect(planned.switchedFrom).toEqual({ type: 'icmp' })
-      expect(planned.probe).toEqual({ type: 'tcp', port: 443 })
+      expect(planned.probe).toEqual({ type: 'tcp', port: 53 })
       expect(planned.needsCreation).toBe(true)
       expect(planned.retiredTasks.map(task => task.id)).toEqual([7])
       expect(planned.exhausted).toBe(false)
       // 换挡后任务名必须保持不变——不像第 2 段那样另起带后缀的新名字，否则
       // 站长在 Komari 里按名字识别的入口探测就找不到了。
       expect(planned.task.name).toBe('北京电信')
-      expect(planned.task.target).toBe(`${beijingTelecom.landmarkAddress}:443`)
+      expect(planned.task.target).toBe(`${beijingTelecom.dnsAddress}:53`)
     }
     finally {
       restore()
@@ -662,8 +663,9 @@ describe('planEntryProbeTask', () => {
   })
 
   test('reports exhaustion once the last ladder rung is also dead, and does not propose retiring it', async () => {
+    // 入口阶梯只有 ICMP → TCP 53 两档，TCP 53 判死就到头了。
     const restore = mockKomari(
-      [{ id: 8, name: '北京电信', clients: [source.uuid], type: 'tcp', target: `${beijingTelecom.landmarkAddress}:22`, interval: 30 }],
+      [{ id: 8, name: '北京电信', clients: [source.uuid], type: 'tcp', target: `${beijingTelecom.dnsAddress}:53`, interval: 30 }],
       [{ task_id: '8', total: 40, valid: 0 }],
     )
     try {
@@ -679,7 +681,9 @@ describe('planEntryProbeTask', () => {
     }
   })
 
-  test('picks an already-healthy TCP port for the initial creation instead of defaulting to ICMP', async () => {
+  test('starts at TCP instead of ICMP when only TCP is proven to work on this relay', async () => {
+    // 这台线路机上只有 TCP 在出数，说明它发不出 ICMP。第 2 段会照抄 443，入口
+    // 段不能：运营商测速点上 443 没有意义，只能落回入口阶梯自己的 TCP 档。
     const restore = mockKomari(
       [{ id: 9, name: 'unrelated-task', clients: [source.uuid], type: 'tcp', target: '198.51.100.9:443', interval: 30 }],
       [{ task_id: '9', total: 40, valid: 40 }],
@@ -687,8 +691,8 @@ describe('planEntryProbeTask', () => {
     try {
       const planned = await planEntryProbeTask(source, beijingTelecom)
       expect(planned.needsCreation).toBe(true)
-      expect(planned.probe).toEqual({ type: 'tcp', port: 443 })
-      expect(planned.task.target).toBe(`${beijingTelecom.landmarkAddress}:443`)
+      expect(planned.probe).toEqual({ type: 'tcp', port: 53 })
+      expect(planned.task.target).toBe(`${beijingTelecom.dnsAddress}:53`)
     }
     finally {
       restore()
@@ -705,7 +709,7 @@ describe('planEntryProbeTask', () => {
     const restore = mockKomari(
       [
         { id: 10, name: '北京电信', clients: [source.uuid], type: 'icmp', target: beijingTelecom.landmarkAddress, interval: 30 },
-        { id: 11, name: '北京电信', clients: [source.uuid], type: 'tcp', target: `${beijingTelecom.landmarkAddress}:443`, interval: 30 },
+        { id: 11, name: '北京电信', clients: [source.uuid], type: 'tcp', target: `${beijingTelecom.dnsAddress}:53`, interval: 30 },
       ],
       [
         { task_id: '10', total: 40, valid: 0 },
@@ -728,7 +732,7 @@ describe('planEntryProbeTask', () => {
     const restore = mockKomari(
       [
         { id: 12, name: '北京电信', clients: [source.uuid], type: 'icmp', target: beijingTelecom.landmarkAddress, interval: 30 },
-        { id: 13, name: '北京电信', clients: [source.uuid], type: 'tcp', target: `${beijingTelecom.landmarkAddress}:443`, interval: 30 },
+        { id: 13, name: '北京电信', clients: [source.uuid], type: 'tcp', target: `${beijingTelecom.dnsAddress}:53`, interval: 30 },
       ],
       [
         { task_id: '12', total: 40, valid: 0 },
@@ -763,7 +767,7 @@ describe('planEntryProbeTask', () => {
       const planned = await planEntryProbeTask(source, beijingTelecom)
       expect(planned.needsCreation).toBe(true)
       expect(planned.switchedFrom).toEqual({ type: 'icmp' })
-      expect(planned.probe).toEqual({ type: 'tcp', port: 443 })
+      expect(planned.probe).toEqual({ type: 'tcp', port: 53 })
       expect(planned.retiredTasks.map(task => task.id).sort()).toEqual([14, 15])
     }
     finally {
