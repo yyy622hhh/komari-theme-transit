@@ -17,6 +17,7 @@
 - `utils/rpc.ts`（1213 行）拆成线上数据结构、JSON-RPC 传输层和方法门面三个文件，对外导入路径不变。
 - `components/LoadChart.vue`（1548 行）的取数层抽成 `useLoadChartData`：实时轮询、历史查询、Metric Store 与旧版 records 的降级，以及切换节点或时间范围时的请求竞态，都不再需要挂载组件才能读懂。
 - 新增 `docs/DependencyPins.md`：`typescript` 与 `vite` 为什么停在当前主版本，以及各自可判定的解除条件和复查方式。此前这些理由只存在于两条提交信息里，翻不到也就无从判断是否还成立。
+- Komari 兼容性实验室新增 Ping 任务 RPC 的验证：入口任务复用依赖的 `admin:editPingTask` 在矩阵里每个版本上到底有没有、写进去了没有，现在有证据而不是靠推测。
 
 ### Testing
 

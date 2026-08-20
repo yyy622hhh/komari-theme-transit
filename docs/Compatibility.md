@@ -13,6 +13,7 @@ Transit 的兼容性工作流会为每个版本启动全新的 Komari 进程和�
 - 初始化管理员并验证匿名请求不能调用管理员 RPC；
 - 激活 Transit、保存随机 canary 配置并通过公共配置接口读回；
 - 创建两个隔离节点，调用 `admin:orderClients` 后通过 `admin:listClients` 读回权重；
+- 走一遍拓扑自愈依赖的整组 Ping 任务 RPC：`admin:addPingTask` → `admin:getAllPingTasks` → `admin:editPingTask` → `admin:deletePingTask`，逐个核对写入是否真的落库。其中 `admin:editPingTask` 比另外三个晚出现，主题在它缺失时会退回新建任务，所以这里把「缺失」当作可接受结果记录并跳过，但「返回成功却没有写进去」直接失败；
 - 使用同一 Release zip 再次走真实上传接口，验证覆盖升级会替换旧目录，同时保留数据库中的主题配置和节点顺序；
 - 在覆盖升级前生成独立主题目录快照，升级后停止 Komari 并以目录重命名恢复快照；重启后通过专用标记、主题文件、canary 和节点权重共同验证回滚；
 - 校验 JSON-RPC `jsonrpc` 和 `id` 回包信封，并兼容 `admin:orderClients` 成功时省略 nil `result` 的 Komari 行为。

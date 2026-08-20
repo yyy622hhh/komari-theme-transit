@@ -354,6 +354,63 @@ async function saveAndVerify(baseUrl: string): Promise<{ first: string, second: 
   return { first, second }
 }
 
+interface PingTaskRecord {
+  id?: number
+  name?: string
+  type?: string
+  target?: string
+  clients?: string[]
+  interval?: number
+}
+
+/**
+ * 拓扑自愈依赖的整组 Ping 任务 RPC 在这个 Komari 版本上是否都在。
+ *
+ * 单独验证是因为入口任务复用走的是 `admin:editPingTask`（把线路机加进已有任务的
+ * clients），而这个方法比另外三个晚出现。主题在它缺失时会退回新建，但「退回」这条
+ * 路只有单测覆盖，没有任何证据说明矩阵里最老的版本到底有没有它——不知道就等于
+ * 每次改这块都在赌。这里把答案固定下来：缺失是可接受的（记录并跳过），而存在却
+ * 语义不符不可接受。
+ */
+async function verifyPingTaskRpcSurface(baseUrl: string, clientUuid: string): Promise<void> {
+  const created = await rpc(baseUrl, 'admin:addPingTask', {
+    name: 'Transit Lab Probe',
+    type: 'icmp',
+    target: '203.0.113.9',
+    clients: [clientUuid],
+    interval: 60,
+    default_on: false,
+  })
+  if (created.error)
+    throw new Error(`admin:addPingTask failed with RPC ${created.error.code ?? 'unknown'}`)
+
+  const listed = requireResult(await rpc<PingTaskRecord[]>(baseUrl, 'admin:getAllPingTasks'), 'admin:getAllPingTasks')
+  const task = listed.find(entry => entry.name === 'Transit Lab Probe')
+  if (!task || !Number.isInteger(task.id))
+    throw new Error('admin:getAllPingTasks did not return the task just created')
+
+  const edited = await rpc(baseUrl, 'admin:editPingTask', {
+    tasks: [{ ...task, clients: [...(task.clients ?? []), 'transit-lab-second-client'] }],
+  })
+  if (edited.error) {
+    // 方法不存在是已知且被主题容忍的情况：ensureTopologyEntryProbeTask 会退回新建。
+    console.warn(`[komari-lab] admin:editPingTask unavailable on ${version} (RPC ${edited.error.code ?? 'unknown'}); the theme falls back to creating a task`)
+  }
+  else {
+    const afterEdit = requireResult(await rpc<PingTaskRecord[]>(baseUrl, 'admin:getAllPingTasks'), 'admin:getAllPingTasks')
+    const updated = afterEdit.find(entry => entry.id === task.id)
+    if (!updated?.clients?.includes('transit-lab-second-client'))
+      throw new Error('admin:editPingTask reported success but did not persist the added client')
+  }
+
+  const deleted = await rpc(baseUrl, 'admin:deletePingTask', { id: [task.id] })
+  if (deleted.error)
+    throw new Error(`admin:deletePingTask failed with RPC ${deleted.error.code ?? 'unknown'}`)
+  const afterDelete = requireResult(await rpc<PingTaskRecord[]>(baseUrl, 'admin:getAllPingTasks'), 'admin:getAllPingTasks')
+  if (afterDelete.some(entry => entry.id === task.id))
+    throw new Error('admin:deletePingTask reported success but the task is still listed')
+}
+
 async function verifyOrder(baseUrl: string, ids: { first: string, second: string }, label: string): Promise<void> {
   const clients = requireResult(await rpc<ClientRecord[]>(baseUrl, 'admin:listClients'), 'admin:listClients')
   if (clients.find(client => client.uuid === ids.first)?.weight !== 91 || clients.find(client => client.uuid === ids.second)?.weight !== 17)
@@ -495,6 +552,7 @@ async function main(): Promise<void> {
   await verifyThemeAndAdminRoutes(baseUrl, 'after initial installation')
   await verifyThemeInBrowser(baseUrl, 'after initial installation')
   const ids = await saveAndVerify(baseUrl)
+  await verifyPingTaskRpcSurface(baseUrl, ids.first)
   createRollbackSnapshot()
   await uploadTheme(baseUrl, zipPath, 'Same-package theme upgrade')
   if (existsSync(rollbackMarker))
