@@ -204,17 +204,17 @@ const statusEdgeStyle = computed(() => ({ '--node-status-tone': statusEdgeTone.v
       -->
       <div
         data-node-network-cell
-        class="node-card-cell min-w-0 px-2.5 py-2 text-[9px]"
+        class="node-card-cell min-w-0 overflow-hidden p-0 text-[9px]"
         :class="!hasReturnRoute && 'node-card-cell--full'"
       >
-        <div class="flex items-center justify-between gap-2 text-slate-500">
+        <div class="flex items-center justify-between gap-2 px-2.5 py-2 text-slate-500">
           <span>网络概览</span>
           <span v-if="hasTrafficLimit(node)" class="shrink-0 tabular-nums">{{ trafficPercentage.toFixed(1) }}%</span>
         </div>
 
         <!-- 四项一组：半宽时排成 2×2，整行时摊成一排，不留大片空白 -->
-        <div data-node-network-grid class="node-card-network-grid mt-1.5 grid gap-x-2 gap-y-1.5">
-          <div data-node-speed-cell class="min-w-0">
+        <div data-node-network-grid class="node-card-network-grid grid">
+          <div data-node-speed-cell class="min-w-0 px-2.5 py-1.5">
             <div class="text-slate-500">
               上行
             </div>
@@ -222,7 +222,7 @@ const statusEdgeStyle = computed(() => ({ '--node-status-tone': statusEdgeTone.v
               ↑ {{ formatSpeed(node.net_out) }}
             </div>
           </div>
-          <div class="min-w-0">
+          <div class="min-w-0 px-2.5 py-1.5">
             <div class="text-slate-500">
               下行
             </div>
@@ -230,7 +230,7 @@ const statusEdgeStyle = computed(() => ({ '--node-status-tone': statusEdgeTone.v
               ↓ {{ formatSpeed(node.net_in) }}
             </div>
           </div>
-          <div class="min-w-0">
+          <div class="min-w-0 px-2.5 py-1.5">
             <div class="text-slate-500">
               累计
             </div>
@@ -240,7 +240,7 @@ const statusEdgeStyle = computed(() => ({ '--node-status-tone': statusEdgeTone.v
               </template>
             </div>
           </div>
-          <div class="min-w-0">
+          <div class="min-w-0 px-2.5 py-1.5">
             <div class="text-slate-500">
               到期
             </div>
@@ -322,6 +322,15 @@ const statusEdgeStyle = computed(() => ({ '--node-status-tone': statusEdgeTone.v
    会得到四个五十几像素的窄列。 */
 .node-card-network-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  border-top: 1px solid var(--transit-divider);
+}
+
+.node-card-network-grid > div:nth-child(odd) {
+  border-right: 1px solid var(--transit-divider);
+}
+
+.node-card-network-grid > div:nth-child(-n + 2) {
+  border-bottom: 1px solid var(--transit-divider);
 }
 
 /*
@@ -340,6 +349,15 @@ const statusEdgeStyle = computed(() => ({ '--node-status-tone': statusEdgeTone.v
 
   .node-card-cell--full .node-card-network-grid {
     grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .node-card-cell--full .node-card-network-grid > div {
+    border-bottom: 0;
+    border-right: 1px solid var(--transit-divider);
+  }
+
+  .node-card-cell--full .node-card-network-grid > div:last-child {
+    border-right: 0;
   }
 }
 

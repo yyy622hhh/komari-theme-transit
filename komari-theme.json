@@ -31,7 +31,7 @@
       { "key": "topologyEnabled", "name": "显示多线路拓扑", "type": "switch", "default": true, "help": "首页显示入口、线路机与落地机链路；登录后可在拓扑右上角可视化管理。" },
       { "key": "carrierPingRegion", "name": "节点卡三网地区", "type": "select", "default": "beijing", "options": "beijing,shanghai,guangdong,all", "help": "beijing=北京；shanghai=上海；guangdong=广东；all=全部地区。" },
       { "key": "topologyAutoRepairEnabled", "name": "自动修复拓扑探测", "type": "switch", "default": true, "help": "默认开启。登录管理员打开首页时，每分钟自动检查入口和第 2 段探测是否还通；不通会自动新建 Ping 任务、切换探测方式并写回拓扑绑定，只会删除主题自己创建过的旧任务。关闭后只保留拓扑管理对话框里的手动操作。" },
-      { "key": "routeProbeAutoEnabled", "name": "自动检测三网回程线路", "type": "switch", "default": true, "help": "默认开启。登录管理员打开首页时，对「还没测过或结果已超过 7 天」的在线节点自动执行一次 traceroute，判定回程走的是 CN2GIA/163/9929/CMIN2 等哪条骨干网，结果写进该节点的标签。命令是主题内置的固定内容，只含三网测速点地址，不含任何节点或用户输入；回程几周才变一次，因此每台机器实际上约每周只跑一次。这会通过 Komari 的远程执行在你的服务器上运行 traceroute 命令，Komari 自身的审计日志会记录每一次执行。关闭后仅保留手动触发。" },
+      { "key": "routeProbeAutoEnabled", "name": "自动检测三网回程线路", "type": "switch", "default": true, "help": "默认开启。登录管理员打开首页时，对「还没测过或结果已超过 7 天」的在线节点检测一次回程并写入标签。优先使用 Transit 固定能力节点助手：助手不开放端口、不接受命令或目标地址，只能探测内置的北京/上海/广州三网目标；未安装伴生插件时为兼容旧部署才回退 Komari 固定命令远程执行。关闭后仅保留手动触发。" },
       { "key": "topologyConfig", "name": "拓扑配置数据", "type": "richtext", "default": "", "help": "由可视化管理器生成的 JSON，是拓扑配置的真值。下面的“拓扑线路数据/拓扑指标数据”是为兼容旧版本继续写入的同一份内容，只读即可，将来会移除。" },
       { "key": "topologyRoute", "name": "拓扑线路数据", "type": "richtext", "default": "", "help": "兼容字段，不要手工编辑——拓扑真值是上面的“拓扑配置数据”，改这里会在下次保存时被覆盖。仅当老站点还没有 JSON 配置时才会被解析：|| 分隔线路，分号分隔节点，节点为 名称|地区|角色|UUID，UUID 可省略。" },
       { "key": "topologyMetrics", "name": "拓扑指标数据", "type": "richtext", "default": "", "help": "兼容字段，不要手工编辑，理由同上。静态格式：延迟,丢包；实时格式：live@来源节点@Ping任务名称@备用延迟@备用丢包。" },

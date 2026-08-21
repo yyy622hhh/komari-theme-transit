@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { mergeRouteTag, ROUTE_PROBE_MAX_NODES, selectRouteProbeCandidates } from '../../src/services/route-probe.service'
+import { classifyRouteProbeOutputFailure, mergeRouteTag, ROUTE_PROBE_MAX_NODES, selectRouteProbeCandidates } from '../../src/services/route-probe.service'
 
 const NOW = Date.UTC(2026, 7, 21, 12, 0, 0)
 const DAY = 24 * 60 * 60 * 1000
@@ -85,5 +85,23 @@ describe('标签写回合并', () => {
 
   test('空白与多余分隔符被清掉', () => {
     expect(mergeRouteTag('  香港 ; ; 中转  ;', routeTag)).toBe(`香港;中转;${routeTag}`)
+  })
+})
+
+describe('采集执行失败归因', () => {
+  test('远程控制关闭不会被误报成普通探测失败', () => {
+    expect(classifyRouteProbeOutputFailure('Remote control is disabled.')).toBe('remote-disabled')
+  })
+
+  test('未安装 traceroute 有独立状态', () => {
+    expect(classifyRouteProbeOutputFailure('__TRANSIT_ROUTE_NO_TRACEROUTE__\n')).toBe('no-traceroute')
+  })
+
+  test('没有任何分段标记的空回执归普通失败', () => {
+    expect(classifyRouteProbeOutputFailure('')).toBe('failed')
+  })
+
+  test('带有效分段标记的回执交给线路解析继续处理', () => {
+    expect(classifyRouteProbeOutputFailure('__TRANSIT_ROUTE_CT__\n 1 59.43.1.1 1 ms')).toBeNull()
   })
 })

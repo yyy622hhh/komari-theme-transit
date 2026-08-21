@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { expect, test } from '@playwright/test'
-import { installKomariFixture, readRouteProbeEdits, readRouteProbeExecCalls } from './fixtures/komari'
+import { installKomariFixture, readRouteProbeCompanionCalls, readRouteProbeEdits, readRouteProbeExecCalls } from './fixtures/komari'
 
 const LIGHT_NODE_SURFACE = /^(?:rgba\(248, 250, 252, 0\.9\)|oklch\(0\.965 0\.008 252\))$/
 const WALLPAPER_FIXTURE = fileURLToPath(new URL('../../docs/preview.png', import.meta.url))
@@ -2727,7 +2727,7 @@ for (const nodeCardSize of ['mini', 'compact', 'comfortable', 'large'] as const)
         // 网络概览和三网回程必须并排（同一行顶部对齐），三网质量必须换行到下面。
         sameRowAsNetwork: Math.abs(el.getBoundingClientRect().top - network.getBoundingClientRect().top) < 2,
         insightBelow: insight ? insight.getBoundingClientRect().top > el.getBoundingClientRect().top : false,
-        rows: el.querySelectorAll('svg').length,
+        rows: el.querySelectorAll('[data-route-lane]').length,
       }
     })
 
@@ -2769,7 +2769,7 @@ test('transit card without route data lets the network panel span the full row',
   expect(columns, '宽卡上网络概览应摊成四列').toBe(4)
 })
 
-test('return route lanes expose evidence to keyboard and point from the node toward the carrier', async ({ page }) => {
+test('return route lanes expose evidence to keyboard and lead from carrier labels to route verdicts', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 })
   await installKomariFixture(page, { returnRouteTag: 'fresh', opsDashboard: true, authenticated: true })
   await openStablePage(page, '/')
@@ -2777,6 +2777,7 @@ test('return route lanes expose evidence to keyboard and point from the node tow
   const panel = page.locator('[data-node-route-panel]').first()
   const telecomLane = panel.getByRole('button', { name: /电信回程/ })
   await expect(telecomLane).toBeVisible()
+  await expect(telecomLane.getByText('电信', { exact: true })).toHaveCSS('white-space', 'nowrap')
 
   const positions = await telecomLane.evaluate((lane) => {
     const labels = [...lane.querySelectorAll('span')]
@@ -2787,7 +2788,8 @@ test('return route lanes expose evidence to keyboard and point from the node tow
       carrierX: carrier.getBoundingClientRect().x,
     }
   })
-  expect(positions.routeX, '节点出发后应先经过骨干线路，再到国内运营商').toBeLessThan(positions.carrierX)
+  expect(positions.carrierX, '参考设计要求运营商在左、线路判定在右').toBeLessThan(positions.routeX)
+  await expect(telecomLane.locator('[data-grade="精品线路"]')).toBeVisible()
 
   await telecomLane.focus()
   const tooltip = telecomLane.getByRole('tooltip')
@@ -2799,7 +2801,26 @@ test('return route lanes expose evidence to keyboard and point from the node tow
   expect(new URL(page.url()).pathname).toBe('/')
 })
 
-test('route probe dispatches a constant command and writes the tag back', async ({ page }) => {
+test('route probe prefers the fixed-purpose node helper and writes its tag back', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, {
+    authenticated: true,
+    routeProbeCompanion: true,
+  })
+  await openStablePage(page, '/')
+
+  await page.getByRole('button', { name: /检测回程/ }).click()
+  await expect.poll(() => readRouteProbeEdits().length, { timeout: 15_000 }).toBeGreaterThan(0)
+
+  const calls = readRouteProbeCompanionCalls()
+  expect(calls).toHaveLength(1)
+  expect(calls[0]).toMatchObject({ city: 'beijing', guard: '1' })
+  expect(calls[0]!.clients.every(uuid => uuid.startsWith('00000000-0000-4000-8000'))).toBe(true)
+  expect(readRouteProbeExecCalls()).toHaveLength(0)
+  expect(readRouteProbeEdits()[0]!.tags).toMatch(/transit-route:ct=4809\.4809\.4134,cu=4837\.4837,cm=58807\.9808@\d+/)
+})
+
+test('route probe dispatches a constant command and writes the tag back when the companion is absent', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   // 不给任何节点预置回程标签，于是全部进候选。
   await installKomariFixture(page, {
@@ -2834,6 +2855,22 @@ test('route probe dispatches a constant command and writes the tag back', async 
   expect(edit.tags.match(/transit-route:/g)).toHaveLength(1)
   expect(edit.tags).toMatch(/core|edge/)
   expect(edit.tags).toContain('命令执行后新增<purple>')
+})
+
+test('route probe reports disabled remote control without pretending the route was updated', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, {
+    authenticated: true,
+    routeProbeExec: true,
+    routeProbeResult: 'remote-disabled',
+  })
+  await openStablePage(page, '/')
+
+  await page.getByRole('button', { name: /检测回程/ }).click()
+  const summary = page.locator('[data-route-probe-summary]')
+  await expect(summary).toBeVisible({ timeout: 30_000 })
+  await expect(summary).toContainText('远程控制已关闭')
+  expect(readRouteProbeEdits()).toHaveLength(0)
 })
 
 test('route probe stays hidden for logged-out visitors', async ({ page }) => {

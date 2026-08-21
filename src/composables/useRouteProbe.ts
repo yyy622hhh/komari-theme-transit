@@ -18,18 +18,43 @@ import { logAppWarning } from '@/utils/safeError'
  *
  * 1. **挑节点**：只有「在线 且 标签缺失或已过期（7 天）」的节点进候选。回程几周
  *    才变一次，这一条就把频率压到每台约每周一次。
- * 2. **进程内节流**：同一个页面会话里两轮之间至少隔 30 分钟。
+ * 2. **同源浏览器节流**：同一站点的页面和标签页共享 30 分钟冷却时间。
  * 3. **单飞**：正在跑的时候不再开第二轮。
  * 4. **后台标签页不跑**：见 `pageIsVisible`。
  * 5. **失败不重试**：见 `autoSkipped`，避免在跑不通的机器上反复执行命令。
  * 6. **没权限就停**：见 `autoBlocked`，2FA 场景下不做无意义的循环重试。
  *
- * 跨标签页的重复下发靠第 1、4 两条一起压：可见的标签页通常只有一个，而先写回
- * 标签的那一轮会让其余标签页算出空候选。
+ * 跨标签页的重复下发再由 localStorage 冷却时间直接压住；不同设备之间不共享浏览器
+ * 存储，仍由候选标签与单轮失败跳过控制。
  */
 
-/** 同一页面会话内两轮自动采集之间的最小间隔。 */
+/** 同一浏览器、同一站点的两轮自动采集之间的最小间隔。 */
 const AUTO_PROBE_COOLDOWN_MS = 30 * TIME_MS.minute
+const AUTO_PROBE_STORAGE_KEY = 'transit:route-probe:last-auto-run-at'
+
+/** 浏览器存储不可用时保持静默降级，不能让节流本身挡住手动检测。 */
+function readSharedAutoRunAt(): number {
+  if (typeof localStorage === 'undefined')
+    return 0
+  try {
+    const value = Number(localStorage.getItem(AUTO_PROBE_STORAGE_KEY))
+    return Number.isFinite(value) && value > 0 ? value : 0
+  }
+  catch {
+    return 0
+  }
+}
+
+function writeSharedAutoRunAt(value: number): void {
+  if (typeof localStorage === 'undefined')
+    return
+  try {
+    localStorage.setItem(AUTO_PROBE_STORAGE_KEY, String(value))
+  }
+  catch {
+    // 隐私模式或存储配额不该影响检测主流程。
+  }
+}
 
 /**
  * 后台标签页不自动采集。
@@ -113,8 +138,11 @@ export function useRouteProbe(nodes: MaybeRefOrGetter<NodeData[]>) {
       return
     if (trigger === 'auto' && !pageIsVisible())
       return
-    if (trigger === 'auto' && lastRunAt > 0 && Date.now() - lastRunAt < AUTO_PROBE_COOLDOWN_MS)
+    const sharedLastRunAt = trigger === 'auto' ? readSharedAutoRunAt() : 0
+    if (trigger === 'auto' && Math.max(lastRunAt, sharedLastRunAt) > 0
+      && Date.now() - Math.max(lastRunAt, sharedLastRunAt) < AUTO_PROBE_COOLDOWN_MS) {
       return
+    }
 
     // 手动触发时把「试过也没用」的清单一并作废，让运营者修好环境后能立刻重试。
     if (trigger === 'manual')
@@ -126,6 +154,8 @@ export function useRouteProbe(nodes: MaybeRefOrGetter<NodeData[]>) {
 
     probing.value = true
     lastRunAt = Date.now()
+    if (trigger === 'auto')
+      writeSharedAutoRunAt(lastRunAt)
     controller = new AbortController()
     try {
       const summary = await probeNodeRoutes(candidates, probeCity(), { trigger, signal: controller.signal })
@@ -188,12 +218,16 @@ export function useRouteProbe(nodes: MaybeRefOrGetter<NodeData[]>) {
       return lastError.value
     if (!lastOutcomes.value.length)
       return ''
-    const counts = { 'updated': 0, 'no-traceroute': 0, 'failed': 0, 'timeout': 0 }
+    const counts = { 'updated': 0, 'helper-offline': 0, 'remote-disabled': 0, 'no-traceroute': 0, 'failed': 0, 'timeout': 0 }
     for (const outcome of lastOutcomes.value)
       counts[outcome.status] += 1
     const parts: string[] = []
     if (counts.updated)
       parts.push(`${counts.updated} 台已更新`)
+    if (counts['helper-offline'])
+      parts.push(`${counts['helper-offline']} 台节点助手未连接`)
+    if (counts['remote-disabled'])
+      parts.push(`${counts['remote-disabled']} 台远程控制已关闭`)
     if (counts['no-traceroute'])
       parts.push(`${counts['no-traceroute']} 台未安装 traceroute`)
     if (counts.failed)

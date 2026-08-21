@@ -14,6 +14,11 @@
 import type { NodeInfo } from '@/utils/api.types'
 import type { RouteTraceCity } from '@/utils/routeTrace'
 import { requirePermission } from '@/services/auth.service'
+import {
+  enqueueCompanionRouteProbe,
+  getCompanionRouteProbeBatch,
+  RouteProbeCompanionUnavailableError,
+} from '@/services/route-probe-companion.service'
 import { formatNodeRouteTag, isNodeRouteTag, parseNodeRouteTag } from '@/utils/routeTag'
 import { buildRouteTraceCommand, isMissingTracerouteOutput, isUsableRouteTraceOutput, parseRouteTraceOutput } from '@/utils/routeTrace'
 import { getSharedRpc } from '@/utils/rpc'
@@ -34,7 +39,7 @@ export interface RouteProbeCandidate {
 export interface RouteProbeOutcome {
   uuid: string
   name: string
-  status: 'updated' | 'no-traceroute' | 'failed' | 'timeout'
+  status: 'updated' | 'helper-offline' | 'remote-disabled' | 'no-traceroute' | 'failed' | 'timeout'
   detail?: string
 }
 
@@ -87,6 +92,22 @@ export function mergeRouteTag(existingTags: string, routeTag: string): string {
   return kept.join(';')
 }
 
+/**
+ * 把节点执行层的明确失败归因出来。远程控制关闭和没装 traceroute 都不是线路探测
+ * 失败，必须告诉运营者具体该改哪里；其余没有分段标记的空输出才归普通失败。
+ */
+export function classifyRouteProbeOutputFailure(
+  output: string,
+): 'remote-disabled' | 'no-traceroute' | 'failed' | null {
+  if (output.includes('Remote control is disabled.'))
+    return 'remote-disabled'
+  if (isMissingTracerouteOutput(output))
+    return 'no-traceroute'
+  if (!isUsableRouteTraceOutput(output))
+    return 'failed'
+  return null
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
@@ -108,6 +129,96 @@ export async function probeNodeRoutes(
   if (!permission.granted)
     throw new Error('登录状态已过期，请重新登录后再检测回程线路。')
 
+  try {
+    return await probeNodeRoutesViaCompanion(candidates, city, options)
+  }
+  catch (error) {
+    // 兼容还没有安装伴生插件的现有 Komari：只在明确 404 时退回原来的固定命令
+    // admin:exec 路径。插件已经接单后的任何错误都不能回退，否则同一节点可能同时
+    // 跑两轮探测。关闭远程控制的节点仍然不会执行命令，只会收到明确失败原因。
+    if (!(error instanceof RouteProbeCompanionUnavailableError))
+      throw error
+  }
+
+  return probeNodeRoutesViaRemoteExec(candidates, city, options)
+}
+
+async function probeNodeRoutesViaCompanion(
+  candidates: readonly RouteProbeCandidate[],
+  city: RouteTraceCity,
+  options: { trigger: 'manual' | 'auto', signal?: AbortSignal },
+): Promise<RouteProbeSummary> {
+  const batch = await enqueueCompanionRouteProbe(candidates.map(candidate => candidate.uuid), city, options.signal)
+  recordTopologyWrite({
+    trigger: options.trigger,
+    action: `节点助手三网回程检测（${candidates.length} 台）`,
+    outcome: 'ok',
+    detail: `批次 ${batch.batch_id}`,
+  })
+
+  const pending = new Map(candidates.map(candidate => [candidate.uuid, candidate]))
+  const lastStates = new Map<string, { status: string, helperSeenAt: number | null }>()
+  const outcomes: RouteProbeOutcome[] = []
+  const deadline = Date.now() + RESULT_TIMEOUT_MS
+
+  while (pending.size && Date.now() < deadline) {
+    const snapshot = await getCompanionRouteProbeBatch(batch.batch_id, options.signal)
+    const completed = snapshot.jobs.filter(job => pending.has(job.client)
+      && (job.status === 'completed' || job.status === 'failed'))
+    for (const job of snapshot.jobs)
+      lastStates.set(job.client, { status: job.status, helperSeenAt: job.helper_seen_at })
+
+    if (completed.length) {
+      // 和旧远程执行路径一样，写回前读取一次最新标签，避免覆盖检测期间的并发修改。
+      const latestClients = await getSharedRpc().getNodesOverHttp(options.signal)
+      for (const job of completed) {
+        const candidate = pending.get(job.client)
+        if (!candidate)
+          continue
+        pending.delete(job.client)
+        if (job.status === 'completed' && job.tag) {
+          outcomes.push(await applyCompanionRouteTag(
+            candidate,
+            job.tag,
+            options.trigger,
+            latestClients[job.client]?.tags,
+          ))
+        }
+        else {
+          outcomes.push({
+            uuid: candidate.uuid,
+            name: candidate.name,
+            status: job.error === 'no-traceroute' ? 'no-traceroute' : 'failed',
+            detail: job.error === 'no-traceroute' ? '节点助手未找到 traceroute' : '节点助手未取得可用结果',
+          })
+        }
+      }
+    }
+    if (pending.size) {
+      await sleep(RESULT_POLL_INTERVAL_MS)
+      if (options.signal?.aborted)
+        break
+    }
+  }
+
+  for (const candidate of pending.values()) {
+    const state = lastStates.get(candidate.uuid)
+    const helperOffline = !state?.helperSeenAt && state?.status === 'queued'
+    outcomes.push({
+      uuid: candidate.uuid,
+      name: candidate.name,
+      status: helperOffline ? 'helper-offline' : 'timeout',
+      detail: helperOffline ? '节点助手未安装、未启动或尚未连接' : '节点助手执行超时',
+    })
+  }
+  return { taskId: `companion:${batch.batch_id}`, outcomes }
+}
+
+async function probeNodeRoutesViaRemoteExec(
+  candidates: readonly RouteProbeCandidate[],
+  city: RouteTraceCity,
+  options: { trigger: 'manual' | 'auto', signal?: AbortSignal },
+): Promise<RouteProbeSummary> {
   const command = buildRouteTraceCommand(city)
   if (!command)
     throw new Error(`没有 ${city} 的三网测速点地址。`)
@@ -162,20 +273,52 @@ export async function probeNodeRoutes(
   return { taskId: dispatch.task_id, outcomes }
 }
 
+async function applyCompanionRouteTag(
+  candidate: RouteProbeCandidate,
+  routeTag: string,
+  trigger: 'manual' | 'auto',
+  latestTags: string | undefined,
+): Promise<RouteProbeOutcome> {
+  const report = parseNodeRouteTag(routeTag)
+  const hasEvidence = report?.entries.some(entry => entry.asns.length)
+  if (!report || report.raw !== routeTag || report.measuredAt === null || report.freshness === 'stale' || !hasEvidence) {
+    return {
+      uuid: candidate.uuid,
+      name: candidate.name,
+      status: 'failed',
+      detail: '节点助手返回了无效或过期的回程标签',
+    }
+  }
+  if (latestTags === undefined) {
+    return {
+      uuid: candidate.uuid,
+      name: candidate.name,
+      status: 'failed',
+      detail: '写回前未找到节点最新信息，已取消以避免覆盖标签',
+    }
+  }
+
+  return writeRouteTag(candidate, routeTag, trigger, latestTags)
+}
+
 async function applyRouteResult(
   candidate: RouteProbeCandidate,
   output: string,
   trigger: 'manual' | 'auto',
   latestTags: string | undefined,
 ): Promise<RouteProbeOutcome> {
-  if (!isUsableRouteTraceOutput(output)) {
-    // 没装 traceroute 和命令没跑起来要分开报，前者运营者能自己修。
-    const status = isMissingTracerouteOutput(output) ? 'no-traceroute' : 'failed'
+  const outputFailure = classifyRouteProbeOutputFailure(output)
+  if (outputFailure) {
+    const detail = {
+      'remote-disabled': '节点已关闭 Komari 远程控制，可启用后重试或改用节点侧采集脚本',
+      'no-traceroute': '节点未安装 traceroute',
+      'failed': '未取得可用的探测输出',
+    }[outputFailure]
     return {
       uuid: candidate.uuid,
       name: candidate.name,
-      status,
-      detail: status === 'no-traceroute' ? '节点未安装 traceroute' : '未取得可用的探测输出',
+      status: outputFailure,
+      detail,
     }
   }
 
@@ -204,6 +347,15 @@ async function applyRouteResult(
   }
 
   const routeTag = formatNodeRouteTag(parsed, Date.now())
+  return writeRouteTag(candidate, routeTag, trigger, latestTags)
+}
+
+async function writeRouteTag(
+  candidate: RouteProbeCandidate,
+  routeTag: string,
+  trigger: 'manual' | 'auto',
+  latestTags: string,
+): Promise<RouteProbeOutcome> {
   const merged = mergeRouteTag(latestTags, routeTag)
 
   try {

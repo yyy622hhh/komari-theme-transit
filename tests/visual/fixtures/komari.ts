@@ -29,6 +29,7 @@ const VISUAL_TRACE_OUTPUT = [
 /** 本次 fixture 安装期间记录到的远程执行与写回，供断言检查。 */
 let routeProbeExecCalls: Array<{ command: string, clients: string[] }> = []
 let routeProbeEdits: Array<{ uuid: string, tags: string }> = []
+let routeProbeCompanionCalls: Array<{ clients: string[], city: string, guard: string | undefined }> = []
 
 export function readRouteProbeExecCalls(): Array<{ command: string, clients: string[] }> {
   return routeProbeExecCalls
@@ -36,6 +37,10 @@ export function readRouteProbeExecCalls(): Array<{ command: string, clients: str
 
 export function readRouteProbeEdits(): Array<{ uuid: string, tags: string }> {
   return routeProbeEdits
+}
+
+export function readRouteProbeCompanionCalls(): Array<{ clients: string[], city: string, guard: string | undefined }> {
+  return routeProbeCompanionCalls
 }
 
 const REGION_FIXTURES = [
@@ -95,6 +100,10 @@ export interface VisualFixtureOptions {
   returnRouteTag?: 'unknown' | 'fresh' | 'stale'
   /** 记录并模拟三网回程的远程执行（admin:exec / 结果轮询 / 写回）。 */
   routeProbeExec?: boolean
+  /** 模拟优先的固定能力节点助手伴生插件路径。 */
+  routeProbeCompanion?: boolean
+  /** 覆写远程执行回执，用来验证运行环境问题能被准确告知运营者。 */
+  routeProbeResult?: 'success' | 'remote-disabled' | 'missing-traceroute'
   /** 模拟命令执行期间管理员新增的标签，用来验证写回不会拿旧快照覆盖它。 */
   routeProbeConcurrentTag?: string
   /**
@@ -499,16 +508,23 @@ async function handleRpc(
     case 'admin:getTaskResultsByTaskId':
       if (!options.routeProbeExec)
         break
-      result = (routeProbeExecCalls.at(-1)?.clients ?? []).map(client => ({
-        client,
-        result: VISUAL_TRACE_OUTPUT,
-        exit_code: 0,
-        finished_at: FIXED_NOW,
-        created_at: FIXED_NOW,
-      }))
+      result = (routeProbeExecCalls.at(-1)?.clients ?? []).map((client) => {
+        const probeResult = options.routeProbeResult ?? 'success'
+        return {
+          client,
+          result: probeResult === 'remote-disabled'
+            ? 'Remote control is disabled.'
+            : probeResult === 'missing-traceroute'
+              ? '__TRANSIT_ROUTE_NO_TRACEROUTE__'
+              : VISUAL_TRACE_OUTPUT,
+          exit_code: probeResult === 'remote-disabled' ? -1 : 0,
+          finished_at: FIXED_NOW,
+          created_at: FIXED_NOW,
+        }
+      })
       break
     case 'admin:editClient':
-      if (!options.routeProbeExec)
+      if (!options.routeProbeExec && !options.routeProbeCompanion)
         break
       routeProbeEdits.push({
         uuid: String(payload.params?.uuid ?? ''),
@@ -740,6 +756,7 @@ function legacyTopologyToJson(routeValue: string, metricValue: string): string {
 export async function installKomariFixture(page: Page, options: VisualFixtureOptions = {}): Promise<void> {
   routeProbeExecCalls = []
   routeProbeEdits = []
+  routeProbeCompanionCalls = []
 
   await page.route('**/__transit-visual-font-chinese.woff2', route => route.fulfill({
     path: VISUAL_FONT_FILES.chinese,
@@ -977,6 +994,55 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
     contentType: 'application/json',
     body: JSON.stringify({ status: 'success', message: 'ok', data: { version: '1.2.6-visual', hash: 'visual' } }),
   }))
+  await page.route('**/api/transit-route-probe/v1/**', async (route) => {
+    if (!options.routeProbeCompanion) {
+      await route.fulfill({ status: 404, contentType: 'application/json', body: '{"error":"not installed"}' })
+      return
+    }
+    const request = route.request()
+    const url = new URL(request.url())
+    const guard = request.headers()['x-transit-route-probe']
+    if (url.pathname.endsWith('/enqueue')) {
+      const body = request.postDataJSON() as { clients?: unknown, city?: unknown }
+      const clients = Array.isArray(body.clients) ? body.clients.map(String) : []
+      const city = String(body.city ?? '')
+      routeProbeCompanionCalls.push({ clients, city, guard })
+      await route.fulfill({
+        status: 202,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          batch_id: 'b_visualcompanion0001',
+          jobs: clients.map(client => ({
+            client,
+            city,
+            status: 'queued',
+            tag: null,
+            error: null,
+            attempts: 0,
+            helper_seen_at: Date.parse(FIXED_NOW),
+          })),
+        }),
+      })
+      return
+    }
+    const clients = routeProbeCompanionCalls.at(-1)?.clients ?? []
+    const city = routeProbeCompanionCalls.at(-1)?.city ?? 'beijing'
+    await route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({
+        batch_id: 'b_visualcompanion0001',
+        jobs: clients.map(client => ({
+          client,
+          city,
+          status: 'completed',
+          tag: `transit-route:ct=4809.4809.4134,cu=4837.4837,cm=58807.9808@${Math.floor(Date.parse(FIXED_NOW) / 1000)}`,
+          error: null,
+          attempts: 1,
+          helper_seen_at: Date.parse(FIXED_NOW),
+        })),
+      }),
+    })
+  })
   await page.route('**/rpc2', route => handleRpc(route, clientFixtures, statusFixtures, options, adminPingTasks))
   for (const pattern of [
     'https://api.ip.sb/geoip/**',

@@ -1,0 +1,15 @@
+{
+  "name": "Transit Route Probe",
+  "short": "transit-route-probe",
+  "description": "Fixed-purpose return-route job relay for the Transit theme",
+  "author": "PandaKiko",
+  "version": "0.1.0",
+  "komari": ">=1.4.0",
+  "entry": "script.js",
+  "permissions": {
+    "node": true,
+    "allowRoutes": true,
+    "maxHTTPBodyBytes": 8192,
+    "timeout": 10
+  }
+}

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { RouteGrade } from '@/utils/routeClassification'
 import type { NodeRouteEntry } from '@/utils/routeTag'
+import { Icon } from '@iconify/vue'
 import { computed } from 'vue'
 import { DataTooltip } from '@/components/ui/data-tooltip'
 import { useAppStore } from '@/stores/app'
@@ -11,35 +12,13 @@ import { parseNodeRouteTag } from '@/utils/routeTag'
 /**
  * 节点卡上的「三网回程」面板：一行一家运营商，箭头指向判定出的骨干线路。
  *
- * 箭头朝向就是回程的方向——从国内运营商回到这台机器。三网质量那一行回答「现在
- * 快不快」，这个面板回答「走的是哪条线」，两个并排看才完整。
+ * 运营商名是每行的类别标签，右侧是该运营商对应的回程骨干判定；轨道只表达两者
+ * 的对应关系，不冒充完整拓扑方向。真实方向与逐跳证据仍放在可聚焦的依据提示里。
  */
 const props = defineProps<{
   /** 节点的原始 `tags` 字段；没有回程标签时整个面板不渲染。 */
   tags?: string | null
 }>()
-
-const CARRIER_DOT_CLASSES: Record<string, string> = {
-  CT: 'bg-blue-500',
-  CU: 'bg-rose-500',
-  CM: 'bg-emerald-500',
-}
-
-/** 线路用运营商色，和终点圆点、三网质量那一行保持同一套配色。 */
-const CARRIER_ARROW_CLASSES: Record<string, string> = {
-  CT: 'text-blue-500/70',
-  CU: 'text-rose-500/70',
-  CM: 'text-emerald-500/70',
-}
-
-/** 按线路档次着色；判不出档次的走静音色，不借颜色暗示好坏。 */
-const GRADE_CLASSES: Record<string, string> = {
-  精品线路: 'border-emerald-500/40 text-emerald-600 dark:text-emerald-400',
-  优质线路: 'border-sky-500/40 text-sky-600 dark:text-sky-400',
-  普通线路: 'border-amber-500/40 text-amber-600 dark:text-amber-500',
-}
-
-const MUTED_CLASS = 'border-muted-foreground/20 text-muted-foreground'
 
 const appStore = useAppStore()
 
@@ -55,12 +34,6 @@ const report = computed(() => parseNodeRouteTag(props.tags, now.value))
 
 /** 过期或采集时间未知的判定不再着色，避免把历史结果暗示成当前状态。 */
 const untrusted = computed(() => report.value?.freshness === 'stale' || report.value?.freshness === 'unknown')
-
-function gradeClass(grade: RouteGrade): string {
-  if (untrusted.value || !grade)
-    return MUTED_CLASS
-  return GRADE_CLASSES[grade] ?? MUTED_CLASS
-}
 
 /** 档次后缀去掉「线路」二字，卡片上宽度紧张：精品线路 -> 精品。 */
 function gradeText(grade: RouteGrade): string {
@@ -120,8 +93,8 @@ function routeDetails(entry: NodeRouteEntry): string {
 </script>
 
 <template>
-  <div v-if="report" data-node-route-panel class="node-card-cell min-w-0 px-2.5 py-2">
-    <div class="flex items-center justify-between gap-2 text-[9px] text-slate-500">
+  <div v-if="report" data-node-route-panel class="node-card-cell node-route-panel min-w-0 overflow-hidden p-0">
+    <div class="node-route-panel__header flex items-center justify-between gap-2 px-2.5 py-2 text-[9px] text-slate-500">
       <span>三网回程</span>
       <span
         v-if="measuredAgo || report.freshness === 'unknown'"
@@ -132,43 +105,144 @@ function routeDetails(entry: NodeRouteEntry): string {
       </span>
     </div>
 
-    <div class="mt-1.5 flex flex-col gap-1">
+    <div class="flex flex-col gap-1 px-2.5 pb-2 pt-1.5">
       <DataTooltip
         v-for="entry in report.entries"
         :key="entry.carrier"
         as="button"
         type="button"
-        class="pointer-events-auto flex w-full min-w-0 items-center gap-1.5 rounded-sm text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-400/60"
+        class="node-route-row pointer-events-auto grid w-full min-w-0 grid-cols-[auto_1.5rem_minmax(1.75rem,1fr)_auto] items-center gap-1.5 rounded-md px-0.5 py-0.5 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-400/60"
+        :class="untrusted && 'node-route-row--untrusted'"
+        :data-carrier="entry.carrier"
         :content="routeDetails(entry)"
         content-class="whitespace-pre-line text-left"
         :aria-label="routeDetails(entry)"
         @click.stop
       >
         <span
-          class="flex min-w-0 shrink items-baseline gap-1 truncate rounded border px-1.5 py-px text-[9px] leading-tight"
-          :class="gradeClass(entry.classification.grade)"
+          aria-hidden="true"
+          class="node-route-beacon grid size-3.5 shrink-0 place-items-center rounded-full border"
         >
-          <span class="truncate font-medium">{{ lineText(entry.classification.label, entry.classification.grade) }}</span>
-          <span v-if="gradeText(entry.classification.grade)" class="shrink-0 opacity-75">{{ gradeText(entry.classification.grade) }}</span>
+          <span class="size-1.5 rounded-full bg-current" />
         </span>
 
-        <!-- 卡片本身是起点：节点（隐含）→ 骨干线路 → 国内运营商终点。 -->
-        <svg
-          class="h-2 min-w-3 flex-1"
-          :class="untrusted ? 'text-muted-foreground/40' : CARRIER_ARROW_CLASSES[entry.carrier]"
-          viewBox="0 0 24 8"
-          preserveAspectRatio="none"
-          fill="none"
-          aria-hidden="true"
-        >
-          <circle cx="2.5" cy="4" r="2" stroke="currentColor" stroke-width="1" />
-          <path d="M5.5 4h13" stroke="currentColor" stroke-width="1" stroke-dasharray="2 2" />
-          <path d="M18 1.5 22.5 4 18 6.5z" fill="currentColor" />
-        </svg>
+        <span class="whitespace-nowrap text-[9px] text-slate-500">{{ entry.carrierLabel }}</span>
 
-        <span class="shrink-0 text-[9px] text-slate-500">{{ entry.carrierLabel }}</span>
-        <span class="size-1.5 shrink-0 rounded-full" :class="untrusted ? 'bg-muted-foreground/40' : CARRIER_DOT_CLASSES[entry.carrier]" />
+        <!-- 运营商是行标签，轨道把视线导向右侧的线路判定；真实探测方向见悬浮依据。 -->
+        <span
+          data-route-lane
+          aria-hidden="true"
+          class="node-route-lane flex min-w-0 items-center"
+        >
+          <span class="node-route-lane__origin size-1.5 shrink-0 rounded-full border" />
+          <span class="node-route-lane__line min-w-2 flex-1" />
+          <span class="node-route-lane__chevrons -ml-0.5 flex shrink-0 items-center">
+            <Icon icon="tabler:chevron-right" :width="8" :height="8" />
+            <Icon icon="tabler:chevron-right" class="-ml-1" :width="8" :height="8" />
+          </span>
+        </span>
+
+        <span
+          class="node-route-badge flex min-w-[4.75rem] shrink-0 items-baseline justify-between gap-1 rounded-md border px-1.5 py-0.5 text-[9px] leading-tight"
+          :data-grade="untrusted ? '' : entry.classification.grade || ''"
+        >
+          <span class="truncate font-medium text-slate-700 dark:text-slate-200">{{ lineText(entry.classification.label, entry.classification.grade) }}</span>
+          <span v-if="gradeText(entry.classification.grade)" class="node-route-badge__grade shrink-0 font-medium">{{ gradeText(entry.classification.grade) }}</span>
+        </span>
       </DataTooltip>
     </div>
   </div>
 </template>
+
+<style scoped>
+.node-route-panel__header {
+  border-bottom: 1px solid var(--transit-divider);
+}
+
+.node-route-row {
+  --route-tone: 100 116 139;
+  transition:
+    background-color 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.node-route-row[data-carrier='CT'] {
+  --route-tone: 59 130 246;
+}
+
+.node-route-row[data-carrier='CU'] {
+  --route-tone: 244 63 94;
+}
+
+.node-route-row[data-carrier='CM'] {
+  --route-tone: 16 185 129;
+}
+
+.node-route-row:hover,
+.node-route-row:focus-visible {
+  background: rgb(var(--route-tone) / 0.06);
+}
+
+.node-route-beacon {
+  color: rgb(var(--route-tone));
+  border-color: rgb(var(--route-tone) / 0.42);
+  background: rgb(var(--route-tone) / 0.12);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.14),
+    0 0 7px rgb(var(--route-tone) / 0.22);
+}
+
+.node-route-beacon > span {
+  box-shadow: 0 0 5px rgb(var(--route-tone) / 0.72);
+}
+
+.node-route-lane {
+  color: rgb(var(--route-tone) / 0.72);
+}
+
+.node-route-lane__origin {
+  border-color: currentColor;
+  background: rgb(var(--route-tone) / 0.08);
+}
+
+.node-route-lane__line {
+  height: 1px;
+  background: linear-gradient(90deg, currentColor 0 48%, transparent 48% 58%, currentColor 58% 100%);
+  opacity: 0.72;
+}
+
+.node-route-lane__chevrons {
+  filter: drop-shadow(0 0 3px rgb(var(--route-tone) / 0.32));
+}
+
+.node-route-badge {
+  --grade-tone: 100 116 139;
+  border-color: rgb(var(--grade-tone) / 0.28);
+  background: linear-gradient(180deg, rgb(var(--grade-tone) / 0.13), rgb(var(--grade-tone) / 0.055));
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.07);
+}
+
+.node-route-badge[data-grade='精品线路'] {
+  --grade-tone: 16 185 129;
+}
+
+.node-route-badge[data-grade='优质线路'] {
+  --grade-tone: 14 165 233;
+}
+
+.node-route-badge[data-grade='普通线路'] {
+  --grade-tone: 245 158 11;
+}
+
+.node-route-badge__grade {
+  color: rgb(var(--grade-tone));
+}
+
+.node-route-row--untrusted {
+  --route-tone: 100 116 139 !important;
+}
+
+.node-route-row--untrusted .node-route-badge {
+  --grade-tone: 100 116 139 !important;
+}
+</style>
