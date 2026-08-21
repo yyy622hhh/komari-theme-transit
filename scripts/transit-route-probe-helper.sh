@@ -8,7 +8,7 @@
 
 set -uo pipefail
 
-VERSION="1.1.4"
+VERSION="1.2.0"
 DEFAULT_CONFIG="/etc/transit-route-probe.conf"
 INSTALL_DIR="/usr/local/libexec/transit-route-probe"
 SERVICE_NAME="transit-route-probe"
