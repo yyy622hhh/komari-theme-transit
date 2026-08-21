@@ -17,6 +17,11 @@ Protocol summary:
 4. A one-time leased job ID binds the result to the authenticated node.
 5. The theme validates and merges the returned `transit-route:` tag.
 
+An authenticated admin can also read `GET /roster?clients=` to see which
+node UUIDs have a helper actively polling (`helper_seen_at`). This is
+read-only — a poll call updates that timestamp regardless of whether a job
+exists, so the roster never queues a job or triggers a probe on its own.
+
 Package the three plugin files at the ZIP root and install the ZIP on Komari's
 Plugins page. Komari `>=1.4.0` is required because the relay relies on plugin
 route identity context for both admin sessions and Agent tokens.

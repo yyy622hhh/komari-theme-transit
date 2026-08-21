@@ -2943,6 +2943,84 @@ test('route probe stays hidden for logged-out visitors', async ({ page }) => {
   expect(readRouteProbeExecCalls()).toHaveLength(0)
 })
 
+test('route probe setup wizard checks the environment without probing and enables detection', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: async (value: string) => {
+          ;(window as typeof window & { __copiedInstallCommand?: string }).__copiedInstallCommand = value
+        },
+      },
+    })
+  })
+  await installKomariFixture(page, {
+    authenticated: true,
+    routeProbeCompanion: true,
+    routeProbeMissingHelperUuids: ['00000000-0000-4000-8000-000000000002'],
+  })
+  await openStablePage(page, '/')
+
+  await expect(page.getByRole('button', { name: /检测回程/ })).toHaveCount(0)
+  const openButton = page.getByRole('button', { name: '配置回程检测' })
+  await expect(openButton).toBeVisible()
+  await openButton.click()
+
+  const dialog = page.getByRole('dialog')
+  await expect(dialog).toContainText('已安装 · v1.1.4-visual')
+  // 12 台默认虚构节点里有 1 台离线（伦敦-离线归档），离线节点不计入候选，
+  // 所以在线助手数是 12 - 1（离线）- 1（缺助手）= 10。
+  await expect(dialog).toContainText('10 台在线')
+  await expect(dialog).toContainText('还有 1 台境外节点未安装助手')
+
+  // 环境检查阶段只读了花名册，不应该触发任何一次真实的探测入队。
+  expect(readRouteProbeCompanionCalls()).toHaveLength(0)
+
+  // 安装命令所有节点共用同一段，不含 token——token 单独复制，运行到交互式
+  // 提示时再粘贴，避免和命令一起进 shell 历史。
+  await dialog.getByRole('button', { name: '复制安装命令' }).click()
+  const copiedCommand = await page.evaluate(() => (window as typeof window & { __copiedInstallCommand?: string }).__copiedInstallCommand ?? '')
+  expect(copiedCommand).toContain(`releases/download/v${THEME_VERSION}/transit-route-probe-helper.sh`)
+  expect(copiedCommand).toContain(`releases/download/v${THEME_VERSION}/collect-return-route.sh`)
+  expect(copiedCommand).not.toContain('--token')
+  expect(copiedCommand).not.toContain('agent-token')
+
+  await dialog.getByRole('button', { name: '香港边缘节点-超长名称布局测试' }).click()
+  const copiedToken = await page.evaluate(() => (window as typeof window & { __copiedInstallCommand?: string }).__copiedInstallCommand ?? '')
+  expect(copiedToken).toBe('agent-token-1')
+
+  await dialog.getByRole('button', { name: '继续安装' }).click()
+  await expect(dialog).toContainText('10 台境外节点助手在线')
+  await dialog.getByRole('button', { name: '启用并开始首次检测' }).click()
+
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: /检测回程|重新检测回程/ })).toBeVisible()
+  expect(readRouteProbeCompanionCalls()).toHaveLength(0)
+})
+
+test('route probe setup wizard does not show a false all-clear helper row when the roster fetch fails', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, {
+    authenticated: true,
+    routeProbeCompanion: true,
+    routeProbeRosterFails: true,
+  })
+  await openStablePage(page, '/')
+
+  await page.getByRole('button', { name: '配置回程检测' }).click()
+  const dialog = page.getByRole('dialog')
+  await expect(dialog).toContainText('已安装 · v1.1.4-visual')
+  await expect(dialog.getByText('internal error')).toBeVisible()
+
+  // 插件确认已装，但花名册没查成功——不该显示“节点助手”行或任何“N 台在线”，
+  // 那会把一次失败的检查伪装成“0 台助手在线”的确定结果。
+  await expect(dialog.getByText('节点助手', { exact: true })).toHaveCount(0)
+  await expect(dialog.getByText(/台在线/)).toHaveCount(0)
+
+  await expect(dialog.getByRole('button', { name: '继续安装' })).toBeDisabled()
+})
+
 test('detail shows classified return routes and hides the raw route tag', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 720 })
   await installKomariFixture(page, { returnRouteTag: 'fresh' })

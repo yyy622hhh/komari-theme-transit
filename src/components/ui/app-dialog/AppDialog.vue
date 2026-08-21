@@ -15,6 +15,8 @@ defineProps<{
   title: string
   description?: string
   contentClass?: string
+  /** 可选：标题左侧的图标方块，不传就还是纯文字标题。 */
+  icon?: string
 }>()
 
 const emit = defineEmits<{
@@ -31,6 +33,9 @@ const emit = defineEmits<{
         :class="contentClass"
       >
         <div class="flex items-start gap-3 border-b border-border/60 px-4 py-3 sm:px-5">
+          <div v-if="icon" class="flex size-9 shrink-0 items-center justify-center rounded-lg border border-border/60 bg-background/60">
+            <Icon :icon="icon" width="18" height="18" />
+          </div>
           <div class="min-w-0 flex-1">
             <DialogTitle class="truncate text-base font-semibold">
               {{ title }}

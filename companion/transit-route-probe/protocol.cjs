@@ -16,15 +16,18 @@ const JOB_TTL_MS = 10 * 60 * 1000
 const JOB_LEASE_MS = 180 * 1000
 const BATCH_TTL_MS = 20 * 60 * 1000
 const MAX_CLIENTS = 20
+// 花名册只读取已经上报过的 lastSeenByClient，不创建任何任务，所以可以覆盖比一次
+// 探测批次大得多的机群规模。
+const ROSTER_MAX_CLIENTS = 200
 
 function assertCity(city) {
   if (!VALID_CITIES.has(city))
     throw new TypeError('unsupported city')
 }
 
-function normalizeClients(clients) {
-  if (!Array.isArray(clients) || clients.length === 0 || clients.length > MAX_CLIENTS)
-    throw new TypeError(`clients must contain 1-${MAX_CLIENTS} entries`)
+function normalizeClients(clients, max = MAX_CLIENTS) {
+  if (!Array.isArray(clients) || clients.length === 0 || clients.length > max)
+    throw new TypeError(`clients must contain 1-${max} entries`)
 
   const unique = []
   const seen = new Set()
@@ -182,9 +185,29 @@ class RouteProbeCoordinator {
           tag: job.tag,
           error: job.error,
           attempts: job.attempts,
-          helper_seen_at: this.lastSeenByClient.get(job.client) || null,
+          helper_seen_at: this.lastSeenByClient.get(job.client) ?? null,
         }
       }),
+    }
+  }
+
+  /**
+   * 花名册：只读 `lastSeenByClient`，不创建、不触碰任何任务。
+   *
+   * 助手每 15 秒轮询一次 `/poll`，不论当时有没有任务都会先落一次 lastSeenByClient
+   * （见 `poll()`），所以“助手是否在线”本就是已有数据——之前只能通过 `enqueue` 再
+   * `status` 间接推断，而 `enqueue` 会真的建任务、被在线助手立刻执行一次探测。
+   * 加这个只读方法是为了让设置向导能在“环境检查”阶段判断助手在线情况，同时不
+   * 触发任何一次 traceroute。
+   */
+  roster(clients) {
+    this.cleanup()
+    const normalizedClients = normalizeClients(clients, ROSTER_MAX_CLIENTS)
+    return {
+      clients: normalizedClients.map(client => ({
+        client,
+        helper_seen_at: this.lastSeenByClient.get(client) ?? null,
+      })),
     }
   }
 
@@ -230,6 +253,7 @@ module.exports = {
   JOB_LEASE_MS,
   JOB_TTL_MS,
   MAX_CLIENTS,
+  ROSTER_MAX_CLIENTS,
   RouteProbeCoordinator,
   normalizeClients,
   validateRouteTag,

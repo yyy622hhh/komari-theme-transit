@@ -22,6 +22,13 @@ describe('采集节点的挑选（频率控制）', () => {
     expect(selectRouteProbeCandidates(nodes, NOW)).toEqual([])
   })
 
+  test('force 跳过新鲜度检查，但仍然排除离线和中国大陆节点', () => {
+    const fresh = [node({ tags: tagAt(2 * DAY) })]
+    expect(selectRouteProbeCandidates(fresh, NOW, new Set(), true).map(c => c.uuid)).toEqual(['u1'])
+    expect(selectRouteProbeCandidates([node({ online: false, tags: tagAt(2 * DAY) })], NOW, new Set(), true)).toEqual([])
+    expect(selectRouteProbeCandidates([node({ region: 'CN', tags: tagAt(2 * DAY) })], NOW, new Set(), true)).toEqual([])
+  })
+
   test('标签超过 7 天才重新采集', () => {
     expect(selectRouteProbeCandidates([node({ tags: tagAt(6 * DAY) })], NOW)).toEqual([])
     expect(selectRouteProbeCandidates([node({ tags: tagAt(8 * DAY) })], NOW).map(c => c.uuid)).toEqual(['u1'])

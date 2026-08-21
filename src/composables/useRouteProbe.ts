@@ -18,7 +18,9 @@ import { logAppWarning } from '@/utils/safeError'
  *
  * 1. **显式启用**：默认不加载候选、不显示入口，也不向节点下发任务。
  * 2. **挑节点**：只有「非中国大陆、在线，且标签缺失或已过期（7 天）」的节点进
- *    候选。回程几周才变一次，这一条就把频率压到每台约每周一次。
+ *    候选。回程几周才变一次，这一条就把频率压到每台约每周一次。运营者手动点
+ *    按钮时可以传 `force` 跳过新鲜度这一条（见 `probeNow`），但自动轮询永远
+ *    不会这样做。
  * 3. **同源浏览器节流**：同一站点的页面和标签页共享 30 分钟冷却时间。
  * 4. **单飞**：正在跑的时候不再开第二轮。
  * 5. **后台标签页不跑**：见 `pageIsVisible`。
@@ -108,11 +110,15 @@ export function useRouteProbe(nodes: MaybeRefOrGetter<NodeData[]>) {
   /**
    * 当前有多少台节点该测。按钮显示这个数字，所以它要算上「自动跳过」的那些——
    * 那些节点确实还没测出结果，运营者修好环境后正是要靠这个按钮重试。
+   *
+   * `force: true` 用来算「如果运营者要求强制重测，会有多少台」，与自动节流的
+   * 候选数是两个独立的数字：全部节点都新鲜时前者为 0，后者仍然等于在线且非
+   * 中国大陆的节点数，按钮据此决定是显示「检测回程 N」还是「重新检测回程 N」。
    */
-  function pendingCount(): number {
+  function pendingCount(force = false): number {
     if (!appStore.routeProbeEnabled)
       return 0
-    return selectRouteProbeCandidates(toValue(nodes)).length
+    return selectRouteProbeCandidates(toValue(nodes), Date.now(), new Set(), force).length
   }
 
   /**
@@ -129,7 +135,7 @@ export function useRouteProbe(nodes: MaybeRefOrGetter<NodeData[]>) {
     return mapping[appStore.carrierPingRegion] ?? 'beijing'
   }
 
-  async function run(trigger: 'manual' | 'auto'): Promise<void> {
+  async function run(trigger: 'manual' | 'auto', force = false): Promise<void> {
     if (disposed || probing.value)
       return
     // 只有已登录管理员能执行远程命令；未登录时连候选都不算。
@@ -152,7 +158,9 @@ export function useRouteProbe(nodes: MaybeRefOrGetter<NodeData[]>) {
     if (trigger === 'manual')
       autoSkipped.clear()
     // 跳过清单要交给挑选函数在截断台数之前用掉，不能等拿到结果再过滤。
-    const candidates = selectRouteProbeCandidates(toValue(nodes), Date.now(), autoSkipped)
+    // force 只在手动触发时才可能为 true——自动轮询永远不该跳过新鲜度检查，
+    // 否则每 20 秒就会在所有节点上重新执行一遍命令。
+    const candidates = selectRouteProbeCandidates(toValue(nodes), Date.now(), autoSkipped, trigger === 'manual' && force)
     if (!candidates.length)
       return
 
@@ -191,9 +199,12 @@ export function useRouteProbe(nodes: MaybeRefOrGetter<NodeData[]>) {
     }
   }
 
-  /** 手动触发：忽略节流，但仍然只测该测的那些节点。 */
-  function probeNow(): Promise<void> {
-    return run('manual')
+  /**
+   * 手动触发：忽略节流。默认仍然只测该测的那些节点；`force: true` 时连新鲜度
+   * 也一并跳过，用于运营者明确要求「我现在就要重新测一遍」的场景。
+   */
+  function probeNow(force = false): Promise<void> {
+    return run('manual', force)
   }
 
   if (typeof window !== 'undefined') {

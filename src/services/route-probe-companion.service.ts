@@ -72,7 +72,16 @@ async function readPayload(response: Response): Promise<unknown> {
   }
 }
 
-async function requestBatch(url: string, init: RequestInit): Promise<CompanionProbeBatch> {
+/**
+ * 三个伴生插件接口共用的请求外壳：404 统一映射成「未安装」，非 2xx 统一映射
+ * 成携带服务端消息的错误。`parse` 只管把已经确认是 2xx 的 payload 转成具体
+ * 形状，形状不对就自己抛 `RouteProbeCompanionError`。
+ */
+async function requestCompanion<T>(
+  url: string,
+  init: RequestInit,
+  parse: (payload: unknown) => T,
+): Promise<T> {
   const response = await fetch(url, {
     ...init,
     credentials: 'include',
@@ -91,7 +100,11 @@ async function requestBatch(url: string, init: RequestInit): Promise<CompanionPr
       : `伴生插件请求失败（HTTP ${response.status}）`
     throw new RouteProbeCompanionError(response.status, message)
   }
-  return parseBatch(payload)
+  return parse(payload)
+}
+
+function requestBatch(url: string, init: RequestInit): Promise<CompanionProbeBatch> {
+  return requestCompanion(url, init, parseBatch)
 }
 
 export function enqueueCompanionRouteProbe(
@@ -115,5 +128,56 @@ export function getCompanionRouteProbeBatch(
   return requestBatch(`${COMPANION_ROOT}/status?${query}`, {
     method: 'GET',
     signal,
+  })
+}
+
+export interface CompanionHealth {
+  ok: boolean
+  protocol: number
+  version: string | null
+}
+
+function isCompanionHealth(value: unknown): value is CompanionHealth {
+  return isRecord(value) && value.ok === true && typeof value.protocol === 'number'
+}
+
+/**
+ * 设置向导用来判断伴生插件是否已安装。404 说明插件未安装或未启用，交由调用方
+ * 捕获 `RouteProbeCompanionUnavailableError` 处理；这里不吞掉，语义和其余请求
+ * 保持一致。
+ */
+export function getCompanionRouteProbeHealth(signal?: AbortSignal): Promise<CompanionHealth> {
+  return requestCompanion(`${COMPANION_ROOT}/health`, { method: 'GET', signal }, (payload) => {
+    if (!isCompanionHealth(payload))
+      throw new RouteProbeCompanionError(502, '伴生插件返回了无效的健康检查数据')
+    return { ok: payload.ok, protocol: payload.protocol, version: typeof payload.version === 'string' ? payload.version : null }
+  })
+}
+
+export interface CompanionRosterEntry {
+  client: string
+  helper_seen_at: number | null
+}
+
+function isRosterEntry(value: unknown): value is CompanionRosterEntry {
+  return isRecord(value) && typeof value.client === 'string'
+    && (value.helper_seen_at === null || typeof value.helper_seen_at === 'number')
+}
+
+/**
+ * 只读花名册：设置向导的“环境检查”用它判断哪些节点已经有助手在轮询。不创建
+ * 任何任务，因此不会让在线助手执行一次真实探测。
+ */
+export function getCompanionRouteProbeRoster(
+  clients: readonly string[],
+  signal?: AbortSignal,
+): Promise<CompanionRosterEntry[]> {
+  if (!clients.length)
+    return Promise.resolve([])
+  const query = new URLSearchParams({ clients: clients.join(',') })
+  return requestCompanion(`${COMPANION_ROOT}/roster?${query}`, { method: 'GET', signal }, (payload) => {
+    if (!isRecord(payload) || !Array.isArray(payload.clients) || !payload.clients.every(isRosterEntry))
+      throw new RouteProbeCompanionError(502, '伴生插件返回了无效的花名册数据')
+    return payload.clients
   })
 }

@@ -14,6 +14,7 @@ const {
     poll: (client: string) => { id: string, city: string } | null
     status: (batchId: string) => CompanionBatch
     submit: (client: string, result: Record<string, string>) => { status: string }
+    roster: (clients: string[]) => { clients: Array<{ client: string, helper_seen_at: number | null }> }
   }
   normalizeClients: (clients: string[]) => string[]
   validateRouteTag: (tag: string, now?: number) => boolean
@@ -97,5 +98,29 @@ describe('Transit Route Probe companion protocol', () => {
     expect(value.status(first.batch_id).jobs[0].status).toBe('completed')
     expect(value.status(second.batch_id).jobs[0].status).toBe('completed')
     expect(value.status(second.batch_id).jobs[0].attempts).toBe(1)
+  })
+
+  test('花名册只读 lastSeenByClient，不创建任务、不影响候选任务的领取', () => {
+    const { value, advance } = coordinator()
+    expect(value.roster([CLIENT_A, CLIENT_B])).toEqual({
+      clients: [
+        { client: CLIENT_A, helper_seen_at: null },
+        { client: CLIENT_B, helper_seen_at: null },
+      ],
+    })
+
+    // 助手在没有任务时轮询也会落 lastSeenByClient，花名册应该能看到这次心跳。
+    expect(value.poll(CLIENT_A)).toBeNull()
+    advance(1000)
+    expect(value.roster([CLIENT_A, CLIENT_B])).toEqual({
+      clients: [
+        { client: CLIENT_A, helper_seen_at: NOW },
+        { client: CLIENT_B, helper_seen_at: null },
+      ],
+    })
+
+    // 查过花名册之后再入队，任务应该照常存在——花名册不能悄悄吃掉候选。
+    const batch = value.enqueue([CLIENT_A], 'beijing')
+    expect(value.status(batch.batch_id).jobs[0].status).toBe('queued')
   })
 })

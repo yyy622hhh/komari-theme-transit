@@ -63,6 +63,7 @@ defineOptions({
     NodeTopologyPanel: defineAsyncComponent(() => import('@/components/NodeTopologyPanel.vue')),
     PingMonitorDialog: defineAsyncComponent(() => import('@/components/PingMonitorDialog.vue')),
     ProviderValuePanel: defineAsyncComponent(() => import('@/components/ProviderValuePanel.vue')),
+    RouteProbeSetupWizard: defineAsyncComponent(() => import('@/components/RouteProbeSetupWizard.vue')),
     ServerListPanel: defineAsyncComponent(() => import('@/components/ServerListPanel.vue')),
     SnapshotExportPanel: defineAsyncComponent(() => import('@/components/SnapshotExportPanel.vue')),
     Tabs,
@@ -104,6 +105,7 @@ const activeHomeTool = ref<HomeToolKey>('nodes')
 const activeQuickControl = ref<HomeQuickControlKey | null>(null)
 const pingDialogNode = ref<NodeData | null>(null)
 const nodeControlDialogNode = ref<NodeData | null>(null)
+const routeProbeSetupOpen = ref(false)
 const homeOrderContainer = ref<HTMLElement | null>(null)
 const homeOrderViewBeforeEdit = ref<{
   group: string
@@ -573,14 +575,37 @@ const nodeCardGridClass = computed(() => {
               class="search flex min-w-0 flex-wrap gap-2 items-center justify-end pointer-events-auto max-sm:justify-start xl:ml-auto"
             >
               <!--
-                三网回程检测入口。总开关关闭时不实例化组件；开启后仍通过懒加载把
-                判定与采集的依赖链移出首屏 chunk（见组件内注释）。未登录时组件自身
-                不渲染。
+                三网回程检测入口。总开关关闭时只显示安静的“配置回程检测”入口，打开
+                设置向导；不提前探测、不提前报错。总开关开启后换成实际检测按钮，同时
+                在旁边留一个小图标重新打开向导，方便后续给新加的节点补装助手。开启
+                前后都通过懒加载把依赖链移出首屏 chunk，未登录时两者都不渲染。
               -->
               <NodeRouteProbeButton
                 v-if="appStore.routeProbeEnabled"
                 :nodes="nodesStore.visibleNodes"
               />
+              <UiButton
+                v-if="appStore.privateFeaturesAllowed && !appStore.routeProbeEnabled"
+                variant="ghost"
+                size="sm"
+                class="h-8 shrink-0 gap-1 rounded-md bg-background/50 px-2 text-xs backdrop-blur-xs"
+                title="安装伴生插件和节点助手后，一键启用三网回程检测"
+                @click="routeProbeSetupOpen = true"
+              >
+                <Icon icon="tabler:route" :width="14" :height="14" />
+                <span>配置回程检测</span>
+              </UiButton>
+              <UiButton
+                v-else-if="appStore.privateFeaturesAllowed"
+                variant="outline"
+                size="icon"
+                class="size-8 shrink-0 border-none bg-background/50 backdrop-blur-xs shadow-none hover:bg-background/60"
+                aria-label="重新检查回程检测环境"
+                title="重新检查伴生插件和节点助手，给新加的节点补装"
+                @click="routeProbeSetupOpen = true"
+              >
+                <Icon icon="tabler:settings" :width="14" :height="14" />
+              </UiButton>
               <div
                 v-if="homeTools.length && appStore.homeAdvancedToolsVisible"
                 class="flex h-8 items-center gap-1 rounded-md bg-background/50 p-0.5 backdrop-blur-xs"
@@ -817,6 +842,12 @@ const nodeCardGridClass = computed(() => {
       :open="Boolean(nodeControlDialogNode)"
       :node="nodeControlDialogNode"
       @update:open="!$event && (nodeControlDialogNode = null)"
+    />
+    <RouteProbeSetupWizard
+      v-if="routeProbeSetupOpen"
+      :open="routeProbeSetupOpen"
+      :nodes="nodesStore.visibleNodes"
+      @update:open="routeProbeSetupOpen = $event"
     />
   </div>
 </template>

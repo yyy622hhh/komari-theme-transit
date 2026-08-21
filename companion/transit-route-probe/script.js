@@ -7,6 +7,11 @@ const server = require('server')
 const { RouteProbeCoordinator } = require('./protocol.cjs')
 
 const API_ROOT = '/api/transit-route-probe/v1'
+// Kept in sync with komari-plugin.json's "version" by hand (same as helper.sh's
+// own VERSION constant) rather than `require('./komari-plugin.json')` — Komari's
+// goja module loader has never been exercised against a JSON require anywhere
+// in this plugin, and a load-time failure there would take down every route.
+const PLUGIN_VERSION = '1.2.0'
 const coordinator = new RouteProbeCoordinator({
   // Hex is supported by every Buffer implementation bundled with Komari's
   // goja runtime; unlike base64url it also needs no punctuation filtering.
@@ -91,7 +96,7 @@ function load() {
   server.route('GET', `${API_ROOT}/health`, (req, res) => {
     if (!isAdmin(req) || !hasBrowserGuard(req))
       return json(res, 403, { error: 'admin authentication required' })
-    return json(res, 200, { ok: true, protocol: 1 })
+    return json(res, 200, { ok: true, protocol: 1, version: PLUGIN_VERSION })
   })
 
   server.route('POST', `${API_ROOT}/enqueue`, (req, res) => {
@@ -113,6 +118,20 @@ function load() {
       return json(res, 403, { error: 'admin authentication required' })
     try {
       return json(res, 200, coordinator.status(req.query.batch_id))
+    }
+    catch (error) {
+      return handleError(res, error)
+    }
+  })
+
+  // 只读花名册：给设置向导的“环境检查”用，判断哪些节点已经有助手在轮询，
+  // 不创建、不触碰任何任务，因此不会让在线助手执行一次探测。
+  server.route('GET', `${API_ROOT}/roster`, (req, res) => {
+    if (!isAdmin(req) || !hasBrowserGuard(req))
+      return json(res, 403, { error: 'admin authentication required' })
+    try {
+      const clients = String(req.query.clients || '').split(',').map(value => value.trim()).filter(Boolean)
+      return json(res, 200, coordinator.roster(clients))
     }
     catch (error) {
       return handleError(res, error)

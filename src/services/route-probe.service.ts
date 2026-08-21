@@ -52,10 +52,27 @@ export interface RouteProbeSummary {
 type ProbeNode = Pick<NodeInfo, 'uuid' | 'name' | 'region' | 'tags'> & { online?: boolean }
 
 /**
+ * 节点是否满足回程检测的「在线、可探测」前提：有 uuid 且不是明确离线。
+ *
+ * 地区豁免（大陆）故意不放在这里判断——设置向导要把大陆节点单独计数展示，
+ * 而不是和「离线/没 uuid」一样直接丢弃，所以留给调用方单独判断。这个前提本身
+ * 被 `selectRouteProbeCandidates`（真正下发探测）和向导的环境检查共用，抽出来
+ * 是为了不让两边的口径各自漂移。
+ */
+export function isRouteProbeOnlineNode<T extends { uuid?: string, online?: boolean }>(
+  node: T,
+): node is T & { uuid: string } {
+  return Boolean(node.uuid) && node.online !== false
+}
+
+/**
  * 挑出该采集的节点：在线，且没有回程标签或标签已经过期。
  *
- * 这里就是「频率控制」的全部——没有单独的计时器，也没有给运营者的间隔设置。
- * 标签自带采集时间，过期阈值复用展示层那一套，判断和显示永远一致。
+ * 这是自动和默认手动路径的「频率控制」全部内容——没有单独的计时器，也没有给
+ * 运营者的间隔设置。标签自带采集时间，过期阈值复用展示层那一套，判断和显示
+ * 永远一致。`force` 只供运营者手动点按钮时使用：跳过新鲜度这一条，但在线、
+ * 非中国大陆、台数上限这几条硬约束仍然生效——这些约束和「多久测一次」无关，
+ * 不该被绕过。
  */
 export function selectRouteProbeCandidates(
   nodes: readonly ProbeNode[],
@@ -66,19 +83,22 @@ export function selectRouteProbeCandidates(
    * 名额，后面的节点一次也轮不到。
    */
   skip: ReadonlySet<string> = new Set(),
+  force = false,
 ): RouteProbeCandidate[] {
   const candidates: RouteProbeCandidate[] = []
   for (const node of nodes) {
     // 三网“回程线路”描述的是境外节点回到中国大陆时走哪条国际骨干。大陆节点到
     // 国内目标通常只经过云厂商内网和本地接入网，既没有可判定的国际骨干 ASN，
     // 也没有这项指标的实际含义；把它们送去采集只会稳定地产生空结果与失败提示。
-    if (node.online === false || !node.uuid || skip.has(node.uuid) || getRegionCode(node.region) === 'CN')
+    if (!isRouteProbeOnlineNode(node) || skip.has(node.uuid) || getRegionCode(node.region) === 'CN')
       continue
-    const report = parseNodeRouteTag(node.tags, now)
-    // 已有标签、还没过期、且知道是什么时候采的，才算不用重跑。采集时间未知时
-    // 无从判断新鲜度，按「该重测」处理，否则这台机器会被永久钉在轮换之外。
-    if (report && report.measuredAt !== null && report.freshness !== 'stale')
-      continue
+    if (!force) {
+      const report = parseNodeRouteTag(node.tags, now)
+      // 已有标签、还没过期、且知道是什么时候采的，才算不用重跑。采集时间未知时
+      // 无从判断新鲜度，按「该重测」处理，否则这台机器会被永久钉在轮换之外。
+      if (report && report.measuredAt !== null && report.freshness !== 'stale')
+        continue
+    }
     candidates.push({ uuid: node.uuid, name: node.name ?? node.uuid })
     if (candidates.length >= ROUTE_PROBE_MAX_NODES)
       break

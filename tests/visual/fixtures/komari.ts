@@ -102,6 +102,10 @@ export interface VisualFixtureOptions {
   routeProbeExec?: boolean
   /** 模拟优先的固定能力节点助手伴生插件路径。 */
   routeProbeCompanion?: boolean
+  /** 设置向导的花名册模拟：这些 UUID 视为「从未连接」，用来测试缺助手的提示和安装命令。 */
+  routeProbeMissingHelperUuids?: string[]
+  /** 模拟花名册接口在插件已确认安装之后仍然失败，用来测试向导不会显示假的“0 台在线”。 */
+  routeProbeRosterFails?: boolean
   /** 回程采集是显式启用的可选能力；默认关闭。 */
   routeProbeEnabled?: boolean
   /** 复现旧版默认开启键，验证升级后不会绕过新的显式同意。 */
@@ -145,6 +149,7 @@ function buildClients(freePriceNode = false, expiryThresholds = false, nodeCount
     const uuid = uuidFor(index)
     return [uuid, {
       uuid,
+      token: `agent-token-${index}`,
       name: index < REGION_FIXTURES.length ? fixture.name : `${fixture.name}-${index + 1}`,
       cpu_name: fixture.cpu,
       virtualization: index % 3 === 0 ? 'docker' : 'kvm',
@@ -1013,6 +1018,31 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
     const request = route.request()
     const url = new URL(request.url())
     const guard = request.headers()['x-transit-route-probe']
+    if (url.pathname.endsWith('/health')) {
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ ok: true, protocol: 1, version: '1.1.4-visual' }),
+      })
+      return
+    }
+    if (url.pathname.endsWith('/roster')) {
+      if (options.routeProbeRosterFails) {
+        await route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"internal error"}' })
+        return
+      }
+      const missing = new Set(options.routeProbeMissingHelperUuids ?? [])
+      const clients = (url.searchParams.get('clients') ?? '').split(',').filter(Boolean)
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({
+          clients: clients.map(client => ({
+            client,
+            helper_seen_at: missing.has(client) ? null : Date.parse(FIXED_NOW),
+          })),
+        }),
+      })
+      return
+    }
     if (url.pathname.endsWith('/enqueue')) {
       const body = request.postDataJSON() as { clients?: unknown, city?: unknown }
       const clients = Array.isArray(body.clients) ? body.clients.map(String) : []

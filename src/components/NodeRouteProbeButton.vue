@@ -21,13 +21,20 @@ const props = defineProps<{
 const appStore = useAppStore()
 const routeProbe = useRouteProbe(() => props.nodes)
 
-// 待测台数跟着节点列表走：写回标签后节点对象变化，这里自然掉到 0，按钮随之消失。
+// 待测台数跟着节点列表走：写回标签后节点对象变化，这里自然掉到 0。
 const pending = computed(() => props.nodes.length ? routeProbe.pendingCount() : 0)
+// 全部节点都新鲜时 pending 为 0，但运营者仍然可能想手动强制重测一遍——按钮
+// 不该在这种时候消失，只是从「测该测的」切到「重测全部」。
+const forceEligible = computed(() => props.nodes.length ? routeProbe.pendingCount(true) : 0)
 const visible = computed(() => appStore.routeProbeEnabled
   && appStore.privateFeaturesAllowed
-  && (routeProbe.probing.value || pending.value > 0))
+  && (routeProbe.probing.value || pending.value > 0 || forceEligible.value > 0))
 const summaryHasFailure = computed(() => Boolean(routeProbe.lastError.value)
   || routeProbe.lastOutcomes.value.some(outcome => outcome.status !== 'updated'))
+
+function handleClick(): void {
+  void routeProbe.probeNow(pending.value === 0)
+}
 </script>
 
 <template>
@@ -37,8 +44,10 @@ const summaryHasFailure = computed(() => Boolean(routeProbe.lastError.value)
       size="sm"
       class="h-8 shrink-0 gap-1 rounded-md bg-background/50 px-2 text-xs backdrop-blur-xs"
       :disabled="routeProbe.probing.value"
-      :title="routeProbe.lastSummary.value || '对还没测过或结果已过期的在线节点执行一次 traceroute，判定三网回程线路'"
-      @click="() => routeProbe.probeNow()"
+      :title="routeProbe.lastSummary.value || (pending > 0
+        ? '对还没测过或结果已过期的在线节点执行一次 traceroute，判定三网回程线路'
+        : '所有节点的回程结果都还新鲜，点击将强制重新测一遍，忽略 7 天新鲜度')"
+      @click="handleClick"
     >
       <Icon
         :icon="routeProbe.probing.value ? 'tabler:loader-2' : 'tabler:route'"
@@ -46,7 +55,9 @@ const summaryHasFailure = computed(() => Boolean(routeProbe.lastError.value)
         :width="14"
         :height="14"
       />
-      <span>{{ routeProbe.probing.value ? '检测回程中' : `检测回程 ${pending}` }}</span>
+      <span>{{ routeProbe.probing.value
+        ? '检测回程中'
+        : pending > 0 ? `检测回程 ${pending}` : `重新检测回程 ${forceEligible}` }}</span>
     </UiButton>
 
     <span
