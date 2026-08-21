@@ -3,7 +3,7 @@
   "short": "transit-route-probe",
   "description": "Fixed-purpose return-route job relay for the Transit theme",
   "author": "PandaKiko",
-  "version": "0.1.0",
+  "version": "1.1.2",
   "komari": ">=1.4.0",
   "entry": "script.js",
   "permissions": {

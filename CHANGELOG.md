@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [1.1.2] - 2026-08-21
+
 ### Added
 
 - 新增 Transit Route Probe 固定能力节点助手和 Komari 伴生插件：节点通过现有 Agent token 主动轮询，只能执行本地内置的北京/上海/广州三网 traceroute，不开放入站端口，不接受服务端命令、IP 或参数，也无需开启 Komari 远程控制。
