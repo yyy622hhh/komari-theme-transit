@@ -32,6 +32,7 @@
     "test:functional": "VITE_COMPONENT_BOUNDARY_TEST=true bun run build-only && playwright test --config playwright.functional.config.ts",
     "test:performance": "bun run build-only && playwright test --config playwright.performance.config.ts",
     "test:accessibility": "bun run build-only && playwright test tests/visual/accessibility.spec.ts",
+    "docs:screenshots": "bun run build-only && UPDATE_DOCS_SCREENSHOT=1 playwright test tests/visual/visual.spec.ts --grep 'Transit documentation screenshots'",
     "test:visual:update": "bun run build-only && playwright test --update-snapshots",
     "test:visual:baseline": "bun run build-only && playwright test --update-snapshots=all",
     "lint": "eslint . --fix --cache",

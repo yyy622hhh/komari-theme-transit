@@ -1761,13 +1761,54 @@ test('Transit automatically rematches Ping tasks when its followed route node ch
   await expect(page.getByText('线路已保存。')).toBeVisible()
 })
 
-test('Transit topology manager screenshot for docs', async ({ page }) => {
-  test.skip(!process.env.UPDATE_DOCS_SCREENSHOT, 'Set UPDATE_DOCS_SCREENSHOT=1 to refresh docs/screenshots/transit-topology-manager.png')
-  await page.setViewportSize({ width: 1440, height: 900 })
-  await installKomariFixture(page, { opsDashboard: true, dark: true, authenticated: true })
-  await openStablePage(page)
-  const dialog = await openTopologyManager(page)
-  await dialog.screenshot({ path: 'docs/screenshots/transit-topology-manager.png' })
+test('Transit documentation screenshots', async ({ browser }) => {
+  test.skip(!process.env.UPDATE_DOCS_SCREENSHOT, 'Set UPDATE_DOCS_SCREENSHOT=1 to refresh documentation screenshots')
+
+  async function capture(
+    viewport: { width: number, height: number },
+    options: Parameters<typeof installKomariFixture>[1],
+    screenshot: (page: Page) => Promise<Buffer>,
+  ): Promise<void> {
+    const context = await browser.newContext({
+      colorScheme: options?.dark ? 'dark' : 'light',
+      locale: 'zh-CN',
+      timezoneId: 'Asia/Shanghai',
+      viewport,
+    })
+    const page = await context.newPage()
+    try {
+      await installKomariFixture(page, options)
+      await openStablePage(page)
+      await screenshot(page)
+    }
+    finally {
+      await context.close()
+    }
+  }
+
+  await capture(
+    { width: 1440, height: 900 },
+    { opsDashboard: true, dark: true },
+    page => page.screenshot({ path: 'docs/screenshots/transit-overview-dark.png' }),
+  )
+  await capture(
+    { width: 1440, height: 900 },
+    { opsDashboard: true },
+    page => page.screenshot({ path: 'docs/screenshots/transit-overview-light.png' }),
+  )
+  await capture(
+    { width: 1280, height: 720 },
+    { opsDashboard: true, dark: true },
+    page => page.screenshot({ path: 'docs/preview.png' }),
+  )
+  await capture(
+    { width: 1440, height: 900 },
+    { opsDashboard: true, dark: true, authenticated: true },
+    async (page) => {
+      const dialog = await openTopologyManager(page)
+      return dialog.screenshot({ path: 'docs/screenshots/transit-topology-manager.png' })
+    },
+  )
 })
 
 test('Transit node maintenance saves globally and updates alerts immediately', async ({ page }) => {

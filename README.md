@@ -14,7 +14,7 @@ Transit 是一个面向多节点、多线路和跨境链路监控的 Komari 社�
 
 - 当前稳定版：[v1.2.0](https://github.com/yyy622hhh/komari-theme-transit/releases/tag/v1.2.0)
 - 安装包：只从 [GitHub Releases](https://github.com/yyy622hhh/komari-theme-transit/releases) 下载 `komari-theme-Transit-build-*.zip`
-- 项目定位：社区主题，不修改 Komari 数据库、Agent、系统账户或公开 API
+- 项目定位：主题安装包本身不修改 Komari 数据库、Agent 或系统账户；可选的回程伴生组件仅在管理员明确安装并启用后，才增加受控路由或安装节点助手
 
 ![Transit 暗色总览](docs/screenshots/transit-overview-dark.png)
 
@@ -187,7 +187,7 @@ Transit 使用独立短名称 `Transit`，不会覆盖已有的 PandaOps、Glass
 - `nodes` 最多三个，第一个是入口标签（没有 `uuid`）；线路机和落地机带 `uuid`，节点在 Komari 里改名后仍能认回来。只有入口和线路机、没有落地机时，写两个节点即可。
 - `metrics` 与 `nodes` 的段一一对应：三节点两段，两节点一段。
 - 静态基线写 `fallbackLatency` / `fallbackLoss`，不写 `live`；实时绑定写 `"live": true` 加 `source`（探测来源节点名）和 `task`（Ping 任务名）。省略某个字段表示没有该值。
-- JSON 格式没有保留字符，节点名和任务名里可以出现 `|`、`;`、`@`。
+- 虽然 JSON 自身没有转义问题，但当前版本仍会双写旧格式以便降级安装；节点名称、地区和角色不能包含 `|` 或 `;`，实时指标的来源和任务名不能包含 `@`、`;` 或 `||`。停止写入旧格式后才会放宽这些限制。
 
 > **`topologyRoute` 和 `topologyMetrics` 是兼容字段，不要手工编辑。** 它们是旧的分隔符格式，主题仍会写入同一份内容，好让降级安装不会看到空拓扑；但读取时以 `topologyConfig` 优先，改了旧字段会在下次保存时被覆盖。旧字段会在确认无人回滚后的某个版本停写。
 >
@@ -230,7 +230,7 @@ Transit 使用独立短名称 `Transit`，不会覆盖已有的 PandaOps、Glass
 bun run build:route-probe
 ```
 
-插件要求 Komari `>=1.4.0`，只申请 `allowRoutes` 权限；不会申请系统 RPC、子进程执行、端口监听、HTML 注入、全盘文件或请求钩子权限。
+插件要求 Komari `>=1.4.0`，声明 `node`、`allowRoutes` 以及请求体大小、超时限制；不会申请系统 RPC、子进程执行、端口监听、HTML 注入、全盘文件或请求钩子权限。
 
 然后在每台节点下载**同一 GitHub Release** 的两个脚本并安装。安装器会交互式读取该节点现有的 Komari Agent token，输入不会进入 shell 历史；下面的 `<版本>` 应替换为正在使用的发布标签（例如 `v1.2.0`），不要长期跟随会变化的 `main`：
 
@@ -524,11 +524,11 @@ Linux 环境还可以运行 `bun run test:komari`，在隔离的真实 Komari �
 - `dist/`
 - `komari-theme-Transit-build-<short-sha>.zip`
 
-视觉回归覆盖亮暗主题、桌面/移动端、拓扑管理器、统一采样交互、无障碍扫描和节点卡等高布局。功能回归覆盖 Chromium、Firefox、WebKit 与移动 WebKit；性能回归覆盖大规模节点虚拟化和反复导航后的资源释放。像素基准由 Playwright Chromium 在 macOS 环境维护，Linux CI 负责质量、依赖安全、兼容性与发布结构门禁。更新截图基准前必须人工确认设计差异。
+视觉回归覆盖亮暗主题、桌面/移动端、拓扑管理器、统一采样交互、无障碍扫描和节点卡等高布局。功能回归覆盖 Chromium、Firefox、WebKit 与移动 WebKit；性能回归覆盖大规模节点虚拟化和反复导航后的资源释放。像素基准由 Playwright Chromium 在 macOS 环境维护，Linux CI 负责质量、依赖安全、兼容性与发布结构门禁。更新截图基准前必须人工确认设计差异。README 和主题预览图则运行 `bun run docs:screenshots` 刷新；它使用确定性 Komari 夹具直接重拍 `docs/` 图片，不会改写视觉回归基准。
 
 ## 发布物授权边界
 
-- Release 只打包本仓库可依法再分发的主题代码和资产。
+- 主题安装 ZIP 只包含本仓库可依法再分发的主题代码和资产；GitHub Release 还可能单独附带回程伴生插件和节点安装脚本，它们不会被嵌入主题 ZIP。
 - 构建检测到 `dist/admin-app/` 时会直接失败，避免误把外部管理端带入主题包。
 - 外部项目的名称、链接与截图仅用于兼容性说明或致谢，不表示其许可证自动适用于 Transit。
 - 如需加入第三方代码，贡献者必须同时提交来源、固定版本、许可证文本和必要的 NOTICE。
