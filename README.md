@@ -12,7 +12,7 @@
 
 Transit 是一个面向多节点、多线路和跨境链路监控的 Komari 社区主题。它把“入口 → 线路机 → 落地机”的链路拓扑、北京/上海/广州三网 Ping、实时资源、异常告警和资产信息放进同一套紧凑界面，并提供可视化拓扑管理器。
 
-- 当前稳定版：[v1.1.2](https://github.com/yyy622hhh/komari-theme-transit/releases/tag/v1.1.2)
+- 当前稳定版：[v1.1.3](https://github.com/yyy622hhh/komari-theme-transit/releases/tag/v1.1.3)
 - 安装包：只从 [GitHub Releases](https://github.com/yyy622hhh/komari-theme-transit/releases) 下载 `komari-theme-Transit-build-*.zip`
 - 项目定位：社区主题，不修改 Komari 数据库、Agent、系统账户或公开 API
 
@@ -232,7 +232,7 @@ bun run build:route-probe
 
 插件要求 Komari `>=1.4.0`，只申请 `allowRoutes` 权限；不会申请系统 RPC、子进程执行、端口监听、HTML 注入、全盘文件或请求钩子权限。
 
-然后在每台节点下载**同一 GitHub Release** 的两个脚本并安装。安装器会交互式读取该节点现有的 Komari Agent token，输入不会进入 shell 历史；下面的 `<版本>` 应替换为正在使用的发布标签（例如 `v1.1.2`），不要长期跟随会变化的 `main`：
+然后在每台节点下载**同一 GitHub Release** 的两个脚本并安装。安装器会交互式读取该节点现有的 Komari Agent token，输入不会进入 shell 历史；下面的 `<版本>` 应替换为正在使用的发布标签（例如 `v1.1.3`），不要长期跟随会变化的 `main`：
 
 ```bash
 curl -fsSLO https://github.com/yyy622hhh/komari-theme-transit/releases/download/<版本>/transit-route-probe-helper.sh

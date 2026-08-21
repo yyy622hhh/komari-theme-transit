@@ -3,7 +3,7 @@ import type { RouteGrade } from '@/utils/routeClassification'
 import type { NodeRouteEntry } from '@/utils/routeTag'
 import { computed } from 'vue'
 import { Badge } from '@/components/ui/badge'
-import { DataTooltip } from '@/components/ui/data-tooltip'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { useAppStore } from '@/stores/app'
 import { formatDateTime } from '@/utils/helper'
 import { ROUTE_ASN_LABELS } from '@/utils/routeClassification'
@@ -92,38 +92,47 @@ function badgeText(label: string, grade: RouteGrade): string {
 </script>
 
 <template>
-  <div v-if="report" class="flex flex-wrap items-center gap-1">
-    <DataTooltip
-      v-for="entry in report.entries"
-      :key="entry.carrier"
-      as="button"
-      type="button"
-      class="rounded-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-400/60"
-      :content="routeDetails(entry)"
-      content-class="whitespace-pre-line text-left"
-      :aria-label="routeDetails(entry)"
-      @click.stop
-    >
-      <Badge
-        as="span"
-        variant="outline"
-        class="rounded py-0 font-normal"
-        :class="[gradeClass(entry.classification.grade), compact ? '!h-auto !text-[9px] px-1 py-0.5 gap-0.5' : '!text-[11px] px-1.5']"
-      >
-        <span
-          v-if="compact"
-          class="size-1 shrink-0 rounded-full"
-          :class="untrusted ? 'bg-muted-foreground/40' : CARRIER_DOT_CLASSES[entry.carrier]"
-          :aria-label="entry.carrierLabel"
-        />
-        {{ badgeText(entry.classification.label, entry.classification.grade) }}
-        <!-- 证据不足的那几种，label 本身已经说明了情况，不再加标记。 -->
-        <span
-          v-if="entry.classification.confidence === 'mixed'"
-          class="opacity-60"
-          title="证据存在矛盾，判定不确定"
-        >?</span>
-      </Badge>
-    </DataTooltip>
-  </div>
+  <TooltipProvider v-if="report" :delay-duration="160">
+    <div class="flex flex-wrap items-center gap-1">
+      <Tooltip v-for="entry in report.entries" :key="entry.carrier">
+        <TooltipTrigger as-child>
+          <button
+            type="button"
+            class="rounded-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-400/60"
+            :aria-label="routeDetails(entry)"
+            @click.stop
+          >
+            <Badge
+              as="span"
+              variant="outline"
+              class="rounded py-0 font-normal"
+              :class="[gradeClass(entry.classification.grade), compact ? '!h-auto !text-[9px] px-1 py-0.5 gap-0.5' : '!text-[11px] px-1.5']"
+            >
+              <span
+                v-if="compact"
+                class="size-1 shrink-0 rounded-full"
+                :class="untrusted ? 'bg-muted-foreground/40' : CARRIER_DOT_CLASSES[entry.carrier]"
+                :aria-label="entry.carrierLabel"
+              />
+              {{ badgeText(entry.classification.label, entry.classification.grade) }}
+              <!-- 证据不足的那几种，label 本身已经说明了情况，不再加标记。 -->
+              <span
+                v-if="entry.classification.confidence === 'mixed'"
+                class="opacity-60"
+                aria-hidden="true"
+              >?</span>
+            </Badge>
+          </button>
+        </TooltipTrigger>
+        <TooltipContent
+          data-route-evidence-tooltip
+          side="top"
+          :side-offset="8"
+          class="max-w-[min(24rem,calc(100vw-2rem))] whitespace-pre-line text-left text-[10px] leading-relaxed"
+        >
+          {{ routeDetails(entry) }}
+        </TooltipContent>
+      </Tooltip>
+    </div>
+  </TooltipProvider>
 </template>

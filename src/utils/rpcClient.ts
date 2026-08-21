@@ -16,6 +16,7 @@ const RPC_REQUEST_ABORTED = -32800
 const RPC_METHODS_ALLOWING_MISSING_RESULT = new Set([
   'admin:addPingTask',
   'admin:deletePingTask',
+  'admin:editClient',
   'admin:editPingTask',
   'admin:editSettings',
   'admin:orderClients',

@@ -97,7 +97,7 @@ export interface VisualFixtureOptions {
    * 给 1 号节点写一条回程判定标签。传 `stale` 时把采集时间挪到 30 天前，用来
    * 验证过期判定不再着色。
    */
-  returnRouteTag?: 'unknown' | 'fresh' | 'stale'
+  returnRouteTag?: 'unknown' | 'fresh' | 'stale' | 'inconclusive'
   /** 记录并模拟三网回程的远程执行（admin:exec / 结果轮询 / 写回）。 */
   routeProbeExec?: boolean
   /** 模拟优先的固定能力节点助手伴生插件路径。 */
@@ -530,7 +530,9 @@ async function handleRpc(
         uuid: String(payload.params?.uuid ?? ''),
         tags: String(payload.params?.tags ?? ''),
       })
-      result = null
+      // Komari 的 Go 端成功写入后返回 nil，JSON 通过 omitempty 不包含 result。
+      // 这里刻意复现生产响应，避免「实际已写回、界面却报探测失败」回归。
+      result = undefined
       break
     case 'common:getNodes':
       if (options.routeProbeConcurrentTag && routeProbeExecCalls.length) {
@@ -785,7 +787,10 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
     const measuredAt = Math.floor((new Date(FIXED_NOW).getTime() - ageMs) / 1000)
     const node = clientFixtures[uuidFor(1)]! as Record<string, unknown>
     const stamp = options.returnRouteTag === 'unknown' ? '' : `@${measuredAt}`
-    node.tags = `${node.tags || ''};transit-route:ct=4809.4809.4134,cu=4837.4837,cm=58807.9808${stamp}`
+    const routes = options.returnRouteTag === 'inconclusive'
+      ? 'ct=4134,cu=4837,cm=58453'
+      : 'ct=4809.4809.4134,cu=4837.4837,cm=58807.9808'
+    node.tags = `${node.tags || ''};transit-route:${routes}${stamp}`
   }
   const statusFixtures = options.nodeCount || options.nodeCardWorstCase
     ? structuredClone(options.nodeCount ? buildStatuses(nodeCount) : statuses)

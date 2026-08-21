@@ -311,8 +311,9 @@ describe('RpcClient WebSocket lifecycle', () => {
 
     await rpc.orderClients({ a: 0 })
     await rpc.updateAdminSettings({ visitor_audit_enabled: true })
+    await rpc.editClient({ uuid: 'client-a', tags: 'transit-route:ct=4809.4809@1755000000' })
 
-    expect(methods).toEqual(['admin:orderClients', 'admin:editSettings'])
+    expect(methods).toEqual(['admin:orderClients', 'admin:editSettings', 'admin:editClient'])
     expect(FakeWebSocket.instances).toHaveLength(0)
   })
 })

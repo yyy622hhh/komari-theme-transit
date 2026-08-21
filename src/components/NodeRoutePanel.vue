@@ -3,7 +3,7 @@ import type { RouteGrade } from '@/utils/routeClassification'
 import type { NodeRouteEntry } from '@/utils/routeTag'
 import { Icon } from '@iconify/vue'
 import { computed } from 'vue'
-import { DataTooltip } from '@/components/ui/data-tooltip'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { useAppStore } from '@/stores/app'
 import { formatDateTime } from '@/utils/helper'
 import { ROUTE_ASN_LABELS } from '@/utils/routeClassification'
@@ -105,52 +105,61 @@ function routeDetails(entry: NodeRouteEntry): string {
       </span>
     </div>
 
-    <div class="flex flex-col gap-1 px-2.5 pb-2 pt-1.5">
-      <DataTooltip
-        v-for="entry in report.entries"
-        :key="entry.carrier"
-        as="button"
-        type="button"
-        class="node-route-row pointer-events-auto grid w-full min-w-0 grid-cols-[auto_1.5rem_minmax(1.75rem,1fr)_auto] items-center gap-1.5 rounded-md px-0.5 py-0.5 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-400/60"
-        :class="untrusted && 'node-route-row--untrusted'"
-        :data-carrier="entry.carrier"
-        :content="routeDetails(entry)"
-        content-class="whitespace-pre-line text-left"
-        :aria-label="routeDetails(entry)"
-        @click.stop
-      >
-        <span
-          aria-hidden="true"
-          class="node-route-beacon grid size-3.5 shrink-0 place-items-center rounded-full border"
-        >
-          <span class="size-1.5 rounded-full bg-current" />
-        </span>
+    <TooltipProvider :delay-duration="160">
+      <div class="flex flex-col gap-1 px-2.5 pb-2 pt-1.5">
+        <Tooltip v-for="entry in report.entries" :key="entry.carrier">
+          <TooltipTrigger as-child>
+            <button
+              type="button"
+              class="node-route-row pointer-events-auto grid w-full min-w-0 grid-cols-[auto_1.25rem_minmax(0,1fr)_minmax(5.5rem,max-content)] items-center gap-1.5 rounded-md px-0.5 py-0.5 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-400/60"
+              :class="untrusted && 'node-route-row--untrusted'"
+              :data-carrier="entry.carrier"
+              :aria-label="routeDetails(entry)"
+              @click.stop
+            >
+              <span
+                aria-hidden="true"
+                class="node-route-beacon grid size-3.5 shrink-0 place-items-center rounded-full border"
+              >
+                <span class="size-1.5 rounded-full bg-current" />
+              </span>
 
-        <span class="whitespace-nowrap text-[9px] text-slate-500">{{ entry.carrierLabel }}</span>
+              <span class="whitespace-nowrap text-[9px] text-slate-500">{{ entry.carrierLabel }}</span>
 
-        <!-- 运营商是行标签，轨道把视线导向右侧的线路判定；真实探测方向见悬浮依据。 -->
-        <span
-          data-route-lane
-          aria-hidden="true"
-          class="node-route-lane flex min-w-0 items-center"
-        >
-          <span class="node-route-lane__origin size-1.5 shrink-0 rounded-full border" />
-          <span class="node-route-lane__line min-w-2 flex-1" />
-          <span class="node-route-lane__chevrons -ml-0.5 flex shrink-0 items-center">
-            <Icon icon="tabler:chevron-right" :width="8" :height="8" />
-            <Icon icon="tabler:chevron-right" class="-ml-1" :width="8" :height="8" />
-          </span>
-        </span>
+              <!-- 运营商是行标签，轨道把视线导向右侧的线路判定；真实探测方向见悬浮依据。 -->
+              <span
+                data-route-lane
+                aria-hidden="true"
+                class="node-route-lane flex min-w-0 items-center"
+              >
+                <span class="node-route-lane__origin size-1.5 shrink-0 rounded-full border" />
+                <span class="node-route-lane__line min-w-2 flex-1" />
+                <span class="node-route-lane__chevrons -ml-0.5 flex shrink-0 items-center">
+                  <Icon icon="tabler:chevron-right" :width="8" :height="8" />
+                  <Icon icon="tabler:chevron-right" class="-ml-1" :width="8" :height="8" />
+                </span>
+              </span>
 
-        <span
-          class="node-route-badge flex min-w-[4.75rem] shrink-0 items-baseline justify-between gap-1 rounded-md border px-1.5 py-0.5 text-[9px] leading-tight"
-          :data-grade="untrusted ? '' : entry.classification.grade || ''"
-        >
-          <span class="truncate font-medium text-slate-700 dark:text-slate-200">{{ lineText(entry.classification.label, entry.classification.grade) }}</span>
-          <span v-if="gradeText(entry.classification.grade)" class="node-route-badge__grade shrink-0 font-medium">{{ gradeText(entry.classification.grade) }}</span>
-        </span>
-      </DataTooltip>
-    </div>
+              <span
+                class="node-route-badge flex min-w-[5.5rem] shrink-0 items-baseline justify-between gap-1 rounded-md border px-1.5 py-0.5 text-[9px] leading-tight"
+                :data-grade="untrusted ? '' : entry.classification.grade || ''"
+              >
+                <span class="whitespace-nowrap font-medium text-slate-700 dark:text-slate-200">{{ lineText(entry.classification.label, entry.classification.grade) }}</span>
+                <span v-if="gradeText(entry.classification.grade)" class="node-route-badge__grade shrink-0 whitespace-nowrap font-medium">{{ gradeText(entry.classification.grade) }}</span>
+              </span>
+            </button>
+          </TooltipTrigger>
+          <TooltipContent
+            data-route-evidence-tooltip
+            side="top"
+            :side-offset="8"
+            class="max-w-[min(24rem,calc(100vw-2rem))] whitespace-pre-line text-left text-[10px] leading-relaxed"
+          >
+            {{ routeDetails(entry) }}
+          </TooltipContent>
+        </Tooltip>
+      </div>
+    </TooltipProvider>
   </div>
 </template>
 

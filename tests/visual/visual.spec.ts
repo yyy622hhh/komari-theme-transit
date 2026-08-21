@@ -2769,7 +2769,7 @@ test('transit card without route data lets the network panel span the full row',
   expect(columns, '宽卡上网络概览应摊成四列').toBe(4)
 })
 
-test('return route lanes expose evidence to keyboard and lead from carrier labels to route verdicts', async ({ page }) => {
+test('return route lanes expose unclipped evidence and lead from carrier labels to route verdicts', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 })
   await installKomariFixture(page, { returnRouteTag: 'fresh', opsDashboard: true, authenticated: true })
   await openStablePage(page, '/')
@@ -2791,10 +2791,16 @@ test('return route lanes expose evidence to keyboard and lead from carrier label
   expect(positions.carrierX, '参考设计要求运营商在左、线路判定在右').toBeLessThan(positions.routeX)
   await expect(telecomLane.locator('[data-grade="精品线路"]')).toBeVisible()
 
+  await expect(telecomLane).toHaveAttribute('aria-label', /AS4809/)
   await telecomLane.focus()
-  const tooltip = telecomLane.getByRole('tooltip')
+  const tooltip = page.locator('[data-route-evidence-tooltip]')
   await expect(tooltip).toBeVisible()
   await expect(tooltip).toContainText('AS4809')
+  const tooltipBounds = await tooltip.boundingBox()
+  expect(tooltipBounds).not.toBeNull()
+  expect(tooltipBounds!.x, '回程依据浮层不能越过视口左侧').toBeGreaterThanOrEqual(0)
+  expect(tooltipBounds!.y, '回程依据浮层不能越过视口顶部').toBeGreaterThanOrEqual(0)
+  expect(tooltipBounds!.x + tooltipBounds!.width, '回程依据浮层不能越过视口右侧').toBeLessThanOrEqual(1280)
 
   // 路线行用于查看依据，不应把点击透传给卡片底层的详情按钮。
   await telecomLane.click()
@@ -2811,6 +2817,10 @@ test('route probe prefers the fixed-purpose node helper and writes its tag back'
 
   await page.getByRole('button', { name: /检测回程/ }).click()
   await expect.poll(() => readRouteProbeEdits().length, { timeout: 15_000 }).toBeGreaterThan(0)
+  const summary = page.locator('[data-route-probe-summary]')
+  await expect(summary).toBeVisible()
+  await expect(summary).toContainText('台已更新')
+  await expect(summary).not.toContainText('探测失败')
 
   const calls = readRouteProbeCompanionCalls()
   expect(calls).toHaveLength(1)
@@ -2818,6 +2828,41 @@ test('route probe prefers the fixed-purpose node helper and writes its tag back'
   expect(calls[0]!.clients.every(uuid => uuid.startsWith('00000000-0000-4000-8000'))).toBe(true)
   expect(readRouteProbeExecCalls()).toHaveLength(0)
   expect(readRouteProbeEdits()[0]!.tags).toMatch(/transit-route:ct=4809\.4809\.4134,cu=4837\.4837,cm=58807\.9808@\d+/)
+})
+
+test('long inconclusive return-route verdicts stay readable and their evidence escapes card clipping', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await installKomariFixture(page, {
+    authenticated: true,
+    opsDashboard: true,
+    nodeCardSize: 'mini',
+    returnRouteTag: 'inconclusive',
+  })
+  await openStablePage(page, '/')
+
+  const panel = page.locator('[data-node-route-panel]').first()
+  await expect(panel).toBeVisible()
+  await expect(panel.getByText('仅见电信目的网', { exact: true })).toBeVisible()
+  await expect(panel.getByText('仅见联通目的网', { exact: true })).toBeVisible()
+
+  const layout = await panel.evaluate((el) => {
+    const badges = [...el.querySelectorAll<HTMLElement>('.node-route-badge')]
+    return {
+      panelOverflow: el.scrollWidth - el.clientWidth,
+      clippedBadges: badges.filter(badge => badge.scrollWidth > badge.clientWidth).length,
+    }
+  })
+  expect(layout.panelOverflow, '长判定不能撑破回程面板').toBeLessThanOrEqual(0)
+  expect(layout.clippedBadges, '长判定不能被省略或裁掉').toBe(0)
+
+  await panel.getByRole('button', { name: /电信回程/ }).hover()
+  const tooltip = page.locator('[data-route-evidence-tooltip]')
+  await expect(tooltip).toBeVisible()
+  await expect(tooltip).toContainText('判定依据')
+  const bounds = await tooltip.boundingBox()
+  expect(bounds).not.toBeNull()
+  expect(bounds!.x).toBeGreaterThanOrEqual(0)
+  expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(390)
 })
 
 test('route probe dispatches a constant command and writes the tag back when the companion is absent', async ({ page }) => {
@@ -2921,7 +2966,7 @@ test('return routes without a timestamp are marked unknown and drop their grade 
   await expect(badge).toHaveClass(/muted-foreground/)
 
   await trigger.focus()
-  await expect(trigger.getByRole('tooltip')).toContainText('采集时间未知，判定结果仅供参考')
+  await expect(page.locator('[data-route-evidence-tooltip]')).toContainText('采集时间未知，判定结果仅供参考')
 })
 
 test('detail dark mobile', async ({ page }) => {
