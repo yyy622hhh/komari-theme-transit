@@ -23,6 +23,7 @@ import { defineStore } from 'pinia'
 import { computed, onScopeDispose, ref, watch } from 'vue'
 import { getAuthSession, requirePermission, setAuthSessionFromLogin, subscribeAuthSession, verifyLogin } from '@/services/auth.service'
 import { usePublicSettingsState } from '@/stores/app.publicSettings'
+import { createTopologySettings } from '@/stores/app.topologySettings'
 import { isNodeCardPanelDefaultMode, parseNodeCardPanelConfigs } from '@/utils/nodeCardPanel'
 import { parseNodeControls } from '@/utils/nodeControl'
 import { normalizeThemeSettings, resolveThemeBackgroundSource } from '@/utils/themeSettings'
@@ -202,20 +203,14 @@ const useAppStore = defineStore('app', () => {
 
   const opsDashboardEnabled = computed<boolean>(() => readBooleanSetting(themeSettings.value, 'opsDashboardEnabled', true))
 
-  const topologyEnabled = computed<boolean>(() => readBooleanSetting(themeSettings.value, 'topologyEnabled', true))
-
-  /**
-   * 后台自愈是唯一一处无人值守就会写后端（建/删 Ping 任务、改拓扑绑定）的逻辑，
-   * 因此给站长一个显式开关；关闭后拓扑管理对话框里的手动操作不受影响。
-   */
-  const topologyAutoRepairEnabled = computed<boolean>(() => readBooleanSetting(themeSettings.value, 'topologyAutoRepairEnabled', true))
-
-  /** JSON 格式的拓扑配置，取代下面两条遗留字符串；读取一律走 readTopologyRoutes()。 */
-  const topologyConfig = computed<string>(() => readStringSetting(themeSettings.value, 'topologyConfig'))
-
-  const topologyRoute = computed<string>(() => readStringSetting(themeSettings.value, 'topologyRoute'))
-
-  const topologyMetrics = computed<string>(() => readStringSetting(themeSettings.value, 'topologyMetrics'))
+  const {
+    topologyEnabled,
+    topologyAutoRepairEnabled,
+    routeProbeAutoEnabled,
+    topologyConfig,
+    topologyRoute,
+    topologyMetrics,
+  } = createTopologySettings(themeSettings)
 
   const nodeControls = computed(() => parseNodeControls(
     themeSettings.value.pandaOpsNodeControls,
@@ -537,6 +532,7 @@ const useAppStore = defineStore('app', () => {
     opsDashboardEnabled,
     topologyEnabled,
     topologyAutoRepairEnabled,
+    routeProbeAutoEnabled,
     topologyConfig,
     topologyRoute,
     topologyMetrics,

@@ -250,6 +250,24 @@ export interface PingTaskMutation {
   interval: number
 }
 
+/** `admin:exec` 的回执。离线节点不在这两个列表里，服务端会直接给它写一条失败结果。 */
+export interface ExecTaskDispatch {
+  task_id: string
+  /** 命令已经推下去的在线节点。 */
+  clients: string[] | null
+  /** 连接暂时不可用、事件已排队的节点。 */
+  queued_clients: string[] | null
+}
+
+/** `admin:getTaskResultsByTaskId` 的单条结果。 */
+export interface ExecTaskResult {
+  client: string
+  result: string
+  exit_code: number
+  finished_at: string | null
+  created_at: string | null
+}
+
 export interface AuditLogEntry {
   id: number
   ip: string

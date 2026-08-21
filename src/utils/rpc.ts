@@ -1,5 +1,5 @@
 import type { RpcClientOptions } from '@/utils/rpcClient'
-import type { AuditLogsResponse, Client, MethodMeta, MetricDefinition, MetricQueryParams, MetricQueryResponse, NodeStatus, PingMetricStatsParams, PingMetricStatsResponse, PingRecord, PingTaskInfo, PingTaskMutation, PublicInfo, StatusRecord, VersionInfo, VisitorAuditEventParams, VisitorAuditEventResponse } from '@/utils/rpcTypes'
+import type { AuditLogsResponse, Client, ExecTaskDispatch, ExecTaskResult, MethodMeta, MetricDefinition, MetricQueryParams, MetricQueryResponse, NodeStatus, PingMetricStatsParams, PingMetricStatsResponse, PingRecord, PingTaskInfo, PingTaskMutation, PublicInfo, StatusRecord, VersionInfo, VisitorAuditEventParams, VisitorAuditEventResponse } from '@/utils/rpcTypes'
 import { RpcClient } from '@/utils/rpcClient'
 
 /**
@@ -164,6 +164,27 @@ export class KomariRpc {
 
   async orderClients(order: Record<string, number>, signal?: AbortSignal): Promise<void> {
     await this.client.callOverHttp('admin:orderClients', order, signal)
+  }
+
+  /**
+   * 局部更新一个节点。Komari 后端用 GORM 的 map 更新，只会写传进去的那几列，
+   * 所以 `{ uuid, tags }` 不会碰到该节点的其他字段。
+   */
+  async editClient(update: Record<string, unknown> & { uuid: string }, signal?: AbortSignal): Promise<void> {
+    await this.client.callOverHttp('admin:editClient', update, signal)
+  }
+
+  /**
+   * 在选定节点上执行一条命令。这是主题能力边界上最重的一个接口：Komari 会把它
+   * 记进审计日志（warn 级），调用方必须自己保证命令是常量、不含任何外部输入。
+   */
+  async execCommand(command: string, clients: string[], signal?: AbortSignal): Promise<ExecTaskDispatch> {
+    return this.client.callOverHttp<ExecTaskDispatch>('admin:exec', { command, clients }, signal)
+  }
+
+  /** 取回某次 `execCommand` 的逐节点结果。节点还没交回来时不会出现在列表里。 */
+  async getExecTaskResults(taskId: string, signal?: AbortSignal): Promise<ExecTaskResult[]> {
+    return this.client.callOverHttp<ExecTaskResult[]>('admin:getTaskResultsByTaskId', { task_id: taskId }, signal)
   }
 
   async getAllPingTasks(signal?: AbortSignal): Promise<PingTaskInfo[]> {

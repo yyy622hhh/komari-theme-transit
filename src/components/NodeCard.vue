@@ -2,6 +2,7 @@
 import type { NodeData } from '@/stores/nodes'
 import { Icon } from '@iconify/vue'
 import { computed } from 'vue'
+import NodeRouteBadges from '@/components/NodeRouteBadges.vue'
 import TelemetrySampleStrip from '@/components/TelemetrySampleStrip.vue'
 import { Badge } from '@/components/ui/badge'
 import { CardX } from '@/components/ui/card-x'
@@ -13,6 +14,7 @@ import { formatBytesPerSecondWithConfig, formatBytesWithConfig, formatDateTime, 
 import { getDiskPercentage, getMemoryPercentage, getTrafficUsed, getTrafficUsedPercentage, hasTrafficLimit } from '@/utils/nodeMetricsHelper'
 import { getOSImage, getOSName } from '@/utils/osImageHelper'
 import { getRegionCode, getRegionDisplayName } from '@/utils/regionHelper'
+import { parseNodeRouteTag } from '@/utils/routeTag'
 import { formatCurrencyValue, formatPriceWithCycle, getDaysUntilExpired, getExpireStatus, getRemainingValue, isFreePrice, parseTags } from '@/utils/tagHelper'
 
 const props = withDefaults(defineProps<{
@@ -183,6 +185,7 @@ const remainingInfoTags = computed<RemainingInfoTag[]>(() => {
 })
 
 const customTags = computed(() => parseTags(props.node.tags).map(t => t.text))
+const hasReturnRoute = computed(() => parseNodeRouteTag(props.node.tags) !== null)
 
 function getRegionAltText(region: string): string {
   return getRegionDisplayName(region) || getRegionCode(region)
@@ -507,8 +510,9 @@ function hasRegion(region: string | null | undefined): boolean {
           </div>
         </div>
 
-        <!-- 自定义标签 -->
-        <div v-if="customTags.length > 0" class="flex flex-wrap gap-1">
+        <!-- 自定义标签与三网回程线路。回程徽章排在前面：它比第 N 个自定义标签更值得占位。 -->
+        <div v-if="customTags.length > 0 || hasReturnRoute" data-node-tag-row class="flex flex-wrap items-center gap-1">
+          <NodeRouteBadges :tags="props.node.tags" compact />
           <Badge
             v-for="(tag, i) in customTags" :key="i"
             variant="outline"

@@ -3,6 +3,7 @@ import type { NodeData } from '@/stores/nodes'
 import { Icon } from '@iconify/vue'
 import { computed } from 'vue'
 import NodeCardInsightPanel from '@/components/NodeCardInsightPanel.vue'
+import NodeRouteBadges from '@/components/NodeRouteBadges.vue'
 import { ProgressThin } from '@/components/ui/progress-thin'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { useNodeAlert } from '@/composables/useNodeAlertState'
@@ -12,6 +13,7 @@ import { getDiskPercentage, getMemoryPercentage, getTrafficUsed, getTrafficUsedP
 import { getConfiguredNodeRole, getNodeRole } from '@/utils/nodeRoleHelper'
 import { getOSImage, getOSName } from '@/utils/osImageHelper'
 import { getRegionCode, getRegionDisplayName } from '@/utils/regionHelper'
+import { parseNodeRouteTag } from '@/utils/routeTag'
 import { formatPriceWithCycle, getDaysUntilExpired, getExpireStatus, parseTags } from '@/utils/tagHelper'
 
 const props = defineProps<{ node: NodeData }>()
@@ -28,10 +30,12 @@ const trafficPercentage = computed(() => getTrafficUsedPercentage(props.node))
 const showPrice = computed(() => appStore.isLoggedIn || !appStore.hidePriceWhenLoggedOut)
 const role = computed(() => getNodeRole(props.node.tags, props.node.groups)
   ?? getConfiguredNodeRole(props.node.name, appStore.topologyRoute))
+const hasReturnRoute = computed(() => parseNodeRouteTag(props.node.tags) !== null)
+// footer 单行不换行，回程徽章占了位就少留几个自定义标签，避免把它们挤出可视区。
 const tags = computed(() => parseTags(props.node.tags)
   .map(tag => tag.text)
   .filter(tag => tag !== role.value)
-  .slice(0, 5))
+  .slice(0, hasReturnRoute.value ? 2 : 5))
 
 const price = computed(() => props.node.price > 0 && showPrice.value
   ? formatPriceWithCycle(props.node.price, props.node.billing_cycle, props.node.currency, appStore.lang)
@@ -218,7 +222,9 @@ const statusEdgeStyle = computed(() => ({ '--node-status-tone': statusEdgeTone.v
       <NodeCardInsightPanel :node="node" />
     </div>
 
-    <footer v-if="tags.length" class="pointer-events-none relative z-1 mt-2.5 flex min-w-0 gap-1 overflow-hidden">
+    <footer v-if="tags.length || hasReturnRoute" data-node-tag-row class="pointer-events-none relative z-1 mt-2.5 flex min-w-0 items-center gap-1 overflow-hidden">
+      <!-- 卡片整体可点，footer 默认不吃事件；回程徽章要能悬停看依据，单独放开。 -->
+      <NodeRouteBadges :tags="node.tags" compact class="pointer-events-auto shrink-0" />
       <span v-for="tag in tags" :key="tag" class="transit-divider shrink-0 rounded-full border px-2 py-0.5 text-[9px] text-slate-500">
         {{ tag }}
       </span>

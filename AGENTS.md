@@ -69,6 +69,8 @@ rewrites the authoritative set with this machine's rendering.
 - [package.json](package.json) — bun scripts and dependencies; intentionally no top-level `version`.
 - [scripts/audit-source-size.ts](scripts/audit-source-size.ts) — non-data source files stay at or below 600 lines. `.vue` counts its `<script>` blocks only: the rule is about how much logic has to be understood, not how long a template is. Never move a template or style out of the SFC to satisfy it — `vue-tsc` does not type-check `<template src="…">`, so that trade buys lines with silent template bugs. Split the script instead.
 - [docs/DependencyPins.md](docs/DependencyPins.md) — majors that were tried, measured and rolled back, each with a checkable exit condition. Read it before starting a dependency bump; do not re-litigate a pin from memory.
+- [scripts/collect-return-route.sh](scripts/collect-return-route.sh) — the one script in `scripts/` that does **not** run in this repo. It runs on a monitored node and is the fallback path for operators who will not let the theme execute commands; the normal path is the theme's own `admin:exec` collection. Everything else under `scripts/` is bun tooling for this repo. Its output format is a contract with [src/utils/routeTag.ts](src/utils/routeTag.ts): change one and you must change the other.
+- Remote command execution: [src/utils/routeTrace.ts](src/utils/routeTrace.ts) builds the only shell command this theme ever sends to a node. It must stay a compile-time constant — node UUIDs travel in `admin:exec`'s `clients` array, never in the command string, and no shell expansion may be introduced. A regression test asserts this; do not weaken it to make a feature easier.
 
 ## Architecture anchor
 

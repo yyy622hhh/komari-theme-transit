@@ -1,4 +1,5 @@
 import dayjs from 'dayjs'
+import { isNodeRouteTag } from '@/utils/routeTag'
 
 /** 计费周期类型 */
 export type BillingCycleType = 'monthly' | 'quarterly' | 'semi_annual' | 'annual' | 'biennial' | 'triennial' | 'quinquennial' | 'once' | 'custom'
@@ -307,6 +308,11 @@ export function getTagColorHex(color: TagColor): string {
 
 /**
  * 解析标签字符串为标签列表
+ *
+ * 带 `transit-route:` 保留前缀的条目会被滤掉：那是采集端写回的回程判定数据，
+ * 由 `utils/routeTag.ts` 单独解析并以线路徽章呈现，不该再当成普通彩色标签展示
+ * 一遍。在这里统一过滤，所有渲染点和角色识别都自动生效。
+ *
  * @param tags 标签字符串，用分号分隔
  * @returns 标签数组
  */
@@ -314,7 +320,7 @@ export function parseTags(tags: string | undefined): Array<{ text: string, color
   if (!tags || tags.trim() === '')
     return []
 
-  const tagList = tags.split(';').map(tag => tag.trim()).filter(Boolean)
+  const tagList = tags.split(';').map(tag => tag.trim()).filter(Boolean).filter(tag => !isNodeRouteTag(tag))
 
   return tagList.map((tag, index) => {
     const { text, color } = parseTagWithColor(tag)

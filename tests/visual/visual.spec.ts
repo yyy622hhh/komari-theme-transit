@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { expect, test } from '@playwright/test'
-import { installKomariFixture } from './fixtures/komari'
+import { installKomariFixture, readRouteProbeEdits, readRouteProbeExecCalls } from './fixtures/komari'
 
 const LIGHT_NODE_SURFACE = /^(?:rgba\(248, 250, 252, 0\.9\)|oklch\(0\.965 0\.008 252\))$/
 const WALLPAPER_FIXTURE = fileURLToPath(new URL('../../docs/preview.png', import.meta.url))
@@ -2675,6 +2675,112 @@ test('detail light desktop', async ({ page }) => {
   await openStablePage(page, '/instance/00000000-0000-4000-8000-000000000001')
   await expect(page.getByText('硬件信息')).toBeVisible()
   await expect(page).toHaveScreenshot('detail-light-desktop.png', { fullPage: false })
+})
+
+// 回程徽章挤进节点卡的标签行是这个功能唯一真正有布局风险的地方：TransitNodeCard
+// 的 footer 单行不换行，NodeCard 的密度最小到 mini。逐档实测，每档一个独立 test，
+// 因为 installKomariFixture 在同一个 page 上重复安装会叠加路由与 initScript。
+for (const opsDashboard of [false, true]) {
+  for (const nodeCardSize of ['mini', 'compact', 'comfortable', 'large'] as const) {
+    const card = opsDashboard ? 'TransitNodeCard' : 'NodeCard'
+    test(`return route badges fit the ${card} tag row at ${nodeCardSize} density`, async ({ page }) => {
+      await page.setViewportSize({ width: 1280, height: 900 })
+      await installKomariFixture(page, { returnRouteTag: 'fresh', nodeCardSize, opsDashboard, authenticated: opsDashboard })
+      await openStablePage(page, '/')
+
+      // 只有 1 号节点带回程标签，按徽章文本定位到它那张卡的标签行。
+      const row = page.locator('[data-node-tag-row]').filter({ hasText: 'CN2GIA' }).first()
+
+      // TransitNodeCard 在 mini 密度下用 `footer { display: none }` 整行隐藏标签，
+      // 这是既有的密度设计，回程徽章跟着一起不显示，不为它开特例。
+      if (opsDashboard && nodeCardSize === 'mini') {
+        await expect(row).toBeHidden()
+        return
+      }
+      await expect(row).toBeVisible()
+
+      const layout = await row.evaluate((el) => {
+        const siblings = [...el.parentElement!.querySelectorAll('[data-node-tag-row]')]
+        return {
+          scrollWidth: el.scrollWidth,
+          clientWidth: el.clientWidth,
+          routeBadges: el.querySelectorAll('[data-slot="badge"]').length,
+          height: Math.round(el.getBoundingClientRect().height),
+          siblingHeights: siblings.map(node => Math.round(node.getBoundingClientRect().height)),
+        }
+      })
+
+      expect(layout.scrollWidth, `${card} @ ${nodeCardSize} 标签行横向溢出`).toBeLessThanOrEqual(layout.clientWidth)
+      expect(layout.routeBadges, `${card} @ ${nodeCardSize} 回程徽章数量不对`).toBeGreaterThanOrEqual(3)
+    })
+  }
+}
+
+test('route probe dispatches a constant command and writes the tag back', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  // 不给任何节点预置回程标签，于是全部进候选。
+  await installKomariFixture(page, { authenticated: true, routeProbeExec: true })
+  await openStablePage(page, '/')
+
+  const button = page.getByRole('button', { name: /检测回程/ })
+  await expect(button).toBeVisible()
+  await button.click()
+
+  await expect.poll(() => readRouteProbeEdits().length, { timeout: 30_000 }).toBeGreaterThan(0)
+
+  const calls = readRouteProbeExecCalls()
+  expect(calls).toHaveLength(1)
+
+  // 命令里只能出现三网测速点地址，绝不能出现节点 UUID 或节点 IP。
+  const command = calls[0]!.command
+  expect(command).toContain('219.141.140.10')
+  expect(command).not.toMatch(/00000000-0000-4000-8000/)
+  expect(command).not.toContain('192.0.2.')
+  expect(command).not.toMatch(/\$\{|\$\(|`/)
+
+  // 节点只通过 clients 数组传递。
+  expect(calls[0]!.clients.every(uuid => uuid.startsWith('00000000-0000-4000-8000'))).toBe(true)
+
+  // 写回的 tags 必须保留原有标签，并且只有一条 transit-route。
+  const edit = readRouteProbeEdits()[0]!
+  expect(edit.tags).toMatch(/transit-route:ct=4809\.4809\.4134,cu=4837\.4837,cm=58807\.9808@\d+/)
+  expect(edit.tags.match(/transit-route:/g)).toHaveLength(1)
+  expect(edit.tags).toMatch(/core|edge/)
+})
+
+test('route probe stays hidden for logged-out visitors', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, { routeProbeExec: true })
+  await openStablePage(page, '/')
+
+  await expect(page.getByRole('button', { name: /检测回程/ })).toHaveCount(0)
+  expect(readRouteProbeExecCalls()).toHaveLength(0)
+})
+
+test('detail shows classified return routes and hides the raw route tag', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 })
+  await installKomariFixture(page, { returnRouteTag: 'fresh' })
+  await openStablePage(page, '/instance/00000000-0000-4000-8000-000000000002')
+  await expect(page.getByText('硬件信息')).toBeVisible()
+
+  await expect(page.getByText('电信CN2GIA', { exact: true })).toBeVisible()
+  await expect(page.getByText('联通4837', { exact: true })).toBeVisible()
+  await expect(page.getByText('移动CMIN2', { exact: true })).toBeVisible()
+  // 保留标签不能再以普通彩色标签的形式漏出来。
+  await expect(page.getByText('transit-route:')).toHaveCount(0)
+})
+
+test('stale return routes drop their grade colour', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 })
+  await installKomariFixture(page, { returnRouteTag: 'stale' })
+  await openStablePage(page, '/instance/00000000-0000-4000-8000-000000000002')
+  await expect(page.getByText('硬件信息')).toBeVisible()
+
+  const badge = page.locator('[data-slot="badge"]', { hasText: '电信CN2GIA' })
+  await expect(badge).toBeVisible()
+  // 精品线路的绿色只在数据还新鲜时给，过期后统一转静音色。
+  await expect(badge).not.toHaveClass(/emerald/)
+  await expect(badge).toHaveClass(/muted-foreground/)
 })
 
 test('detail dark mobile', async ({ page }) => {

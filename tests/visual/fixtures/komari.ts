@@ -11,6 +11,33 @@ const GIB = 1024 ** 3
 const TIB = 1024 ** 4
 const FIRST_TOPOLOGY_METRIC_PATTERN = /^live@[^;]+/
 
+/** 模拟节点交回来的 traceroute 输出：电信 CN2GIA、联通 4837、移动 CMIN2。 */
+const VISUAL_TRACE_OUTPUT = [
+  '__TRANSIT_ROUTE_CT__',
+  ' 1  10.0.0.1  0.5 ms',
+  ' 2  59.43.130.1  120.1 ms',
+  ' 3  59.43.82.2  130.4 ms',
+  ' 4  202.97.94.1  140.2 ms',
+  '__TRANSIT_ROUTE_CU__',
+  ' 1  219.158.16.1  150.0 ms',
+  ' 2  219.158.3.65  152.1 ms',
+  '__TRANSIT_ROUTE_CM__',
+  ' 1  223.120.140.1  160.0 ms',
+  ' 2  221.183.55.1  165.2 ms',
+].join('\n')
+
+/** 本次 fixture 安装期间记录到的远程执行与写回，供断言检查。 */
+let routeProbeExecCalls: Array<{ command: string, clients: string[] }> = []
+let routeProbeEdits: Array<{ uuid: string, tags: string }> = []
+
+export function readRouteProbeExecCalls(): Array<{ command: string, clients: string[] }> {
+  return routeProbeExecCalls
+}
+
+export function readRouteProbeEdits(): Array<{ uuid: string, tags: string }> {
+  return routeProbeEdits
+}
+
 const REGION_FIXTURES = [
   { code: 'US', name: '主控-洛杉矶', cpu: 'Intel Xeon Gold 6152 CPU @ 2.10GHz' },
   { code: 'HK', name: '香港边缘节点-超长名称布局测试', cpu: 'AMD EPYC 7551 32-Core Processor' },
@@ -61,6 +88,13 @@ export interface VisualFixtureOptions {
   quickTopologyMutationDelayMs?: number
   quickTopologyNoTasks?: boolean
   quickTopologyNoAddress?: boolean
+  /**
+   * 给 1 号节点写一条回程判定标签。传 `stale` 时把采集时间挪到 30 天前，用来
+   * 验证过期判定不再着色。
+   */
+  returnRouteTag?: 'fresh' | 'stale'
+  /** 记录并模拟三网回程的远程执行（admin:exec / 结果轮询 / 写回）。 */
+  routeProbeExec?: boolean
   /**
    * 覆写 `public:getPingMetricStats` 的采样结果，用来驱动第 2 段探测方式的
    * 自动挑选与自愈：`valid > 0` 代表这种探测方式通，`total > 0 && valid === 0`
@@ -449,6 +483,37 @@ async function handleRpc(
     case 'rpc.ping':
       result = 'pong'
       break
+    // 远程执行只在明确开启时才应答。别的用例里保持「未实现」，这样任何一处
+    // 意外触发采集都会当场失败，而不是被一个万能 mock 悄悄吃掉。
+    case 'admin:exec':
+      if (!options.routeProbeExec)
+        break
+      routeProbeExecCalls.push({
+        command: String(payload.params?.command ?? ''),
+        clients: Array.isArray(payload.params?.clients) ? payload.params.clients.map(String) : [],
+      })
+      result = { task_id: 'visual-route-task', clients: payload.params?.clients ?? [], queued_clients: [] }
+      break
+    case 'admin:getTaskResultsByTaskId':
+      if (!options.routeProbeExec)
+        break
+      result = (routeProbeExecCalls.at(-1)?.clients ?? []).map(client => ({
+        client,
+        result: VISUAL_TRACE_OUTPUT,
+        exit_code: 0,
+        finished_at: FIXED_NOW,
+        created_at: FIXED_NOW,
+      }))
+      break
+    case 'admin:editClient':
+      if (!options.routeProbeExec)
+        break
+      routeProbeEdits.push({
+        uuid: String(payload.params?.uuid ?? ''),
+        tags: String(payload.params?.tags ?? ''),
+      })
+      result = null
+      break
     case 'common:getNodes':
       result = clientFixtures
       break
@@ -663,6 +728,9 @@ function legacyTopologyToJson(routeValue: string, metricValue: string): string {
 }
 
 export async function installKomariFixture(page: Page, options: VisualFixtureOptions = {}): Promise<void> {
+  routeProbeExecCalls = []
+  routeProbeEdits = []
+
   await page.route('**/__transit-visual-font-chinese.woff2', route => route.fulfill({
     path: VISUAL_FONT_FILES.chinese,
     contentType: 'font/woff2',
@@ -682,6 +750,13 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
       ipv4: '',
       ipv6: '',
     })
+  }
+  if (options.returnRouteTag) {
+    // 时间被冻结在 FIXED_NOW，所以采集时间也按它推算：1 小时前算新鲜，30 天前算过期。
+    const ageMs = options.returnRouteTag === 'stale' ? 30 * 24 * 60 * 60 * 1000 : 60 * 60 * 1000
+    const measuredAt = Math.floor((new Date(FIXED_NOW).getTime() - ageMs) / 1000)
+    const node = clientFixtures[uuidFor(1)]! as Record<string, unknown>
+    node.tags = `${node.tags || ''};transit-route:ct=4809.4809.4134,cu=4837.4837,cm=58807.9808@${measuredAt}`
   }
   const statusFixtures = options.nodeCount || options.nodeCardWorstCase
     ? structuredClone(options.nodeCount ? buildStatuses(nodeCount) : statuses)

@@ -5,6 +5,7 @@ import { Icon } from '@iconify/vue'
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ComponentErrorBoundary from '@/components/ComponentErrorBoundary.vue'
+import NodeRouteBadges from '@/components/NodeRouteBadges.vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { CardX } from '@/components/ui/card-x'
@@ -555,6 +556,8 @@ const metricCards = computed<MetricCard[]>(() => appStore.detailMetricCardOrder.
             {{ tag }}
           </Badge>
         </div>
+        <!-- 三网回程线路，由采集端写入节点 tags；没有数据时整块不渲染 -->
+        <NodeRouteBadges :tags="data.tags" />
         <div class="ml-auto flex h-8 shrink-0 items-center gap-1 rounded-md bg-background/50 p-0.5 backdrop-blur-xs">
           <UiButton
             variant="ghost"

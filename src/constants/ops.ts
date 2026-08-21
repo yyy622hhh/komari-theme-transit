@@ -21,6 +21,18 @@ export const OPS_ALERT_LIMITS = {
   mobileCollapsed: 2,
 } as const
 
+/**
+ * 回程线路判定的新鲜度。尺度是「天」而不是「分钟」：回程走哪条骨干网通常几周
+ * 才变一次，采集端一天跑一次就够，所以过了一天还没更新只是提示，超过一周才当
+ * 它失去参考价值。
+ */
+export const OPS_ROUTE_FRESHNESS = {
+  /** 超过这个时间未更新时提示「可能不是最新」，判定结果继续显示。 */
+  delayedAfterMs: TIME_MS.day,
+  /** 超过这个时间未更新时判定结果不再可信，只保留采集时间。 */
+  staleAfterMs: 7 * TIME_MS.day,
+} as const
+
 export const OPS_PING_FRESHNESS = {
   /** 超过这个时间仍未成功刷新时，只提示“可能不是最新”，继续显示最后数据。 */
   delayedAfterMs: 10 * TIME_MS.minute,
