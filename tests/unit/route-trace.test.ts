@@ -69,7 +69,29 @@ describe('采集命令生成', () => {
     expect(command).toContain('command -v traceroute')
     expect(command).toContain(ROUTE_TRACE_MISSING_MARKER)
     expect(command).toContain('traceroute -I -n')
-    expect(command).toContain('|| traceroute -n')
+    expect(command).toContain('traceroute -n -q 1')
+  })
+
+  test('每家运营商的分段标记打两次，回退那轮才能替换而不是追加', () => {
+    // ICMP 可能先吐几跳再失败，两轮输出接在一起会得到一条不存在的跳序。
+    const command = buildRouteTraceCommand('beijing')
+    for (const marker of ['__TRANSIT_ROUTE_CT__', '__TRANSIT_ROUTE_CU__', '__TRANSIT_ROUTE_CM__'])
+      expect(command.match(new RegExp(`echo ${marker}`, 'g')), `${marker} 的标记次数`).toHaveLength(2)
+  })
+
+  test('同一家出现两段时，后一段整体覆盖前一段', () => {
+    const parsed = parseRouteTraceOutput([
+      '__TRANSIT_ROUTE_CT__',
+      ' 1  202.97.1.1  1 ms',
+      '__TRANSIT_ROUTE_CT__',
+      ' 1  59.43.1.1  1 ms',
+      ' 2  59.43.2.1  1 ms',
+      ' 3  202.97.9.1  1 ms',
+    ].join('\n'))
+    // 拼接的话会是 4134,4809,4809,4134，判成 ct_cn2_gt；覆盖才得到正确的 GIA。
+    expect(parsed).toEqual({ CT: ['AS4809', 'AS4809', 'AS4134'] })
+    expect(classifyReturnRoute('CT', parsed.CT!.map((asn, index) => ({ distance: index + 1, asns: [asn] }))).code)
+      .toBe('ct_cn2_gia')
   })
 })
 

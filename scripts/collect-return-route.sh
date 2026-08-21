@@ -32,14 +32,21 @@ usage() {
   exit "${1:-0}"
 }
 
+# 取值型参数缺少取值时必须当场报错退出。脚本用的是 `set -uo pipefail`（没有 -e），
+# 而 bash 的 `shift 2` 在只剩一个参数时不会移动、只返回非零——那个返回值被忽略后
+# while 就永远转下去了。`./collect-return-route.sh --city` 这种手误会直接挂死。
+need_value() {
+  [ "$2" -ge 2 ] || { echo "参数 $1 缺少取值" >&2; exit 1; }
+}
+
 while [ $# -gt 0 ]; do
   case "$1" in
-    --city) CITY="${2:-}"; shift 2 ;;
+    --city) need_value "$1" $#; CITY="$2"; shift 2 ;;
     --push) PUSH=1; shift ;;
-    --url) KOMARI_URL="${2:-}"; shift 2 ;;
-    --uuid) NODE_UUID="${2:-}"; shift 2 ;;
-    --key) API_KEY="${2:-}"; shift 2 ;;
-    --max-hops) MAX_HOPS="${2:-}"; shift 2 ;;
+    --url) need_value "$1" $#; KOMARI_URL="$2"; shift 2 ;;
+    --uuid) need_value "$1" $#; NODE_UUID="$2"; shift 2 ;;
+    --key) need_value "$1" $#; API_KEY="$2"; shift 2 ;;
+    --max-hops) need_value "$1" $#; MAX_HOPS="$2"; shift 2 ;;
     -h|--help) usage 0 ;;
     *) echo "未知参数：$1" >&2; usage 1 ;;
   esac

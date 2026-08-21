@@ -317,13 +317,11 @@ const statusEdgeStyle = computed(() => ({ '--node-status-tone': statusEdgeTone.v
   background: var(--transit-cell-bg);
 }
 
-/* 上行/下行/累计/到期：半宽时 2×2，整行时摊成一排 */
+/* 上行/下行/累计/到期默认 2×2；只有在卡片本身够宽、且这一格独占整行时才摊成一排。
+   `--full` 只说明这个节点没有回程数据，不代表容器很宽——不加宽度条件的话，窄卡上
+   会得到四个五十几像素的窄列。 */
 .node-card-network-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.node-card-cell--full .node-card-network-grid {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 /*
@@ -338,6 +336,10 @@ const statusEdgeStyle = computed(() => ({ '--node-status-tone': statusEdgeTone.v
   [data-node-insight-panel],
   .node-card-cell--full {
     grid-column: 1 / -1;
+  }
+
+  .node-card-cell--full .node-card-network-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
 

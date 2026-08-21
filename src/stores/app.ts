@@ -103,8 +103,8 @@ const useAppStore = defineStore('app', () => {
   }
 
   const themeSettings = computed(() => normalizeThemeSettings(publicSettings.value?.theme_settings))
-  // Maintenance expiry and Beijing auto theme need the same minute resolution.
-  // Sharing one clock avoids keeping two app-lifetime intervals.
+  // Maintenance expiry, Beijing auto theme and return-route freshness need the same
+  // minute resolution. Sharing one clock avoids keeping several app-lifetime intervals.
   const minuteTick = useNow({ interval: 60_000 })
   const visitorAuditSupported = computed(() => typeof publicSettings.value?.visitor_audit_enabled === 'boolean')
   const visitorAuditEnabled = computed(() => publicSettings.value?.visitor_audit_enabled === true)
@@ -537,6 +537,8 @@ const useAppStore = defineStore('app', () => {
     topologyRoute,
     topologyMetrics,
     nodeControls,
+    /** 全站共享的分钟时钟，供「多久之前」这类相对时间显示保持自动刷新。 */
+    minuteTick,
     nodeCardPanelDefault,
     nodeCardPanels,
     carrierPingRegion,

@@ -48,6 +48,22 @@ describe('采集节点的挑选（频率控制）', () => {
     const picked = selectRouteProbeCandidates([node({ tags: '香港<blue>;中转' })], NOW)
     expect(picked[0]!.tags).toBe('香港<blue>;中转')
   })
+
+  test('跳过清单在截断台数之前生效，后面的节点不会被饿死', () => {
+    // 前 20 台永远失败时，若先截断再过滤，候选会恒为空，第 21 台起一次也轮不到。
+    const nodes = Array.from({ length: ROUTE_PROBE_MAX_NODES + 5 }, (_, i) => node({ uuid: `u${i}` }))
+    const skip = new Set(nodes.slice(0, ROUTE_PROBE_MAX_NODES).map(n => n.uuid))
+
+    const picked = selectRouteProbeCandidates(nodes, NOW, skip)
+    expect(picked).toHaveLength(5)
+    expect(picked.map(c => c.uuid)).toEqual(['u20', 'u21', 'u22', 'u23', 'u24'])
+  })
+
+  test('采集时间未知的标签按「该重测」处理，不会被永久钉在轮换之外', () => {
+    // 手写或从文档抄来的标签可能没有 @<unix> 后缀；无从判断新鲜度就该重测。
+    const picked = selectRouteProbeCandidates([node({ tags: 'transit-route:ct=4134.4134' })], NOW)
+    expect(picked.map(c => c.uuid)).toEqual(['u1'])
+  })
 })
 
 describe('标签写回合并', () => {

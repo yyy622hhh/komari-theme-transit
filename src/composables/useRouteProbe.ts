@@ -116,11 +116,11 @@ export function useRouteProbe(nodes: MaybeRefOrGetter<NodeData[]>) {
     if (trigger === 'auto' && lastRunAt > 0 && Date.now() - lastRunAt < AUTO_PROBE_COOLDOWN_MS)
       return
 
-    const all = selectRouteProbeCandidates(toValue(nodes))
     // 手动触发时把「试过也没用」的清单一并作废，让运营者修好环境后能立刻重试。
     if (trigger === 'manual')
       autoSkipped.clear()
-    const candidates = all.filter(candidate => !autoSkipped.has(candidate.uuid))
+    // 跳过清单要交给挑选函数在截断台数之前用掉，不能等拿到结果再过滤。
+    const candidates = selectRouteProbeCandidates(toValue(nodes), Date.now(), autoSkipped)
     if (!candidates.length)
       return
 

@@ -2,6 +2,7 @@
 import type { RouteGrade } from '@/utils/routeClassification'
 import { computed } from 'vue'
 import { DataTooltip } from '@/components/ui/data-tooltip'
+import { useAppStore } from '@/stores/app'
 import { formatDateTime } from '@/utils/helper'
 import { ROUTE_ASN_LABELS } from '@/utils/routeClassification'
 import { parseNodeRouteTag } from '@/utils/routeTag'
@@ -39,7 +40,17 @@ const GRADE_CLASSES: Record<string, string> = {
 
 const MUTED_CLASS = 'border-muted-foreground/20 text-muted-foreground'
 
-const report = computed(() => parseNodeRouteTag(props.tags))
+const appStore = useAppStore()
+
+/**
+ * 相对时间和过期判定都跟着全站共享的分钟时钟走。
+ *
+ * 只读 `Date.now()` 的话，computed 的依赖里没有时间，`props.tags` 不变就永远不
+ * 重算——页面开着不动时「1小时前」会一直停在那儿，超过 7 天转静音色的降级也不会
+ * 真的发生。
+ */
+const now = computed(() => appStore.minuteTick.getTime())
+const report = computed(() => parseNodeRouteTag(props.tags, now.value))
 
 /** 过期的判定不再着色：线路可能早就换了，颜色会让人误以为是当前状态。 */
 const stale = computed(() => report.value?.freshness === 'stale')
@@ -71,7 +82,7 @@ const measuredAgo = computed(() => {
   const measuredAt = report.value?.measuredAt
   if (!measuredAt)
     return ''
-  const age = Math.max(0, Date.now() - measuredAt)
+  const age = Math.max(0, now.value - measuredAt)
   if (age < HOUR)
     return `${Math.max(1, Math.floor(age / MINUTE))}分钟前`
   if (age < DAY)

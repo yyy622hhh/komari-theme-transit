@@ -2738,6 +2738,20 @@ for (const nodeCardSize of ['mini', 'compact', 'comfortable', 'large'] as const)
   })
 }
 
+test('full-width network panel only spreads to four columns when the card is wide', async ({ page }) => {
+  // `--full` 只说明这个节点没有回程数据，不代表容器很宽。窄卡上摊成四列会得到
+  // 四个五十几像素的窄列，比同样宽度、有回程数据时的 2×2 还挤。
+  await page.setViewportSize({ width: 320, height: 900 })
+  await installKomariFixture(page, { opsDashboard: true, nodeCardSize: 'mini', nodeCardWorstCase: true })
+  await openStablePage(page, '/')
+
+  const columns = await page.locator('[data-node-network-cell]').first().evaluate((el) => {
+    const grid = el.querySelector<HTMLElement>('[data-node-network-grid]')!
+    return getComputedStyle(grid).gridTemplateColumns.split(' ').length
+  })
+  expect(columns, '窄卡上网络概览不应摊成四列').toBe(2)
+})
+
 test('transit card without route data lets the network panel span the full row', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 })
   await installKomariFixture(page, { opsDashboard: true, authenticated: true })
@@ -2746,6 +2760,13 @@ test('transit card without route data lets the network panel span the full row',
   await expect(page.locator('[data-node-route-panel]')).toHaveCount(0)
   const network = page.locator('[data-node-network-cell]').first()
   await expect(network).toHaveClass(/node-card-cell--full/)
+
+  // 卡片够宽时才把四项摊成一排，窄卡的对照见上一个用例。
+  const columns = await network.evaluate((el) => {
+    const grid = el.querySelector<HTMLElement>('[data-node-network-grid]')!
+    return getComputedStyle(grid).gridTemplateColumns.split(' ').length
+  })
+  expect(columns, '宽卡上网络概览应摊成四列').toBe(4)
 })
 
 test('route probe dispatches a constant command and writes the tag back', async ({ page }) => {

@@ -3,6 +3,7 @@ import type { RouteGrade } from '@/utils/routeClassification'
 import { computed } from 'vue'
 import { Badge } from '@/components/ui/badge'
 import { DataTooltip } from '@/components/ui/data-tooltip'
+import { useAppStore } from '@/stores/app'
 import { formatDateTime } from '@/utils/helper'
 import { ROUTE_ASN_LABELS } from '@/utils/routeClassification'
 import { parseNodeRouteTag } from '@/utils/routeTag'
@@ -35,7 +36,9 @@ const GRADE_CLASSES: Record<string, string> = {
 
 const MUTED_CLASS = 'border-muted-foreground/15 bg-muted-foreground/5 text-muted-foreground'
 
-const report = computed(() => parseNodeRouteTag(props.tags))
+const appStore = useAppStore()
+// 跟着全站共享的分钟时钟，否则过期降级要等到刷新页面才会发生。理由见 NodeRoutePanel。
+const report = computed(() => parseNodeRouteTag(props.tags, appStore.minuteTick.getTime()))
 
 /** 过期的判定不再着色：线路可能早就换了，颜色会让人误以为是当前状态。 */
 const stale = computed(() => report.value?.freshness === 'stale')

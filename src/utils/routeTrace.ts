@@ -56,12 +56,16 @@ export function routeTraceTargets(city: RouteTraceCity): Record<RouteCarrier, st
  * 机器刷一屏 not found。
  */
 function traceSegment(carrier: RouteCarrier, target: string): string {
-  return [
-    `echo ${SECTION_MARKERS[carrier]}`,
-    `traceroute -I -n -q 1 -w 1 -m ${MAX_HOPS} ${target} 2>/dev/null`
-    + ` || traceroute -n -q 1 -w 1 -m ${MAX_HOPS} ${target} 2>/dev/null`
-    + ` || true`,
-  ].join('; ')
+  const marker = SECTION_MARKERS[carrier]
+  const probe = (icmp: boolean) =>
+    `traceroute ${icmp ? '-I ' : ''}-n -q 1 -w 1 -m ${MAX_HOPS} ${target} 2>/dev/null`
+
+  // 回退前重新打一次分段标记，让 UDP 那轮的跳点**替换**掉 ICMP 那轮的，而不是接在
+  // 后面。ICMP 可能先打印出几跳再失败（例如中途 sendto 被拒），两轮拼在一起会得到
+  // 一条根本不存在的跳序，足以把 CN2GIA 判成 CN2GT。
+  // 解析器每遇到一次标记就重置该运营商的列表，所以这里不需要 shell 变量去捕获输出
+  // ——命令里不出现任何展开，「无外部输入」这条仍然一眼可验。
+  return `echo ${marker}; ${probe(true)} || { echo ${marker}; ${probe(false)}; } || true`
 }
 
 /**

@@ -52,14 +52,24 @@ type ProbeNode = Pick<NodeInfo, 'uuid' | 'name' | 'tags'> & { online?: boolean }
  * 这里就是「频率控制」的全部——没有单独的计时器，也没有给运营者的间隔设置。
  * 标签自带采集时间，过期阈值复用展示层那一套，判断和显示永远一致。
  */
-export function selectRouteProbeCandidates(nodes: readonly ProbeNode[], now = Date.now()): RouteProbeCandidate[] {
+export function selectRouteProbeCandidates(
+  nodes: readonly ProbeNode[],
+  now = Date.now(),
+  /**
+   * 本轮不该再试的节点。必须在这里排除、而不是等调用方拿到结果后再过滤：
+   * 台数上限是在这个函数里截断的，先截断后过滤会让排在前面的失败节点反复占满
+   * 名额，后面的节点一次也轮不到。
+   */
+  skip: ReadonlySet<string> = new Set(),
+): RouteProbeCandidate[] {
   const candidates: RouteProbeCandidate[] = []
   for (const node of nodes) {
-    if (node.online === false || !node.uuid)
+    if (node.online === false || !node.uuid || skip.has(node.uuid))
       continue
     const report = parseNodeRouteTag(node.tags, now)
-    // 没有标签，或标签已经老到不该再展示，才值得重新跑一次。
-    if (report && report.freshness !== 'stale')
+    // 已有标签、还没过期、且知道是什么时候采的，才算不用重跑。采集时间未知时
+    // 无从判断新鲜度，按「该重测」处理，否则这台机器会被永久钉在轮换之外。
+    if (report && report.measuredAt !== null && report.freshness !== 'stale')
       continue
     candidates.push({ uuid: node.uuid, name: node.name ?? node.uuid, tags: node.tags ?? '' })
     if (candidates.length >= ROUTE_PROBE_MAX_NODES)
@@ -127,6 +137,11 @@ export async function probeNodeRoutes(
     for (const result of results) {
       const candidate = pending.get(result.client)
       if (!candidate)
+        continue
+      // 只认已完成的行。当前 Komari 只在节点离线时预写占位（那条带真实时间戳），
+      // 但接口的类型允许 finished_at 为空；真出现未完成占位时，若照单全收就会把
+      // 整批节点判成失败，而且它们已经从 pending 里删掉了，后续轮询再也纠正不回来。
+      if (!result.finished_at)
         continue
       pending.delete(result.client)
       outcomes.push(await applyRouteResult(candidate, result.result ?? '', options.trigger))
