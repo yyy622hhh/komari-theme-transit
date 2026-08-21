@@ -573,10 +573,14 @@ const nodeCardGridClass = computed(() => {
               class="search flex min-w-0 flex-wrap gap-2 items-center justify-end pointer-events-auto max-sm:justify-start xl:ml-auto"
             >
               <!--
-                三网回程检测入口。组件自带自动触发逻辑，懒加载是为了把判定与采集
-                的依赖链移出首屏 chunk（见组件内注释）。未登录时组件自身不渲染。
+                三网回程检测入口。总开关关闭时不实例化组件；开启后仍通过懒加载把
+                判定与采集的依赖链移出首屏 chunk（见组件内注释）。未登录时组件自身
+                不渲染。
               -->
-              <NodeRouteProbeButton :nodes="nodesStore.visibleNodes" />
+              <NodeRouteProbeButton
+                v-if="appStore.routeProbeEnabled"
+                :nodes="nodesStore.visibleNodes"
+              />
               <div
                 v-if="homeTools.length && appStore.homeAdvancedToolsVisible"
                 class="flex h-8 items-center gap-1 rounded-md bg-background/50 p-0.5 backdrop-blur-xs"

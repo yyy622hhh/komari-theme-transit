@@ -8,8 +8,8 @@ function tagAt(msAgo: number): string {
   return `transit-route:ct=4134.4134@${Math.floor((NOW - msAgo) / 1000)}`
 }
 
-function node(overrides: Partial<{ uuid: string, name: string, tags: string, online: boolean }> = {}) {
-  return { uuid: 'u1', name: 'n1', tags: '', online: true, ...overrides }
+function node(overrides: Partial<{ uuid: string, name: string, region: string, tags: string, online: boolean }> = {}) {
+  return { uuid: 'u1', name: 'n1', region: 'US', tags: '', online: true, ...overrides }
 }
 
 describe('采集节点的挑选（频率控制）', () => {
@@ -33,6 +33,19 @@ describe('采集节点的挑选（频率控制）', () => {
 
   test('没有 uuid 的节点跳过', () => {
     expect(selectRouteProbeCandidates([node({ uuid: '' })], NOW)).toEqual([])
+  })
+
+  test('中国大陆节点不参与境外回程检测', () => {
+    for (const region of ['CN', 'cn', '🇨🇳', '中国'])
+      expect(selectRouteProbeCandidates([node({ region })], NOW)).toEqual([])
+  })
+
+  test('港澳台仍属于需要检测的境外线路', () => {
+    const regions = ['HK', '🇭🇰', 'MO', '🇲🇴', 'TW', '🇹🇼']
+    const nodes = regions.map((region, index) => node({ uuid: `u${index}`, region }))
+    expect(selectRouteProbeCandidates(nodes, NOW).map(candidate => candidate.uuid)).toEqual(
+      regions.map((_, index) => `u${index}`),
+    )
   })
 
   test('一次最多下发固定台数', () => {

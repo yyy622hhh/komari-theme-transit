@@ -14,15 +14,16 @@ import { logAppWarning } from '@/utils/safeError'
  * `services/route-probe.service.ts`（纯函数部分有单测），这里只负责触发时机。
  *
  * 这是主题里唯一会让别人的服务器执行命令的路径，所以「什么时候不跑」比「什么
- * 时候跑」更重要。下面每一条都不需要运营者配置：
+ * 时候跑」更重要。除了显式总开关，下面的约束都由主题强制执行：
  *
- * 1. **挑节点**：只有「在线 且 标签缺失或已过期（7 天）」的节点进候选。回程几周
- *    才变一次，这一条就把频率压到每台约每周一次。
- * 2. **同源浏览器节流**：同一站点的页面和标签页共享 30 分钟冷却时间。
- * 3. **单飞**：正在跑的时候不再开第二轮。
- * 4. **后台标签页不跑**：见 `pageIsVisible`。
- * 5. **失败不重试**：见 `autoSkipped`，避免在跑不通的机器上反复执行命令。
- * 6. **没权限就停**：见 `autoBlocked`，2FA 场景下不做无意义的循环重试。
+ * 1. **显式启用**：默认不加载候选、不显示入口，也不向节点下发任务。
+ * 2. **挑节点**：只有「非中国大陆、在线，且标签缺失或已过期（7 天）」的节点进
+ *    候选。回程几周才变一次，这一条就把频率压到每台约每周一次。
+ * 3. **同源浏览器节流**：同一站点的页面和标签页共享 30 分钟冷却时间。
+ * 4. **单飞**：正在跑的时候不再开第二轮。
+ * 5. **后台标签页不跑**：见 `pageIsVisible`。
+ * 6. **失败不重试**：见 `autoSkipped`，避免在跑不通的机器上反复执行命令。
+ * 7. **没权限就停**：见 `autoBlocked`，2FA 场景下不做无意义的循环重试。
  *
  * 跨标签页的重复下发再由 localStorage 冷却时间直接压住；不同设备之间不共享浏览器
  * 存储，仍由候选标签与单轮失败跳过控制。
@@ -109,6 +110,8 @@ export function useRouteProbe(nodes: MaybeRefOrGetter<NodeData[]>) {
    * 那些节点确实还没测出结果，运营者修好环境后正是要靠这个按钮重试。
    */
   function pendingCount(): number {
+    if (!appStore.routeProbeEnabled)
+      return 0
     return selectRouteProbeCandidates(toValue(nodes)).length
   }
 
@@ -132,7 +135,8 @@ export function useRouteProbe(nodes: MaybeRefOrGetter<NodeData[]>) {
     // 只有已登录管理员能执行远程命令；未登录时连候选都不算。
     if (!appStore.privateFeaturesAllowed)
       return
-    if (trigger === 'auto' && !appStore.routeProbeAutoEnabled)
+    // 这是总开关：关闭时自动和手动路径都不能下发任务。
+    if (!appStore.routeProbeEnabled)
       return
     if (trigger === 'auto' && autoBlocked)
       return

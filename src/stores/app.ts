@@ -206,7 +206,7 @@ const useAppStore = defineStore('app', () => {
   const {
     topologyEnabled,
     topologyAutoRepairEnabled,
-    routeProbeAutoEnabled,
+    routeProbeEnabled,
     topologyConfig,
     topologyRoute,
     topologyMetrics,
@@ -532,7 +532,7 @@ const useAppStore = defineStore('app', () => {
     opsDashboardEnabled,
     topologyEnabled,
     topologyAutoRepairEnabled,
-    routeProbeAutoEnabled,
+    routeProbeEnabled,
     topologyConfig,
     topologyRoute,
     topologyMetrics,

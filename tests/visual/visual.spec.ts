@@ -2812,6 +2812,7 @@ test('route probe prefers the fixed-purpose node helper and writes its tag back'
   await installKomariFixture(page, {
     authenticated: true,
     routeProbeCompanion: true,
+    routeProbeEnabled: true,
   })
   await openStablePage(page, '/')
 
@@ -2871,6 +2872,7 @@ test('route probe dispatches a constant command and writes the tag back when the
   await installKomariFixture(page, {
     authenticated: true,
     routeProbeExec: true,
+    routeProbeEnabled: true,
     routeProbeConcurrentTag: '命令执行后新增<purple>',
   })
   await openStablePage(page, '/')
@@ -2908,6 +2910,7 @@ test('route probe reports disabled remote control without pretending the route w
     authenticated: true,
     routeProbeExec: true,
     routeProbeResult: 'remote-disabled',
+    routeProbeEnabled: true,
   })
   await openStablePage(page, '/')
 
@@ -2918,9 +2921,22 @@ test('route probe reports disabled remote control without pretending the route w
   expect(readRouteProbeEdits()).toHaveLength(0)
 })
 
+test('route probe stays hidden when the optional feature is disabled', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, {
+    authenticated: true,
+    routeProbeCompanion: true,
+    routeProbeLegacyAutoEnabled: true,
+  })
+  await openStablePage(page, '/')
+
+  await expect(page.getByRole('button', { name: /检测回程/ })).toHaveCount(0)
+  expect(readRouteProbeCompanionCalls()).toHaveLength(0)
+})
+
 test('route probe stays hidden for logged-out visitors', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
-  await installKomariFixture(page, { routeProbeExec: true })
+  await installKomariFixture(page, { routeProbeExec: true, routeProbeEnabled: true })
   await openStablePage(page, '/')
 
   await expect(page.getByRole('button', { name: /检测回程/ })).toHaveCount(0)

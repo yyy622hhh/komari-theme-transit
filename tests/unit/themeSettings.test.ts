@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test'
+import { computed } from 'vue'
+import { createTopologySettings } from '../../src/stores/app.topologySettings'
 import { normalizeThemeSettings, resolveThemeBackgroundSource, validateServerThemeSettings, validateThemeSettings } from '../../src/utils/themeSettings'
 
 describe('theme settings boundary', () => {
@@ -45,5 +47,11 @@ describe('theme settings boundary', () => {
     expect(resolveThemeBackgroundSource('/\\evil.example/wall.jpg')).toBe('')
     expect(resolveThemeBackgroundSource('/safe\nunsafe.jpg')).toBe('')
     expect(resolveThemeBackgroundSource('local:../secret')).toBe('')
+  })
+
+  test('requires explicit consent for return-route collection after upgrading', () => {
+    expect(createTopologySettings(computed(() => ({ routeProbeAutoEnabled: true }))).routeProbeEnabled.value).toBe(false)
+    expect(createTopologySettings(computed(() => ({ routeProbeEnabled: false }))).routeProbeEnabled.value).toBe(false)
+    expect(createTopologySettings(computed(() => ({ routeProbeEnabled: true }))).routeProbeEnabled.value).toBe(true)
   })
 })

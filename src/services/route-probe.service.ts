@@ -19,6 +19,7 @@ import {
   getCompanionRouteProbeBatch,
   RouteProbeCompanionUnavailableError,
 } from '@/services/route-probe-companion.service'
+import { getRegionCode } from '@/utils/regionHelper'
 import { formatNodeRouteTag, isNodeRouteTag, parseNodeRouteTag } from '@/utils/routeTag'
 import { buildRouteTraceCommand, isMissingTracerouteOutput, isUsableRouteTraceOutput, parseRouteTraceOutput } from '@/utils/routeTrace'
 import { getSharedRpc } from '@/utils/rpc'
@@ -48,7 +49,7 @@ export interface RouteProbeSummary {
   outcomes: RouteProbeOutcome[]
 }
 
-type ProbeNode = Pick<NodeInfo, 'uuid' | 'name' | 'tags'> & { online?: boolean }
+type ProbeNode = Pick<NodeInfo, 'uuid' | 'name' | 'region' | 'tags'> & { online?: boolean }
 
 /**
  * 挑出该采集的节点：在线，且没有回程标签或标签已经过期。
@@ -68,7 +69,10 @@ export function selectRouteProbeCandidates(
 ): RouteProbeCandidate[] {
   const candidates: RouteProbeCandidate[] = []
   for (const node of nodes) {
-    if (node.online === false || !node.uuid || skip.has(node.uuid))
+    // 三网“回程线路”描述的是境外节点回到中国大陆时走哪条国际骨干。大陆节点到
+    // 国内目标通常只经过云厂商内网和本地接入网，既没有可判定的国际骨干 ASN，
+    // 也没有这项指标的实际含义；把它们送去采集只会稳定地产生空结果与失败提示。
+    if (node.online === false || !node.uuid || skip.has(node.uuid) || getRegionCode(node.region) === 'CN')
       continue
     const report = parseNodeRouteTag(node.tags, now)
     // 已有标签、还没过期、且知道是什么时候采的，才算不用重跑。采集时间未知时

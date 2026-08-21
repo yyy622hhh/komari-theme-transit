@@ -12,7 +12,7 @@
 
 Transit 是一个面向多节点、多线路和跨境链路监控的 Komari 社区主题。它把“入口 → 线路机 → 落地机”的链路拓扑、北京/上海/广州三网 Ping、实时资源、异常告警和资产信息放进同一套紧凑界面，并提供可视化拓扑管理器。
 
-- 当前稳定版：[v1.1.3](https://github.com/yyy622hhh/komari-theme-transit/releases/tag/v1.1.3)
+- 当前稳定版：[v1.1.4](https://github.com/yyy622hhh/komari-theme-transit/releases/tag/v1.1.4)
 - 安装包：只从 [GitHub Releases](https://github.com/yyy622hhh/komari-theme-transit/releases) 下载 `komari-theme-Transit-build-*.zip`
 - 项目定位：社区主题，不修改 Komari 数据库、Agent、系统账户或公开 API
 
@@ -232,7 +232,7 @@ bun run build:route-probe
 
 插件要求 Komari `>=1.4.0`，只申请 `allowRoutes` 权限；不会申请系统 RPC、子进程执行、端口监听、HTML 注入、全盘文件或请求钩子权限。
 
-然后在每台节点下载**同一 GitHub Release** 的两个脚本并安装。安装器会交互式读取该节点现有的 Komari Agent token，输入不会进入 shell 历史；下面的 `<版本>` 应替换为正在使用的发布标签（例如 `v1.1.3`），不要长期跟随会变化的 `main`：
+然后在每台节点下载**同一 GitHub Release** 的两个脚本并安装。安装器会交互式读取该节点现有的 Komari Agent token，输入不会进入 shell 历史；下面的 `<版本>` 应替换为正在使用的发布标签（例如 `v1.1.4`），不要长期跟随会变化的 `main`：
 
 ```bash
 curl -fsSLO https://github.com/yyy622hhh/komari-theme-transit/releases/download/<版本>/transit-route-probe-helper.sh
@@ -244,9 +244,9 @@ sudo bash transit-route-probe-helper.sh install --endpoint https://status.exampl
 
 为兼容旧部署，伴生插件明确返回 404 时主题仍会退回原来的编译期固定 `admin:exec` 命令；已经接单后的插件错误绝不会再回退，避免同一节点同时跑两轮。希望彻底禁用远程执行时，保持所有 Komari Agent 的远程控制关闭即可，节点助手路径不受影响。
 
-默认自动进行：已登录管理员打开首页约 20 秒后，主题会挑出「在线，且没测过或结果已超过 7 天」的节点跑一轮。回程几周才变一次，这个条件天然把频率压到每台约每周一次；同一浏览器的多个标签页还共享 30 分钟冷却时间。首页工具栏上另有一个「检测回程 N」按钮，刚加完机器不想等的时候可以手动点，N 是当前待测台数；没有待测节点时按钮不出现。
+回程采集默认关闭。先安装上面的伴生插件与节点助手，再在主题设置中开启 **启用三网回程检测**（`routeProbeEnabled`）。未开启时，主题不显示手动入口、不自动派发任务，也不会因为节点没有安装助手而产生批量失败提示；已经写入的回程标签仍会正常展示。旧版的 `routeProbeAutoEnabled` 不会自动迁移为开启——这项能力会在节点上主动测量网络，升级后仍需站长明确同意一次。
 
-不想让主题自动执行的话，把主题设置里的 **自动检测三网回程线路**（`routeProbeAutoEnabled`）关掉，手动按钮不受影响。
+开启后，已登录管理员打开首页约 20 秒，主题会挑出「非中国大陆、在线，且没测过或结果已超过 7 天」的节点跑一轮。回程几周才变一次，这个条件天然把频率压到每台约每周一次；同一浏览器的多个标签页还共享 30 分钟冷却时间。首页工具栏另有一个「检测回程 N」按钮，刚加完机器不想等时可以手动点，N 是当前待测台数；没有待测节点时按钮不出现。中国大陆节点到国内目标通常不经过可判定的国际骨干，这项指标也没有实际意义，因此不会进入待测数量或失败统计；香港、澳门和台湾节点仍会正常检测。
 
 关于节点助手的安全边界，有几点是明确设计过的：
 

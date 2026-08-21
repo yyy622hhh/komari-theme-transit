@@ -102,6 +102,10 @@ export interface VisualFixtureOptions {
   routeProbeExec?: boolean
   /** 模拟优先的固定能力节点助手伴生插件路径。 */
   routeProbeCompanion?: boolean
+  /** 回程采集是显式启用的可选能力；默认关闭。 */
+  routeProbeEnabled?: boolean
+  /** 复现旧版默认开启键，验证升级后不会绕过新的显式同意。 */
+  routeProbeLegacyAutoEnabled?: boolean
   /** 覆写远程执行回执，用来验证运行环境问题能被准确告知运营者。 */
   routeProbeResult?: 'success' | 'remote-disabled' | 'missing-traceroute'
   /** 模拟命令执行期间管理员新增的标签，用来验证写回不会拿旧快照覆盖它。 */
@@ -897,6 +901,8 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
     opsDashboardEnabled: options.opsDashboard ?? false,
     topologyEnabled: options.opsDashboard ?? false,
     carrierPingRegion: 'all',
+    routeProbeEnabled: options.routeProbeEnabled,
+    routeProbeAutoEnabled: options.routeProbeLegacyAutoEnabled,
     nodeCardPanels: options.nodeCardPanels ? JSON.stringify(options.nodeCardPanels) : undefined,
     topologyRoute: options.opsDashboard && !options.emptyTopology && !options.opsJsonTopologyOnly
       ? topologyRoute

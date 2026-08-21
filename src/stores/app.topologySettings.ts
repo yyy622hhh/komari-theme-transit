@@ -13,7 +13,7 @@ import { readBooleanSetting, readStringSetting } from '@/stores/app.settings'
 export interface TopologySettings {
   topologyEnabled: ComputedRef<boolean>
   topologyAutoRepairEnabled: ComputedRef<boolean>
-  routeProbeAutoEnabled: ComputedRef<boolean>
+  routeProbeEnabled: ComputedRef<boolean>
   topologyConfig: ComputedRef<string>
   topologyRoute: ComputedRef<string>
   topologyMetrics: ComputedRef<string>
@@ -23,16 +23,16 @@ export function createTopologySettings(themeSettings: ComputedRef<ThemeSettings>
   return {
     topologyEnabled: computed(() => readBooleanSetting(themeSettings.value, 'topologyEnabled', true)),
 
-    /**
-     * 两个默认开启、且无人值守就会写后端的开关，都给站长留了显式出口。
-     *
-     * 自愈会建删 Ping 任务并改写拓扑绑定；回程检测更重一档——它通过 Komari 的
-     * `admin:exec` 在运营者的节点上执行 traceroute。下发的命令是编译期常量，
-     * 完整的触发条件与克制机制见 `composables/useRouteProbe.ts`。
-     * 关掉任一个都不影响对应的手动操作。
-     */
+    /** 自动修复仍默认开启，但可以由站长完整关闭无人值守写入。 */
     topologyAutoRepairEnabled: computed(() => readBooleanSetting(themeSettings.value, 'topologyAutoRepairEnabled', true)),
-    routeProbeAutoEnabled: computed(() => readBooleanSetting(themeSettings.value, 'routeProbeAutoEnabled', true)),
+
+    /**
+     * 回程采集是可选能力，默认不在别人的节点上做任何探测。这里刻意不继承早期
+     * `routeProbeAutoEnabled` 的默认开启状态：升级后的站点也必须由站长明确打开新
+     * 总开关。它同时控制自动轮询和首页手动入口；已有 `transit-route:` 标签的展示
+     * 不受影响。
+     */
+    routeProbeEnabled: computed(() => readBooleanSetting(themeSettings.value, 'routeProbeEnabled', false)),
 
     /** JSON 格式的拓扑配置，取代下面两条遗留字符串；读取一律走 readTopologyRoutes()。 */
     topologyConfig: computed(() => readStringSetting(themeSettings.value, 'topologyConfig')),

@@ -23,7 +23,9 @@ const routeProbe = useRouteProbe(() => props.nodes)
 
 // 待测台数跟着节点列表走：写回标签后节点对象变化，这里自然掉到 0，按钮随之消失。
 const pending = computed(() => props.nodes.length ? routeProbe.pendingCount() : 0)
-const visible = computed(() => appStore.privateFeaturesAllowed && (routeProbe.probing.value || pending.value > 0))
+const visible = computed(() => appStore.routeProbeEnabled
+  && appStore.privateFeaturesAllowed
+  && (routeProbe.probing.value || pending.value > 0))
 const summaryHasFailure = computed(() => Boolean(routeProbe.lastError.value)
   || routeProbe.lastOutcomes.value.some(outcome => outcome.status !== 'updated'))
 </script>
