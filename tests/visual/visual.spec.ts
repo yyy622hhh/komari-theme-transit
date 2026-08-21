@@ -2538,12 +2538,14 @@ test('Transit cards reserve the same expiry height when no date is configured', 
 })
 
 test('Transit worst-case node cards remain complete and responsive across densities', async ({ page }) => {
+  // 详情栅格最多两列：网络概览 | 三网回程，三网质量始终占满整行——一整排采样格
+  // 挤进半列就读不出来了。窄卡退回单列。
   const cases = [
     { width: 320, height: 900, size: 'mini', columns: 1 },
     { width: 390, height: 900, size: 'compact', columns: 1 },
-    { width: 768, height: 1000, size: 'comfortable', columns: 3 },
+    { width: 768, height: 1000, size: 'comfortable', columns: 2 },
     { width: 1280, height: 900, size: 'compact', columns: 2 },
-    { width: 1700, height: 1000, size: 'large', columns: 3 },
+    { width: 1700, height: 1000, size: 'large', columns: 2 },
   ] as const
 
   for (const testCase of cases) {
@@ -2586,7 +2588,9 @@ test('Transit worst-case node cards remain complete and responsive across densit
       '[data-node-uptime]',
       '[data-node-price]',
       '[data-node-resource-value]',
-      '[data-node-speed-cell] > span',
+      // 上下行改成了「标签 + 数值」两行，选择器跟着走；留 span 的话匹配为空、
+      // every() 对空数组恒真，这条断言会静默失效。
+      '[data-node-speed-cell] > div',
       '[data-node-traffic-value]',
       '[data-node-expiry-text]',
       '[data-node-expiry-date]',
@@ -2680,41 +2684,69 @@ test('detail light desktop', async ({ page }) => {
 // 回程徽章挤进节点卡的标签行是这个功能唯一真正有布局风险的地方：TransitNodeCard
 // 的 footer 单行不换行，NodeCard 的密度最小到 mini。逐档实测，每档一个独立 test，
 // 因为 installKomariFixture 在同一个 page 上重复安装会叠加路由与 initScript。
-for (const opsDashboard of [false, true]) {
-  for (const nodeCardSize of ['mini', 'compact', 'comfortable', 'large'] as const) {
-    const card = opsDashboard ? 'TransitNodeCard' : 'NodeCard'
-    test(`return route badges fit the ${card} tag row at ${nodeCardSize} density`, async ({ page }) => {
-      await page.setViewportSize({ width: 1280, height: 900 })
-      await installKomariFixture(page, { returnRouteTag: 'fresh', nodeCardSize, opsDashboard, authenticated: opsDashboard })
-      await openStablePage(page, '/')
+// 默认节点卡把回程判定塞进标签行，最窄到 mini 密度都不能撑破。
+for (const nodeCardSize of ['mini', 'compact', 'comfortable', 'large'] as const) {
+  test(`return route badges fit the NodeCard tag row at ${nodeCardSize} density`, async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await installKomariFixture(page, { returnRouteTag: 'fresh', nodeCardSize })
+    await openStablePage(page, '/')
 
-      // 只有 1 号节点带回程标签，按徽章文本定位到它那张卡的标签行。
-      const row = page.locator('[data-node-tag-row]').filter({ hasText: 'CN2GIA' }).first()
+    // 只有 1 号节点带回程标签，按徽章文本定位到它那张卡的标签行。
+    const row = page.locator('[data-node-tag-row]').filter({ hasText: 'CN2GIA' }).first()
+    await expect(row).toBeVisible()
 
-      // TransitNodeCard 在 mini 密度下用 `footer { display: none }` 整行隐藏标签，
-      // 这是既有的密度设计，回程徽章跟着一起不显示，不为它开特例。
-      if (opsDashboard && nodeCardSize === 'mini') {
-        await expect(row).toBeHidden()
-        return
-      }
-      await expect(row).toBeVisible()
+    const layout = await row.evaluate(el => ({
+      scrollWidth: el.scrollWidth,
+      clientWidth: el.clientWidth,
+      routeBadges: el.querySelectorAll('[data-slot="badge"]').length,
+    }))
 
-      const layout = await row.evaluate((el) => {
-        const siblings = [...el.parentElement!.querySelectorAll('[data-node-tag-row]')]
-        return {
-          scrollWidth: el.scrollWidth,
-          clientWidth: el.clientWidth,
-          routeBadges: el.querySelectorAll('[data-slot="badge"]').length,
-          height: Math.round(el.getBoundingClientRect().height),
-          siblingHeights: siblings.map(node => Math.round(node.getBoundingClientRect().height)),
-        }
-      })
-
-      expect(layout.scrollWidth, `${card} @ ${nodeCardSize} 标签行横向溢出`).toBeLessThanOrEqual(layout.clientWidth)
-      expect(layout.routeBadges, `${card} @ ${nodeCardSize} 回程徽章数量不对`).toBeGreaterThanOrEqual(3)
-    })
-  }
+    expect(layout.scrollWidth, `NodeCard @ ${nodeCardSize} 标签行横向溢出`).toBeLessThanOrEqual(layout.clientWidth)
+    expect(layout.routeBadges, `NodeCard @ ${nodeCardSize} 回程徽章数量不对`).toBeGreaterThanOrEqual(3)
+  })
 }
+
+// 运维卡改用独立的「三网回程」面板，和「网络概览」并排；三网质量占满整行。
+for (const nodeCardSize of ['mini', 'compact', 'comfortable', 'large'] as const) {
+  test(`return route panel fits the TransitNodeCard at ${nodeCardSize} density`, async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await installKomariFixture(page, { returnRouteTag: 'fresh', nodeCardSize, opsDashboard: true, authenticated: true })
+    await openStablePage(page, '/')
+
+    const panel = page.locator('[data-node-route-panel]').first()
+    await expect(panel).toBeVisible()
+    await expect(panel).toContainText('三网回程')
+    await expect(panel).toContainText('CN2GIA')
+
+    const layout = await panel.evaluate((el) => {
+      const grid = el.closest('[data-node-card-detail-grid]')!
+      const network = grid.querySelector('[data-node-network-cell]')!
+      const insight = grid.querySelector('[data-node-insight-panel]')
+      return {
+        panelOverflow: el.scrollWidth - el.clientWidth,
+        // 网络概览和三网回程必须并排（同一行顶部对齐），三网质量必须换行到下面。
+        sameRowAsNetwork: Math.abs(el.getBoundingClientRect().top - network.getBoundingClientRect().top) < 2,
+        insightBelow: insight ? insight.getBoundingClientRect().top > el.getBoundingClientRect().top : false,
+        rows: el.querySelectorAll('svg').length,
+      }
+    })
+
+    expect(layout.panelOverflow, `TransitNodeCard @ ${nodeCardSize} 回程面板横向溢出`).toBeLessThanOrEqual(0)
+    expect(layout.sameRowAsNetwork, `TransitNodeCard @ ${nodeCardSize} 回程面板未与网络概览并排`).toBe(true)
+    expect(layout.insightBelow, `TransitNodeCard @ ${nodeCardSize} 三网质量未换行到下方`).toBe(true)
+    expect(layout.rows, `TransitNodeCard @ ${nodeCardSize} 回程面板应有三家运营商`).toBe(3)
+  })
+}
+
+test('transit card without route data lets the network panel span the full row', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await installKomariFixture(page, { opsDashboard: true, authenticated: true })
+  await openStablePage(page, '/')
+
+  await expect(page.locator('[data-node-route-panel]')).toHaveCount(0)
+  const network = page.locator('[data-node-network-cell]').first()
+  await expect(network).toHaveClass(/node-card-cell--full/)
+})
 
 test('route probe dispatches a constant command and writes the tag back', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })

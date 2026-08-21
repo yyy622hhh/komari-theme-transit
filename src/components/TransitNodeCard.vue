@@ -3,7 +3,7 @@ import type { NodeData } from '@/stores/nodes'
 import { Icon } from '@iconify/vue'
 import { computed } from 'vue'
 import NodeCardInsightPanel from '@/components/NodeCardInsightPanel.vue'
-import NodeRouteBadges from '@/components/NodeRouteBadges.vue'
+import NodeRoutePanel from '@/components/NodeRoutePanel.vue'
 import { ProgressThin } from '@/components/ui/progress-thin'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { useNodeAlert } from '@/composables/useNodeAlertState'
@@ -30,12 +30,12 @@ const trafficPercentage = computed(() => getTrafficUsedPercentage(props.node))
 const showPrice = computed(() => appStore.isLoggedIn || !appStore.hidePriceWhenLoggedOut)
 const role = computed(() => getNodeRole(props.node.tags, props.node.groups)
   ?? getConfiguredNodeRole(props.node.name, appStore.topologyRoute))
+/** 有回程数据时右边那一格才存在，没有的话网络概览独占整行。 */
 const hasReturnRoute = computed(() => parseNodeRouteTag(props.node.tags) !== null)
-// footer 单行不换行，回程徽章占了位就少留几个自定义标签，避免把它们挤出可视区。
 const tags = computed(() => parseTags(props.node.tags)
   .map(tag => tag.text)
   .filter(tag => tag !== role.value)
-  .slice(0, hasReturnRoute.value ? 2 : 5))
+  .slice(0, 5))
 
 const price = computed(() => props.node.price > 0 && showPrice.value
   ? formatPriceWithCycle(props.node.price, props.node.billing_cycle, props.node.currency, appStore.lang)
@@ -198,33 +198,66 @@ const statusEdgeStyle = computed(() => ({ '--node-status-tone': statusEdgeTone.v
     </div>
 
     <div data-node-card-detail-grid class="node-card-detail-grid pointer-events-none relative z-1 mt-2.5 grid gap-2">
-      <div data-node-speed-cell class="node-card-cell flex min-w-0 flex-col justify-center px-2.5 py-2 text-[10px] tabular-nums">
-        <span class="break-words text-emerald-600 dark:text-emerald-400">↑ {{ formatSpeed(node.net_out) }}</span>
-        <span class="mt-1 break-words text-slate-700 dark:text-slate-300">↓ {{ formatSpeed(node.net_in) }}</span>
+      <!--
+        网络概览：上下行、累计流量和到期并成一格，让右边空出位置给三网回程。
+        没有回程数据时这一格独占整行，不留半格空白。
+      -->
+      <div
+        data-node-network-cell
+        class="node-card-cell min-w-0 px-2.5 py-2 text-[9px]"
+        :class="!hasReturnRoute && 'node-card-cell--full'"
+      >
+        <div class="flex items-center justify-between gap-2 text-slate-500">
+          <span>网络概览</span>
+          <span v-if="hasTrafficLimit(node)" class="shrink-0 tabular-nums">{{ trafficPercentage.toFixed(1) }}%</span>
+        </div>
+
+        <!-- 四项一组：半宽时排成 2×2，整行时摊成一排，不留大片空白 -->
+        <div data-node-network-grid class="node-card-network-grid mt-1.5 grid gap-x-2 gap-y-1.5">
+          <div data-node-speed-cell class="min-w-0">
+            <div class="text-slate-500">
+              上行
+            </div>
+            <div class="mt-0.5 break-words text-[10px] tabular-nums text-emerald-600 dark:text-emerald-400">
+              ↑ {{ formatSpeed(node.net_out) }}
+            </div>
+          </div>
+          <div class="min-w-0">
+            <div class="text-slate-500">
+              下行
+            </div>
+            <div class="mt-0.5 break-words text-[10px] tabular-nums text-slate-700 dark:text-slate-300">
+              ↓ {{ formatSpeed(node.net_in) }}
+            </div>
+          </div>
+          <div class="min-w-0">
+            <div class="text-slate-500">
+              累计
+            </div>
+            <div data-node-traffic-value class="mt-0.5 break-words text-[10px] font-medium leading-tight tabular-nums text-slate-700 dark:text-slate-200">
+              {{ formatBytes(trafficUsed) }}<template v-if="hasTrafficLimit(node)">
+                / {{ formatBytes(node.traffic_limit) }}
+              </template>
+            </div>
+          </div>
+          <div class="min-w-0">
+            <div class="text-slate-500">
+              到期
+            </div>
+            <div data-node-expiry-row class="mt-0.5 flex h-[1.65rem] min-w-0 flex-col items-start gap-y-0.5 text-slate-500">
+              <span data-node-expiry-text class="max-w-full whitespace-nowrap">{{ expiryText }}</span>
+              <span v-if="expiryDate" data-node-expiry-date class="max-w-full whitespace-nowrap text-[8px] tabular-nums">{{ expiryDate }}</span>
+            </div>
+          </div>
+        </div>
       </div>
 
-      <div data-node-traffic-cell class="node-card-cell min-w-0 px-2.5 py-2 text-[9px]">
-        <div class="flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5 text-slate-500">
-          <span>累计流量</span>
-          <span v-if="hasTrafficLimit(node)" class="tabular-nums">{{ trafficPercentage.toFixed(1) }}%</span>
-        </div>
-        <div data-node-traffic-value class="mt-1 break-words text-[10px] font-medium leading-tight tabular-nums text-slate-700 dark:text-slate-200">
-          {{ formatBytes(trafficUsed) }}<template v-if="hasTrafficLimit(node)">
-            / {{ formatBytes(node.traffic_limit) }}
-          </template>
-        </div>
-        <div data-node-expiry-row class="mt-1 flex h-[1.65rem] min-w-0 flex-col items-start gap-y-0.5 text-slate-500">
-          <span data-node-expiry-text class="max-w-full whitespace-nowrap">{{ expiryText }}</span>
-          <span v-if="expiryDate" data-node-expiry-date class="max-w-full whitespace-nowrap text-[8px] tabular-nums">{{ expiryDate }}</span>
-        </div>
-      </div>
+      <NodeRoutePanel :tags="node.tags" />
 
       <NodeCardInsightPanel :node="node" />
     </div>
 
-    <footer v-if="tags.length || hasReturnRoute" data-node-tag-row class="pointer-events-none relative z-1 mt-2.5 flex min-w-0 items-center gap-1 overflow-hidden">
-      <!-- 卡片整体可点，footer 默认不吃事件；回程徽章要能悬停看依据，单独放开。 -->
-      <NodeRouteBadges :tags="node.tags" compact class="pointer-events-auto shrink-0" />
+    <footer v-if="tags.length" data-node-tag-row class="pointer-events-none relative z-1 mt-2.5 flex min-w-0 items-center gap-1 overflow-hidden">
       <span v-for="tag in tags" :key="tag" class="transit-divider shrink-0 rounded-full border px-2 py-0.5 text-[9px] text-slate-500">
         {{ tag }}
       </span>
@@ -284,23 +317,33 @@ const statusEdgeStyle = computed(() => ({ '--node-status-tone': statusEdgeTone.v
   background: var(--transit-cell-bg);
 }
 
+/* 上行/下行/累计/到期：半宽时 2×2，整行时摊成一排 */
+.node-card-network-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.node-card-cell--full .node-card-network-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+/*
+ * 两列：网络概览 | 三网回程，三网质量占满整行。
+ * 三网质量是一整排采样格，挤进半列会读不出来，所以不像以前那样在宽卡上并成三列。
+ */
 @container (min-width: 22rem) {
   .node-card-detail-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  [data-node-insight-panel] {
+  [data-node-insight-panel],
+  .node-card-cell--full {
     grid-column: 1 / -1;
   }
 }
 
 @container (min-width: 35rem) {
   .node-card-detail-grid {
-    grid-template-columns: minmax(0, 0.78fr) minmax(0, 0.92fr) minmax(0, 1.65fr);
-  }
-
-  [data-node-insight-panel] {
-    grid-column: auto;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
   }
 }
 
