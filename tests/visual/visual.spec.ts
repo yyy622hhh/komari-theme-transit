@@ -2769,10 +2769,44 @@ test('transit card without route data lets the network panel span the full row',
   expect(columns, '宽卡上网络概览应摊成四列').toBe(4)
 })
 
+test('return route lanes expose evidence to keyboard and point from the node toward the carrier', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await installKomariFixture(page, { returnRouteTag: 'fresh', opsDashboard: true, authenticated: true })
+  await openStablePage(page, '/')
+
+  const panel = page.locator('[data-node-route-panel]').first()
+  const telecomLane = panel.getByRole('button', { name: /电信回程/ })
+  await expect(telecomLane).toBeVisible()
+
+  const positions = await telecomLane.evaluate((lane) => {
+    const labels = [...lane.querySelectorAll('span')]
+    const route = labels.find(node => node.textContent?.trim() === 'CN2GIA')!
+    const carrier = labels.find(node => node.textContent?.trim() === '电信')!
+    return {
+      routeX: route.getBoundingClientRect().x,
+      carrierX: carrier.getBoundingClientRect().x,
+    }
+  })
+  expect(positions.routeX, '节点出发后应先经过骨干线路，再到国内运营商').toBeLessThan(positions.carrierX)
+
+  await telecomLane.focus()
+  const tooltip = telecomLane.getByRole('tooltip')
+  await expect(tooltip).toBeVisible()
+  await expect(tooltip).toContainText('AS4809')
+
+  // 路线行用于查看依据，不应把点击透传给卡片底层的详情按钮。
+  await telecomLane.click()
+  expect(new URL(page.url()).pathname).toBe('/')
+})
+
 test('route probe dispatches a constant command and writes the tag back', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   // 不给任何节点预置回程标签，于是全部进候选。
-  await installKomariFixture(page, { authenticated: true, routeProbeExec: true })
+  await installKomariFixture(page, {
+    authenticated: true,
+    routeProbeExec: true,
+    routeProbeConcurrentTag: '命令执行后新增<purple>',
+  })
   await openStablePage(page, '/')
 
   const button = page.getByRole('button', { name: /检测回程/ })
@@ -2799,6 +2833,7 @@ test('route probe dispatches a constant command and writes the tag back', async 
   expect(edit.tags).toMatch(/transit-route:ct=4809\.4809\.4134,cu=4837\.4837,cm=58807\.9808@\d+/)
   expect(edit.tags.match(/transit-route:/g)).toHaveLength(1)
   expect(edit.tags).toMatch(/core|edge/)
+  expect(edit.tags).toContain('命令执行后新增<purple>')
 })
 
 test('route probe stays hidden for logged-out visitors', async ({ page }) => {
@@ -2834,6 +2869,22 @@ test('stale return routes drop their grade colour', async ({ page }) => {
   // 精品线路的绿色只在数据还新鲜时给，过期后统一转静音色。
   await expect(badge).not.toHaveClass(/emerald/)
   await expect(badge).toHaveClass(/muted-foreground/)
+})
+
+test('return routes without a timestamp are marked unknown and drop their grade colour', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 })
+  await installKomariFixture(page, { returnRouteTag: 'unknown' })
+  await openStablePage(page, '/instance/00000000-0000-4000-8000-000000000002')
+  await expect(page.getByText('硬件信息')).toBeVisible()
+
+  const trigger = page.getByRole('button', { name: /电信回程.*采集时间未知/ })
+  const badge = trigger.locator('[data-slot="badge"]')
+  await expect(badge).toBeVisible()
+  await expect(badge).not.toHaveClass(/emerald/)
+  await expect(badge).toHaveClass(/muted-foreground/)
+
+  await trigger.focus()
+  await expect(trigger.getByRole('tooltip')).toContainText('采集时间未知，判定结果仅供参考')
 })
 
 test('detail dark mobile', async ({ page }) => {

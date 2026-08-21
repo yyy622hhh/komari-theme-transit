@@ -27,7 +27,7 @@ import { classifyReturnRoute } from '@/utils/routeClassification'
 /** 保留前缀。大小写不敏感，比对前统一转小写。 */
 export const NODE_ROUTE_TAG_PREFIX = 'transit-route:'
 
-export type RouteFreshness = 'fresh' | 'delayed' | 'stale'
+export type RouteFreshness = 'unknown' | 'fresh' | 'delayed' | 'stale'
 
 export interface NodeRouteEntry {
   carrier: RouteCarrier
@@ -76,7 +76,7 @@ function parseAsnList(value: string): string[] {
 
 function resolveFreshness(measuredAt: number | null, now: number): RouteFreshness {
   if (measuredAt === null)
-    return 'fresh'
+    return 'unknown'
   const age = Math.max(0, now - measuredAt)
   if (age >= OPS_ROUTE_FRESHNESS.staleAfterMs)
     return 'stale'

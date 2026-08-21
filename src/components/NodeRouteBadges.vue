@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { RouteGrade } from '@/utils/routeClassification'
+import type { NodeRouteEntry } from '@/utils/routeTag'
 import { computed } from 'vue'
 import { Badge } from '@/components/ui/badge'
 import { DataTooltip } from '@/components/ui/data-tooltip'
@@ -40,11 +41,11 @@ const appStore = useAppStore()
 // 跟着全站共享的分钟时钟，否则过期降级要等到刷新页面才会发生。理由见 NodeRoutePanel。
 const report = computed(() => parseNodeRouteTag(props.tags, appStore.minuteTick.getTime()))
 
-/** 过期的判定不再着色：线路可能早就换了，颜色会让人误以为是当前状态。 */
-const stale = computed(() => report.value?.freshness === 'stale')
+/** 过期或采集时间未知的判定不再着色，避免把历史结果暗示成当前状态。 */
+const untrusted = computed(() => report.value?.freshness === 'stale' || report.value?.freshness === 'unknown')
 
 function gradeClass(grade: RouteGrade): string {
-  if (stale.value || !grade)
+  if (untrusted.value || !grade)
     return MUTED_CLASS
   return GRADE_CLASSES[grade] ?? MUTED_CLASS
 }
@@ -58,6 +59,8 @@ const measuredText = computed(() => {
 
 const freshnessNote = computed(() => {
   switch (report.value?.freshness) {
+    case 'unknown':
+      return '\n采集时间未知，判定结果仅供参考。'
     case 'stale':
       return '\n已超过 7 天未更新，判定结果仅供参考。'
     case 'delayed':
@@ -71,6 +74,10 @@ function hopChain(asns: string[]): string {
   if (!asns.length)
     return '未识别到骨干网跳点'
   return asns.map(asn => `${asn}（${ROUTE_ASN_LABELS[asn] ?? '未知'}）`).join(' → ')
+}
+
+function routeDetails(entry: NodeRouteEntry): string {
+  return `${entry.carrierLabel}回程\n${hopChain(entry.asns)}\n判定依据：${entry.classification.evidence}\n${measuredText.value}${freshnessNote.value}`
 }
 
 /**
@@ -89,11 +96,16 @@ function badgeText(label: string, grade: RouteGrade): string {
     <DataTooltip
       v-for="entry in report.entries"
       :key="entry.carrier"
-      as="span"
-      :content="`${entry.carrierLabel}回程\n${hopChain(entry.asns)}\n判定依据：${entry.classification.evidence}\n${measuredText}${freshnessNote}`"
+      as="button"
+      type="button"
+      class="rounded-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-400/60"
+      :content="routeDetails(entry)"
       content-class="whitespace-pre-line text-left"
+      :aria-label="routeDetails(entry)"
+      @click.stop
     >
       <Badge
+        as="span"
         variant="outline"
         class="rounded py-0 font-normal"
         :class="[gradeClass(entry.classification.grade), compact ? '!h-auto !text-[9px] px-1 py-0.5 gap-0.5' : '!text-[11px] px-1.5']"
@@ -101,7 +113,7 @@ function badgeText(label: string, grade: RouteGrade): string {
         <span
           v-if="compact"
           class="size-1 shrink-0 rounded-full"
-          :class="stale ? 'bg-muted-foreground/40' : CARRIER_DOT_CLASSES[entry.carrier]"
+          :class="untrusted ? 'bg-muted-foreground/40' : CARRIER_DOT_CLASSES[entry.carrier]"
           :aria-label="entry.carrierLabel"
         />
         {{ badgeText(entry.classification.label, entry.classification.grade) }}

@@ -29,7 +29,6 @@ const RESULT_POLL_INTERVAL_MS = 5_000
 export interface RouteProbeCandidate {
   uuid: string
   name: string
-  tags: string
 }
 
 export interface RouteProbeOutcome {
@@ -71,7 +70,7 @@ export function selectRouteProbeCandidates(
     // 无从判断新鲜度，按「该重测」处理，否则这台机器会被永久钉在轮换之外。
     if (report && report.measuredAt !== null && report.freshness !== 'stale')
       continue
-    candidates.push({ uuid: node.uuid, name: node.name ?? node.uuid, tags: node.tags ?? '' })
+    candidates.push({ uuid: node.uuid, name: node.name ?? node.uuid })
     if (candidates.length >= ROUTE_PROBE_MAX_NODES)
       break
   }
@@ -134,17 +133,26 @@ export async function probeNodeRoutes(
       break
 
     const results = await rpc.getExecTaskResults(dispatch.task_id, options.signal)
-    for (const result of results) {
+    const completedResults = results.filter(result => result.finished_at && pending.has(result.client))
+    if (!completedResults.length)
+      continue
+
+    // 远程命令最长可能跑两分多钟。期间管理员或另一个会话可能修改节点标签，不能
+    // 再拿下发前保存在 candidate 里的旧 tags 覆盖写回。这里直接走 HTTP 重新读取
+    // 当前节点信息；同一轮交回的所有节点共享这一次快照，避免逐节点重复请求。
+    const latestClients = await rpc.getNodesOverHttp(options.signal)
+
+    for (const result of completedResults) {
       const candidate = pending.get(result.client)
       if (!candidate)
         continue
-      // 只认已完成的行。当前 Komari 只在节点离线时预写占位（那条带真实时间戳），
-      // 但接口的类型允许 finished_at 为空；真出现未完成占位时，若照单全收就会把
-      // 整批节点判成失败，而且它们已经从 pending 里删掉了，后续轮询再也纠正不回来。
-      if (!result.finished_at)
-        continue
       pending.delete(result.client)
-      outcomes.push(await applyRouteResult(candidate, result.result ?? '', options.trigger))
+      outcomes.push(await applyRouteResult(
+        candidate,
+        result.result ?? '',
+        options.trigger,
+        latestClients[result.client]?.tags,
+      ))
     }
   }
 
@@ -158,6 +166,7 @@ async function applyRouteResult(
   candidate: RouteProbeCandidate,
   output: string,
   trigger: 'manual' | 'auto',
+  latestTags: string | undefined,
 ): Promise<RouteProbeOutcome> {
   if (!isUsableRouteTraceOutput(output)) {
     // 没装 traceroute 和命令没跑起来要分开报，前者运营者能自己修。
@@ -185,8 +194,17 @@ async function applyRouteResult(
     }
   }
 
+  if (latestTags === undefined) {
+    return {
+      uuid: candidate.uuid,
+      name: candidate.name,
+      status: 'failed',
+      detail: '写回前未找到节点最新信息，已取消以避免覆盖标签',
+    }
+  }
+
   const routeTag = formatNodeRouteTag(parsed, Date.now())
-  const merged = mergeRouteTag(candidate.tags, routeTag)
+  const merged = mergeRouteTag(latestTags, routeTag)
 
   try {
     await getSharedRpc().editClient({ uuid: candidate.uuid, tags: merged })

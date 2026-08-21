@@ -92,9 +92,11 @@ export interface VisualFixtureOptions {
    * 给 1 号节点写一条回程判定标签。传 `stale` 时把采集时间挪到 30 天前，用来
    * 验证过期判定不再着色。
    */
-  returnRouteTag?: 'fresh' | 'stale'
+  returnRouteTag?: 'unknown' | 'fresh' | 'stale'
   /** 记录并模拟三网回程的远程执行（admin:exec / 结果轮询 / 写回）。 */
   routeProbeExec?: boolean
+  /** 模拟命令执行期间管理员新增的标签，用来验证写回不会拿旧快照覆盖它。 */
+  routeProbeConcurrentTag?: string
   /**
    * 覆写 `public:getPingMetricStats` 的采样结果，用来驱动第 2 段探测方式的
    * 自动挑选与自愈：`valid > 0` 代表这种探测方式通，`total > 0 && valid === 0`
@@ -515,7 +517,15 @@ async function handleRpc(
       result = null
       break
     case 'common:getNodes':
-      result = clientFixtures
+      if (options.routeProbeConcurrentTag && routeProbeExecCalls.length) {
+        const latestClients = structuredClone(clientFixtures)
+        const latestNode = latestClients[uuidFor(0)]!
+        latestNode.tags = `${latestNode.tags};${options.routeProbeConcurrentTag}`
+        result = latestClients
+      }
+      else {
+        result = clientFixtures
+      }
       break
     case 'common:getNodesLatestStatus':
       result = statusFixtures
@@ -752,11 +762,13 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
     })
   }
   if (options.returnRouteTag) {
-    // 时间被冻结在 FIXED_NOW，所以采集时间也按它推算：1 小时前算新鲜，30 天前算过期。
+    // 时间被冻结在 FIXED_NOW，所以采集时间也按它推算：1 小时前算新鲜，30 天前算过期；
+    // unknown 故意不带时间戳。
     const ageMs = options.returnRouteTag === 'stale' ? 30 * 24 * 60 * 60 * 1000 : 60 * 60 * 1000
     const measuredAt = Math.floor((new Date(FIXED_NOW).getTime() - ageMs) / 1000)
     const node = clientFixtures[uuidFor(1)]! as Record<string, unknown>
-    node.tags = `${node.tags || ''};transit-route:ct=4809.4809.4134,cu=4837.4837,cm=58807.9808@${measuredAt}`
+    const stamp = options.returnRouteTag === 'unknown' ? '' : `@${measuredAt}`
+    node.tags = `${node.tags || ''};transit-route:ct=4809.4809.4134,cu=4837.4837,cm=58807.9808${stamp}`
   }
   const statusFixtures = options.nodeCount || options.nodeCardWorstCase
     ? structuredClone(options.nodeCount ? buildStatuses(nodeCount) : statuses)

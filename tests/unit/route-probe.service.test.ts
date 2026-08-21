@@ -44,9 +44,9 @@ describe('采集节点的挑选（频率控制）', () => {
     expect(selectRouteProbeCandidates([node({ tags: 'transit-route:garbage' })], NOW).map(c => c.uuid)).toEqual(['u1'])
   })
 
-  test('挑选时原样带上现有 tags，供写回时合并', () => {
+  test('候选不携带旧 tags，写回必须重新读取最新值', () => {
     const picked = selectRouteProbeCandidates([node({ tags: '香港<blue>;中转' })], NOW)
-    expect(picked[0]!.tags).toBe('香港<blue>;中转')
+    expect(picked[0]).toEqual({ uuid: 'u1', name: 'n1' })
   })
 
   test('跳过清单在截断台数之前生效，后面的节点不会被饿死', () => {

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { RouteGrade } from '@/utils/routeClassification'
+import type { NodeRouteEntry } from '@/utils/routeTag'
 import { computed } from 'vue'
 import { DataTooltip } from '@/components/ui/data-tooltip'
 import { useAppStore } from '@/stores/app'
@@ -24,7 +25,7 @@ const CARRIER_DOT_CLASSES: Record<string, string> = {
   CM: 'bg-emerald-500',
 }
 
-/** 箭头用运营商色，和左侧圆点、三网质量那一行保持同一套配色。 */
+/** 线路用运营商色，和终点圆点、三网质量那一行保持同一套配色。 */
 const CARRIER_ARROW_CLASSES: Record<string, string> = {
   CT: 'text-blue-500/70',
   CU: 'text-rose-500/70',
@@ -52,11 +53,11 @@ const appStore = useAppStore()
 const now = computed(() => appStore.minuteTick.getTime())
 const report = computed(() => parseNodeRouteTag(props.tags, now.value))
 
-/** 过期的判定不再着色：线路可能早就换了，颜色会让人误以为是当前状态。 */
-const stale = computed(() => report.value?.freshness === 'stale')
+/** 过期或采集时间未知的判定不再着色，避免把历史结果暗示成当前状态。 */
+const untrusted = computed(() => report.value?.freshness === 'stale' || report.value?.freshness === 'unknown')
 
 function gradeClass(grade: RouteGrade): string {
-  if (stale.value || !grade)
+  if (untrusted.value || !grade)
     return MUTED_CLASS
   return GRADE_CLASSES[grade] ?? MUTED_CLASS
 }
@@ -92,6 +93,8 @@ const measuredAgo = computed(() => {
 
 const freshnessNote = computed(() => {
   switch (report.value?.freshness) {
+    case 'unknown':
+      return '\n采集时间未知，判定结果仅供参考。'
     case 'stale':
       return '\n已超过 7 天未更新，判定结果仅供参考。'
     case 'delayed':
@@ -110,14 +113,22 @@ function hopChain(asns: string[]): string {
     return '未识别到骨干网跳点'
   return asns.map(asn => `${asn}（${ROUTE_ASN_LABELS[asn] ?? '未知'}）`).join(' → ')
 }
+
+function routeDetails(entry: NodeRouteEntry): string {
+  return `${entry.carrierLabel}回程\n${hopChain(entry.asns)}\n判定依据：${entry.classification.evidence}\n${measuredText.value}${freshnessNote.value}`
+}
 </script>
 
 <template>
   <div v-if="report" data-node-route-panel class="node-card-cell min-w-0 px-2.5 py-2">
     <div class="flex items-center justify-between gap-2 text-[9px] text-slate-500">
       <span>三网回程</span>
-      <span v-if="measuredAgo" class="shrink-0 tabular-nums" :class="stale && 'text-amber-600 dark:text-amber-500'">
-        {{ measuredAgo }}
+      <span
+        v-if="measuredAgo || report.freshness === 'unknown'"
+        class="shrink-0 tabular-nums"
+        :class="report.freshness === 'stale' ? 'text-amber-600 dark:text-amber-500' : ''"
+      >
+        {{ report.freshness === 'unknown' ? '时间未知' : measuredAgo }}
       </span>
     </div>
 
@@ -125,19 +136,28 @@ function hopChain(asns: string[]): string {
       <DataTooltip
         v-for="entry in report.entries"
         :key="entry.carrier"
-        as="div"
-        class="pointer-events-auto flex min-w-0 items-center gap-1.5"
-        :content="`${entry.carrierLabel}回程\n${hopChain(entry.asns)}\n判定依据：${entry.classification.evidence}\n${measuredText}${freshnessNote}`"
+        as="button"
+        type="button"
+        class="pointer-events-auto flex w-full min-w-0 items-center gap-1.5 rounded-sm text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-400/60"
+        :content="routeDetails(entry)"
         content-class="whitespace-pre-line text-left"
+        :aria-label="routeDetails(entry)"
+        @click.stop
       >
-        <span class="size-1.5 shrink-0 rounded-full" :class="stale ? 'bg-muted-foreground/40' : CARRIER_DOT_CLASSES[entry.carrier]" />
-        <span class="shrink-0 text-[9px] text-slate-500">{{ entry.carrierLabel }}</span>
+        <span
+          class="flex min-w-0 shrink items-baseline gap-1 truncate rounded border px-1.5 py-px text-[9px] leading-tight"
+          :class="gradeClass(entry.classification.grade)"
+        >
+          <span class="truncate font-medium">{{ lineText(entry.classification.label, entry.classification.grade) }}</span>
+          <span v-if="gradeText(entry.classification.grade)" class="shrink-0 opacity-75">{{ gradeText(entry.classification.grade) }}</span>
+        </span>
 
-        <!-- 箭头指向节点，也就是回程的方向 -->
+        <!-- 卡片本身是起点：节点（隐含）→ 骨干线路 → 国内运营商终点。 -->
         <svg
-          class="h-2 w-6 shrink-0"
-          :class="stale ? 'text-muted-foreground/40' : CARRIER_ARROW_CLASSES[entry.carrier]"
+          class="h-2 min-w-3 flex-1"
+          :class="untrusted ? 'text-muted-foreground/40' : CARRIER_ARROW_CLASSES[entry.carrier]"
           viewBox="0 0 24 8"
+          preserveAspectRatio="none"
           fill="none"
           aria-hidden="true"
         >
@@ -146,13 +166,8 @@ function hopChain(asns: string[]): string {
           <path d="M18 1.5 22.5 4 18 6.5z" fill="currentColor" />
         </svg>
 
-        <span
-          class="ml-auto flex min-w-0 shrink items-baseline gap-1 truncate rounded border px-1.5 py-px text-[9px] leading-tight"
-          :class="gradeClass(entry.classification.grade)"
-        >
-          <span class="truncate font-medium">{{ lineText(entry.classification.label, entry.classification.grade) }}</span>
-          <span v-if="gradeText(entry.classification.grade)" class="shrink-0 opacity-75">{{ gradeText(entry.classification.grade) }}</span>
-        </span>
+        <span class="shrink-0 text-[9px] text-slate-500">{{ entry.carrierLabel }}</span>
+        <span class="size-1.5 shrink-0 rounded-full" :class="untrusted ? 'bg-muted-foreground/40' : CARRIER_DOT_CLASSES[entry.carrier]" />
       </DataTooltip>
     </div>
   </div>

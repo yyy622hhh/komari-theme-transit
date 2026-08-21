@@ -85,8 +85,8 @@ describe('回程标签新鲜度', () => {
     expect(report.freshness).toBe(expected as string)
   })
 
-  test('没有时间戳时不判过期', () => {
-    expect(parseNodeRouteTag('transit-route:ct=4134.4134', NOW)!.freshness).toBe('fresh')
+  test('没有时间戳时明确标为 unknown，不伪装成当前结果', () => {
+    expect(parseNodeRouteTag('transit-route:ct=4134.4134', NOW)!.freshness).toBe('unknown')
   })
 })
 
