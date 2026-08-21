@@ -306,7 +306,7 @@ function classifyUnicom(hops: readonly RouteHopEvidence[]): RouteClassification 
     return {
       code: 'cu_9929',
       label: '联通9929',
-      grade: '优质线路',
+      grade: '精品线路',
       confidence: 'confirmed',
       rank: 5,
       evidence: 'AS9929 is present without an earlier AS4837 segment',
