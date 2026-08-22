@@ -25,6 +25,7 @@ import { useAppStore } from '@/stores/app'
 import { useNodesStore } from '@/stores/nodes'
 import { applyHomeQuickControl, countHomeQuickControl, resolveActiveHomeQuickControl } from '@/utils/homeQuickControls'
 import { isNodeMatchSearch } from '@/utils/nodeSearch'
+import { preloadChartsOnIdle } from '@/utils/preloadCharts'
 
 interface QuickControlOption {
   key: HomeQuickControlKey
@@ -96,6 +97,8 @@ onActivated(() => {
     if (appStore.homeScrollPosition > 0)
       window.scrollTo({ top: appStore.homeScrollPosition, behavior: 'instant' })
   })
+  // 幂等：只有第一次真正调度预取，之后每次 keep-alive 激活都是空操作。
+  preloadChartsOnIdle()
 })
 
 onDeactivated(() => {

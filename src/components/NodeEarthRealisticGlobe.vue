@@ -16,6 +16,9 @@ const props = defineProps<{
   nodes?: NodeData[]
 }>()
 
+/** 通知 NodeEarthGlobe.vue 换用更轻量的渲染方式；本组件仍保留本地静态兜底文案作为兜底的兜底。 */
+const emit = defineEmits<{ unavailable: [] }>()
+
 const EARTH_DAY_TEXTURE = '/images/earth/earth-blue-marble.jpg'
 const EARTH_NIGHT_TEXTURE = '/images/earth/earth-night.jpg'
 const EARTH_BUMP_MAP = '/images/earth/earth-topology.png'
@@ -177,6 +180,7 @@ async function startGlobe() {
 
   if (!supportsWebGL2()) {
     webglUnavailable.value = true
+    emit('unavailable')
     return
   }
 
@@ -270,6 +274,7 @@ async function startGlobe() {
       webglUnavailable.value = true
       logAppWarning('Realistic globe unavailable; using static fallback', error)
       stopGlobe()
+      emit('unavailable')
     }
   }
   finally {

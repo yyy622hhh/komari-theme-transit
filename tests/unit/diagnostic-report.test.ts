@@ -23,6 +23,8 @@ function baseInput(overrides: Partial<DiagnosticReportInput> = {}): DiagnosticRe
     routeProbeEnabled: false,
     lastTopologyWrite: null,
     companionHealth: null,
+    earthRenderMode: { configured: 'realistic', active: 'realistic', reason: null },
+    chartsPreloadState: 'idle',
     ...overrides,
   }
 }
@@ -86,6 +88,24 @@ describe('buildDiagnosticReport', () => {
   test('shows （无） when no features are enabled', () => {
     const report = buildDiagnosticReport(baseInput({ enabledFeatures: [{ label: '网络拓扑', enabled: false }] }))
     expect(report).toContain('（无）')
+  })
+
+  test('shows the active earth renderer and degrade reason when it differs from the configured one', () => {
+    const report = buildDiagnosticReport(baseInput({
+      earthRenderMode: { configured: 'realistic', active: 'cobe', reason: '检测到低性能或触屏设备，已自动切换为点阵地球以保证流畅度。' },
+    }))
+    expect(report).toContain('cobe')
+    expect(report).toContain('检测到低性能或触屏设备')
+  })
+
+  test('shows the globe as not rendered when the current home layout does not mount it', () => {
+    const report = buildDiagnosticReport(baseInput({ earthRenderMode: null }))
+    expect(report).toContain('未渲染（当前首页布局不显示地球）')
+  })
+
+  test('reports the chart preload state', () => {
+    expect(buildDiagnosticReport(baseInput({ chartsPreloadState: 'done' }))).toContain('已完成')
+    expect(buildDiagnosticReport(baseInput({ chartsPreloadState: 'failed' }))).toContain('失败')
   })
 
   test('redacts UUIDs and task IDs surfaced through the topology write log entry', () => {

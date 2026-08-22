@@ -12,14 +12,18 @@ import createGlobe from 'cobe'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useNodeGeoClusters } from '@/composables/useNodeGeoClusters'
 import { useAppStore } from '@/stores/app'
+import { logAppWarning } from '@/utils/safeError'
 
 const props = defineProps<{
   nodes?: NodeData[]
 }>()
+/** 通知 NodeEarthGlobe.vue 换用更轻量的渲染方式（平铺地图）；本组件仍保留本地静态兜底文案。 */
+const emit = defineEmits<{ unavailable: [] }>()
 const appStore = useAppStore()
 
 const containerRef = ref<HTMLDivElement>()
 const canvasRef = ref<HTMLCanvasElement>()
+const webglUnavailable = ref(false)
 const { width: containerWidth, height: containerHeight } = useElementSize(containerRef)
 
 const documentVisibility = useDocumentVisibility()
@@ -239,7 +243,15 @@ function startGlobe() {
     return
   if (appStore.stopEarth)
     resetStoppedView()
-  globe = createGlobe(canvasRef.value, buildInitialOptions())
+  try {
+    globe = createGlobe(canvasRef.value, buildInitialOptions())
+  }
+  catch (error) {
+    webglUnavailable.value = true
+    logAppWarning('Cobe globe unavailable; using static fallback', error)
+    emit('unavailable')
+    return
+  }
   requestAnimationFrame(() => {
     updateGlobeFrame()
     applyLabelStyles()
@@ -356,10 +368,18 @@ function onPointerUp(e: PointerEvent) {
 <template>
   <div ref="containerRef" class="relative aspect-square w-full max-w-md mx-auto -translate-y-6 md:-translate-y-12">
     <canvas
+      v-if="!webglUnavailable"
       ref="canvasRef"
       class="earth-globe-canvas absolute inset-0 w-full h-full select-none touch-none cursor-grab active:cursor-grabbing"
       @pointerdown="onPointerDown" @pointermove="onPointerMove" @pointerup="onPointerUp" @pointercancel="onPointerUp"
     />
+    <div
+      v-if="webglUnavailable"
+      data-earth-static-fallback
+      class="absolute inset-8 flex items-center justify-center rounded-full border border-border/60 bg-muted/20 px-8 text-center text-xs text-muted-foreground"
+    >
+      当前环境不支持 3D 地球，节点统计仍可正常使用
+    </div>
 
     <div
       v-for="label in cobeLabels"

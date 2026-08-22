@@ -7,6 +7,7 @@ import { useAppStore } from '@/stores/app'
 import { useNodesStore } from '@/stores/nodes'
 import { buildDiagnosticReport } from '@/utils/diagnosticReport'
 import { message } from '@/utils/message'
+import { chartsPreloadState, earthRenderModeState } from '@/utils/renderModeState'
 import { readTopologyWriteLog } from '@/utils/topologyWriteLog'
 
 /**
@@ -75,6 +76,8 @@ export function useGlobalDiagnostics() {
       routeProbeEnabled: appStore.routeProbeEnabled,
       lastTopologyWrite: readTopologyWriteLog()[0] ?? null,
       companionHealth: companionHealth.value,
+      earthRenderMode: earthRenderModeState.value,
+      chartsPreloadState: chartsPreloadState.value,
     })
   }
 
@@ -98,6 +101,8 @@ export function useGlobalDiagnostics() {
     companionHealthLoading,
     lastNodeUpdateAt,
     enabledFeatures,
+    earthRenderModeState,
+    chartsPreloadState,
     refresh,
     copyReport,
   }

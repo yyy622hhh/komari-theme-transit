@@ -19,9 +19,18 @@ const {
   companionHealthLoading,
   lastNodeUpdateAt,
   enabledFeatures,
+  earthRenderModeState,
+  chartsPreloadState,
   refresh,
   copyReport,
 } = useGlobalDiagnostics()
+
+const CHARTS_PRELOAD_LABELS: Record<typeof chartsPreloadState.value, string> = {
+  idle: '待触发',
+  loading: '进行中',
+  done: '已完成',
+  failed: '失败',
+}
 
 const refreshing = computed(() => serverVersionLoading.value || companionHealthLoading.value)
 const themeVersion = __BUILD_VERSION__
@@ -157,6 +166,33 @@ const themeGitHash = __BUILD_GIT_HASH__
         </dl>
       </CardX>
     </div>
+
+    <CardX title="渲染" size="small" class="border-none bg-background/50">
+      <dl class="space-y-2 text-sm">
+        <div class="flex items-center justify-between">
+          <dt class="text-muted-foreground">
+            地球
+          </dt>
+          <dd class="font-medium">
+            <template v-if="earthRenderModeState">
+              {{ earthRenderModeState.active }}
+              <span v-if="earthRenderModeState.reason" class="ml-1 text-xs font-normal text-amber-600 dark:text-amber-400">{{ earthRenderModeState.reason }}</span>
+            </template>
+            <template v-else>
+              未渲染（当前首页布局不显示地球）
+            </template>
+          </dd>
+        </div>
+        <div class="flex items-center justify-between">
+          <dt class="text-muted-foreground">
+            图表预加载
+          </dt>
+          <dd class="font-medium">
+            {{ CHARTS_PRELOAD_LABELS[chartsPreloadState] }}
+          </dd>
+        </div>
+      </dl>
+    </CardX>
 
     <CardX title="已启用功能" size="small" class="border-none bg-background/50">
       <div class="flex flex-wrap gap-1.5">

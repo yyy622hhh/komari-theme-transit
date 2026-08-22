@@ -2,6 +2,7 @@ import type { CompanionHealth } from '@/services/route-probe-companion.service'
 import type { RpcTransportMode } from '@/stores/app.types'
 import type { WsConnectionState } from '@/stores/nodes'
 import type { VersionInfo } from '@/utils/api'
+import type { EarthRenderModeState } from '@/utils/renderModeState'
 import type { TopologyWriteEntry } from '@/utils/topologyWriteLog'
 import { formatBeijingTime, redactDiagnosticReport } from '@/utils/topologyReport'
 
@@ -22,6 +23,8 @@ export interface DiagnosticReportInput {
   routeProbeEnabled: boolean
   lastTopologyWrite: TopologyWriteEntry | null
   companionHealth: CompanionHealth | null
+  earthRenderMode: EarthRenderModeState | null
+  chartsPreloadState: 'idle' | 'loading' | 'done' | 'failed'
 }
 
 export const WS_STATE_LABELS: Record<WsConnectionState, string> = {
@@ -73,6 +76,15 @@ export function buildDiagnosticReport(input: DiagnosticReportInput): string {
       `  版本：${input.companionHealth?.version ? `v${input.companionHealth.version}` : '未知'}`,
     )
   }
+
+  lines.push(
+    '',
+    '渲染：',
+    `  地球：${input.earthRenderMode
+      ? `${input.earthRenderMode.active}${input.earthRenderMode.reason ? `（${input.earthRenderMode.reason}）` : ''}`
+      : '未渲染（当前首页布局不显示地球）'}`,
+    `  图表预加载：${{ idle: '待触发', loading: '进行中', done: '已完成', failed: '失败' }[input.chartsPreloadState]}`,
+  )
 
   lines.push('', '说明：本报告已对 UUID、IP、任务 ID 做脱敏处理，仅用于故障排查。')
 
