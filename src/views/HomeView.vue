@@ -50,6 +50,7 @@ defineOptions({
     UiButton: Button,
     DeferredRender,
     Empty,
+    GlobalDiagnosticsPanel: defineAsyncComponent(() => import('@/components/GlobalDiagnosticsPanel.vue')),
     HealthSummaryPanel: defineAsyncComponent(() => import('@/components/HealthSummaryPanel.vue')),
     Icon,
     UiInput: Input,
@@ -134,6 +135,7 @@ const homeToolPermissionMap = {
   healthSummary: 'healthSummary',
   snapshotExport: 'snapshotExport',
   auditLog: 'auditLog',
+  diagnostics: 'diagnostics',
 } as const satisfies Record<PrivateHomeToolKey, string>
 
 function isPrivateHomeTool(key: HomeToolKey): key is PrivateHomeToolKey {
@@ -162,7 +164,7 @@ const homeTools = computed<HomeToolOption[]>(() => {
   if (!appStore.privateFeaturesAllowed)
     return tools
 
-  return [...tools, { key: 'serverList', label: '服务器', icon: 'tabler:server-2', description: '实时服务器清单与运维入口' }, { key: 'topology', label: '网络', icon: 'tabler:route', description: '网络归属、配置链路与离线聚类' }, { key: 'providerValue', label: '性价比', icon: 'tabler:scale', description: '单机资源成本对比' }, { key: 'healthSummary', label: '健康', icon: 'tabler:heartbeat', description: '日周月历史健康概览' }, { key: 'snapshotExport', label: '导出', icon: 'tabler:download', description: 'CSV / JSON 数据快照' }, { key: 'auditLog', label: '日志', icon: 'tabler:list-details', description: '管理员操作审计日志' }]
+  return [...tools, { key: 'serverList', label: '服务器', icon: 'tabler:server-2', description: '实时服务器清单与运维入口' }, { key: 'topology', label: '网络', icon: 'tabler:route', description: '网络归属、配置链路与离线聚类' }, { key: 'providerValue', label: '性价比', icon: 'tabler:scale', description: '单机资源成本对比' }, { key: 'healthSummary', label: '健康', icon: 'tabler:heartbeat', description: '日周月历史健康概览' }, { key: 'snapshotExport', label: '导出', icon: 'tabler:download', description: 'CSV / JSON 数据快照' }, { key: 'auditLog', label: '日志', icon: 'tabler:list-details', description: '管理员操作审计日志' }, { key: 'diagnostics', label: '诊断', icon: 'tabler:stethoscope', description: '版本、连接与拓扑运行诊断，一键复制脱敏报告' }]
 })
 
 const updateDebouncedSearch = useDebounceFn((value: string) => {
@@ -755,6 +757,7 @@ const nodeCardGridClass = computed(() => {
             <HealthSummaryPanel v-else-if="activeHomeTool === 'healthSummary'" :nodes="groupNodeList" />
             <SnapshotExportPanel v-else-if="activeHomeTool === 'snapshotExport'" :nodes="groupNodeList" />
             <AuditLogPanel v-else-if="activeHomeTool === 'auditLog'" />
+            <GlobalDiagnosticsPanel v-else-if="activeHomeTool === 'diagnostics'" />
             <TransitionGroup
               v-else-if="displayedNodeList.length !== 0 && appStore.nodeViewMode === 'card'"
               :ref="setHomeOrderContainer"

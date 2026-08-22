@@ -9,6 +9,6 @@ export const SECURITY_CONFIG = {
   },
 } as const
 
-export const PRIVATE_HOME_TOOL_KEYS = ['serverList', 'topology', 'providerValue', 'healthSummary', 'snapshotExport', 'auditLog'] as const
+export const PRIVATE_HOME_TOOL_KEYS = ['serverList', 'topology', 'providerValue', 'healthSummary', 'snapshotExport', 'auditLog', 'diagnostics'] as const
 
 export type PrivateHomeToolKey = typeof PRIVATE_HOME_TOOL_KEYS[number]

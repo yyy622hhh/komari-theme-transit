@@ -29,7 +29,7 @@ const IPV4_PATTERN = /\b(?:\d{1,3}\.){3}\d{1,3}\b/g
 const IPV6_CANDIDATE_PATTERN = /[\da-f:.]*:[\da-f:.]+/gi
 const TASK_ID_PATTERN = /(?:任务 ID|任务ID|task_id|task-id|task id)[:：=# ]{0,4}\d+/gi
 
-function formatBeijingTime(timestamp: number | null): string {
+export function formatBeijingTime(timestamp: number | null): string {
   if (timestamp === null || !Number.isFinite(timestamp))
     return '待数据'
   const parts = new Intl.DateTimeFormat('zh-CN', {
@@ -66,7 +66,7 @@ function baselineShift(snapshot: TopologySegmentReliabilitySnapshot): string | n
   return shift.direction === 'degraded' ? `延迟基线升高 ${delta} ms` : `延迟基线降低 ${delta} ms`
 }
 
-export function redactTopologyDiagnosticReport(value: string): string {
+export function redactDiagnosticReport(value: string): string {
   return value
     .replace(UUID_PATTERN, '[已隐藏]')
     .replace(IPV4_PATTERN, '[已隐藏]')
@@ -109,5 +109,5 @@ export function buildTopologyDiagnosticReport(input: TopologyDiagnosticReportInp
   }
 
   lines.push('', '说明：本报告仅依据公开 Ping 样本生成，不代表确认发生路由变化。')
-  return redactTopologyDiagnosticReport(lines.join('\n'))
+  return redactDiagnosticReport(lines.join('\n'))
 }

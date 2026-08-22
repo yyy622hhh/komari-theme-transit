@@ -1,6 +1,6 @@
 import type { TopologySegmentReliabilitySnapshot } from '../../src/utils/topologyIntelligence'
 import { describe, expect, test } from 'bun:test'
-import { buildTopologyDiagnosticReport, redactTopologyDiagnosticReport } from '../../src/utils/topologyReport'
+import { buildTopologyDiagnosticReport, redactDiagnosticReport } from '../../src/utils/topologyReport'
 
 function reliability(): TopologySegmentReliabilitySnapshot {
   return {
@@ -69,7 +69,7 @@ describe('topology diagnostic report', () => {
   })
 
   test('redacts UUID, IPv4, IPv6 and explicit task identifiers after composition', () => {
-    const value = redactTopologyDiagnosticReport('00000000-0000-4000-8000-000000000001 203.0.113.5 2001:db8::8 2001:db8:1:2:3:4:5:6 task_id=18 任务 ID：19')
+    const value = redactDiagnosticReport('00000000-0000-4000-8000-000000000001 203.0.113.5 2001:db8::8 2001:db8:1:2:3:4:5:6 task_id=18 任务 ID：19')
     expect(value).not.toMatch(/00000000|203\.0\.113\.5|2001:db8|task_id=18|任务 ID：19/)
     expect(value.match(/\[已隐藏\]/g)?.length).toBeGreaterThanOrEqual(6)
   })
