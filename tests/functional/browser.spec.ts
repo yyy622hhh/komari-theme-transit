@@ -1,4 +1,5 @@
 import type { Page } from '@playwright/test'
+import { Buffer } from 'node:buffer'
 import { expect, test } from '@playwright/test'
 import { installKomariFixture } from '../visual/fixtures/komari'
 
@@ -26,6 +27,16 @@ async function openHome(page: Page): Promise<void> {
   await page.goto('/')
   await expect(page.getByRole('heading', { name: 'Komari Visual Lab' })).toBeVisible()
   await expect(page.getByRole('button', { name: '查看节点 主控-洛杉矶 详情' })).toBeVisible()
+}
+
+/**
+ * A test that intentionally injects a failing response logs the browser's own
+ *  "failed to load resource" console line for it; that's expected noise from
+ *  the fault being injected, not an app bug, so drop it before the shared
+ *  afterEach's blanket no-console-errors check runs.
+ */
+function clearExpectedBrowserErrors(page: Page): void {
+  browserErrors.set(page, [])
 }
 
 test('public home navigates to a node detail and returns without private API calls', async ({ page }) => {
@@ -218,6 +229,60 @@ test('setup wizard applies a preset and writes the expected patch', async ({ pag
   const applied = savedPatches.at(-1)
   expect(applied?.nodeCardSize).toBe('large')
   expect(applied?.generalCardPreset).toBe('full')
+})
+
+test('setup wizard surfaces a save failure instead of silently closing or marking itself seen', async ({ page }) => {
+  await installKomariFixture(page, { authenticated: true, opsDashboard: true, setupWizardFirstRun: true, routeProbeCompanion: true })
+  // Override the fixture's success handler to simulate the save request reaching
+  // the server and failing there, mirroring "任务创建成功、主题配置保存失败".
+  await page.route('**/api/admin/theme/settings?theme=*', route => route.fulfill({
+    status: 500,
+    contentType: 'application/json',
+    body: JSON.stringify({ status: 'error', message: '写入配置失败' }),
+  }))
+  await page.goto('/')
+
+  const dialog = page.getByRole('dialog', { name: 'Transit 设置中心' })
+  await expect(dialog).toBeVisible()
+  await dialog.getByRole('button', { name: '开始设置' }).click()
+  await dialog.getByRole('button', { name: '日常监控' }).click()
+  await dialog.getByRole('button', { name: '继续' }).click()
+  await dialog.getByRole('button', { name: '继续' }).click()
+  await dialog.getByRole('button', { name: '确认应用' }).click()
+
+  await expect(dialog.getByText('写入配置失败')).toBeVisible()
+  clearExpectedBrowserErrors(page)
+  // Stays open on the confirm step so the operator can retry, rather than
+  // closing as if the write had gone through.
+  await expect(dialog).toBeVisible()
+  expect(await page.evaluate(() => localStorage.getItem('transit:setup-wizard-dismissed'))).not.toBe('1')
+})
+
+test('config backup surfaces an import failure and keeps the staged diff for retry', async ({ page }) => {
+  await installKomariFixture(page, { authenticated: true, opsDashboard: true })
+  await page.route('**/api/admin/theme/settings?theme=*', route => route.fulfill({
+    status: 500,
+    contentType: 'application/json',
+    body: JSON.stringify({ status: 'error', message: '写入配置失败' }),
+  }))
+  await openHome(page)
+  await page.getByRole('button', { name: '显示首页工具' }).click()
+  await page.getByRole('button', { name: /配置：/ }).click()
+
+  await page.getByRole('button', { name: '导入配置', exact: true }).click()
+  await page.setInputFiles('input[type="file"]', {
+    name: 'transit-config.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify({ schemaVersion: 1, themeVersion: '1.3.0', exportedAt: Date.now(), settings: { alertEnabled: true } })),
+  })
+  await expect(page.getByText('导入预览')).toBeVisible()
+  await page.getByRole('button', { name: '确认导入' }).click()
+
+  await expect(page.getByText('写入配置失败')).toBeVisible()
+  clearExpectedBrowserErrors(page)
+  // The preview must not vanish on failure -- otherwise the operator has to
+  // re-pick the file and re-diff instead of just retrying the apply.
+  await expect(page.getByText('导入预览')).toBeVisible()
 })
 
 test('mobile WebKit keeps the core browse flow inside the viewport', async ({ page }, testInfo) => {
