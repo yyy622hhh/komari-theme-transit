@@ -137,6 +137,11 @@ export interface VisualFixtureOptions {
   nodeCardPanels?: Record<string, { mode: string, pingTasks?: string[] }>
   /** Generate a deterministic large node fleet for performance coverage. */
   nodeCount?: number
+  /**
+   * 默认把设置向导标记为"已看过"，这样其余场景不用逐个处理首次登录弹出的
+   * 模态框。传 `true` 才会让向导按真实首次会话的样子自动弹出。
+   */
+  setupWizardFirstRun?: boolean
 }
 
 function uuidFor(index: number): string {
@@ -920,11 +925,13 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
       : '',
   }
 
-  await page.addInitScript(({ fixedNow, dark }) => {
+  await page.addInitScript(({ fixedNow, dark, setupWizardFirstRun }) => {
     localStorage.clear()
     sessionStorage.clear()
     localStorage.setItem('appearance', dark ? 'dark' : 'light')
     localStorage.setItem('color', 'green')
+    if (!setupWizardFirstRun)
+      localStorage.setItem('transit:setup-wizard-dismissed', '1')
     const NativeDate = Date
     class FixedDate extends NativeDate {
       constructor(...args: ConstructorParameters<typeof Date>) {
@@ -936,7 +943,7 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
       }
     }
     window.Date = FixedDate as DateConstructor
-  }, { fixedNow: FIXED_NOW, dark: options.dark ?? false })
+  }, { fixedNow: FIXED_NOW, dark: options.dark ?? false, setupWizardFirstRun: options.setupWizardFirstRun ?? false })
 
   await page.route('**/api/public', route => route.fulfill({
     contentType: 'application/json',

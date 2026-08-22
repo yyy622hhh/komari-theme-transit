@@ -11,10 +11,16 @@ import { readThemeSettingsHistory, recordThemeSettingsVersion } from '@/utils/th
  */
 export function useThemeSettingsHistoryRecorder(): void {
   const appStore = useAppStore()
+  /**
+   * 必须把 privateFeaturesAllowed 也放进被 watch 的源里，不能只在回调里判断——
+   * 认证状态确认往往比 publicSettings 的首次拉取更晚完成。如果只 watch
+   * theme_settings，两者哪个后到都可能让这次变化被回调里的权限判断吞掉，而
+   * theme_settings 在下次真正改变前不会再触发 watch，历史就永久漏记这一份。
+   */
   watch(
-    () => appStore.publicSettings?.theme_settings,
-    (raw) => {
-      if (!appStore.privateFeaturesAllowed)
+    () => [appStore.publicSettings?.theme_settings, appStore.privateFeaturesAllowed] as const,
+    ([raw, allowed]) => {
+      if (!allowed)
         return
       const settings = normalizeThemeSettings(raw)
       if (Object.keys(settings).length === 0)

@@ -42,9 +42,9 @@ const themeGitHash = __BUILD_GIT_HASH__
     <CardX class="border-none bg-background/50">
       <template #header>
         <div>
-          <div class="font-semibold">
+          <h2 class="font-semibold">
             全局诊断中心
-          </div>
+          </h2>
           <div class="text-xs text-muted-foreground">
             版本、连接与拓扑运行状态一览，报告已脱敏，可直接用于故障排查。
           </div>

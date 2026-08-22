@@ -60,9 +60,9 @@ function formatDiffValue(value: unknown): string {
     <CardX class="border-none bg-background/50">
       <template #header>
         <div>
-          <div class="font-semibold">
+          <h2 class="font-semibold">
             配置备份中心
-          </div>
+          </h2>
           <div class="text-xs text-muted-foreground">
             导出/导入完整主题配置，保存/回滚最近 20 次版本，保存前均先显示差异。
           </div>
