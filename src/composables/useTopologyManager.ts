@@ -64,31 +64,38 @@ export function useTopologyManager(nodes: MaybeRefOrGetter<NodeData[]>) {
     return duplicateNodeNames.value.has(name.trim().toLowerCase())
   }
 
-  function findDuplicateRoute(sourceName: string, landingName = '', sourceUuid = '', landingUuid = ''): number {
-    return findDuplicateTopologyRouteIndex(routes.value, sourceName, landingName, sourceUuid, landingUuid)
+  function findDuplicateRoute(sourceName: string, landingName = '', sourceUuid = '', landingUuid = '', jumperName = '', jumperUuid = ''): number {
+    return findDuplicateTopologyRouteIndex(routes.value, sourceName, landingName, sourceUuid, landingUuid, jumperName, jumperUuid)
   }
 
   function addQuickRoute(
     taskNames: string[] = [],
     sourceUuid = '',
-    options: { landingUuid?: string | null, entryTask?: string, hopTask?: string, probeKey?: string } = {},
+    options: { jumperUuid?: string | null, landingUuid?: string | null, entryTask?: string, hopTask?: string, finalTask?: string, probeKey?: string, entryLabel?: string, entryTarget?: string } = {},
   ): { route: TopologyRouteConfig, created: boolean } | null {
     const route = buildQuickTopologyRoute(availableNodes.value, {
       sourceTasks: taskNames,
       sourceUuid,
       landingUuid: options.landingUuid,
+      jumperUuid: options.jumperUuid,
       entryTask: options.entryTask,
       hopTask: options.hopTask,
+      finalTask: options.finalTask,
       probeKey: options.probeKey,
+      entryLabel: options.entryLabel,
+      entryTarget: options.entryTarget,
     })
     if (!route)
       return null
+    const hasJumper = route.nodes.length >= 4
     const duplicateIndex = findDuplicateTopologyRouteIndex(
       routes.value,
       route.nodes[1]?.name ?? '',
-      route.nodes[2]?.name ?? '',
+      route.nodes.at(-1)?.name ?? '',
       route.nodes[1]?.uuid ?? '',
-      route.nodes[2]?.uuid ?? '',
+      route.nodes.at(-1)?.uuid ?? '',
+      hasJumper ? route.nodes[2]?.name ?? '' : '',
+      hasJumper ? route.nodes[2]?.uuid ?? '' : '',
     )
     if (duplicateIndex >= 0) {
       const existing = routes.value[duplicateIndex]
@@ -127,8 +134,8 @@ export function useTopologyManager(nodes: MaybeRefOrGetter<NodeData[]>) {
     const nextName = selected?.name.trim() || nodeName.trim()
     const nextUuid = selected?.uuid?.trim() ?? ''
     const followingMetrics = index === 1
-      ? route.metrics.filter(metric => !metric.nodeName.trim() || metric.nodeName.trim() === previousName)
-      : []
+      ? route.metrics.slice(0, 2).filter(metric => !metric.nodeName.trim() || metric.nodeName.trim() === previousName)
+      : route.metrics[index] ? [route.metrics[index]!] : []
     route.nodes[index] = nodeConfig(selected, previous?.role || (index === 1 ? '线路机' : index === 2 ? '落地机' : '入口'))
     if (index === 1) {
       for (const metric of followingMetrics) {
@@ -137,10 +144,19 @@ export function useTopologyManager(nodes: MaybeRefOrGetter<NodeData[]>) {
         metric.nodeName = nextName
       }
     }
-    else if (index === 2 && route.metrics[1]?.live) {
-      route.metrics[1].nodeName = route.nodes[1]?.name.trim() ?? ''
-      if (previousName !== nextName || previousUuid !== nextUuid)
-        route.metrics[1].taskFilter = ''
+    else {
+      const incoming = route.metrics[index - 1]
+      if (incoming?.live) {
+        incoming.nodeName = route.nodes[index - 1]?.name.trim() ?? ''
+        if (previousName !== nextName || previousUuid !== nextUuid)
+          incoming.taskFilter = ''
+      }
+      const outgoing = route.metrics[index]
+      if (outgoing?.live) {
+        outgoing.nodeName = nextName
+        if (previousName !== nextName || previousUuid !== nextUuid)
+          outgoing.taskFilter = ''
+      }
     }
   }
 

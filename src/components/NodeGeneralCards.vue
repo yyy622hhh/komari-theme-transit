@@ -33,6 +33,7 @@ import {
   formatNodeCount,
   formatNodeNameList,
 } from '@/utils/nodeMetricsHelper'
+import { earthRenderModeState, resolveStaticEarthRenderer } from '@/utils/renderModeState'
 
 defineOptions({ components: { CardX, ComponentErrorBoundary, DataTooltip, FinanceDetailsDialog: defineAsyncComponent(() => import('@/components/FinanceDetailsDialog.vue')), Icon, NodeEarthGlobe } })
 
@@ -49,9 +50,18 @@ const nodesStore = useNodesStore()
 // 未登录且开启「未登录隐藏价格」时，屏蔽金额类信息
 const showPrice = computed(() => appStore.privateFeaturesAllowed || !appStore.hidePriceWhenLoggedOut)
 const financeCardKeys = new Set<GeneralCardKey>(['remainingValue', 'monthlyCost', 'yearlyCost'])
+const showEarth = computed(() => !appStore.hideEarth)
+const isTiledEarth = computed(() => {
+  if (!showEarth.value)
+    return false
+  const live = earthRenderModeState.value?.active
+  if (live)
+    return live === 'tiled'
+  return resolveStaticEarthRenderer(appStore.earthRenderer).active === 'tiled'
+})
 const needsExchangeRates = computed(() => showPrice.value && (
   appStore.generalCardOrder.some(key => financeCardKeys.has(key))
-  || (!appStore.hideEarth && appStore.earthRenderer === 'tiled')
+  || isTiledEarth.value
 ))
 
 const {
@@ -142,8 +152,6 @@ const tiledDefaultCardKeys: GeneralCardKey[] = [
 ]
 const baseVisibleCards = computed(() => appStore.generalCardOrder.map(getCardDefinition))
 const tiledDefaultCards = computed(() => tiledDefaultCardKeys.map(getCardDefinition))
-const showEarth = computed(() => !appStore.hideEarth)
-const isTiledEarth = computed(() => showEarth.value && appStore.earthRenderer === 'tiled')
 const visibleCards = computed(() => isTiledEarth.value ? tiledDefaultCards.value : baseVisibleCards.value)
 const shouldRenderHeader = computed(() => showEarth.value || visibleCards.value.length > 0)
 const hasExtraCards = computed(() => visibleCards.value.length > 6)

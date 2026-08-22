@@ -3,6 +3,7 @@ import type { RouteTraceCity } from '@/utils/routeTrace'
 const API_BASE = import.meta.env.VITE_API_BASE || '/api'
 const COMPANION_ROOT = `${API_BASE.replace(/\/?api\/?$/, '')}/api/transit-route-probe/v1`
 const BROWSER_GUARD_HEADER = { 'X-Transit-Route-Probe': '1' } as const
+const COMPANION_REQUEST_TIMEOUT_MS = 15_000
 
 export type CompanionProbeStatus = 'queued' | 'running' | 'completed' | 'failed'
 
@@ -82,25 +83,41 @@ async function requestCompanion<T>(
   init: RequestInit,
   parse: (payload: unknown) => T,
 ): Promise<T> {
-  const response = await fetch(url, {
-    ...init,
-    credentials: 'include',
-    headers: {
-      ...BROWSER_GUARD_HEADER,
-      ...init.headers,
-    },
-  })
-  if (response.status === 404)
-    throw new RouteProbeCompanionUnavailableError()
+  const controller = new AbortController()
+  const callerSignal = init.signal
+  const abortFromCaller = () => controller.abort(callerSignal?.reason)
+  if (callerSignal?.aborted)
+    abortFromCaller()
+  else
+    callerSignal?.addEventListener('abort', abortFromCaller, { once: true })
+  const timeoutId = setTimeout(() => controller.abort(new DOMException('Request timeout', 'TimeoutError')), COMPANION_REQUEST_TIMEOUT_MS)
 
-  const payload = await readPayload(response)
-  if (!response.ok) {
-    const message = isRecord(payload) && typeof payload.error === 'string'
-      ? payload.error
-      : `伴生插件请求失败（HTTP ${response.status}）`
-    throw new RouteProbeCompanionError(response.status, message)
+  try {
+    const response = await fetch(url, {
+      ...init,
+      credentials: 'include',
+      headers: {
+        ...BROWSER_GUARD_HEADER,
+        ...init.headers,
+      },
+      signal: controller.signal,
+    })
+    if (response.status === 404)
+      throw new RouteProbeCompanionUnavailableError()
+
+    const payload = await readPayload(response)
+    if (!response.ok) {
+      const message = isRecord(payload) && typeof payload.error === 'string'
+        ? payload.error
+        : `伴生插件请求失败（HTTP ${response.status}）`
+      throw new RouteProbeCompanionError(response.status, message)
+    }
+    return parse(payload)
   }
-  return parse(payload)
+  finally {
+    clearTimeout(timeoutId)
+    callerSignal?.removeEventListener('abort', abortFromCaller)
+  }
 }
 
 function requestBatch(url: string, init: RequestInit): Promise<CompanionProbeBatch> {
@@ -120,15 +137,25 @@ export function enqueueCompanionRouteProbe(
   })
 }
 
-export function getCompanionRouteProbeBatch(
+export async function getCompanionRouteProbeBatch(
   batchId: string,
   signal?: AbortSignal,
 ): Promise<CompanionProbeBatch> {
   const query = new URLSearchParams({ batch_id: batchId })
-  return requestBatch(`${COMPANION_ROOT}/status?${query}`, {
-    method: 'GET',
-    signal,
-  })
+  try {
+    return await requestBatch(`${COMPANION_ROOT}/status?${query}`, {
+      method: 'GET',
+      signal,
+    })
+  }
+  catch (error) {
+    // Only an enqueue 404 means the companion is unavailable and may safely
+    // fall back to admin:exec. Once enqueue succeeded, a missing batch must
+    // fail the current run; falling back would execute the same probe twice.
+    if (error instanceof RouteProbeCompanionUnavailableError)
+      throw new RouteProbeCompanionError(404, '伴生插件未找到已接单的探测批次')
+    throw error
+  }
 }
 
 export interface CompanionHealth {

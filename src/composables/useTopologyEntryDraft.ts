@@ -22,6 +22,8 @@ export function useTopologyEntryDraft(customProbe: string) {
   }
 
   function probeValue(route: TopologyRouteConfig): string {
+    if (route.nodes[0]?.probeTarget?.trim())
+      return customProbe
     return getTopologyRouteProbeKey(route) || customProbe
   }
 

@@ -13,7 +13,7 @@
 
 import type { NodeInfo } from '@/utils/api.types'
 import type { RouteTraceCity } from '@/utils/routeTrace'
-import { requirePermission } from '@/services/auth.service'
+import { requirePermission, setAuthSessionFromLogin } from '@/services/auth.service'
 import {
   enqueueCompanionRouteProbe,
   getCompanionRouteProbeBatch,
@@ -22,7 +22,7 @@ import {
 import { getRegionCode } from '@/utils/regionHelper'
 import { formatNodeRouteTag, isNodeRouteTag, parseNodeRouteTag } from '@/utils/routeTag'
 import { buildRouteTraceCommand, isMissingTracerouteOutput, isUsableRouteTraceOutput, parseRouteTraceOutput } from '@/utils/routeTrace'
-import { getSharedRpc } from '@/utils/rpc'
+import { getSharedRpc, isRpcPermissionError } from '@/utils/rpc'
 import { recordTopologyWrite } from '@/utils/topologyWriteLog'
 
 /** 一次采集能覆盖的节点上限。一次下发太多会让服务端同时推送过多命令。 */
@@ -132,8 +132,21 @@ export function classifyRouteProbeOutputFailure(
   return null
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms))
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted)
+    return Promise.reject(signal.reason ?? new DOMException('Aborted', 'AbortError'))
+  return new Promise((resolve, reject) => {
+    let timeoutId: ReturnType<typeof setTimeout>
+    const abort = () => {
+      clearTimeout(timeoutId)
+      reject(signal?.reason ?? new DOMException('Aborted', 'AbortError'))
+    }
+    timeoutId = setTimeout(() => {
+      signal?.removeEventListener('abort', abort)
+      resolve()
+    }, ms)
+    signal?.addEventListener('abort', abort, { once: true })
+  })
 }
 
 /**
@@ -219,9 +232,7 @@ async function probeNodeRoutesViaCompanion(
       }
     }
     if (pending.size) {
-      await sleep(RESULT_POLL_INTERVAL_MS)
-      if (options.signal?.aborted)
-        break
+      await sleep(RESULT_POLL_INTERVAL_MS, options.signal)
     }
   }
 
@@ -263,9 +274,7 @@ async function probeNodeRoutesViaRemoteExec(
   const deadline = Date.now() + RESULT_TIMEOUT_MS
 
   while (pending.size && Date.now() < deadline) {
-    await sleep(RESULT_POLL_INTERVAL_MS)
-    if (options.signal?.aborted)
-      break
+    await sleep(RESULT_POLL_INTERVAL_MS, options.signal)
 
     const results = await rpc.getExecTaskResults(dispatch.task_id, options.signal)
     const completedResults = results.filter(result => result.finished_at && pending.has(result.client))
@@ -393,6 +402,8 @@ async function writeRouteTag(
     return { uuid: candidate.uuid, name: candidate.name, status: 'updated', detail: routeTag }
   }
   catch (error) {
+    if (isRpcPermissionError(error))
+      setAuthSessionFromLogin(false)
     const detail = error instanceof Error ? error.message : String(error)
     recordTopologyWrite({
       trigger,

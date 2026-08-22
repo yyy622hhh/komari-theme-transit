@@ -1,5 +1,5 @@
 import type { TopologyProbeOption } from '@/utils/topologyPresets'
-import { findTopologyProbeKey, getTopologyProbeTarget, normalizePingTaskName, topologyEntryTaskName } from '@/utils/topologyPresets'
+import { findTopologyProbeKey, getTopologyProbeTarget, isCustomTopologyProbe, normalizePingTaskName, normalizeTopologyProbeTarget, topologyEntryTaskName } from '@/utils/topologyPresets'
 
 export interface AdminPingTask {
   id?: number
@@ -35,6 +35,7 @@ const BRACKETED_TARGET_PATTERN = /^\[([^\]]+)\](?::\d+)?$/
 const IPV4_PORT_PATTERN = /^((?:\d{1,3}\.){3}\d{1,3}):\d+$/
 const IPV4_TARGET_PORT_PATTERN = /^(?:\d{1,3}\.){3}\d{1,3}:(\d{1,5})$/
 const BRACKETED_TARGET_PORT_PATTERN = /^\[[^\]]+\]:(\d{1,5})$/
+const HOSTNAME_TARGET_PORT_PATTERN = /^([^:[\]\s]+):(\d{1,5})$/
 const TASK_NAME_RESERVED_PATTERN = /[@;|]+/g
 const WHITESPACE_PATTERN = /\s+/g
 const SUPPORTED_PING_TASK_TYPES = new Set(['icmp', 'tcp', 'http'])
@@ -91,7 +92,10 @@ export function pingTaskTargetHost(target: string): string {
   const ipv4WithPort = value.match(IPV4_PORT_PATTERN)
   if (ipv4WithPort?.[1] && validIpv4(ipv4WithPort[1]))
     return ipv4WithPort[1]
-  return normalizeIp(value)
+  const hostnameWithPort = value.match(HOSTNAME_TARGET_PORT_PATTERN)
+  if (hostnameWithPort?.[1] && normalizeTopologyProbeTarget(hostnameWithPort[1]))
+    return normalizeTopologyProbeTarget(hostnameWithPort[1])
+  return normalizeIp(value) || normalizeTopologyProbeTarget(value)
 }
 
 export function pingTaskTargetPort(target: string): number | null {
@@ -106,7 +110,11 @@ export function pingTaskTargetPort(target: string): number | null {
       return null
     }
   }
-  return parsePort(value.match(BRACKETED_TARGET_PORT_PATTERN)?.[1] ?? value.match(IPV4_TARGET_PORT_PATTERN)?.[1])
+  return parsePort(
+    value.match(BRACKETED_TARGET_PORT_PATTERN)?.[1]
+    ?? value.match(IPV4_TARGET_PORT_PATTERN)?.[1]
+    ?? value.match(HOSTNAME_TARGET_PORT_PATTERN)?.[2],
+  )
 }
 
 export function normalizeTopologyHopProbe(probe?: TopologyHopProbe): TopologyHopProbe {
@@ -141,6 +149,17 @@ export function buildTopologyHopTarget(
   probe?: TopologyHopProbe,
 ): string {
   const host = topologyPingTargets(endpoint)[0]
+  if (!host)
+    return ''
+  const normalized = normalizeTopologyHopProbe(probe)
+  if (normalized.type !== 'tcp')
+    return host
+  return host.includes(':') ? `[${host}]:${normalized.port}` : `${host}:${normalized.port}`
+}
+
+/** 入口允许使用域名；普通节点段仍只接受 Komari 上报的 IPv4/IPv6。 */
+export function buildTopologyEntryTarget(targetValue: string, probe?: TopologyHopProbe): string {
+  const host = normalizeTopologyProbeTarget(targetValue)
   if (!host)
     return ''
   const normalized = normalizeTopologyHopProbe(probe)
@@ -288,7 +307,9 @@ export function findTopologyEntryProbeTask(
   const generated = uniqueByName(topologyEntryTaskName(probe, hopProbe))
   if (generated)
     return generated
-  const canonicalNames = new Set([probe.taskFilter, probe.label].map(normalizePingTaskName))
+  const canonicalNames = new Set(
+    (isCustomTopologyProbe(probe) ? [probe.taskFilter] : [probe.taskFilter, probe.label]).map(normalizePingTaskName),
+  )
   const canonical = tasks.filter(task => isPingTaskAssignedToSource(task, sourceUuid)
     && canonicalNames.has(normalizePingTaskName(task.name)))
   return canonical.length === 1 ? canonical[0] : undefined
@@ -306,7 +327,7 @@ export function buildTopologyEntryProbeDraft(
   return {
     name: taskName,
     type: hopProbe.type,
-    target: buildTopologyHopTarget({ ipv4: targetHost }, hopProbe),
+    target: buildTopologyEntryTarget(targetHost, hopProbe),
     default_on: false,
     clients: [source.uuid],
     interval: 30,

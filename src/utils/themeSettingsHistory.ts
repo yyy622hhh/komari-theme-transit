@@ -50,18 +50,43 @@ export function readThemeSettingsHistory(): ThemeSettingsVersionEntry[] {
  * 追加一个版本快照。和上一条内容完全相同就跳过——否则窗口每次重新聚焦刷新一次
  * 设置就会插一条重复记录，20 条的额度很快就被"什么都没变"占满。
  */
-export function recordThemeSettingsVersion(settings: ThemeSettings, source: ThemeSettingsVersionSource): void {
+const SOURCE_SPECIFICITY: Record<ThemeSettingsVersionSource, number> = {
+  'initial': 0,
+  'external-change': 1,
+  'theme-write': 2,
+  'import': 2,
+  'rollback': 2,
+}
+
+function persistHistory(entries: ThemeSettingsVersionEntry[]): boolean {
+  let next = entries
+  while (true) {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
+      return true
+    }
+    catch {
+      // 配额满了就丢最旧的再试；一整份快照都写不下才放弃，不能让导入看起来
+      // 记上了其实列表还停在更早的版本。
+      if (next.length <= 1)
+        return false
+      next = next.slice(0, -1)
+    }
+  }
+}
+
+export function recordThemeSettingsVersion(settings: ThemeSettings, source: ThemeSettingsVersionSource): boolean {
   if (!canUseLocalStorage())
-    return
+    return false
   const history = readThemeSettingsHistory()
-  if (history[0] && themeSettingsEqual(history[0].settings, settings))
-    return
-  const next = [{ at: Date.now(), settings, source }, ...history].slice(0, MAX_ENTRIES)
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
+  if (history[0] && themeSettingsEqual(history[0].settings, settings)) {
+    // App 根上的 recorder 会把保存写成 external-change；导入/回滚/向导随后用
+    // 更具体的来源标同一份快照。内容相同就只升级标签，不另插一条「当前」。
+    if (SOURCE_SPECIFICITY[source] <= SOURCE_SPECIFICITY[history[0].source])
+      return true
+    return persistHistory([{ ...history[0], source }, ...history.slice(1)])
   }
-  catch {
-  }
+  return persistHistory([{ at: Date.now(), settings, source }, ...history].slice(0, MAX_ENTRIES))
 }
 
 export function clearThemeSettingsHistory(): void {

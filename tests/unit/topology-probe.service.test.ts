@@ -10,7 +10,7 @@ import {
   planWorkingHopTask,
 } from '../../src/services/topology-probe.service'
 import { resetSharedRpc } from '../../src/utils/rpc'
-import { getTopologyProbe } from '../../src/utils/topologyPresets'
+import { createCustomTopologyProbe, getTopologyProbe } from '../../src/utils/topologyPresets'
 
 const source = { uuid: 'relay-uuid', name: 'Relay-JP', ipv4: '192.0.2.10' }
 const landing = { uuid: 'exit-uuid', name: 'Exit-SG', ipv4: '203.0.113.20' }
@@ -573,6 +573,51 @@ describe('topology hop task planning', () => {
 describe('planEntryProbeTask', () => {
   const beijingTelecom = getTopologyProbe('beijing-telecom')
   const guangzhouTelecom = getTopologyProbe('guangzhou-telecom')
+
+  test('keeps a custom task identity stable when only its display label changes', () => {
+    const first = createCustomTopologyProbe('湖北电信', 'probe.example.com')!
+    const renamed = createCustomTopologyProbe('武汉电信', 'probe.example.com')!
+    const moved = createCustomTopologyProbe('武汉电信', 'other.example.com')!
+    expect(renamed.key).toBe(first.key)
+    expect(renamed.taskFilter).toBe(first.taskFilter)
+    expect(moved.key).not.toBe(first.key)
+  })
+
+  test('retires the previous owned binding when a custom target changes', async () => {
+    const previous = createCustomTopologyProbe('湖北电信', 'old.example.com')!
+    const current = createCustomTopologyProbe('湖北电信', 'new.example.com')!
+    const restore = mockKomari(
+      [{ id: 54, name: previous.taskFilter, clients: [source.uuid], type: 'icmp', target: 'old.example.com', interval: 30 }],
+      [{ task_id: '54', total: 40, valid: 40 }],
+    )
+    try {
+      const planned = await planEntryProbeTask(source, current, { currentTaskName: previous.taskFilter })
+      expect(planned.needsCreation).toBe(true)
+      expect(planned.task.name).toBe(current.taskFilter)
+      expect(planned.task.target).toBe('new.example.com')
+      expect(planned.retiredTasks.map(task => task.id)).toEqual([54])
+    }
+    finally {
+      restore()
+    }
+  })
+
+  test('does not reuse a same-label task for a custom target', async () => {
+    const custom = createCustomTopologyProbe('湖北电信', 'probe.example.com')!
+    const restore = mockKomari(
+      [{ id: 55, name: '湖北电信', clients: [source.uuid], type: 'icmp', target: '198.51.100.55', interval: 30 }],
+      [{ task_id: '55', total: 40, valid: 40 }],
+    )
+    try {
+      const planned = await planEntryProbeTask(source, custom)
+      expect(planned.needsCreation).toBe(true)
+      expect(planned.task.name).toBe(custom.taskFilter)
+      expect(planned.task.target).toBe('probe.example.com')
+    }
+    finally {
+      restore()
+    }
+  })
 
   test('creates a fresh ICMP task named after the taskFilter, targeting the landmark address, when nothing exists', async () => {
     const restore = mockKomari([], [])

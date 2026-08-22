@@ -4,6 +4,31 @@
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-08-23
+
+### Added
+
+- 拓扑支持“入口 → 线路机 → 可选跳板 → 落地机”，每一段都会自动复用或创建真实 Komari Ping 任务，并可点击查看精确来源、任务和历史。
+- 入口新增傻瓜式自定义：填写“湖北电信”等显示名称和一个裸 IP/域名目标即可，保存、自动修复、配置备份和旧格式兼容均会保留该目标。
+- 新增首次使用设置向导、全局诊断中心，以及完整主题配置的导出、替换导入、本机版本历史与一键回滚。
+- 地球渲染根据设备能力在真实地球、Cobe 和平铺地图间安全降级，图表在浏览器空闲时预加载。
+
+### Changed
+
+- 拓扑管理器重新整理为入口、线路机、可选跳板和落地机的渐进式配置并自动保存；首页拓扑可在三节点和四节点线路间保持对齐与可读性。
+- 配置历史和拓扑写入记录改为跨标签页持久保存；导入与回滚按完整快照替换，缺失字段会被真实删除。
+- 首次设置向导按需加载，使首页主块回到性能预算以内。
+
+### Fixed
+
+- 修复自定义入口与内置预设同名时被错误改回预设、域名 TCP 目标无法解析，以及同名用户任务被错误复用的问题。
+- 自定义入口任务身份只取决于探测目标：仅改显示名称不会重复建任务，改目标后的旧主题自建绑定会进入安全清理流程。
+- 修复设置向导登录过期、配置导入失败重试、地球能力降级、诊断复制回退和多项保存并发边界。
+
+### Testing
+
+- 单元、三浏览器功能、移动 WebKit、无障碍、视觉、性能、可复现构建、发布结构和 OSV 依赖审计均纳入发布前门禁。
+
 ## [1.2.0] - 2026-08-22
 
 ### Added
@@ -766,7 +791,14 @@
 - 亮暗主题、桌面/移动布局和 Transit 风格内嵌 Komari 管理端。
 - Playwright 视觉与交互回归、自动构建和 GitHub Release 发布流程。
 
-[Unreleased]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.45...HEAD
+[Unreleased]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.2.0...v1.3.0
+[1.2.0]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.1.4...v1.2.0
+[1.1.4]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.1.3...v1.1.4
+[1.1.3]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.1.2...v1.1.3
+[1.1.2]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.1.1...v1.1.2
+[1.1.1]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.1.0...v1.1.1
+[1.1.0]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.45...v1.1.0
 [1.0.45]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.44...v1.0.45
 [1.0.44]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.43...v1.0.44
 [1.0.43]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.0.42...v1.0.43

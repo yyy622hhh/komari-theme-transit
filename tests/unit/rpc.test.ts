@@ -239,6 +239,20 @@ describe('RpcClient WebSocket lifecycle', () => {
     await expect(call).rejects.toMatchObject({ code: -32800, message: 'Request aborted' })
   })
 
+  test('forwards caller cancellation through public metric helper methods', async () => {
+    globalThis.fetch = ((_input, init) => new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener('abort', () => {
+        reject(new DOMException('aborted', 'AbortError'))
+      }, { once: true })
+    })) as typeof fetch
+    const controller = new AbortController()
+    const rpc = new KomariRpc({ baseUrl: 'http://example.test/api/rpc2', timeout: 100 })
+    const call = rpc.listPublicMetricDefinitions(controller.signal)
+
+    controller.abort()
+    await expect(call).rejects.toMatchObject({ code: -32800, message: 'Request aborted' })
+  })
+
   test('rejects a pending WebSocket call immediately on malformed JSON-RPC', async () => {
     let requestId = 0
     let requestSent!: () => void

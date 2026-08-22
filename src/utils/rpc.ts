@@ -246,12 +246,12 @@ export class KomariRpc {
     }, signal)
   }
 
-  async getPublicPingTasks(): Promise<PingTaskInfo[]> {
-    return this.client.call<PingTaskInfo[]>('public:getPublicPingTasks')
+  async getPublicPingTasks(signal?: AbortSignal): Promise<PingTaskInfo[]> {
+    return this.client.call<PingTaskInfo[]>('public:getPublicPingTasks', undefined, signal)
   }
 
-  async listPublicMetricDefinitions(): Promise<MetricDefinition[]> {
-    return this.client.call<MetricDefinition[]>('public:listMetricDefinitions')
+  async listPublicMetricDefinitions(signal?: AbortSignal): Promise<MetricDefinition[]> {
+    return this.client.call<MetricDefinition[]>('public:listMetricDefinitions', undefined, signal)
   }
 
   async queryPublicMetrics(params: MetricQueryParams, signal?: AbortSignal): Promise<MetricQueryResponse> {

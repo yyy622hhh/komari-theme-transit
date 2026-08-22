@@ -3,21 +3,43 @@ export interface WebglSupport {
   webgl1: boolean
 }
 
+let cachedSupport: WebglSupport | null = null
+
+function loseWebglContext(gl: { getExtension: (name: string) => { loseContext: () => void } | null } | null): void {
+  try {
+    gl?.getExtension('WEBGL_lose_context')?.loseContext()
+  }
+  catch {
+  }
+}
+
+/** 测试里改 getContext mock 之后要清掉，否则会吃到上一次探测结果。 */
+export function resetWebglSupportCache(): void {
+  cachedSupport = null
+}
+
 /** WebGL2/1 上下文是否可用。用完即丢一个离屏 canvas，不留任何全局状态。 */
 export function detectWebglSupport(): WebglSupport {
+  if (cachedSupport)
+    return cachedSupport
   if (typeof document === 'undefined')
     return { webgl2: false, webgl1: false }
   try {
     const canvas = document.createElement('canvas')
     const gl2 = canvas.getContext('webgl2')
-    gl2?.getExtension('WEBGL_lose_context')?.loseContext()
-    if (gl2)
-      return { webgl2: true, webgl1: true }
+    if (gl2) {
+      loseWebglContext(gl2)
+      cachedSupport = { webgl2: true, webgl1: true }
+      return cachedSupport
+    }
     const gl1 = canvas.getContext('webgl') ?? canvas.getContext('experimental-webgl')
-    return { webgl2: false, webgl1: Boolean(gl1) }
+    loseWebglContext(gl1 && 'getExtension' in gl1 ? gl1 : null)
+    cachedSupport = { webgl2: false, webgl1: Boolean(gl1) }
+    return cachedSupport
   }
   catch {
-    return { webgl2: false, webgl1: false }
+    cachedSupport = { webgl2: false, webgl1: false }
+    return cachedSupport
   }
 }
 

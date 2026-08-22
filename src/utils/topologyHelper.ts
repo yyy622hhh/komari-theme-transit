@@ -2,7 +2,7 @@ import type { TopologyNodeConfig, TopologyQuickNode, TopologyRouteConfig } from 
 import type { TopologyProbeOption } from '@/utils/topologyPresets'
 import { formatCityNameZh } from '@/utils/cityNameHelper'
 import { createTopologyRoute, TOPOLOGY_LIMITS, TOPOLOGY_METRIC_RESERVED_PATTERN, TOPOLOGY_NODE_RESERVED_PATTERN } from '@/utils/topologyModel'
-import { findQuickTopologyTaskProbe, findTopologyProbeKey, getTopologyProbe, normalizePingTaskName, normalizeQuickTopologyTaskNames, pickQuickTopologyTaskName } from '@/utils/topologyPresets'
+import { createCustomTopologyProbe, findQuickTopologyTaskProbe, findTopologyProbeKey, getTopologyProbe, normalizePingTaskName, normalizeQuickTopologyTaskNames, normalizeTopologyProbeTarget, pickQuickTopologyTaskName } from '@/utils/topologyPresets'
 
 // 拓扑模型的类型在这里再导出一次：调用方谈的是「拓扑」，不该被迫记住类型定义
 // 落在哪个内部文件。值和函数不转发，避免这里退化成一个什么都能拿到的桶。
@@ -169,11 +169,15 @@ export function pickQuickHopTaskName(
 
 export interface QuickTopologyRouteOptions {
   sourceUuid?: string
+  jumperUuid?: string | null
   landingUuid?: string | null
   sourceTasks?: readonly string[]
   entryTask?: string
   hopTask?: string
+  finalTask?: string
   probeKey?: string
+  entryLabel?: string
+  entryTarget?: string
 }
 
 const QUICK_ENTRY_COLLISION_SUFFIX_PATTERN = /^(.*)入口\d*$/
@@ -196,6 +200,16 @@ export function getTopologyRouteProbeKey(route: Pick<TopologyRouteConfig, 'nodes
     ...quickEntryLabelCandidates(route.nodes[0]?.name ?? ''),
     route.metrics[0]?.taskFilter ?? '',
   ) ?? ''
+}
+
+/** 自定义目标优先于同名内置预设，避免“北京电信 + 自定义 IP”被错误改回内置地址。 */
+export function getTopologyRouteEntryProbe(route: Pick<TopologyRouteConfig, 'nodes' | 'metrics'>): TopologyProbeOption | null {
+  const entry = route.nodes[0]
+  const custom = createCustomTopologyProbe(entry?.name ?? '', entry?.probeTarget ?? '')
+  if (custom)
+    return custom
+  const key = getTopologyRouteProbeKey(route)
+  return key ? getTopologyProbe(key) : null
 }
 
 export function shouldAutoApplyTopologyProbe(route: Pick<TopologyRouteConfig, 'nodes' | 'metrics'>): boolean {
@@ -223,6 +237,7 @@ export function applyTopologyProbeToRoute(
   entry.name = makeUniqueQuickEntryLabel(probe.label, reserved)
   entry.region = 'CN'
   entry.role = '入口'
+  delete entry.probeTarget
   route.nodes[0] = entry
   const first = route.metrics[0] ?? {
     live: false,
@@ -286,7 +301,7 @@ function isSameTopologyEndpoint(
 export function getTopologyRouteEndpoints(route: Pick<TopologyRouteConfig, 'nodes'>): { source: string, landing: string } {
   return {
     source: topologyEndpointKey(route.nodes[1]),
-    landing: topologyEndpointKey(route.nodes[2]),
+    landing: topologyEndpointKey(route.nodes.at(-1)),
   }
 }
 
@@ -296,11 +311,19 @@ export function findDuplicateTopologyRouteIndex(
   landingName = '',
   sourceUuid = '',
   landingUuid = '',
+  jumperName = '',
+  jumperUuid = '',
 ): number {
   if (!sourceUuid.trim() && !sourceName.trim())
     return -1
-  return routes.findIndex(route => isSameTopologyEndpoint(route.nodes[1], sourceName, sourceUuid)
-    && isSameTopologyEndpoint(route.nodes[2], landingName, landingUuid))
+  return routes.findIndex((route) => {
+    const hasJumper = route.nodes.length >= 4 && Boolean(route.nodes[2]?.name.trim())
+    const routeJumper = hasJumper ? route.nodes[2] : undefined
+    const routeLanding = hasJumper ? route.nodes[3] : route.nodes[2]
+    return isSameTopologyEndpoint(route.nodes[1], sourceName, sourceUuid)
+      && isSameTopologyEndpoint(routeJumper, jumperName, jumperUuid)
+      && isSameTopologyEndpoint(routeLanding, landingName, landingUuid)
+  })
 }
 
 export function listUnusedQuickLandingUuids(
@@ -340,6 +363,17 @@ function resolveQuickTopologyLanding<T extends TopologyQuickNode>(
   return candidates.find(node => node !== source && node.name.trim().toLowerCase() !== sourceName)
 }
 
+function resolveOptionalQuickNode<T extends TopologyQuickNode>(
+  candidates: readonly T[],
+  uuid: string | null | undefined,
+  excluded: readonly T[],
+): T | undefined | null {
+  if (!uuid)
+    return undefined
+  const node = candidates.find(item => item.uuid === uuid)
+  return !node || excluded.includes(node) ? null : node
+}
+
 export function buildQuickTopologyRoute(
   nodes: readonly TopologyQuickNode[],
   taskNamesOrOptions: readonly string[] | QuickTopologyRouteOptions = [],
@@ -355,44 +389,69 @@ export function buildQuickTopologyRoute(
   if (!source)
     return null
 
-  const landing = resolveQuickTopologyLanding(candidates, source, options.landingUuid)
+  const jumper = resolveOptionalQuickNode(candidates, options.jumperUuid, [source])
+  if (jumper === null)
+    return null
+  const landing = resolveQuickTopologyLanding(candidates.filter(node => node !== jumper), source, options.landingUuid)
   if (landing === null)
+    return null
+  if (jumper && !landing)
     return null
 
   const configuredNames = new Set(candidates.map(node => node.name.trim().toLowerCase()))
   const usableTaskNames = normalizeQuickTopologyTaskNames(options.sourceTasks ?? [])
+  const entryTarget = normalizeTopologyProbeTarget(options.entryTarget ?? '')
   const requestedProbe = options.probeKey ? getTopologyProbe(options.probeKey) : null
-  const autoProbe = requestedProbe ?? findQuickTopologyTaskProbe(usableTaskNames)
+  const autoProbe = entryTarget ? null : requestedProbe ?? findQuickTopologyTaskProbe(usableTaskNames)
   const explicitEntryTask = options.entryTask === undefined
     ? undefined
     : normalizeQuickTopologyTaskNames([options.entryTask]).find(task => usableTaskNames.includes(task)) ?? ''
   const entryTask = explicitEntryTask ?? (autoProbe ? pickQuickTopologyTaskName(usableTaskNames, autoProbe) : '')
   const probeKey = findTopologyProbeKey(entryTask) ?? requestedProbe?.key
   const probe = probeKey ? getTopologyProbe(probeKey) : requestedProbe
-  const hopTask = landing
+  const firstHopTarget = jumper ?? landing
+  const hopTask = firstHopTarget
     ? (options.hopTask === undefined
-        ? pickQuickHopTaskName(usableTaskNames, landing.name, entryTask)
+        ? pickQuickHopTaskName(usableTaskNames, firstHopTarget.name, entryTask)
         : normalizeQuickTopologyTaskNames([options.hopTask]).find(task => task !== entryTask) ?? '')
     : ''
-  const entryLabel = probe?.label ?? '自定义入口'
+  const finalTask = jumper && landing ? (options.finalTask?.trim() ?? '') : ''
+  const entryLabel = options.entryLabel?.trim() || probe?.label || '自定义入口'
 
-  return createTopologyRoute(
-    [
-      { name: makeUniqueQuickEntryLabel(entryLabel, configuredNames), region: probe ? 'CN' : '', role: '入口' },
-      { name: source.name.trim(), region: source.region?.trim() ?? '', role: '线路机', uuid: source.uuid },
-      { name: landing?.name.trim() ?? '', region: landing?.region?.trim() ?? '', role: '落地机', uuid: landing?.uuid },
-    ],
-    [
-      { live: Boolean(entryTask), nodeName: entryTask ? source.name.trim() : '', taskFilter: entryTask, fallbackLatency: null, fallbackLoss: null },
-      {
-        live: Boolean(hopTask),
-        nodeName: hopTask ? source.name.trim() : '',
-        taskFilter: hopTask,
-        fallbackLatency: null,
-        fallbackLoss: null,
-      },
-    ],
-  )
+  const routeNodes: TopologyNodeConfig[] = [
+    {
+      name: makeUniqueQuickEntryLabel(entryLabel, configuredNames),
+      region: probe || entryTarget ? 'CN' : '',
+      role: '入口',
+      ...(entryTarget ? { probeTarget: entryTarget } : {}),
+    },
+    { name: source.name.trim(), region: source.region?.trim() ?? '', role: '线路机', uuid: source.uuid },
+  ]
+  if (jumper)
+    routeNodes.push({ name: jumper.name.trim(), region: jumper.region?.trim() ?? '', role: '跳板', uuid: jumper.uuid })
+  routeNodes.push({ name: landing?.name.trim() ?? '', region: landing?.region?.trim() ?? '', role: '落地机', uuid: landing?.uuid })
+
+  const routeMetrics = [
+    { live: Boolean(entryTask), nodeName: entryTask ? source.name.trim() : '', taskFilter: entryTask, fallbackLatency: null, fallbackLoss: null },
+    {
+      live: Boolean(hopTask),
+      nodeName: hopTask ? source.name.trim() : '',
+      taskFilter: hopTask,
+      fallbackLatency: null,
+      fallbackLoss: null,
+    },
+  ]
+  if (jumper) {
+    routeMetrics.push({
+      live: Boolean(finalTask),
+      nodeName: finalTask ? jumper.name.trim() : '',
+      taskFilter: finalTask,
+      fallbackLatency: null,
+      fallbackLoss: null,
+    })
+  }
+
+  return createTopologyRoute(routeNodes, routeMetrics)
 }
 
 export function validateTopologyRoutes(routes: TopologyRouteConfig[]): string[] {
@@ -403,7 +462,7 @@ export function validateTopologyRoutes(routes: TopologyRouteConfig[]): string[] 
   return routes.flatMap((route, routeIndex) => {
     const errors: string[] = []
     const routeLabel = `第 ${routeIndex + 1} 条线路`
-    const nodes = route.nodes.slice(0, 3)
+    const nodes = route.nodes.slice(0, TOPOLOGY_LIMITS.maxNodesPerRoute)
     const names = nodes.map(node => node.name.trim()).filter(Boolean)
     const lastConfiguredIndex = nodes.reduce((last, node, index) => node.name.trim() ? index : last, -1)
 
@@ -423,6 +482,9 @@ export function validateTopologyRoutes(routes: TopologyRouteConfig[]): string[] 
       errors.push(`${routeLabel}地区不能超过 ${TOPOLOGY_LIMITS.regionLength} 个字符`)
     if (nodes.some(node => node.role.length > TOPOLOGY_LIMITS.roleLength))
       errors.push(`${routeLabel}角色不能超过 ${TOPOLOGY_LIMITS.roleLength} 个字符`)
+    const entryTarget = nodes[0]?.probeTarget?.trim() ?? ''
+    if (entryTarget && !normalizeTopologyProbeTarget(entryTarget))
+      errors.push(`${routeLabel}的自定义入口探测目标不是有效的 IP 或域名`)
 
     const endpoints = getTopologyRouteEndpoints(route)
     if (route.enabled && endpoints.source) {

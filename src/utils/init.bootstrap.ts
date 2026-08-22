@@ -95,7 +95,12 @@ export async function fetchInitialUserInfo(
       appStore.updateLoginState(user?.logged_in === true, user)
   }
   catch (error) {
-    if (!signal.aborted && canCommit())
+    if (!signal.aborted && canCommit()) {
+      // A resumed tab can still hold an authenticated WebSocket after its HTTP
+      // session has expired. If /api/me cannot be revalidated, fail closed so
+      // private UI and cached permissions are not kept from the old session.
+      appStore.updateLoginState(false)
       logAppError('Failed to fetch user info', error)
+    }
   }
 }

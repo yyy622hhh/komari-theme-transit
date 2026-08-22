@@ -954,6 +954,60 @@ test('Transit topology manager creates both the entry and hop tasks when no task
   await expect(writeLog).toContainText('手动操作')
 })
 
+test('Transit topology creates and renders an optional jumper without manual tasks', async ({ page }) => {
+  const saves: Array<{ topologyConfig?: string }> = []
+  const addedTasks: Array<Record<string, unknown>> = []
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, { opsDashboard: true, authenticated: true, emptyTopology: true, quickTopologyNoTasks: true })
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && request.url().includes('/api/admin/theme/settings?theme=Transit'))
+      saves.push(request.postDataJSON())
+    if (request.method() === 'POST' && request.url().endsWith('/api/rpc2') && request.postDataJSON().method === 'admin:addPingTask')
+      addedTasks.push(request.postDataJSON().params as Record<string, unknown>)
+  })
+  await openStablePage(page)
+
+  const dialog = await openTopologyManager(page, 'empty')
+  await dialog.getByLabel('添加线路入口探测').selectOption('__custom_probe__')
+  await dialog.getByLabel('自定义入口名称').fill('深圳家宽')
+  await dialog.getByLabel('自定义入口探测目标').fill('202.97.0.1')
+  await dialog.getByLabel('添加线路线路机').selectOption({ label: '主控-洛杉矶' })
+  await dialog.getByLabel('添加线路跳板').selectOption({ label: '东京-高负载' })
+  await dialog.getByLabel('添加线路落地机').selectOption({ label: '新加坡-A100' })
+  await dialog.getByRole('button', { name: '添加线路' }).click()
+
+  const route = dialog.locator('[data-topology-route-id]').first()
+  await expectSelectedNode(dialog.getByLabel('第 1 条线路线路机'), '主控-洛杉矶')
+  await expectSelectedNode(dialog.getByLabel('第 1 条线路跳板'), '东京-高负载')
+  await expectSelectedNode(dialog.getByLabel('第 1 条线路落地机'), '新加坡-A100')
+  await expect(route).toHaveAttribute('data-topology-hop-task', 'Transit-主控-洛杉矶-to-东京-高负载')
+  await expect(route).toHaveAttribute('data-topology-final-task', 'Transit-东京-高负载-to-新加坡-A100')
+  await expect.poll(() => saves.length).toBe(1)
+  await expect.poll(() => addedTasks.length).toBe(3)
+  expect(addedTasks.some(params => JSON.stringify(params).includes('202.97.0.1'))).toBe(true)
+  const quickEntrySelect = dialog.getByLabel('添加线路入口探测')
+  await expect(quickEntrySelect.getByRole('option', { name: '深圳家宽 · 202.97.0.1' })).toHaveCount(1)
+  await quickEntrySelect.selectOption({ label: '北京电信' })
+  await quickEntrySelect.selectOption({ label: '深圳家宽 · 202.97.0.1' })
+  await expect(dialog.getByLabel('自定义入口名称', { exact: true })).toHaveValue('深圳家宽')
+  await expect(dialog.getByLabel('自定义入口探测目标', { exact: true })).toHaveValue('202.97.0.1')
+
+  const payload = JSON.parse(saves[0]?.topologyConfig ?? '{}') as { routes?: Array<{ nodes?: Array<{ name?: string, role?: string, probeTarget?: string }>, metrics?: unknown[] }> }
+  expect(payload.routes?.[0]?.nodes?.map(node => [node.name, node.role, node.probeTarget])).toEqual([
+    ['深圳家宽', '入口', '202.97.0.1'],
+    ['主控-洛杉矶', '线路机', undefined],
+    ['东京-高负载', '跳板', undefined],
+    ['新加坡-A100', '落地机', undefined],
+  ])
+  expect(payload.routes?.[0]?.metrics).toHaveLength(3)
+
+  await dialog.getByRole('button', { name: '关闭' }).click()
+  const homeRoute = page.locator('[data-topology-route]').first()
+  await expect(homeRoute).toContainText('深圳家宽')
+  await expect(homeRoute).toContainText('东京-高负载')
+  await expect(homeRoute.locator('[data-topology-current-metric]')).toHaveCount(3)
+})
+
 test('Transit topology manager adds a relay-only route when the optional landing is not selected', async ({ page }) => {
   const saves: Array<{ topologyRoute?: string, topologyMetrics?: string }> = []
   const addedTasks: Array<Record<string, unknown>> = []

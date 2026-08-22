@@ -17,13 +17,21 @@ const {
   quickConfiguring,
   PROBE_CITIES,
   TOPOLOGY_PROBE_OPTIONS,
+  customEntryOptions,
   CUSTOM_PROBE,
   selectClass,
   quickSourceUuid,
+  quickJumperUuid,
   onQuickSourceChange,
+  onQuickJumperChange,
   nodeOption,
   quickLandingUuid,
   quickLandingOptions,
+  quickJumperOptions,
+  quickEntryLabel,
+  quickEntryTarget,
+  isCustomProbeValue,
+  onQuickProbeChange,
   addQuickRoute,
   quickTaskError,
   validationErrors,
@@ -32,18 +40,21 @@ const {
   routeEntryProbeStates,
   describeTopologyHopProbe,
   routeHopTask,
-  pendingRouteTasks,
-  routeProbeStates,
   moveRoute,
   removeRoute,
   hasCustomEntryOption,
   customEntryLabel,
   selectRouteProbe,
+  updateRouteEntryLabel,
+  updateRouteEntryTarget,
   selectRouteNode,
+  selectRouteJumper,
   routeEntryHint,
   routeEntryHintTone,
   routeHint,
   routeHintTone,
+  routeSegmentPending,
+  routeSegmentState,
   writeLog,
   formatWriteLogTime,
   reset,
@@ -58,8 +69,8 @@ const {
   <AppDialog
     v-model:open="isOpen"
     title="拓扑管理"
-    description="选入口和线路机即可；需要展示下一跳时再选落地机。添加和修改都会自动保存，探测任务会自动创建或复用。"
-    content-class="max-w-3xl"
+    description="按顺序选择节点即可生成线路；跳板可选，所有可探测线路段都会自动创建或复用任务。"
+    content-class="max-w-5xl"
   >
     <fieldset
       class="min-w-0 space-y-4"
@@ -68,9 +79,8 @@ const {
     >
       <div class="space-y-3 rounded-lg border border-border/60 bg-background/45 px-3 py-3">
         <div class="flex flex-wrap items-start justify-between gap-2">
-          <p class="max-w-prose text-xs text-muted-foreground">
-            入口只是线路图上的标签，例如北京电信或北京联通。实时数据由线路机发出 Ping。落地机可选：不选时显示“入口 → 线路机”，选中后显示“入口 → 线路机 → 落地机”。添加或修改线路都会立刻保存；入口探测会自动创建或把线路机加进已有的同名任务，第 2 段按落地机地址自动创建或复用。探测方式也会自动挑选，打不通会自动换一种。主题自己建的任务会记在配置里，关页后再开仍可安全清理。<br>
-            新建线路只列出在线节点（需要当场验证探测）；下方已有线路可以选到离线节点，方便节点掉线后继续修改。没有公网 IP 的节点不能作为落地机。重名节点只要能选中就会按 UUID 绑定。
+          <p class="max-w-3xl text-xs text-muted-foreground">
+            只需选择“入口 → 线路机 → 可选跳板 → 落地机”，系统会自动匹配、创建并保存每一段 Ping 任务。自定义入口填写名称和探测目标后也会自动探测，并保留在入口下拉框中供以后复用；旧线路无需改动。
           </p>
           <Button
             size="sm"
@@ -84,7 +94,7 @@ const {
             重新检测
           </Button>
         </div>
-        <div class="grid items-end gap-2 sm:grid-cols-[1fr_1fr_1fr_auto]">
+        <div class="grid items-end gap-2 md:grid-cols-[1.05fr_1fr_1fr_1fr_auto]">
           <label class="space-y-1 text-[11px] text-muted-foreground">
             入口探测
             <select
@@ -92,7 +102,16 @@ const {
               :disabled="quickConfiguring"
               aria-label="添加线路入口探测"
               :class="selectClass"
+              @change="onQuickProbeChange"
             >
+              <option :value="CUSTOM_PROBE">
+                自定义入口…
+              </option>
+              <optgroup v-if="customEntryOptions.length" label="已保存入口">
+                <option v-for="option in customEntryOptions" :key="option.key" :value="option.key">
+                  {{ option.label }} · {{ option.target }}
+                </option>
+              </optgroup>
               <optgroup v-for="city in PROBE_CITIES" :key="city" :label="city">
                 <option
                   v-for="option in TOPOLOGY_PROBE_OPTIONS.filter(item => item.city === city)"
@@ -103,6 +122,25 @@ const {
                 </option>
               </optgroup>
             </select>
+            <input
+              v-if="isCustomProbeValue(quickProbeKey)"
+              v-model="quickEntryLabel"
+              maxlength="120"
+              class="mt-1"
+              placeholder="例如：深圳家宽"
+              aria-label="自定义入口名称"
+              :class="selectClass"
+            >
+            <input
+              v-if="isCustomProbeValue(quickProbeKey)"
+              v-model="quickEntryTarget"
+              maxlength="253"
+              class="mt-1 font-mono"
+              placeholder="探测目标，例如：202.97.0.1"
+              aria-label="自定义入口探测目标"
+              spellcheck="false"
+              :class="selectClass"
+            >
           </label>
           <label class="space-y-1 text-[11px] text-muted-foreground">
             线路机
@@ -127,7 +165,29 @@ const {
             </select>
           </label>
           <label class="space-y-1 text-[11px] text-muted-foreground">
-            落地机（可选）
+            跳板（可选）
+            <select
+              v-model="quickJumperUuid"
+              :disabled="quickConfiguring"
+              aria-label="添加线路跳板"
+              :class="selectClass"
+              @change="onQuickJumperChange"
+            >
+              <option value="">
+                不使用跳板
+              </option>
+              <option
+                v-for="option in quickJumperOptions"
+                :key="option.uuid"
+                :value="option.uuid"
+                :disabled="nodeOption(option, 'jumper', quickLandingUuid).disabled"
+              >
+                {{ nodeOption(option, 'jumper', quickLandingUuid).label }}
+              </option>
+            </select>
+          </label>
+          <label class="space-y-1 text-[11px] text-muted-foreground">
+            落地机
             <select
               v-model="quickLandingUuid"
               :disabled="quickConfiguring"
@@ -180,9 +240,11 @@ const {
         :data-topology-entry-hop-probe="routeEntryProbeStates[route.id] ? describeTopologyHopProbe(routeEntryProbeStates[route.id]!.probe) : ''"
         :data-topology-entry-verdict="routeEntryProbeStates[route.id]?.verdict ?? ''"
         :data-topology-hop-task="routeHopTask(route)"
-        :data-topology-hop-pending="pendingRouteTasks[route.id] ? 'true' : 'false'"
-        :data-topology-hop-probe="routeProbeStates[route.id] ? describeTopologyHopProbe(routeProbeStates[route.id]!.probe) : ''"
-        :data-topology-hop-verdict="routeProbeStates[route.id]?.verdict ?? ''"
+        :data-topology-hop-pending="routeSegmentPending(route, 1) ? 'true' : 'false'"
+        :data-topology-hop-probe="routeSegmentState(route, 1) ? describeTopologyHopProbe(routeSegmentState(route, 1)!.probe) : ''"
+        :data-topology-hop-verdict="routeSegmentState(route, 1)?.verdict ?? ''"
+        :data-topology-final-task="route.nodes.length >= 4 ? routeHopTask(route, 2) : ''"
+        :data-topology-final-pending="route.nodes.length >= 4 && routeSegmentPending(route, 2) ? 'true' : 'false'"
         class="rounded-xl border border-border/65 bg-background/40 p-3"
       >
         <header class="mb-2 flex items-center justify-between gap-3">
@@ -200,7 +262,7 @@ const {
           </div>
         </header>
 
-        <div class="grid items-end gap-2 sm:grid-cols-[1fr_auto_1fr_auto_1fr]">
+        <div class="grid items-end gap-2 md:grid-cols-[1fr_auto_1fr_auto_1fr_auto_1fr]">
           <label class="space-y-1 text-[11px] text-muted-foreground">
             入口
             <select
@@ -209,9 +271,14 @@ const {
               :class="selectClass"
               @change="selectRouteProbe(route, ($event.target as HTMLSelectElement).value)"
             >
-              <option v-if="hasCustomEntryOption(route)" :value="CUSTOM_PROBE">
-                {{ customEntryLabel(route) }}
+              <option :value="CUSTOM_PROBE">
+                {{ hasCustomEntryOption(route) ? customEntryLabel(route) : '自定义入口…' }}
               </option>
+              <optgroup v-if="customEntryOptions.length" label="已保存入口">
+                <option v-for="option in customEntryOptions" :key="`${route.id}-${option.key}`" :value="option.key">
+                  {{ option.label }} · {{ option.target }}
+                </option>
+              </optgroup>
               <optgroup v-for="city in PROBE_CITIES" :key="`${route.id}-${city}`" :label="city">
                 <option
                   v-for="option in TOPOLOGY_PROBE_OPTIONS.filter(item => item.city === city)"
@@ -222,8 +289,29 @@ const {
                 </option>
               </optgroup>
             </select>
+            <input
+              v-if="isCustomProbeValue(routeProbeValue(route))"
+              :value="route.nodes[0]?.name"
+              maxlength="120"
+              class="mt-1"
+              placeholder="例如：深圳家宽"
+              :aria-label="`第 ${routeIndex + 1} 条线路自定义入口名称`"
+              :class="selectClass"
+              @change="updateRouteEntryLabel(route, ($event.target as HTMLInputElement).value)"
+            >
+            <input
+              v-if="isCustomProbeValue(routeProbeValue(route))"
+              :value="route.nodes[0]?.probeTarget || ''"
+              maxlength="253"
+              class="mt-1 font-mono"
+              placeholder="探测目标，例如：202.97.0.1"
+              :aria-label="`第 ${routeIndex + 1} 条线路自定义入口探测目标`"
+              spellcheck="false"
+              :class="selectClass"
+              @change="updateRouteEntryTarget(route, ($event.target as HTMLInputElement).value)"
+            >
           </label>
-          <span class="hidden pb-2 text-xs text-muted-foreground sm:block" aria-hidden="true">→</span>
+          <span class="hidden pb-2 text-xs text-muted-foreground md:block" aria-hidden="true">→</span>
           <label class="space-y-1 text-[11px] text-muted-foreground">
             线路机
             <select
@@ -239,20 +327,42 @@ const {
                 v-for="option in nodes"
                 :key="option.uuid"
                 :value="option.uuid"
-                :disabled="nodeOption(option, 'source', route.nodes[2]?.uuid, route.nodes[2]?.name).disabled"
+                :disabled="route.nodes.slice(2).some(node => node.uuid === option.uuid) || nodeOption(option, 'source').disabled"
               >
-                {{ nodeOption(option, 'source', route.nodes[2]?.uuid, route.nodes[2]?.name).label }}
+                {{ nodeOption(option, 'source').label }}
               </option>
             </select>
           </label>
-          <span class="hidden pb-2 text-xs text-muted-foreground sm:block" aria-hidden="true">→</span>
+          <span class="hidden pb-2 text-xs text-muted-foreground md:block" aria-hidden="true">→</span>
+          <label class="space-y-1 text-[11px] text-muted-foreground">
+            跳板（可选）
+            <select
+              :value="route.nodes.length >= 4 ? route.nodes[2]?.uuid || route.nodes[2]?.name || '' : ''"
+              :aria-label="`第 ${routeIndex + 1} 条线路跳板`"
+              :class="selectClass"
+              @change="selectRouteJumper(route, ($event.target as HTMLSelectElement).value)"
+            >
+              <option value="">
+                不使用跳板
+              </option>
+              <option
+                v-for="option in nodes"
+                :key="option.uuid"
+                :value="option.uuid"
+                :disabled="option.uuid === route.nodes[1]?.uuid || option.uuid === route.nodes[route.nodes.length - 1]?.uuid || nodeOption(option, 'jumper').disabled"
+              >
+                {{ nodeOption(option, 'jumper').label }}
+              </option>
+            </select>
+          </label>
+          <span class="hidden pb-2 text-xs text-muted-foreground md:block" aria-hidden="true">→</span>
           <label class="space-y-1 text-[11px] text-muted-foreground">
             落地机
             <select
-              :value="route.nodes[2]?.uuid || route.nodes[2]?.name || ''"
+              :value="route.nodes[route.nodes.length - 1]?.uuid || route.nodes[route.nodes.length - 1]?.name || ''"
               :aria-label="`第 ${routeIndex + 1} 条线路落地机`"
               :class="selectClass"
-              @change="selectRouteNode(route, 2, ($event.target as HTMLSelectElement).value)"
+              @change="selectRouteNode(route, route.nodes.length - 1, ($event.target as HTMLSelectElement).value)"
             >
               <option value="">
                 选择节点
@@ -261,9 +371,9 @@ const {
                 v-for="option in nodes"
                 :key="option.uuid"
                 :value="option.uuid"
-                :disabled="nodeOption(option, 'landing', route.nodes[1]?.uuid, route.nodes[1]?.name).disabled"
+                :disabled="route.nodes.slice(1, -1).some(node => node.uuid === option.uuid) || nodeOption(option, 'landing').disabled"
               >
-                {{ nodeOption(option, 'landing', route.nodes[1]?.uuid, route.nodes[1]?.name).label }}
+                {{ nodeOption(option, 'landing').label }}
               </option>
             </select>
           </label>

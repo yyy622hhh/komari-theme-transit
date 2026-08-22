@@ -78,12 +78,17 @@ export function parseThemeSettingsImport(raw: unknown): ThemeSettingsImportResul
     return { ok: false, error: '文件内容不是合法的配置导出格式。' }
 
   const record = raw as Record<string, unknown>
-  const looksWrapped = typeof record.schemaVersion === 'number' && record.settings && typeof record.settings === 'object'
-  const schemaVersion = looksWrapped ? record.schemaVersion as number : null
-  const settingsSource = looksWrapped ? record.settings : raw
+  let settingsSource: unknown = raw
 
-  if (schemaVersion !== null && schemaVersion > THEME_SETTINGS_EXPORT_SCHEMA_VERSION)
-    return { ok: false, error: `导出文件的 schema 版本（v${schemaVersion}）比当前 Transit 支持的（v${THEME_SETTINGS_EXPORT_SCHEMA_VERSION}）更新，请先升级主题。` }
+  if (Object.hasOwn(record, 'schemaVersion')) {
+    if (typeof record.schemaVersion !== 'number')
+      return { ok: false, error: '导出文件缺少有效的 schema 版本。' }
+    if (record.schemaVersion > THEME_SETTINGS_EXPORT_SCHEMA_VERSION)
+      return { ok: false, error: `导出文件的 schema 版本（v${record.schemaVersion}）比当前 Transit 支持的（v${THEME_SETTINGS_EXPORT_SCHEMA_VERSION}）更新，请先升级主题。` }
+    if (!record.settings || typeof record.settings !== 'object' || Array.isArray(record.settings))
+      return { ok: false, error: '导出文件没有可用的配置内容。' }
+    settingsSource = record.settings
+  }
 
   try {
     const settings = validateThemeSettings(settingsSource)

@@ -28,6 +28,7 @@ export interface TopologyDirectionComparison {
 export interface TopologyRouteDetail {
   key: string
   sourceUuid?: string
+  sourceUuids?: Array<string | undefined>
   nodeNames: string[]
   metrics: string[]
   score: TopologyRouteScore
@@ -528,7 +529,7 @@ async function copyDiagnosticReport(): Promise<void> {
           :nodes="nodes"
           :source-label="route.nodeNames[index] || `节点 ${index + 1}`"
           :target-label="route.nodeNames[index + 1] || `节点 ${index + 2}`"
-          :source-uuid="route.sourceUuid"
+          :source-uuid="route.sourceUuids?.[index] || route.sourceUuid"
           :hours="hours"
         />
       </div>

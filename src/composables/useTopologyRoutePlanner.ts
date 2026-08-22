@@ -9,8 +9,8 @@ import { ref, toValue } from 'vue'
 import { OPS_TOPOLOGY_ENTRY_PROBE_LADDER, OPS_TOPOLOGY_HOP_PROBE_LADDER } from '@/constants/ops'
 import { describeTopologyHopProbe, normalizeTopologyHopProbe } from '@/services/ping-task.service'
 import { planEntryProbeTask, planWorkingHopTask } from '@/services/topology-probe.service'
-import { applyTopologyProbeToRoute, getTopologyRouteProbeKey, resolveTopologyNode, shouldAutoApplyTopologyProbe } from '@/utils/topologyHelper'
-import { findTopologyProbeKey, getTopologyProbe, getTopologyProbeTarget } from '@/utils/topologyPresets'
+import { applyTopologyProbeToRoute, getTopologyRouteEntryProbe, getTopologyRouteProbeKey, resolveTopologyNode, shouldAutoApplyTopologyProbe } from '@/utils/topologyHelper'
+import { findTopologyProbeKey, getTopologyProbeTarget } from '@/utils/topologyPresets'
 
 export interface TopologyRouteProbeState {
   probe: TopologyHopProbe
@@ -21,16 +21,32 @@ export interface TopologyRouteProbeState {
 }
 
 export interface TopologyPendingRouteTask {
+  segmentIndex: number
   sourceUuid: string
   targetUuid: string
   taskName: string
   probe: TopologyHopProbe
 }
 
+export function topologySegmentKey(routeId: number, segmentIndex: number): string {
+  return `${routeId}:${segmentIndex}`
+}
+
+export function readTopologySegmentRecord<T>(
+  record: Readonly<Record<string, T>>,
+  routeId: number,
+  segmentIndex: number,
+): T | undefined {
+  return record[topologySegmentKey(routeId, segmentIndex)]
+    // 兼容升级前同一路线只有一段 hop 时按 route id 存储的在途状态。
+    ?? (segmentIndex === 1 ? record[String(routeId)] : undefined)
+}
+
 /** 入口待创建/换挡任务。`taskName` 必须是规划选中的真实任务名，`forceCreate` 表示换挡不能按同名复用。 */
 export interface TopologyPendingEntryTask {
   sourceUuid: string
   probeKey: string
+  entryProbe?: TopologyProbeOption
   taskName: string
   probe: TopologyHopProbe
   forceCreate: boolean
@@ -166,12 +182,12 @@ export function useTopologyRoutePlanner(
   catalog: TopologyRoutePlannerCatalog,
   isOpen: () => boolean,
 ) {
-  const routeProbeStates = ref<Record<number, TopologyRouteProbeState>>({})
+  const routeProbeStates = ref<Record<string, TopologyRouteProbeState>>({})
   const routeEntryProbeStates = ref<Record<number, TopologyRouteProbeState>>({})
-  const pendingRouteTasks = ref<Record<number, TopologyPendingRouteTask>>({})
+  const pendingRouteTasks = ref<Record<string, TopologyPendingRouteTask>>({})
   const pendingEntryTasks = ref<Record<number, TopologyPendingEntryTask>>({})
   /** 新任务绑定并保存成功后可以清理掉的旧任务候选，按线路记录。 */
-  const routeRetiredTasks = ref<Record<number, TopologyRetiredTaskCandidate[]>>({})
+  const routeRetiredTasks = ref<Record<string, TopologyRetiredTaskCandidate[]>>({})
   /** 入口段的清理候选，独立于第 2 段的 `routeRetiredTasks`——两段各自记录，互不覆盖。 */
   const routeEntryRetiredTasks = ref<Record<number, TopologyRetiredTaskCandidate[]>>({})
   const routeTaskPlanning = ref<Record<number, boolean>>({})
@@ -209,11 +225,20 @@ export function useTopologyRoutePlanner(
     routeTaskPlanning.value = next
   }
 
-  function clearPendingRouteTask(routeId: number): void {
-    if (!pendingRouteTasks.value[routeId])
-      return
+  function clearPendingRouteTask(routeId: number, segmentIndex?: number): void {
     const nextPending = { ...pendingRouteTasks.value }
-    delete nextPending[routeId]
+    if (segmentIndex === undefined) {
+      delete nextPending[String(routeId)]
+      for (const key of Object.keys(nextPending)) {
+        if (key.startsWith(`${routeId}:`))
+          delete nextPending[key]
+      }
+    }
+    else {
+      delete nextPending[topologySegmentKey(routeId, segmentIndex)]
+      if (segmentIndex === 1)
+        delete nextPending[String(routeId)]
+    }
     pendingRouteTasks.value = nextPending
   }
 
@@ -233,16 +258,26 @@ export function useTopologyRoutePlanner(
     routeTaskErrors.value = nextErrors
   }
 
-  function clearRouteProbeState(routeId: number): void {
-    if (routeRetiredTasks.value[routeId]) {
-      const nextRetired = { ...routeRetiredTasks.value }
-      delete nextRetired[routeId]
-      routeRetiredTasks.value = nextRetired
+  function clearRouteProbeState(routeId: number, segmentIndex?: number): void {
+    const clearKeys = (record: Record<string, unknown>): void => {
+      if (segmentIndex === undefined) {
+        delete record[String(routeId)]
+        for (const key of Object.keys(record)) {
+          if (key.startsWith(`${routeId}:`))
+            delete record[key]
+        }
+      }
+      else {
+        delete record[topologySegmentKey(routeId, segmentIndex)]
+        if (segmentIndex === 1)
+          delete record[String(routeId)]
+      }
     }
-    if (!routeProbeStates.value[routeId])
-      return
+    const nextRetired = { ...routeRetiredTasks.value }
+    clearKeys(nextRetired)
+    routeRetiredTasks.value = nextRetired
     const next = { ...routeProbeStates.value }
-    delete next[routeId]
+    clearKeys(next)
     routeProbeStates.value = next
   }
 
@@ -260,25 +295,25 @@ export function useTopologyRoutePlanner(
   }
 
   function rememberRetiredTasksInto(
-    target: typeof routeRetiredTasks,
-    routeId: number,
+    target: { value: Record<string, TopologyRetiredTaskCandidate[]> },
+    key: string,
     tasks: ReadonlyArray<{ id?: number, name: string }>,
   ): void {
     const retirable = tasks.flatMap(task => (Number.isInteger(task.id) ? [{ id: task.id!, name: task.name }] : []))
     const next = { ...target.value }
     if (retirable.length)
-      next[routeId] = retirable
+      next[key] = retirable
     else
-      delete next[routeId]
+      delete next[key]
     target.value = next
   }
 
-  function rememberRetiredTasks(routeId: number, tasks: ReadonlyArray<{ id?: number, name: string }>): void {
-    rememberRetiredTasksInto(routeRetiredTasks, routeId, tasks)
+  function rememberRetiredTasks(routeId: number, tasks: ReadonlyArray<{ id?: number, name: string }>, segmentIndex = 1): void {
+    rememberRetiredTasksInto(routeRetiredTasks, topologySegmentKey(routeId, segmentIndex), tasks)
   }
 
   function rememberEntryRetiredTasks(routeId: number, tasks: ReadonlyArray<{ id?: number, name: string }>): void {
-    rememberRetiredTasksInto(routeEntryRetiredTasks, routeId, tasks)
+    rememberRetiredTasksInto(routeEntryRetiredTasks, String(routeId), tasks)
   }
 
   function reservedEntryNames(route?: TopologyRouteConfig): string[] {
@@ -293,23 +328,20 @@ export function useTopologyRoutePlanner(
     plan: Awaited<ReturnType<typeof planEntryProbeTask>>
   }
 
-  /**
-   * 入口段选中了预设时才规划（自定义入口或绑定了非预设自定义任务的入口都
-   * 不碰）；只读，不写任何 route 状态，方便调用方先做完再统一检查过期。
-   */
+  /** 内置预设或携带有效目标的自定义入口才规划；这里只读，方便统一检查过期。 */
   async function planEntryTaskState(
     route: TopologyRouteConfig,
     sourceUuid: string,
     sourceName: string,
     options: { fresh?: boolean } = {},
   ): Promise<TopologyEntryTaskState | null> {
-    const probeKey = getTopologyRouteProbeKey(route)
-    if (!probeKey || !shouldAutoApplyTopologyProbe(route))
+    const probe = getTopologyRouteEntryProbe(route)
+    const isCustom = Boolean(route.nodes[0]?.probeTarget?.trim())
+    if (!probe || (!isCustom && !shouldAutoApplyTopologyProbe(route)))
       return null
-    const probe = getTopologyProbe(probeKey)
     const endpoint: TopologyPingEndpoint = { uuid: sourceUuid, name: sourceName }
-    const plan = await planEntryProbeTask(endpoint, probe, options)
-    return { probeKey, probe, plan }
+    const plan = await planEntryProbeTask(endpoint, probe, { ...options, currentTaskName: route.metrics[0]?.taskFilter })
+    return { probeKey: probe.key, probe, plan }
   }
 
   function applyEntryTaskState(
@@ -345,7 +377,7 @@ export function useTopologyRoutePlanner(
     if (plan.needsCreation) {
       pendingEntryTasks.value = {
         ...pendingEntryTasks.value,
-        [route.id]: { sourceUuid, probeKey, taskName, probe: plan.probe, forceCreate: plan.switchedFrom !== null },
+        [route.id]: { sourceUuid, probeKey, entryProbe: probe, taskName, probe: plan.probe, forceCreate: plan.switchedFrom !== null },
       }
     }
     else {
@@ -361,15 +393,18 @@ export function useTopologyRoutePlanner(
     clearRouteEntryProbeState(route.id)
     routeTaskErrors.value = { ...routeTaskErrors.value, [route.id]: '' }
     const source = resolveTopologyNode(toValue(nodes), route.nodes[1]?.name ?? '', route.nodes[1]?.uuid ?? '')
-    const landing = resolveTopologyNode(toValue(nodes), route.nodes[2]?.name ?? '', route.nodes[2]?.uuid ?? '')
     if (!source) {
       clearRouteTaskPlanning(route.id)
       return
     }
     if (route.nodes[1] && route.nodes[1].name.trim() !== source.name.trim())
       route.nodes[1].name = source.name
-    if (landing && route.nodes[2] && route.nodes[2].name.trim() !== landing.name.trim())
-      route.nodes[2].name = landing.name
+    for (let index = 2; index < route.nodes.length; index++) {
+      const configured = route.nodes[index]
+      const resolved = resolveTopologyNode(toValue(nodes), configured?.name ?? '', configured?.uuid ?? '')
+      if (configured && resolved && configured.name.trim() !== resolved.name.trim())
+        configured.name = resolved.name
+    }
 
     routeTaskPlanning.value = { ...routeTaskPlanning.value, [route.id]: true }
     try {
@@ -380,9 +415,12 @@ export function useTopologyRoutePlanner(
         throw new Error(loaded.error)
 
       const probeKey = getTopologyRouteProbeKey(route)
+      const entryProbe = getTopologyRouteEntryProbe(route)
+      const customEntry = Boolean(route.nodes[0]?.probeTarget?.trim())
       const firstMetric = route.metrics[0]
-      if (probeKey && shouldAutoApplyTopologyProbe(route)) {
-        applyTopologyProbeToRoute(route, probeKey, source.name, loaded.tasks, reservedEntryNames(route))
+      if (entryProbe && (customEntry || shouldAutoApplyTopologyProbe(route))) {
+        if (!customEntry && probeKey)
+          applyTopologyProbeToRoute(route, probeKey, source.name, loaded.tasks, reservedEntryNames(route))
         // 离线线路机发不出样本，判死会走空整条阶梯，不给它规划入口任务。
         if (source.online !== false) {
           const entryState = await planEntryTaskState(route, source.uuid, source.name)
@@ -397,51 +435,57 @@ export function useTopologyRoutePlanner(
           firstMetric.taskFilter = matchingEntryTask
       }
 
-      const secondMetric = route.metrics[1]
-      if (!landing) {
-        clearRouteProbeState(route.id)
-        if (secondMetric) {
-          secondMetric.live = false
-          secondMetric.nodeName = ''
-          secondMetric.taskFilter = ''
+      const segmentCount = Math.max(1, route.nodes.filter(node => node.name.trim()).length - 1)
+      for (let segmentIndex = 1; segmentIndex < segmentCount; segmentIndex++) {
+        const segmentSource = resolveTopologyNode(toValue(nodes), route.nodes[segmentIndex]?.name ?? '', route.nodes[segmentIndex]?.uuid ?? '')
+        const segmentTarget = resolveTopologyNode(toValue(nodes), route.nodes[segmentIndex + 1]?.name ?? '', route.nodes[segmentIndex + 1]?.uuid ?? '')
+        const metric = route.metrics[segmentIndex]
+        if (!segmentSource || !segmentTarget || !metric) {
+          clearRouteProbeState(route.id, segmentIndex)
+          clearPendingRouteTask(route.id, segmentIndex)
+          if (metric) {
+            metric.live = false
+            metric.nodeName = ''
+            metric.taskFilter = ''
+          }
+          continue
         }
-        return
-      }
-      if (!secondMetric)
-        return
-      // 离线节点给不出样本，走阶梯会把 ICMP/443/80/22 建一遍并自动写回。
-      if (source.online === false || landing.online === false)
-        return
-      const planned = await planWorkingHopTask(source, landing, secondMetric.taskFilter)
-      if (routeTaskRuns.get(route.id) !== runId || !isOpen() || !manager.routes.includes(route))
-        return
-      secondMetric.live = true
-      secondMetric.nodeName = source.name
-      secondMetric.taskFilter = planned.task.name
-      routeProbeStates.value = {
-        ...routeProbeStates.value,
-        [route.id]: {
-          probe: planned.probe,
-          verdict: planned.verdict,
-          exhausted: planned.exhausted,
-          switchedFrom: planned.switchedFrom,
-          targetAddress: planned.targetAddress,
-        },
-      }
-      rememberRetiredTasks(route.id, planned.retiredTasks)
-      if (planned.needsCreation) {
-        pendingRouteTasks.value = {
-          ...pendingRouteTasks.value,
-          [route.id]: {
-            sourceUuid: source.uuid,
-            targetUuid: landing.uuid,
-            taskName: planned.task.name,
+        // 离线节点给不出样本，走阶梯会把 ICMP/443/80/22 建一遍并自动写回。
+        if (segmentSource.online === false || segmentTarget.online === false)
+          continue
+        const planned = await planWorkingHopTask(segmentSource, segmentTarget, metric.taskFilter)
+        if (routeTaskRuns.get(route.id) !== runId || !isOpen() || !manager.routes.includes(route))
+          return
+        metric.live = true
+        metric.nodeName = segmentSource.name
+        metric.taskFilter = planned.task.name
+        const key = topologySegmentKey(route.id, segmentIndex)
+        routeProbeStates.value = {
+          ...routeProbeStates.value,
+          [key]: {
             probe: planned.probe,
+            verdict: planned.verdict,
+            exhausted: planned.exhausted,
+            switchedFrom: planned.switchedFrom,
+            targetAddress: planned.targetAddress,
           },
         }
-      }
-      else {
-        catalog.rememberTask(source.uuid, planned.task.name)
+        rememberRetiredTasks(route.id, planned.retiredTasks, segmentIndex)
+        if (planned.needsCreation) {
+          pendingRouteTasks.value = {
+            ...pendingRouteTasks.value,
+            [key]: {
+              segmentIndex,
+              sourceUuid: segmentSource.uuid,
+              targetUuid: segmentTarget.uuid,
+              taskName: planned.task.name,
+              probe: planned.probe,
+            },
+          }
+        }
+        else {
+          catalog.rememberTask(segmentSource.uuid, planned.task.name)
+        }
       }
     }
     catch (error) {
@@ -458,26 +502,47 @@ export function useTopologyRoutePlanner(
     }
   }
 
-  function routeHopTask(route: TopologyRouteConfig): string {
-    return pendingRouteTasks.value[route.id]?.taskName || route.metrics[1]?.taskFilter.trim() || ''
+  function routeHopTask(route: TopologyRouteConfig, segmentIndex = 1): string {
+    return readTopologySegmentRecord(pendingRouteTasks.value, route.id, segmentIndex)?.taskName
+      || route.metrics[segmentIndex]?.taskFilter.trim()
+      || ''
   }
 
   function routeHint(route: TopologyRouteConfig): string {
-    return formatTopologyRouteHint({
-      planning: Boolean(routeTaskPlanning.value[route.id]),
-      taskError: routeTaskErrors.value[route.id] ?? '',
-      hasSource: Boolean(route.nodes[1]?.name.trim()),
-      hasLanding: Boolean(route.nodes[2]?.name.trim()),
-      state: routeProbeStates.value[route.id],
-      pending: Boolean(pendingRouteTasks.value[route.id]),
-    })
+    if (routeTaskPlanning.value[route.id] || routeTaskErrors.value[route.id]) {
+      return formatTopologyRouteHint({
+        planning: Boolean(routeTaskPlanning.value[route.id]),
+        taskError: routeTaskErrors.value[route.id] ?? '',
+        hasSource: Boolean(route.nodes[1]?.name.trim()),
+        hasLanding: Boolean(route.nodes.at(-1)?.name.trim()),
+        state: undefined,
+        pending: false,
+      })
+    }
+    const segmentCount = Math.max(1, route.nodes.filter(node => node.name.trim()).length - 1)
+    return Array.from({ length: Math.max(0, segmentCount - 1) }, (_, offset) => offset + 1)
+      .map((segmentIndex) => {
+        const hint = formatTopologyRouteHint({
+          planning: false,
+          taskError: '',
+          hasSource: Boolean(route.nodes[segmentIndex]?.name.trim()),
+          hasLanding: Boolean(route.nodes[segmentIndex + 1]?.name.trim()),
+          state: readTopologySegmentRecord(routeProbeStates.value, route.id, segmentIndex),
+          pending: Boolean(readTopologySegmentRecord(pendingRouteTasks.value, route.id, segmentIndex)),
+        })
+        if (!hint || segmentCount <= 2)
+          return hint
+        return `${route.nodes[segmentIndex]?.name} → ${route.nodes[segmentIndex + 1]?.name}：${hint}`
+      })
+      .filter(Boolean)
+      .join('；')
   }
 
   function routeEntryHint(route: TopologyRouteConfig): string {
-    const probeKey = getTopologyRouteProbeKey(route)
-    const probe = probeKey ? getTopologyProbe(probeKey) : null
+    const probe = getTopologyRouteEntryProbe(route)
+    const customEntry = Boolean(route.nodes[0]?.probeTarget?.trim())
     return formatTopologyEntryHint({
-      probeLabel: probe?.label ?? '',
+      probeLabel: customEntry ? '' : probe?.label ?? '',
       expectedTaskName: pendingEntryTasks.value[route.id]?.taskName || route.metrics[0]?.taskFilter.trim() || probe?.taskFilter || '',
       entryLabel: route.nodes[0]?.name.trim() ?? '',
       sourceName: route.nodes[1]?.name.trim() ?? '',
@@ -496,7 +561,7 @@ export function useTopologyRoutePlanner(
   function routeHintTone(route: TopologyRouteConfig): boolean {
     return isTopologyRouteHintDestructive({
       taskError: routeTaskErrors.value[route.id] ?? '',
-      exhausted: Boolean(routeProbeStates.value[route.id]?.exhausted),
+      exhausted: Object.entries(routeProbeStates.value).some(([key, state]) => (key === String(route.id) || key.startsWith(`${route.id}:`)) && state.exhausted),
     })
   }
 

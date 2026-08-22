@@ -27,6 +27,8 @@ describe('topology Ping task management', () => {
 
     expect(topologyPingTargets(target)).toEqual([target.ipv4, target.ipv6])
     expect(pingTaskTargetHost(`${target.ipv4}:22`)).toBe(target.ipv4)
+    expect(pingTaskTargetHost('probe.example.com:53')).toBe('probe.example.com')
+    expect(pingTaskTargetPort('probe.example.com:53')).toBe(53)
     expect(findTopologyPingTask(tasks, source.uuid, target)?.name).toBe('right')
   })
 
@@ -519,6 +521,20 @@ describe('loadAdminPingTasks caching', () => {
     }
   })
 
+  test('invalidates the local session when deleting a task is denied', async () => {
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = mock(async () => new Response('', { status: 403 })) as typeof fetch
+    setAuthSessionFromLogin(true, { logged_in: true, username: 'admin' })
+
+    try {
+      await expect(deleteTopologyPingTasks([7])).resolves.toBe(false)
+      expect(isAuthenticated()).toBe(false)
+    }
+    finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
   test('write-path lookups inside ensureTopologyPingTask never read the stale cache', async () => {
     // 一个空缓存条目已经存在，若创建路径误用缓存，就会看不到自己刚创建的任务。
     const { restore } = mockAdminTaskList([])
@@ -665,6 +681,44 @@ describe('ensureTopologyEntryProbeTask', () => {
       expect(ensured).toMatchObject({ created: false, task: { id: 4, name: '北京电信' } })
       expect(ensured.task.clients).toContain(source.uuid)
       expect(edited).toMatchObject({ tasks: [{ id: 4, name: '北京电信', clients: ['other', source.uuid] }] })
+      expect(addCalls).toBe(0)
+    }
+    finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  test('reconciles an entry-task edit whose response is lost instead of creating a duplicate', async () => {
+    const originalFetch = globalThis.fetch
+    const tasks: AdminPingTask[] = [{ id: 14, name: '北京电信', clients: ['other'], type: 'icmp', target: '203.0.113.10', interval: 60 }]
+    let editCalls = 0
+    let addCalls = 0
+    globalThis.fetch = mock(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (!init?.body)
+        return new Response(JSON.stringify({ logged_in: true, username: 'admin' }))
+      const request = JSON.parse(String(init.body)) as { id: number, method: string }
+      if (request.method === 'admin:getAllPingTasks') {
+        return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: tasks }), {
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      if (request.method === 'admin:editPingTask') {
+        editCalls += 1
+        tasks[0] = { ...tasks[0]!, clients: [...(tasks[0]!.clients ?? []), source.uuid] }
+        throw new Error('response lost after commit')
+      }
+      if (request.method === 'admin:addPingTask') {
+        addCalls += 1
+        return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id }), { headers: { 'Content-Type': 'application/json' } })
+      }
+      throw new Error(`Unexpected RPC method: ${request.method}`)
+    }) as typeof fetch
+
+    try {
+      const ensured = await ensureTopologyEntryProbeTask(source, probe)
+      expect(ensured).toMatchObject({ created: false, task: { id: 14 } })
+      expect(ensured.task.clients).toContain(source.uuid)
+      expect(editCalls).toBe(1)
       expect(addCalls).toBe(0)
     }
     finally {

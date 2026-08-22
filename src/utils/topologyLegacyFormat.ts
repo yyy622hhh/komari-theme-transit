@@ -153,7 +153,11 @@ export function serializeTopologyRoutes(routes: TopologyRouteConfig[]): { topolo
   const activeRoutes = routes
     .filter(route => route.enabled)
     .map((route) => {
-      const nodes = route.nodes.slice(0, 3)
+      // 旧格式只能表达三节点。含跳板时为降级页面保留入口、线路机和最终落地机，
+      // 完整四节点结构只存在 topologyConfig JSON 中。
+      const nodes = route.nodes.length >= 4
+        ? [route.nodes[0]!, route.nodes[1]!, route.nodes.at(-1)!]
+        : route.nodes.slice(0, 3)
       while (nodes.length && !nodes.at(-1)?.name.trim())
         nodes.pop()
       return { route, nodes }
@@ -168,8 +172,9 @@ export function serializeTopologyRoutes(routes: TopologyRouteConfig[]): { topolo
       })
       .join(';'))
       .join('||'),
-    topologyMetrics: activeRoutes.map(({ route, nodes }) => route.metrics
-      .slice(0, Math.max(1, nodes.length - 1))
+    topologyMetrics: activeRoutes.map(({ route, nodes }) => (route.nodes.length >= 4
+      ? [route.metrics[0]!, route.metrics.at(-1)!]
+      : route.metrics.slice(0, Math.max(1, nodes.length - 1)))
       .map(formatTopologyMetric)
       .join(';'))
       .join('||'),

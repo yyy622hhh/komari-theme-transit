@@ -1,7 +1,7 @@
 import type { NodeCardSize } from '@/stores/app.types'
 import type { VersionInfo } from '@/utils/api'
 import type { SetupWizardPresetFields, SetupWizardPresetId } from '@/utils/setupWizardPresets'
-import { computed, ref } from 'vue'
+import { computed, onScopeDispose, ref } from 'vue'
 import { getCompanionRouteProbeHealth } from '@/services/route-probe-companion.service'
 import { saveManagedThemeSettings } from '@/services/theme-settings.service'
 import { loadServerVersion } from '@/services/version.service'
@@ -91,6 +91,14 @@ export function useSetupWizard() {
   const applying = ref(false)
   const applyError = ref<string | null>(null)
 
+  let detectGeneration = 0
+  let detectController: AbortController | null = null
+
+  onScopeDispose(() => {
+    detectGeneration += 1
+    detectController?.abort()
+  })
+
   const fields = computed<SetupWizardPresetFields>(() => selection.value === 'custom' ? customFields.value : getSetupWizardPreset(selection.value).fields)
 
   const patch = computed<Record<string, unknown>>(() => ({
@@ -120,18 +128,27 @@ export function useSetupWizard() {
   }
 
   async function goToDetect(): Promise<void> {
+    detectController?.abort()
+    const generation = ++detectGeneration
+    const controller = new AbortController()
+    detectController = controller
+    const timeoutId = setTimeout(() => controller.abort(), 8_000)
     step.value = 'detect'
     detecting.value = true
     try {
       const [version, companion] = await Promise.all([
         loadServerVersion(),
-        getCompanionRouteProbeHealth().then(health => health.ok).catch(() => false),
+        getCompanionRouteProbeHealth(controller.signal).then(health => health.ok).catch(() => false),
       ])
+      if (generation !== detectGeneration)
+        return
       serverVersion.value = version
       companionAvailable.value = companion
     }
     finally {
-      detecting.value = false
+      clearTimeout(timeoutId)
+      if (generation === detectGeneration)
+        detecting.value = false
     }
   }
 
@@ -165,16 +182,18 @@ export function useSetupWizard() {
     applying.value = true
     applyError.value = null
     try {
-      await saveManagedThemeSettings({
+      const saved = await saveManagedThemeSettings({
         theme: publicSettings.theme,
         patch: patch.value,
         permission: 'configBackup',
         requestKey: `setup-wizard:apply:${publicSettings.theme}`,
         onPublicSettings: appStore.applyPublicSettings,
       })
-      recordThemeSettingsVersion({ ...currentSettings.value, ...patch.value }, 'theme-write')
+      if (!recordThemeSettingsVersion(saved, 'theme-write'))
+        message.warning('设置已应用，但本机历史记录写入失败，回滚列表可能不是最新。')
+      else
+        message.success('设置已应用。')
       markSetupWizardSeen()
-      message.success('设置已应用。')
       return true
     }
     catch (error) {

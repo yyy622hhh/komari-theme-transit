@@ -74,5 +74,7 @@ export function downloadText(filename: string, content: string, type: string, op
   document.body.appendChild(link)
   link.click()
   link.remove()
-  URL.revokeObjectURL(url)
+  // Firefox and Safari may consume the href after click() returns. Revoking
+  // synchronously can turn a valid export into a cancelled/empty download.
+  setTimeout(() => URL.revokeObjectURL(url), 0)
 }

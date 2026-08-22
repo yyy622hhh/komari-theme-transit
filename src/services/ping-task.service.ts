@@ -157,7 +157,9 @@ export async function deleteTopologyPingTasks(taskIds: readonly number[], signal
     invalidateAdminPingTasksCache()
     return true
   }
-  catch {
+  catch (error) {
+    if (isRpcPermissionError(error))
+      setAuthSessionFromLogin(false)
     return false
   }
 }
@@ -325,7 +327,20 @@ async function adoptExistingEntryTask(
   catch (error) {
     if (isRpcPermissionError(error))
       handlePingPermissionError(error)
-    // 站点没有 admin:editPingTask 时退回新建；其它失败也一样，新建总能兜住。
+    // The edit may have committed even if its response was lost. Reconcile
+    // before falling back to add, otherwise one transient network failure can
+    // create a duplicate task with the same name and target.
+    try {
+      const refreshed = await fetchAdminPingTasks(undefined, `admin:ping:list:entry:${requestKey}:after-edit-error`)
+      const committed = refreshed.find(task => task.id === template.id && isPingTaskAssignedToSource(task, source.uuid))
+      if (committed)
+        return committed
+    }
+    catch (reconcileError) {
+      if (isRpcPermissionError(reconcileError))
+        handlePingPermissionError(reconcileError)
+      logAppWarning('Failed to reconcile an entry ping task after edit failure', reconcileError)
+    }
     if (!isMissingPingMethodError(error))
       logAppWarning('Failed to adopt an existing entry ping task; creating a new one', error)
     return null

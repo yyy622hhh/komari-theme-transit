@@ -89,6 +89,9 @@ test('public home degrades all the way to the tiled map when no WebGL is availab
   await installKomariFixture(page)
   await openHome(page)
   await expect(page.getByRole('img', { name: '真实地球贴图节点世界地图' })).toBeVisible()
+  const tiledHost = page.locator('.earth-map-scroll')
+  await expect(tiledHost).toHaveClass(/min-h-\[18rem\]/)
+  await expect(tiledHost).not.toHaveClass(/md:col-span-6/)
 })
 
 test('admin entry keeps the supported Komari server route contract', async ({ page }) => {
@@ -163,7 +166,23 @@ test('global diagnostics panel renders live data and copies a redacted report', 
   expect(copied).toContain('1.2.6-visual')
 })
 
-test('config backup panel exports the current settings and shows them after import', async ({ page }) => {
+test('global diagnostics downloads the report when clipboard is unavailable', async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: undefined })
+  })
+  await installKomariFixture(page, { authenticated: true, opsDashboard: true })
+  await openHome(page)
+  await page.getByRole('button', { name: '显示首页工具' }).click()
+  await page.getByRole('button', { name: /诊断：/ }).click()
+
+  const downloadPromise = page.waitForEvent('download')
+  await page.getByRole('button', { name: '复制诊断报告' }).click()
+  await expect(page.getByText('当前环境无法写入剪贴板，已改为下载诊断报告。')).toBeVisible()
+  const download = await downloadPromise
+  expect(download.suggestedFilename()).toMatch(/^transit-diagnostics-.*\.txt$/)
+})
+
+test('config backup panel exports the current settings and records an initial history snapshot', async ({ page }) => {
   await installKomariFixture(page, { authenticated: true, opsDashboard: true })
   await openHome(page)
   await page.getByRole('button', { name: '显示首页工具' }).click()
@@ -177,6 +196,41 @@ test('config backup panel exports the current settings and shows them after impo
 
   await expect(page.getByText('暂无记录，配置发生变化后会自动出现在这里。')).toHaveCount(0)
   await expect(page.getByText('当前', { exact: true })).toBeVisible()
+})
+
+test('config backup import replaces the live snapshot including removed keys', async ({ page }) => {
+  const posted: Array<Record<string, unknown>> = []
+  page.on('request', (request) => {
+    if (!request.url().includes('/api/admin/theme/settings'))
+      return
+    const body = request.postDataJSON() as Record<string, unknown> | null
+    if (body)
+      posted.push(body)
+  })
+
+  await installKomariFixture(page, { authenticated: true, opsDashboard: true })
+  await openHome(page)
+  await page.getByRole('button', { name: '显示首页工具' }).click()
+  await page.getByRole('button', { name: /配置：/ }).click()
+  await page.getByRole('button', { name: '导入配置', exact: true }).click()
+  await page.setInputFiles('input[type="file"]', {
+    name: 'transit-config.json',
+    mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify({
+      schemaVersion: 1,
+      themeVersion: '1.3.0',
+      exportedAt: Date.parse('2026-08-22T08:00:00Z'),
+      settings: { alertEnabled: true, nodeCardSize: 'compact' },
+    })),
+  })
+  await expect(page.getByText('导入预览')).toBeVisible()
+  await expect(page.locator('li').filter({ hasText: 'earthRenderer' }).getByText('移除')).toBeVisible()
+  await page.getByRole('button', { name: '确认导入' }).click()
+  await expect(page.getByText('配置已导入并保存。')).toBeVisible()
+  await expect.poll(() => posted.length).toBeGreaterThan(0)
+  const applied = posted.at(-1)
+  expect(applied).toEqual({ alertEnabled: true, nodeCardSize: 'compact' })
+  expect(applied).not.toHaveProperty('earthRenderer')
 })
 
 test('setup wizard opens automatically once for a new admin session and can be dismissed', async ({ page }) => {
@@ -197,6 +251,22 @@ test('setup wizard opens automatically once for a new admin session and can be d
   // (setupWizardFirstRun unset), which seeds this same flag up front -- their
   // passing without ever needing to dismiss the dialog is what actually proves
   // an already-dismissed session stays dismissed on load.
+})
+
+test('setup wizard closes when the admin session expires without marking itself seen', async ({ page }) => {
+  await installKomariFixture(page, { authenticated: true, opsDashboard: true, setupWizardFirstRun: true })
+  await page.goto('/')
+
+  const dialog = page.getByRole('dialog', { name: 'Transit 设置中心' })
+  await expect(dialog).toBeVisible()
+
+  await page.route('**/api/me', route => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({ logged_in: false, username: 'visual-guest' }),
+  }))
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await expect(dialog).toBeHidden()
+  expect(await page.evaluate(() => localStorage.getItem('transit:setup-wizard-dismissed'))).not.toBe('1')
 })
 
 test('setup wizard applies a preset and writes the expected patch', async ({ page }) => {

@@ -229,6 +229,35 @@ describe('managed theme settings compatibility', () => {
     expect(postedBody).toEqual({ changedInOtherTab: 2, topologyEnabled: true })
   })
 
+  test('replace strategy posts the snapshot as the complete body and drops keys absent from it', async () => {
+    let postedBody: Record<string, unknown> | undefined
+    let persisted: Record<string, unknown> = { keep: 1, drop: 2, topologyEnabled: false }
+    globalThis.fetch = (async (input, init) => {
+      const url = String(input)
+      if (url.endsWith('/api/me'))
+        return jsonResponse({ logged_in: true, username: 'admin' })
+      if (url.endsWith('/api/public'))
+        return jsonResponse({ status: 'success', message: '', data: { theme: 'Transit', theme_settings: persisted } })
+      if (url.includes('/api/admin/theme/settings')) {
+        postedBody = JSON.parse(String(init?.body)) as Record<string, unknown>
+        persisted = postedBody
+        return jsonResponse({ status: 'success', data: null })
+      }
+      return jsonResponse({ message: 'unexpected endpoint' }, 500)
+    }) as typeof fetch
+    setAuthSessionFromLogin(true, { logged_in: true, username: 'admin' })
+
+    await expect(saveManagedThemeSettings({
+      theme: 'Transit',
+      patch: { keep: 1, topologyEnabled: true },
+      permission: 'configBackup',
+      requestKey: 'test:theme-settings:replace',
+      strategy: 'replace',
+    })).resolves.toEqual({ keep: 1, topologyEnabled: true })
+    expect(postedBody).toEqual({ keep: 1, topologyEnabled: true })
+    expect(postedBody).not.toHaveProperty('drop')
+  })
+
   test('serializes concurrent saves so the second patch reads the first result', async () => {
     let settings: Record<string, unknown> = { preserved: true }
     const postedBodies: Record<string, unknown>[] = []

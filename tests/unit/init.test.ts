@@ -214,6 +214,29 @@ describe('InitManager lifecycle isolation', () => {
     manager.destroy()
   })
 
+  test('fails closed when session revalidation cannot read the current user', async () => {
+    const browser = installBrowserEvents()
+    let requestRound = 0
+    const harness = createHarness(async () => ({}))
+    const manager = createManager(harness, {
+      getMe: () => requestRound === 0
+        ? Promise.resolve({ logged_in: true })
+        : Promise.reject(new Error('session endpoint unavailable')),
+      getPublicSettings: async () => ({}),
+    }, async () => 'pong')
+
+    await manager.init()
+    expect(harness.logins.at(-1)).toBe(true)
+
+    requestRound = 1
+    browser.window.dispatchEvent(new Event('focus'))
+    await nextTasks()
+
+    expect(harness.logins.at(-1)).toBe(false)
+    expect(harness.events).toContain('transport:ws')
+    manager.destroy()
+  })
+
   test('coalesces repeated focus events into one session recovery', async () => {
     const browser = installBrowserEvents()
     const recoveryPing = deferred<string>()

@@ -131,7 +131,7 @@ export async function loadMetricDefinitions(): Promise<MetricDefinition[]> {
 
   const definitions = await requestManager.run(
     key,
-    async () => getSharedRpc().listPublicMetricDefinitions(),
+    async signal => getSharedRpc().listPublicMetricDefinitions(signal),
     { shouldRetry: shouldRetryMetricRequest },
   )
   return metricDefinitionsCache.set(key, definitions)
@@ -173,7 +173,7 @@ export async function loadPublicPingTasks(): Promise<PingTaskInfo[]> {
 
   const tasks = await requestManager.run(
     key,
-    async () => getSharedRpc().getPublicPingTasks(),
+    async signal => getSharedRpc().getPublicPingTasks(signal),
     { shouldRetry: shouldRetryMetricRequest },
   )
   return publicPingTasksCache.set(key, tasks)

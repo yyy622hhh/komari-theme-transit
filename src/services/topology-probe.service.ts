@@ -5,7 +5,7 @@ import { OPS_TOPOLOGY_ENTRY_PROBE_LADDER, OPS_TOPOLOGY_HOP_PROBE, OPS_TOPOLOGY_H
 import { loadPingRecordsWithTasks } from '@/services/history.service'
 import { loadPingMetricStats, partitionMetricEntityIds } from '@/services/metrics.service'
 import {
-  buildTopologyHopTarget,
+  buildTopologyEntryTarget,
   DEFAULT_TOPOLOGY_HOP_PROBE,
   draftTopologyPingTask,
   findTopologyPingTask,
@@ -20,7 +20,7 @@ import {
   topologyHopTaskNameCandidates,
   topologyPingTargets,
 } from '@/services/ping-task.service'
-import { getTopologyProbeTarget, normalizePingTaskName, topologyEntryTaskName } from '@/utils/topologyPresets'
+import { getTopologyProbeTarget, isCustomTopologyProbe, normalizePingTaskName, topologyEntryTaskName } from '@/utils/topologyPresets'
 
 /** 一个任务在回看窗口内的采样情况。 */
 export interface HopTaskSamples {
@@ -276,7 +276,7 @@ function entryTaskNameCandidates(probe: TopologyProbeOption): Set<string> {
   const legacyRungs = [...new Set([...LADDER, ...ENTRY_LADDER])].filter(rung => rung.type === 'tcp')
   return new Set([
     probe.taskFilter,
-    probe.label,
+    ...(isCustomTopologyProbe(probe) ? [] : [probe.label]),
     topologyEntryTaskName(probe, { type: 'icmp' }),
     ...legacyRungs.map(rung => topologyEntryTaskName(probe, rung)),
   ].map(normalizePingTaskName))
@@ -458,10 +458,9 @@ export interface EntryProbePlan {
   /** 本次因为判死而从哪种探测方式切换过来；没切换则为 null。 */
   switchedFrom: TopologyHopProbe | null
   /**
-   * 名字符合、但不是这次选中绑定的同名任务——多半是换挡时新建成功、旧的还
-   * 没删掉留下的，也可能是站长本来就建了不止一个。调用方应该在换挡成功后
-   * 尝试清理，但必须先用本会话实际创建的任务 ID 证明所有权，不能仅凭名称
-   * 删除；删不掉也不影响主流程，下一轮还会再给出同样的候选。
+   * 不是这次选中绑定的旧任务——多半是换挡/改目标时新建成功、旧的还没删掉，
+   * 也可能是站长本来就建了不止一个。调用方应该在新绑定保存后尝试清理，但
+   * 必须先用本会话实际创建的任务 ID 证明所有权，不能仅凭名称删除。
    */
   retiredTasks: AdminPingTask[]
 }
@@ -473,7 +472,7 @@ export interface EntryProbePlan {
 export async function planEntryProbeTask(
   source: TopologyPingEndpoint,
   probe: TopologyProbeOption,
-  options: { fresh?: boolean } = {},
+  options: { fresh?: boolean, currentTaskName?: string } = {},
 ): Promise<EntryProbePlan> {
   if (!source.uuid.trim())
     throw new Error('线路机已失效，请重新选择。')
@@ -482,11 +481,17 @@ export async function planEntryProbeTask(
   const assigned = profile.tasks.filter(task => isPingTaskAssignedToSource(task, source.uuid))
   const candidateNames = entryTaskNameCandidates(probe)
   const candidates = assigned.filter(task => candidateNames.has(normalizePingTaskName(task.name)))
+  const currentTaskName = normalizePingTaskName(options.currentTaskName ?? '')
+  // 自定义入口换目标后 key 会随目标变化；旧绑定不能继续拿来探新目标，但要交给
+  // 上层的“仅删除本会话自建任务”机制回收，避免反复修改目标积累孤儿任务。
+  const obsoleteCustomBindings = isCustomTopologyProbe(probe) && currentTaskName && !candidateNames.has(currentTaskName)
+    ? assigned.filter(task => normalizePingTaskName(task.name) === currentTaskName)
+    : []
 
   const draftAt = (hopProbe: TopologyHopProbe, taskName = probe.taskFilter): AdminPingTask => {
     const normalized = normalizeTopologyHopProbe(hopProbe)
     const targetHost = entryProbeTarget(probe, normalized)
-    const target = targetHost ? buildTopologyHopTarget({ ipv4: targetHost }, normalized) : ''
+    const target = targetHost ? buildTopologyEntryTarget(targetHost, normalized) : ''
     return { name: taskName, type: normalized.type, target, default_on: false, clients: [source.uuid], interval: 30 }
   }
 
@@ -499,7 +504,7 @@ export async function planEntryProbeTask(
       needsCreation: true,
       exhausted: false,
       switchedFrom: null,
-      retiredTasks: [],
+      retiredTasks: obsoleteCustomBindings,
     }
   }
 
@@ -521,7 +526,7 @@ export async function planEntryProbeTask(
       needsCreation: false,
       exhausted: false,
       switchedFrom: null,
-      retiredTasks: duplicates,
+      retiredTasks: [...duplicates, ...obsoleteCustomBindings],
     }
   }
 
@@ -535,7 +540,7 @@ export async function planEntryProbeTask(
       needsCreation: false,
       exhausted: true,
       switchedFrom: null,
-      retiredTasks: duplicates,
+      retiredTasks: [...duplicates, ...obsoleteCustomBindings],
     }
   }
   return {
@@ -545,6 +550,6 @@ export async function planEntryProbeTask(
     needsCreation: true,
     exhausted: false,
     switchedFrom: currentProbe,
-    retiredTasks: [existing!, ...duplicates],
+    retiredTasks: [existing!, ...duplicates, ...obsoleteCustomBindings],
   }
 }

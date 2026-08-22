@@ -49,11 +49,13 @@ function isApiResponse<T>(value: unknown): value is ApiResponse<T> {
   return (record.status === 'success' || record.status === 'error') && 'data' in record
 }
 
-async function safeJson(response: Response): Promise<unknown> {
+async function safeJson(response: Response, signal?: AbortSignal): Promise<unknown> {
   try {
     return await response.json()
   }
-  catch {
+  catch (error) {
+    if (signal?.aborted)
+      throw error
     return null
   }
 }
@@ -110,9 +112,7 @@ export class KomariApi {
         signal: controller.signal,
       })
 
-      clearTimeout(timeoutId)
-
-      const result = await safeJson(response)
+      const result = await safeJson(response, controller.signal)
       if (!isApiResponse<T>(result))
         throw new ApiError(response.ok ? 'Invalid API response' : `HTTP error: ${response.status}`, 'error', response.status)
 
@@ -123,12 +123,12 @@ export class KomariApi {
       return result.data
     }
     catch (error) {
-      clearTimeout(timeoutId)
       if (error instanceof ApiError)
         throw error
       throw new ApiError(`Network error: ${error instanceof Error ? error.message : String(error)}`, 'error')
     }
     finally {
+      clearTimeout(timeoutId)
       unlinkAbortSignal()
     }
   }
@@ -150,24 +150,22 @@ export class KomariApi {
         signal: controller.signal,
       })
 
-      clearTimeout(timeoutId)
-
       if (!response.ok) {
         throw new ApiError(`HTTP error: ${response.status}`, 'error', response.status)
       }
 
-      const result = await safeJson(response)
+      const result = await safeJson(response, controller.signal)
       if (result === null)
         throw new ApiError('Invalid JSON response', 'error', response.status)
       return result as T
     }
     catch (error) {
-      clearTimeout(timeoutId)
       if (error instanceof ApiError)
         throw error
       throw new ApiError(`Network error: ${error instanceof Error ? error.message : String(error)}`, 'error')
     }
     finally {
+      clearTimeout(timeoutId)
       unlinkAbortSignal()
     }
   }
@@ -193,9 +191,7 @@ export class KomariApi {
         signal: controller.signal,
       })
 
-      clearTimeout(timeoutId)
-
-      const result = await safeJson(response)
+      const result = await safeJson(response, controller.signal)
       if (!result || typeof result !== 'object')
         throw new ApiError(response.ok ? 'Invalid API response' : `HTTP error: ${response.status}`, 'error', response.status)
 
@@ -214,12 +210,12 @@ export class KomariApi {
       return result.data
     }
     catch (error) {
-      clearTimeout(timeoutId)
       if (error instanceof ApiError)
         throw error
       throw new ApiError(`Network error: ${error instanceof Error ? error.message : String(error)}`, 'error')
     }
     finally {
+      clearTimeout(timeoutId)
       unlinkAbortSignal()
     }
   }

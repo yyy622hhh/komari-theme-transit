@@ -11,6 +11,8 @@ export interface TopologyNodeConfig {
   role: string
   /** 线路机/落地机在 Komari 里的 UUID。入口只是标签，一般没有。 */
   uuid?: string
+  /** 自定义入口的 ICMP/TCP 探测目标；预设入口不需要保存。 */
+  probeTarget?: string
 }
 
 export interface TopologyMetricConfig {
@@ -47,12 +49,25 @@ export const TOPOLOGY_METRIC_RESERVED_PATTERN = /@|;|\|\|/
 
 export const TOPOLOGY_LIMITS = Object.freeze({
   maxRoutes: 50,
+  /** 入口、线路机、可选跳板、落地机。 */
+  maxNodesPerRoute: 4,
   rawValueLength: 65_536,
   nodeNameLength: 120,
   regionLength: 32,
   roleLength: 64,
   taskNameLength: 200,
+  probeTargetLength: 253,
 })
+
+export function defaultTopologyNodeRole(index: number, total: number): string {
+  if (index === 0)
+    return '入口'
+  if (index === 1)
+    return '线路机'
+  if (index === total - 1)
+    return '落地机'
+  return '跳板'
+}
 
 export function createTopologyRoute(nodes: TopologyNodeConfig[] = [], metrics: TopologyMetricConfig[] = []): TopologyRouteConfig {
   nextTopologyRouteId = Math.max(nextTopologyRouteId + 1, Date.now() * 1_000)

@@ -33,6 +33,18 @@ describe('serializeTopologyConfig', () => {
     ])
   })
 
+  test('round-trips a custom entry probe target without leaking it into the legacy fields', () => {
+    const custom = route()
+    custom.nodes[0] = { name: '湖北电信', region: 'CN', role: '入口', probeTarget: 'dns.example.net' }
+    const serialized = serializeTopologyConfig([custom])
+    expect(parseTopologyConfig(serialized)?.[0]?.nodes[0]).toEqual({
+      name: '湖北电信',
+      region: 'CN',
+      role: '入口',
+      probeTarget: 'dns.example.net',
+    })
+  })
+
   test('keeps names that the delimiter format had to reject', () => {
     // 旧格式里 | ; @ 是保留字符，只能靠校验拒绝。JSON 存储没有这个限制——这正是
     // 换格式要拿到的东西，遗留字段停写后校验就能放开。
@@ -80,6 +92,35 @@ describe('serializeTopologyConfig', () => {
       [{ live: false, nodeName: '', taskFilter: '', fallbackLatency: null, fallbackLoss: null }],
     )
     expect(JSON.parse(serializeTopologyConfig([lonely]))).toEqual({ version: TOPOLOGY_CONFIG_VERSION, routes: [] })
+  })
+
+  test('round-trips one optional jumper and all three segment bindings', () => {
+    const withJumper = createTopologyRoute(
+      [
+        { name: '深圳家宽', region: '', role: '入口' },
+        { name: 'AWS-JP', region: 'JP', role: '线路机', uuid: 'aws-jp' },
+        { name: 'CSL-JP', region: 'JP', role: '跳板', uuid: 'csl-jp' },
+        { name: 'CSL-US', region: 'US', role: '落地机', uuid: 'csl-us' },
+      ],
+      [
+        { live: false, nodeName: '', taskFilter: '', fallbackLatency: 51, fallbackLoss: 0 },
+        { live: true, nodeName: 'AWS-JP', taskFilter: 'Transit-AWS-JP-to-CSL-JP', fallbackLatency: null, fallbackLoss: null },
+        { live: true, nodeName: 'CSL-JP', taskFilter: 'Transit-CSL-JP-to-CSL-US', fallbackLatency: null, fallbackLoss: null },
+      ],
+    )
+
+    const [parsed] = parseTopologyConfig(serializeTopologyConfig([withJumper]))!
+    expect(parsed!.nodes.map(node => [node.name, node.role, node.uuid])).toEqual([
+      ['深圳家宽', '入口', undefined],
+      ['AWS-JP', '线路机', 'aws-jp'],
+      ['CSL-JP', '跳板', 'csl-jp'],
+      ['CSL-US', '落地机', 'csl-us'],
+    ])
+    expect(parsed!.metrics.map(metric => [metric.nodeName, metric.taskFilter])).toEqual([
+      ['', ''],
+      ['AWS-JP', 'Transit-AWS-JP-to-CSL-JP'],
+      ['CSL-JP', 'Transit-CSL-JP-to-CSL-US'],
+    ])
   })
 })
 

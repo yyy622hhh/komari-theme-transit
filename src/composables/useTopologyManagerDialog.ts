@@ -5,14 +5,14 @@ import { useTopologyDialogLifecycle } from '@/composables/useTopologyDialogLifec
 import { useTopologyEntryDraft } from '@/composables/useTopologyEntryDraft'
 import { useTopologyManager } from '@/composables/useTopologyManager'
 import { DEFAULT_PROBE, useTopologyQuickRoute } from '@/composables/useTopologyQuickRoute'
-import { useTopologyRoutePlanner } from '@/composables/useTopologyRoutePlanner'
+import { readTopologySegmentRecord, useTopologyRoutePlanner } from '@/composables/useTopologyRoutePlanner'
 import { useTopologyTaskCatalog } from '@/composables/useTopologyTaskCatalog'
 import { describeTopologyHopProbe } from '@/services/ping-task.service'
 import { createTopologyPersistence } from '@/services/topology-persistence.service'
 import { message } from '@/utils/message'
 import { getTopologyCreatedTaskIds } from '@/utils/topologyCreatedTasks'
 import { applyTopologyProbeToRoute, resolveTopologyNode } from '@/utils/topologyHelper'
-import { TOPOLOGY_PROBE_OPTIONS } from '@/utils/topologyPresets'
+import { createCustomTopologyProbe, normalizeTopologyProbeTarget, TOPOLOGY_PROBE_OPTIONS } from '@/utils/topologyPresets'
 import { readTopologyWriteLog } from '@/utils/topologyWriteLog'
 
 export function useTopologyManagerDialog(
@@ -30,8 +30,38 @@ export function useTopologyManagerDialog(
   const rematchDone = ref(false)
   const quickConfiguring = ref(false)
   const quickSourceUuid = ref('')
+  const quickJumperUuid = ref('')
   const quickLandingUuid = ref('')
   const quickProbeKey = ref(DEFAULT_PROBE)
+  const quickEntryLabel = ref('')
+  const quickEntryTarget = ref('')
+
+  const customEntryOptions = computed(() => {
+    const entries = new Map<string, { key: string, label: string, target: string }>()
+    for (const route of manager.routes) {
+      const node = route.nodes[0]
+      const probe = createCustomTopologyProbe(node?.name ?? '', node?.probeTarget ?? '')
+      if (probe)
+        entries.set(probe.key, { key: probe.key, label: probe.label, target: probe.landmarkAddress })
+    }
+    return [...entries.values()]
+  })
+
+  function customEntryOption(value: string) {
+    return customEntryOptions.value.find(option => option.key === value)
+  }
+
+  function isCustomProbeValue(value: string): boolean {
+    return value === CUSTOM_PROBE || Boolean(customEntryOption(value))
+  }
+
+  function onQuickProbeChange(): void {
+    const saved = customEntryOption(quickProbeKey.value)
+    if (!saved)
+      return
+    quickEntryLabel.value = saved.label
+    quickEntryTarget.value = saved.target
+  }
 
   const catalog = useTopologyTaskCatalog(
     () => props.nodes,
@@ -66,10 +96,7 @@ export function useTopologyManagerDialog(
     clearRouteTaskError,
     clearRouteProbeState,
     clearRouteEntryProbeState,
-    rememberRetiredTasks,
     reservedEntryNames,
-    planEntryTaskState,
-    applyEntryTaskState,
     planRouteTasks,
     routeHopTask,
     routeHint,
@@ -101,7 +128,7 @@ export function useTopologyManagerDialog(
   const taskBindingErrors = computed(() => manager.routes.flatMap((route, routeIndex) => route.metrics.flatMap((metric, metricIndex) => {
     if (!metric.live || !metric.nodeName.trim() || !metric.taskFilter.trim())
       return []
-    const node = resolveTopologyNode(props.nodes, metric.nodeName, route.nodes[1]?.uuid)
+    const node = resolveTopologyNode(props.nodes, metric.nodeName, route.nodes[Math.max(1, metricIndex)]?.uuid)
     if (!node) {
       return [`第 ${routeIndex + 1} 条线路的探测来源“${metric.nodeName}”不存在或名称重复`]
     }
@@ -109,8 +136,8 @@ export function useTopologyManagerDialog(
       return [`第 ${routeIndex + 1} 条线路无法验证探测任务：${taskErrors.value[node.uuid]}`]
     if (!taskLoaded.value[node.uuid])
       return []
-    const pending = metricIndex === 1
-      ? pendingRouteTasks.value[route.id]
+    const pending = metricIndex >= 1
+      ? readTopologySegmentRecord(pendingRouteTasks.value, route.id, metricIndex)
       : metricIndex === 0
         ? pendingEntryTasks.value[route.id]
         : undefined
@@ -143,7 +170,8 @@ export function useTopologyManagerDialog(
   const taskValidationPending = computed(() => rematching.value || Object.values(routeTaskPlanning.value).some(Boolean) || manager.routes.some(route => route.metrics.some((metric) => {
     if (!metric.live || !metric.nodeName.trim() || !metric.taskFilter.trim())
       return false
-    const node = resolveTopologyNode(props.nodes, metric.nodeName, route.nodes[1]?.uuid)
+    const metricIndex = route.metrics.indexOf(metric)
+    const node = resolveTopologyNode(props.nodes, metric.nodeName, route.nodes[Math.max(1, metricIndex)]?.uuid)
     return Boolean(node && !taskLoaded.value[node.uuid] && !taskErrors.value[node.uuid])
   })))
 
@@ -176,12 +204,16 @@ export function useTopologyManagerDialog(
     props,
     manager,
     catalog: { loadTasks, rememberTask, taskErrors },
-    planner: { routeProbeStates, pendingRouteTasks, rememberRetiredTasks, planEntryTaskState, applyEntryTaskState, clearRouteProbeState },
+    planner: { pendingRouteTasks, planRouteTasks },
     persistence: { persistRoutes: persistence.persistRoutes },
     quickConfiguring,
     quickSourceUuid,
+    quickJumperUuid,
     quickLandingUuid,
     quickProbeKey,
+    quickEntryLabel,
+    quickEntryTarget,
+    isCustomProbeValue,
     bumpQuickConfigurationRun,
     getQuickConfigurationRun,
   })
@@ -220,21 +252,69 @@ export function useTopologyManagerDialog(
       bumpRouteRun(route.id)
     }
     manager.selectNode(route, index, nodeName)
-    if (index === 2 && route.metrics[1]) {
-      manager.setMetricMode(route.metrics[1], Boolean(nodeName.trim()))
-      if (nodeName.trim())
-        route.metrics[1].nodeName = route.nodes[1]?.name.trim() ?? ''
-    }
+    const incomingMetric = route.metrics[index - 1]
+    if (index > 1 && incomingMetric)
+      manager.setMetricMode(incomingMetric, Boolean(nodeName.trim()))
     if (index > 0)
       void planRouteTasksAndSave(route)
+  }
+
+  function selectRouteJumper(route: TopologyRouteConfig, nodeName: string): void {
+    bumpRouteRun(route.id)
+    clearPendingRouteTask(route.id)
+    clearRouteProbeState(route.id)
+    const emptyMetric = () => ({ live: false, nodeName: '', taskFilter: '', fallbackLatency: null, fallbackLoss: null })
+    if (!nodeName.trim()) {
+      if (route.nodes.length >= 4) {
+        route.nodes.splice(2, 1)
+        route.metrics.splice(1, 2, emptyMetric())
+        if (route.nodes[2])
+          route.nodes[2].role = '落地机'
+      }
+    }
+    else {
+      if (route.nodes.length < 4) {
+        const landing = route.nodes[2] ?? { name: '', region: '', role: '落地机' }
+        route.nodes.splice(2, 1, { name: '', region: '', role: '跳板' }, landing)
+        route.metrics.splice(1, 1, emptyMetric(), emptyMetric())
+      }
+      manager.selectNode(route, 2, nodeName)
+      if (route.nodes[2])
+        route.nodes[2].role = '跳板'
+      if (route.nodes[3])
+        route.nodes[3].role = '落地机'
+    }
+    void planRouteTasksAndSave(route)
+  }
+
+  function routeSegmentPending(route: TopologyRouteConfig, segmentIndex: number) {
+    return readTopologySegmentRecord(pendingRouteTasks.value, route.id, segmentIndex)
+  }
+
+  function routeSegmentState(route: TopologyRouteConfig, segmentIndex: number) {
+    return readTopologySegmentRecord(routeProbeStates.value, route.id, segmentIndex)
+  }
+
+  function routeProbeValue(route: TopologyRouteConfig): string {
+    const custom = createCustomTopologyProbe(route.nodes[0]?.name ?? '', route.nodes[0]?.probeTarget ?? '')
+    return custom?.key || entryDraft.probeValue(route)
   }
 
   function selectRouteProbe(route: TopologyRouteConfig, probeKey: string): void {
     if (!probeKey)
       return
+    const savedCustom = customEntryOption(probeKey)
+    if (savedCustom) {
+      route.nodes[0] = { name: savedCustom.label, region: 'CN', role: '入口', probeTarget: savedCustom.target }
+      route.metrics[0] = { live: false, nodeName: '', taskFilter: '', fallbackLatency: null, fallbackLoss: null }
+      void planRouteTasksAndSave(route)
+      return
+    }
     if (probeKey === CUSTOM_PROBE) {
-      if (!entryDraft.restore(route))
-        return
+      if (!entryDraft.restore(route)) {
+        route.nodes[0] = { name: '自定义入口', region: '', role: '入口' }
+        route.metrics[0] = { live: false, nodeName: '', taskFilter: '', fallbackLatency: null, fallbackLoss: null }
+      }
       void planRouteTasksAndSave(route)
       return
     }
@@ -253,6 +333,39 @@ export function useTopologyManagerDialog(
       void planRouteTasksAndSave(route)
     else
       void persistDraft('线路已保存。')
+  }
+
+  function updateRouteEntryLabel(route: TopologyRouteConfig, label: string): void {
+    const value = label.trim()
+    if (!value || !route.nodes[0])
+      return
+    route.nodes[0].name = value
+    route.nodes[0].region = ''
+    route.nodes[0].role = '入口'
+    route.metrics[0] = { live: false, nodeName: '', taskFilter: '', fallbackLatency: null, fallbackLoss: null }
+    if (route.nodes[0].probeTarget)
+      void planRouteTasksAndSave(route)
+    else
+      void persistDraft('自定义入口已保存。')
+  }
+
+  function updateRouteEntryTarget(route: TopologyRouteConfig, target: string): void {
+    const raw = target.trim()
+    const value = normalizeTopologyProbeTarget(raw)
+    if (raw && !value) {
+      window.$message?.error('请输入有效的 IP 或域名，不要包含协议、端口或路径。')
+      return
+    }
+    const entry = route.nodes[0]
+    if (!entry)
+      return
+    if (value)
+      entry.probeTarget = value
+    else
+      delete entry.probeTarget
+    entry.region = value ? 'CN' : ''
+    route.metrics[0] = { live: false, nodeName: '', taskFilter: '', fallbackLatency: null, fallbackLoss: null }
+    void planRouteTasksAndSave(route)
   }
 
   function removeRoute(index: number): void {
@@ -312,17 +425,25 @@ export function useTopologyManagerDialog(
     quickConfiguring,
     PROBE_CITIES,
     TOPOLOGY_PROBE_OPTIONS,
+    customEntryOptions,
     CUSTOM_PROBE,
     selectClass: quickRoute.selectClass,
     quickSourceUuid,
+    quickJumperUuid,
     onQuickSourceChange: quickRoute.onQuickSourceChange,
+    onQuickJumperChange: quickRoute.onQuickJumperChange,
     nodeOption: quickRoute.nodeOption,
     quickLandingUuid,
     quickLandingOptions: quickRoute.quickLandingOptions,
+    quickJumperOptions: quickRoute.quickJumperOptions,
+    quickEntryLabel,
+    quickEntryTarget,
+    isCustomProbeValue,
+    onQuickProbeChange,
     addQuickRoute: quickRoute.addQuickRoute,
     quickTaskError: quickRoute.quickTaskError,
     validationErrors,
-    routeProbeValue: entryDraft.probeValue,
+    routeProbeValue,
     pendingEntryTasks,
     routeEntryProbeStates,
     describeTopologyHopProbe,
@@ -334,11 +455,16 @@ export function useTopologyManagerDialog(
     hasCustomEntryOption: entryDraft.hasOption,
     customEntryLabel: entryDraft.label,
     selectRouteProbe,
+    updateRouteEntryLabel,
+    updateRouteEntryTarget,
     selectRouteNode,
+    selectRouteJumper,
     routeEntryHint,
     routeEntryHintTone,
     routeHint,
     routeHintTone,
+    routeSegmentPending,
+    routeSegmentState,
     writeLog,
     formatWriteLogTime,
     reset: lifecycle.reset,

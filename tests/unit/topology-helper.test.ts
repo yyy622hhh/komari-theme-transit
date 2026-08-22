@@ -452,6 +452,33 @@ describe('quick topology configuration', () => {
     expect(pickQuickHopTaskName(['北京电信', '香港'], '香港边缘节点-超长名称布局测试', '北京电信')).toBe('香港')
   })
 
+  test('builds a four-node route with a custom entry and optional jumper', () => {
+    const route = buildQuickTopologyRoute([
+      { uuid: 'aws-jp', name: 'AWS-JP', region: 'JP', online: true, ipv4: '192.0.2.10' },
+      { uuid: 'csl-jp', name: 'CSL-JP', region: 'JP', online: true, ipv4: '192.0.2.20' },
+      { uuid: 'csl-us', name: 'CSL-US', region: 'US', online: true, ipv4: '192.0.2.30' },
+    ], {
+      sourceUuid: 'aws-jp',
+      jumperUuid: 'csl-jp',
+      landingUuid: 'csl-us',
+      entryLabel: '深圳家宽',
+      entryTarget: 'probe.example.com',
+    })
+
+    expect(route?.nodes.map(node => [node.name, node.role, node.uuid, node.probeTarget])).toEqual([
+      ['深圳家宽', '入口', undefined, 'probe.example.com'],
+      ['AWS-JP', '线路机', 'aws-jp', undefined],
+      ['CSL-JP', '跳板', 'csl-jp', undefined],
+      ['CSL-US', '落地机', 'csl-us', undefined],
+    ])
+    expect(route?.metrics).toHaveLength(3)
+    expect(route?.metrics[1]).toMatchObject({ live: false, nodeName: '', taskFilter: '' })
+    expect(route?.metrics[2]).toMatchObject({ live: false, nodeName: '', taskFilter: '' })
+    expect(validateTopologyRoutes(route ? [route] : [])).toEqual([])
+    expect(findDuplicateTopologyRouteIndex(route ? [route] : [], 'AWS-JP', 'CSL-US', 'aws-jp', 'csl-us', 'CSL-JP', 'csl-jp')).toBe(0)
+    expect(findDuplicateTopologyRouteIndex(route ? [route] : [], 'AWS-JP', 'CSL-US', 'aws-jp', 'csl-us')).toBe(-1)
+  })
+
   test('keeps a two-node draft when the landing is left empty', () => {
     const route = buildQuickTopologyRoute([
       { uuid: 'relay', name: '线路机-东京', region: 'JP', online: true },

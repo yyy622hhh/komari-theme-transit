@@ -24,6 +24,12 @@ interface SaveThemeSettingsOptions {
   requestKey: string
   lockHeld?: boolean
   onPublicSettings?: PublicSettingsUpdater
+  /**
+   * 默认 merge：只覆盖 patch 里的键，保留服务器上其他键（拓扑局部保存、向导
+   * 只改一小撮字段）。import/rollback 要整份快照落地，必须 replace，否则预览
+   * 里标成「移除」的键会留在服务器上。
+   */
+  strategy?: 'merge' | 'replace'
 }
 
 const themeSaveTails = new Map<string, Promise<void>>()
@@ -161,11 +167,9 @@ export async function saveManagedThemeSettings(options: SaveThemeSettingsOptions
         patch = validateThemeSettings(options.patch(currentSettings))
       if (options.expected && !persistedPatchMatches(currentSettings, options.expected))
         throw new Error(STALE_MANAGED_THEME_SETTINGS_MESSAGE)
-      savedSettings = {
-        ...currentSettings,
-        ...patch,
-      }
-      savedSettings = validateThemeSettings(savedSettings)
+      savedSettings = validateThemeSettings(
+        options.strategy === 'replace' ? patch : { ...currentSettings, ...patch },
+      )
       const currentResponse = await sendThemeSettings(
         `/api/admin/theme/settings?theme=${theme}`,
         'POST',
@@ -194,7 +198,10 @@ export async function saveManagedThemeSettings(options: SaveThemeSettingsOptions
     const persisted = await getSharedApi().getPublicSettings()
     publishPublicSettings(persisted, options.onPublicSettings)
     const persistedSettings = validateServerThemeSettings(persisted.theme_settings)
-    if (persisted.theme !== options.theme || !persistedPatchMatches(persistedSettings, patch))
+    const persistMatched = options.strategy === 'replace'
+      ? stableJson(persistedSettings) === stableJson(savedSettings)
+      : persistedPatchMatches(persistedSettings, patch)
+    if (persisted.theme !== options.theme || !persistMatched)
       throw new Error('服务器未保留本次主题配置，请刷新后重试。')
     savedSettings = persistedSettings
   })

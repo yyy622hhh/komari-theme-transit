@@ -1,7 +1,8 @@
 import type { CompanionHealth } from '@/services/route-probe-companion.service'
 import type { VersionInfo } from '@/utils/api'
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onScopeDispose, ref } from 'vue'
 import { getCompanionRouteProbeHealth } from '@/services/route-probe-companion.service'
+import { downloadText } from '@/services/snapshot.service'
 import { loadServerVersion } from '@/services/version.service'
 import { useAppStore } from '@/stores/app'
 import { useNodesStore } from '@/stores/nodes'
@@ -24,18 +25,54 @@ export function useGlobalDiagnostics() {
   const companionHealth = ref<CompanionHealth | null>(null)
   const companionHealthLoading = ref(false)
 
-  async function refresh(): Promise<void> {
-    serverVersionLoading.value = true
-    serverVersion.value = await loadServerVersion()
-    serverVersionLoading.value = false
+  let refreshGeneration = 0
+  let refreshController: AbortController | null = null
 
-    if (!appStore.routeProbeEnabled) {
-      companionHealth.value = null
-      return
+  onScopeDispose(() => {
+    refreshGeneration += 1
+    refreshController?.abort()
+  })
+
+  async function refresh(): Promise<void> {
+    refreshController?.abort()
+    const generation = ++refreshGeneration
+    const controller = new AbortController()
+    refreshController = controller
+    const timeoutId = setTimeout(() => controller.abort(), 8_000)
+    try {
+      serverVersionLoading.value = true
+      try {
+        const version = await loadServerVersion()
+        if (generation !== refreshGeneration)
+          return
+        serverVersion.value = version
+      }
+      finally {
+        if (generation === refreshGeneration)
+          serverVersionLoading.value = false
+      }
+
+      if (!appStore.routeProbeEnabled) {
+        if (generation === refreshGeneration)
+          companionHealth.value = null
+        return
+      }
+
+      companionHealthLoading.value = true
+      try {
+        const health = await getCompanionRouteProbeHealth(controller.signal).catch(() => null)
+        if (generation !== refreshGeneration)
+          return
+        companionHealth.value = health
+      }
+      finally {
+        if (generation === refreshGeneration)
+          companionHealthLoading.value = false
+      }
     }
-    companionHealthLoading.value = true
-    companionHealth.value = await getCompanionRouteProbeHealth().catch(() => null)
-    companionHealthLoading.value = false
+    finally {
+      clearTimeout(timeoutId)
+    }
   }
 
   onMounted(refresh)
@@ -82,15 +119,17 @@ export function useGlobalDiagnostics() {
   }
 
   async function copyReport(): Promise<void> {
+    const report = buildReport()
     try {
       if (!navigator.clipboard?.writeText)
         throw new Error('Clipboard API unavailable')
-      await navigator.clipboard.writeText(buildReport())
+      await navigator.clipboard.writeText(report)
       message.success('诊断报告已复制')
     }
-    catch (error) {
-      console.error('Failed to copy diagnostic report', error)
-      message.error('复制失败，请检查浏览器剪贴板权限')
+    catch {
+      // Komari 常见部署是 http://局域网IP，不安全上下文没有 Clipboard API。
+      downloadText(`transit-diagnostics-${Date.now()}.txt`, report, 'text/plain;charset=utf-8')
+      message.success('当前环境无法写入剪贴板，已改为下载诊断报告。')
     }
   }
 

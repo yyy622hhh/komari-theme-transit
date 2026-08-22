@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { buildSnapshotCsvAsync, buildSnapshotJsonAsync } from '../../src/services/snapshot.service'
+import { buildSnapshotCsvAsync, buildSnapshotJsonAsync, downloadText } from '../../src/services/snapshot.service'
 import { escapeCsvCell, sanitizeCsvCell, toCsvRows } from '../../src/utils/csv'
 
 describe('CSV export hardening', () => {
@@ -37,5 +37,48 @@ describe('CSV export hardening', () => {
       2,
       controller.signal,
     )).rejects.toMatchObject({ name: 'AbortError' })
+  })
+
+  test('keeps an object URL alive until the browser has consumed the download click', async () => {
+    const originalDocument = Object.getOwnPropertyDescriptor(globalThis, 'document')
+    const originalCreateObjectURL = URL.createObjectURL
+    const originalRevokeObjectURL = URL.revokeObjectURL
+    let revoked = false
+    let revokedAtClick = true
+    const link = {
+      click: () => {
+        revokedAtClick = revoked
+      },
+      download: '',
+      href: '',
+      remove: () => {},
+    }
+    Object.defineProperty(globalThis, 'document', {
+      configurable: true,
+      value: {
+        body: { appendChild: () => {} },
+        createElement: () => link,
+      },
+    })
+    URL.createObjectURL = () => 'blob:test'
+    URL.revokeObjectURL = () => {
+      revoked = true
+    }
+
+    try {
+      downloadText('snapshot.csv', 'value', 'text/csv')
+      expect(revokedAtClick).toBe(false)
+      expect(revoked).toBe(false)
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect(revoked).toBe(true)
+    }
+    finally {
+      URL.createObjectURL = originalCreateObjectURL
+      URL.revokeObjectURL = originalRevokeObjectURL
+      if (originalDocument)
+        Object.defineProperty(globalThis, 'document', originalDocument)
+      else
+        Reflect.deleteProperty(globalThis, 'document')
+    }
   })
 })

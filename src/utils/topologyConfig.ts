@@ -1,6 +1,6 @@
 import type { TopologyMetricConfig, TopologyNodeConfig, TopologyRouteConfig } from '@/utils/topologyModel'
 import { parseTopologyRoutes } from '@/utils/topologyLegacyFormat'
-import { createTopologyRoute, TOPOLOGY_LIMITS } from '@/utils/topologyModel'
+import { createTopologyRoute, defaultTopologyNodeRole, TOPOLOGY_LIMITS } from '@/utils/topologyModel'
 
 /**
  * 拓扑配置的 JSON 存储格式。
@@ -20,6 +20,7 @@ interface SerializedNode {
   region?: string
   role?: string
   uuid?: string
+  probeTarget?: string
 }
 
 interface SerializedMetric {
@@ -52,11 +53,13 @@ function serializeNode(node: TopologyNodeConfig): SerializedNode {
   const uuid = node.uuid?.trim()
   const region = node.region.trim()
   const role = node.role.trim()
+  const probeTarget = node.probeTarget?.trim()
   return {
     name: node.name.trim(),
     ...(region ? { region } : {}),
     ...(role ? { role } : {}),
     ...(uuid ? { uuid } : {}),
+    ...(probeTarget ? { probeTarget } : {}),
   }
 }
 
@@ -81,7 +84,7 @@ function activeRoutes(routes: readonly TopologyRouteConfig[]): Array<{ route: To
   return routes
     .filter(route => route.enabled)
     .map((route) => {
-      const nodes = route.nodes.slice(0, 3)
+      const nodes = route.nodes.slice(0, TOPOLOGY_LIMITS.maxNodesPerRoute)
       while (nodes.length && !nodes.at(-1)?.name.trim())
         nodes.pop()
       return { route, nodes }
@@ -100,15 +103,17 @@ export function serializeTopologyConfig(routes: readonly TopologyRouteConfig[]):
   return JSON.stringify(payload)
 }
 
-function parseNode(value: unknown, index: number): TopologyNodeConfig {
+function parseNode(value: unknown, index: number, total: number): TopologyNodeConfig {
   const record = (value && typeof value === 'object' && !Array.isArray(value) ? value : {}) as Record<string, unknown>
-  const defaultRole = index === 0 ? '入口' : index === 1 ? '线路机' : '落地机'
+  const defaultRole = defaultTopologyNodeRole(index, total)
   const uuid = trimmed(record.uuid)
+  const probeTarget = trimmed(record.probeTarget)
   return {
     name: trimmed(record.name),
     region: trimmed(record.region),
     role: trimmed(record.role) || defaultRole,
     ...(uuid ? { uuid } : {}),
+    ...(probeTarget ? { probeTarget } : {}),
   }
 }
 
@@ -161,14 +166,15 @@ export function parseTopologyConfig(raw: unknown): TopologyRouteConfig[] | null 
 
   return payload.routes.slice(0, TOPOLOGY_LIMITS.maxRoutes).map((entry) => {
     const record = (entry && typeof entry === 'object' && !Array.isArray(entry) ? entry : {}) as Record<string, unknown>
-    const rawNodes = Array.isArray(record.nodes) ? record.nodes.slice(0, 3) : []
-    const rawMetrics = Array.isArray(record.metrics) ? record.metrics.slice(0, 2) : []
-    const nodes = rawNodes.map(parseNode)
+    const rawNodes = Array.isArray(record.nodes) ? record.nodes.slice(0, TOPOLOGY_LIMITS.maxNodesPerRoute) : []
+    const rawMetrics = Array.isArray(record.metrics) ? record.metrics.slice(0, TOPOLOGY_LIMITS.maxNodesPerRoute - 1) : []
+    const parsedTotal = Math.max(3, rawNodes.length)
+    const nodes = rawNodes.map((node, index) => parseNode(node, index, parsedTotal))
     const metrics = rawMetrics.map(parseMetric)
-    // 界面永远按三节点两段渲染，缺的补空位，多的在上面已经截断。
+    // 旧配置仍补成三节点；只有明确保存了跳板时才会出现第四个节点。
     while (nodes.length < 3)
-      nodes.push(parseNode({}, nodes.length))
-    while (metrics.length < 2)
+      nodes.push(parseNode({}, nodes.length, 3))
+    while (metrics.length < Math.max(2, nodes.length - 1))
       metrics.push(emptyMetric())
     return createTopologyRoute(nodes, metrics)
   })

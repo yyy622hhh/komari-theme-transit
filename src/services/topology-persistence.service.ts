@@ -8,7 +8,7 @@ import { ref } from 'vue'
 import { createTopologyEntryProbeTask, deleteTopologyPingTasks, ensureTopologyEntryProbeTask, ensureTopologyPingTask, loadAdminPingTasks } from '@/services/ping-task.service'
 import { listOwnedRetiredTaskIds, listOwnedUnboundTaskIds, liveTopologyTaskNames } from '@/services/topology-repair.service'
 import { persistTopologyCreatedTaskIds } from '@/utils/topologyCreatedTasks'
-import { getTopologyRouteProbeKey, resolveTopologyNode } from '@/utils/topologyHelper'
+import { getTopologyRouteEntryProbe, resolveTopologyNode } from '@/utils/topologyHelper'
 import { getTopologyProbe } from '@/utils/topologyPresets'
 import { recordTopologyWrite } from '@/utils/topologyWriteLog'
 
@@ -33,15 +33,15 @@ interface TopologyPersistenceDependencies {
   manager: TopologyPersistenceManager
   taskValidationPending: ComputedRef<boolean>
   persistBlockingErrors: ComputedRef<string[]>
-  pendingRouteTasks: Ref<Record<number, TopologyPendingRouteTask>>
+  pendingRouteTasks: Ref<Record<string, TopologyPendingRouteTask>>
   pendingEntryTasks: Ref<Record<number, TopologyPendingEntryTask>>
-  routeRetiredTasks: Ref<Record<number, TopologyRetiredTaskCandidate[]>>
+  routeRetiredTasks: Ref<Record<string, TopologyRetiredTaskCandidate[]>>
   routeEntryRetiredTasks: Ref<Record<number, TopologyRetiredTaskCandidate[]>>
   routeTaskErrors: Ref<Record<number, string>>
   sessionCreatedTaskIds: Set<number>
   findEndpoint: (uuid: string) => TopologyPingEndpoint | undefined
   rememberTask: (sourceUuid: string, taskName: string) => void
-  clearPendingRouteTask: (routeId: number) => void
+  clearPendingRouteTask: (routeId: number, segmentIndex?: number) => void
   clearPendingEntryTask: (routeId: number) => void
   clearRouteTaskError: (routeId: number) => void
   hasPendingWork: () => boolean
@@ -92,6 +92,10 @@ export function createTopologyPersistence(deps: TopologyPersistenceDependencies)
   let persistTail: Promise<unknown> = Promise.resolve()
   let saveTaskController: AbortController | null = null
   const persisting = ref(false)
+
+  const segmentKey = (routeId: number, segmentIndex: number) => `${routeId}:${segmentIndex}`
+  const pendingSegment = (routeId: number, segmentIndex: number) => pendingRouteTasks.value[segmentKey(routeId, segmentIndex)]
+    ?? (segmentIndex === 1 ? pendingRouteTasks.value[String(routeId)] : undefined)
 
   /**
    * 清理本页面会话中由主题创建、随后被换掉的旧探测任务。
@@ -219,56 +223,59 @@ export function createTopologyPersistence(deps: TopologyPersistenceDependencies)
       persisting.value = true
       try {
         const persist = async (lockHeld = false) => {
-          const completedRouteTasks: Array<{ routeId: number, pending: TopologyPendingRouteTask }> = []
+          const completedRouteTasks: Array<{ routeId: number, segmentIndex: number, pending: TopologyPendingRouteTask }> = []
           const completedEntryTasks: Array<{ routeId: number, pending: TopologyPendingEntryTask }> = []
           let routeTaskCreationFailed = false
           for (const route of manager.routes) {
-            const pending = pendingRouteTasks.value[route.id]
-            if (!pending)
-              continue
-            const source = findEndpoint(pending.sourceUuid)
-            const target = findEndpoint(pending.targetUuid)
-            if (!source || !target)
-              throw new Error('待创建 Ping 任务的节点已变化，请重新选择线路。')
-            const routeSource = resolveTopologyNode(props.nodes, route.nodes[1]?.name ?? '', route.nodes[1]?.uuid ?? '')
-            const routeTarget = resolveTopologyNode(props.nodes, route.nodes[2]?.name ?? '', route.nodes[2]?.uuid ?? '')
-            const plannedMetric = route.metrics[1]
-            if (routeSource?.uuid !== pending.sourceUuid
-              || routeTarget?.uuid !== pending.targetUuid
-              || !plannedMetric?.live
-              || plannedMetric.nodeName !== source.name
-              || plannedMetric.taskFilter !== pending.taskName) {
-              throw new Error('待创建 Ping 任务对应的线路段已变化，请重新选择。')
-            }
-            try {
-              const ensured = await ensureRouteTask(source, target, { probe: pending.probe, signal: controller.signal })
-              if (ensured.created && Number.isInteger(ensured.task.id)) {
-                sessionCreatedTaskIds.add(ensured.task.id!)
-                persistTopologyCreatedTaskIds()
-                createdTaskIds.add(ensured.task.id!)
-                recordTopologyWrite({ trigger: 'manual', action: `创建第 2 段探测任务 ${ensured.task.name}`, outcome: 'ok' })
+            const segmentCount = Math.max(1, route.nodes.filter(node => node.name.trim()).length - 1)
+            for (let segmentIndex = 1; segmentIndex < segmentCount; segmentIndex++) {
+              const pending = pendingSegment(route.id, segmentIndex)
+              if (!pending)
+                continue
+              const source = findEndpoint(pending.sourceUuid)
+              const target = findEndpoint(pending.targetUuid)
+              if (!source || !target)
+                throw new Error('待创建 Ping 任务的节点已变化，请重新选择线路。')
+              const routeSource = resolveTopologyNode(props.nodes, route.nodes[segmentIndex]?.name ?? '', route.nodes[segmentIndex]?.uuid ?? '')
+              const routeTarget = resolveTopologyNode(props.nodes, route.nodes[segmentIndex + 1]?.name ?? '', route.nodes[segmentIndex + 1]?.uuid ?? '')
+              const plannedMetric = route.metrics[segmentIndex]
+              if (routeSource?.uuid !== pending.sourceUuid
+                || routeTarget?.uuid !== pending.targetUuid
+                || !plannedMetric?.live
+                || plannedMetric.nodeName !== source.name
+                || plannedMetric.taskFilter !== pending.taskName) {
+                throw new Error('待创建 Ping 任务对应的线路段已变化，请重新选择。')
               }
-              if (runId !== getQuickConfigurationRun() || session !== getDialogSession() || !props.open) {
-                await cleanupCreatedTasks(createdTaskIds, '保存过程中线路或对话框已变化')
-                return 'cancelled' as const
+              try {
+                const ensured = await ensureRouteTask(source, target, { probe: pending.probe, signal: controller.signal })
+                if (ensured.created && Number.isInteger(ensured.task.id)) {
+                  sessionCreatedTaskIds.add(ensured.task.id!)
+                  persistTopologyCreatedTaskIds()
+                  createdTaskIds.add(ensured.task.id!)
+                  recordTopologyWrite({ trigger: 'manual', action: `创建第 ${segmentIndex + 1} 段探测任务 ${ensured.task.name}`, outcome: 'ok' })
+                }
+                if (runId !== getQuickConfigurationRun() || session !== getDialogSession() || !props.open) {
+                  await cleanupCreatedTasks(createdTaskIds, '保存过程中线路或对话框已变化')
+                  return 'cancelled' as const
+                }
+                const metric = route.metrics[segmentIndex]!
+                metric.nodeName = source.name
+                metric.taskFilter = ensured.task.name
+                metric.live = true
+                rememberTask(source.uuid, ensured.task.name)
+                completedRouteTasks.push({ routeId: route.id, segmentIndex, pending })
+                clearRouteTaskError(route.id)
               }
-              const metric = route.metrics[1]!
-              metric.nodeName = source.name
-              metric.taskFilter = ensured.task.name
-              metric.live = true
-              rememberTask(source.uuid, ensured.task.name)
-              completedRouteTasks.push({ routeId: route.id, pending })
-              clearRouteTaskError(route.id)
-            }
-            catch (error) {
-              if (controller.signal.aborted)
-                throw error
-              routeTaskErrors.value = {
-                ...routeTaskErrors.value,
-                [route.id]: error instanceof Error ? error.message : '无法创建探测任务。',
+              catch (error) {
+                if (controller.signal.aborted)
+                  throw error
+                routeTaskErrors.value = {
+                  ...routeTaskErrors.value,
+                  [route.id]: error instanceof Error ? error.message : '无法创建探测任务。',
+                }
+                routeTaskCreationFailed = true
+                continue
               }
-              routeTaskCreationFailed = true
-              continue
             }
           }
           if (routeTaskCreationFailed) {
@@ -286,15 +293,16 @@ export function createTopologyPersistence(deps: TopologyPersistenceDependencies)
             const routeSource = resolveTopologyNode(props.nodes, route.nodes[1]?.name ?? '', route.nodes[1]?.uuid ?? '')
             const firstMetric = route.metrics[0]
             if (routeSource?.uuid !== pendingEntry.sourceUuid
-              || getTopologyRouteProbeKey(route) !== pendingEntry.probeKey
+              || getTopologyRouteEntryProbe(route)?.key !== pendingEntry.probeKey
               || !firstMetric?.live
               || firstMetric.nodeName !== source.name
               || firstMetric.taskFilter !== pendingEntry.taskName) {
               throw new Error('待创建 Ping 任务对应的线路段已变化，请重新选择。')
             }
+            const entryProbe = pendingEntry.entryProbe ?? getTopologyProbe(pendingEntry.probeKey)
             const ensured = pendingEntry.forceCreate
-              ? { task: await createEntryTask(source, getTopologyProbe(pendingEntry.probeKey), pendingEntry.probe, { signal: controller.signal, taskName: pendingEntry.taskName }), created: true }
-              : await ensureEntryTask(source, getTopologyProbe(pendingEntry.probeKey), { hopProbe: pendingEntry.probe, signal: controller.signal, taskName: pendingEntry.taskName })
+              ? { task: await createEntryTask(source, entryProbe, pendingEntry.probe, { signal: controller.signal, taskName: pendingEntry.taskName }), created: true }
+              : await ensureEntryTask(source, entryProbe, { hopProbe: pendingEntry.probe, signal: controller.signal, taskName: pendingEntry.taskName })
             if (ensured.created && Number.isInteger(ensured.task.id)) {
               sessionCreatedTaskIds.add(ensured.task.id!)
               persistTopologyCreatedTaskIds()
@@ -333,8 +341,8 @@ export function createTopologyPersistence(deps: TopologyPersistenceDependencies)
           // 保存期间用户可能已经为同一路线生成了新的待办；只清除本次实际提交的
           // 那个对象，不能把较新的规划结果一并删掉。
           for (const completed of completedRouteTasks) {
-            if (pendingRouteTasks.value[completed.routeId] === completed.pending)
-              clearPendingRouteTask(completed.routeId)
+            if (pendingSegment(completed.routeId, completed.segmentIndex) === completed.pending)
+              clearPendingRouteTask(completed.routeId, completed.segmentIndex)
           }
           for (const completed of completedEntryTasks) {
             if (pendingEntryTasks.value[completed.routeId] === completed.pending)
@@ -343,7 +351,7 @@ export function createTopologyPersistence(deps: TopologyPersistenceDependencies)
           createdTaskIds.clear()
           return saveResult
         }
-        const hasPendingTasks = manager.routes.some(route => Boolean(pendingRouteTasks.value[route.id]) || Boolean(pendingEntryTasks.value[route.id]))
+        const hasPendingTasks = manager.routes.some(route => Object.keys(pendingRouteTasks.value).some(key => key === String(route.id) || key.startsWith(`${route.id}:`)) || Boolean(pendingEntryTasks.value[route.id]))
         const result = hasPendingTasks
           ? await manager.withSaveLock(async () => {
               await manager.preflightSave()

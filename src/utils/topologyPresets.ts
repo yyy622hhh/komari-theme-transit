@@ -38,6 +38,7 @@ export interface TopologyProbeOption {
 }
 
 const TOPOLOGY_PROBE_SEPARATOR_PATTERN = /[\s\-_—–·]+/g
+const TOPOLOGY_PROBE_TARGET_FORBIDDEN_PATTERN = /[\s/@?#]/
 
 function defineTopologyProbe(option: Omit<TopologyProbeOption, 'probeTargets'>): TopologyProbeOption {
   return {
@@ -64,6 +65,56 @@ export const TOPOLOGY_PROBE_OPTIONS: TopologyProbeOption[] = [
 
 export function normalizePingTaskName(value: string): string {
   return value.toLowerCase().replace(TOPOLOGY_PROBE_SEPARATOR_PATTERN, '')
+}
+
+/** 只接受裸 IP/主机名，拒绝 URL、端口、路径和空白，避免把不透明字符串写进任务。 */
+export function normalizeTopologyProbeTarget(value: string): string {
+  const target = value.trim()
+  if (!target || target.length > 253 || TOPOLOGY_PROBE_TARGET_FORBIDDEN_PATTERN.test(target))
+    return ''
+  const unwrapped = /^\[([^\]]+)\]$/.exec(target)?.[1] ?? target
+  try {
+    const hostname = new URL(`http://${unwrapped.includes(':') ? `[${unwrapped}]` : unwrapped}/`).hostname.replace(/^\[|\]$/g, '').toLowerCase()
+    return hostname && hostname.length <= 253 ? hostname : ''
+  }
+  catch {
+    return ''
+  }
+}
+
+function stableProbeHash(value: string): string {
+  let hash = 0x811C9DC5
+  for (const character of value) {
+    hash ^= character.codePointAt(0) ?? 0
+    hash = Math.imul(hash, 0x01000193)
+  }
+  return (hash >>> 0).toString(36)
+}
+
+/** 把“名称 + 目标”变成与内置预设同构的运行时入口，不扩大全局预设表。 */
+export function createCustomTopologyProbe(labelValue: string, targetValue: string): TopologyProbeOption | null {
+  const label = labelValue.trim()
+  const target = normalizeTopologyProbeTarget(targetValue)
+  if (!label || !target)
+    return null
+  // 显示名称不是探测任务的身份。只改“湖北电信”这类标题时应继续复用原任务，
+  // 否则每次改名都会留下一个无人绑定的 Transit-entry-* 任务。
+  const hash = stableProbeHash(target)
+  const key = `custom-${hash}`
+  return {
+    key,
+    city: '自定义',
+    carrier: '',
+    label,
+    taskFilter: `Transit-entry-${key}`,
+    landmarkAddress: target,
+    dnsAddress: target,
+    probeTargets: { icmp: target, tcp: { 53: target } },
+  }
+}
+
+export function isCustomTopologyProbe(option: Pick<TopologyProbeOption, 'key'>): boolean {
+  return option.key.startsWith('custom-')
 }
 
 export function getTopologyProbe(key?: string): TopologyProbeOption {

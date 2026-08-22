@@ -75,4 +75,17 @@ describe('buildThemeSettingsExport / parseThemeSettingsImport round trip', () =>
     if (result.ok)
       expect(result.settings).toEqual({ alertEnabled: true })
   })
+
+  test('rejects a wrapper-shaped file whose schemaVersion is not a number instead of importing the wrapper keys', () => {
+    const result = parseThemeSettingsImport({
+      schemaVersion: '1',
+      settings: { alertEnabled: true },
+    })
+    expect(result.ok).toBe(false)
+  })
+
+  test('rejects a numbered schema wrapper that has no settings object', () => {
+    const result = parseThemeSettingsImport({ schemaVersion: 1, exportedAt: 1 })
+    expect(result.ok).toBe(false)
+  })
 })

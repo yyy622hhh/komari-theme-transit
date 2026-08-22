@@ -131,13 +131,13 @@ const routes = computed<RouteRow[]>(() => configuredRoutes.value.map((configured
   // 探测选择存在 localStorage 里，键沿用旧的线路组字符串——换成别的算法会让
   // 所有人已保存的入口选择一次性失效。
   const group = serializeTopologyRoutes([configured]).topologyRoute
-  const nodes = configured.nodes.slice(0, 3).map((config, nodeIndex) => {
+  const nodes = configured.nodes.slice(0, 4).map((config, nodeIndex) => {
     const node = nodeIndex === 0 ? findNode(config.name) : findNode(config.name, config.uuid)
     return {
       key: `${routeIndex}-${nodeIndex}-${config.uuid || config.name}`,
       name: config.name,
       region: node?.region || config.region,
-      role: node ? (getNodeRole(node.tags, node.groups) || config.role) : config.role,
+      role: config.role === '跳板' ? '跳板' : node ? (getNodeRole(node.tags, node.groups) || config.role) : config.role,
       uuid: config.uuid || node?.uuid,
       node,
     }
@@ -146,7 +146,7 @@ const routes = computed<RouteRow[]>(() => configuredRoutes.value.map((configured
     nodes.pop()
   // 子组件仍按字符串接收指标；这里把解析结果格式化回去，读路径的格式差异
   // （例如旧版六段 live@ 写法）在这一步就被归一化掉了。
-  const metrics = configured.metrics.slice(0, 2).map(formatTopologyMetric)
+  const metrics = configured.metrics.slice(0, Math.max(1, nodes.length - 1)).map(formatTopologyMetric)
   const configuredFirstMetric = parseTopologyMetric(metrics[0] || '')
   const configuredEntryProbeKey = findTopologyProbeKey(nodes[0]?.name || '')
   const configuredTaskProbeKey = findTopologyProbeKey(configuredFirstMetric.taskFilter)
@@ -299,8 +299,8 @@ const routeRankings = computed<Record<string, TopologyRouteRanking>>(() => rankT
 const directionPairs = computed(() => findTopologyDirectionPairs(routes.value.map(route => ({
   routeKey: route.key,
   sourceUuid: route.nodes[1]?.uuid ?? '',
-  targetUuid: route.nodes[2]?.uuid ?? '',
-  live: Boolean(route.nodes[2] && parseTopologyMetric(route.metrics[1] || '').live),
+  targetUuid: route.nodes.length === 3 ? route.nodes[2]?.uuid ?? '' : '',
+  live: Boolean(route.nodes.length === 3 && route.nodes[2] && parseTopologyMetric(route.metrics[1] || '').live),
 }))))
 
 function getRouteBaselineShift(route: RouteRow) {
@@ -355,6 +355,7 @@ const selectedRoute = computed<TopologyRouteDetail | null>(() => {
   return {
     key: route.key,
     sourceUuid: route.nodes[1]?.uuid,
+    sourceUuids: Array.from({ length: expectedSegments }, (_, index) => route.nodes[Math.max(1, index)]?.uuid),
     nodeNames: route.nodes.map(node => node.name),
     metrics: route.metrics,
     score: getRouteScore(route),
@@ -533,13 +534,14 @@ function routeRankingLabel(route: RouteRow): string {
       </nav>
 
       <div v-if="isDesktop" class="topology-scroll overflow-x-auto px-3 sm:px-4">
-        <div class="min-w-[980px]">
+        <div :class="routes.some(route => route.nodes.length >= 4) ? 'min-w-[1260px]' : 'min-w-[980px]'">
           <article
             v-for="route in visibleRoutes"
             :key="route.key"
             data-topology-route
-            class="transit-divider transit-hover-surface group grid min-h-16 items-center gap-3 border-b px-2 transition-colors last:border-b-0"
-            :class="route.nodes[2] ? 'grid-cols-[144px_minmax(190px,1fr)_178px_minmax(190px,1fr)_190px]' : 'grid-cols-[144px_minmax(190px,1fr)_190px]'"
+            class="transit-divider transit-hover-surface group relative grid items-center gap-3 border-b px-2 transition-colors last:border-b-0"
+            :class="[route.nodes.length >= 4 ? 'min-h-20' : 'min-h-16', routeRankingLabel(route) === '推荐' && 'bg-emerald-500/[0.025] before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-full before:bg-emerald-400/80']"
+            :style="{ gridTemplateColumns: route.nodes.length >= 4 ? '154px minmax(150px,1fr) 150px minmax(150px,1fr) 150px minmax(150px,1fr) 174px' : '144px minmax(190px,1fr) 178px minmax(190px,1fr) 190px' }"
           >
             <div class="min-w-0">
               <div class="flex min-w-0 items-center gap-2">
@@ -575,6 +577,9 @@ function routeRankingLabel(route: RouteRow): string {
                 >
                   {{ routeRankingLabel(route) }}
                 </span>
+                <span v-if="route.nodes.length >= 4" class="ml-1 text-[8px] text-slate-500">
+                  · 3 段
+                </span>
               </button>
               <button
                 v-if="routeBaselineShiftLabel(route)"
@@ -598,73 +603,41 @@ function routeRankingLabel(route: RouteRow): string {
               </button>
             </div>
 
-            <TopologyEdgeMetric
-              :metric="route.metrics[0] || '-,-'"
-              :nodes="nodes"
-              :source-uuid="route.nodes[1]?.uuid"
-              :source-label="route.nodes[0]?.name || '入口'"
-              :target-label="route.nodes[1]?.name || '线路机'"
-              :segment-index="0"
-              @open-detail="openRouteDetail(route)"
-              @status-change="updateRouteSegmentHealth(route.key, 0, $event)"
-              @metrics-change="updateRouteSegmentMetrics(route.key, 0, $event)"
-            />
-
-            <button
-              type="button"
-              data-topology-line-node
-              class="flex min-w-0 items-center justify-center gap-2.5 text-left disabled:cursor-default"
-              :disabled="!route.nodes[1]?.node"
-              @click="route.nodes[1] && openNode(route.nodes[1])"
-            >
-              <span
-                class="transit-dot-ring size-1.5 shrink-0 rounded-full ring-4"
-                :class="!route.nodes[1]?.node ? 'bg-amber-400' : route.nodes[1].node.online ? 'bg-emerald-400' : 'bg-rose-400'"
-              />
-              <img
-                v-if="route.nodes[1]?.region"
-                :src="`/images/flags/${getRegionCode(route.nodes[1].region)}.svg`"
-                :alt="route.nodes[1].region"
-                class="h-4 w-6 shrink-0 rounded-[3px] object-cover"
-              >
-              <span class="flex min-w-0 flex-col leading-tight">
-                <span class="truncate text-[13px] font-semibold">{{ route.nodes[1]?.name }}</span>
-                <span class="mt-0.5 truncate text-[10px] text-slate-500">{{ route.nodes[1]?.role }}</span>
-              </span>
-            </button>
-
-            <template v-if="route.nodes[2]">
+            <template v-for="(metric, segmentIndex) in route.metrics.slice(0, Math.max(1, route.nodes.length - 1))" :key="`${route.key}-${segmentIndex}`">
               <TopologyEdgeMetric
-                :metric="route.metrics[1] || '-,-'"
+                :metric="metric || '-,-'"
                 :nodes="nodes"
-                :source-uuid="route.nodes[1]?.uuid"
-                :source-label="route.nodes[1]?.name || '线路机'"
-                :target-label="route.nodes[2]?.name || '落地机'"
-                :segment-index="1"
+                :source-uuid="route.nodes[Math.max(1, segmentIndex)]?.uuid"
+                :source-label="route.nodes[segmentIndex]?.name || `节点 ${segmentIndex + 1}`"
+                :target-label="route.nodes[segmentIndex + 1]?.name || `节点 ${segmentIndex + 2}`"
+                :segment-index="segmentIndex"
                 @open-detail="openRouteDetail(route)"
-                @status-change="updateRouteSegmentHealth(route.key, 1, $event)"
-                @metrics-change="updateRouteSegmentMetrics(route.key, 1, $event)"
+                @status-change="updateRouteSegmentHealth(route.key, segmentIndex, $event)"
+                @metrics-change="updateRouteSegmentMetrics(route.key, segmentIndex, $event)"
               />
 
               <button
+                v-if="route.nodes[segmentIndex + 1]"
                 type="button"
+                :data-topology-line-node="segmentIndex === 0 ? '' : undefined"
                 class="flex min-w-0 items-center gap-2.5 text-left disabled:cursor-default"
-                :disabled="!route.nodes[2]?.node"
-                @click="route.nodes[2] && openNode(route.nodes[2])"
+                :class="segmentIndex < route.nodes.length - 2 && 'justify-center'"
+                :disabled="!route.nodes[segmentIndex + 1]?.node"
+                @click="route.nodes[segmentIndex + 1] && openNode(route.nodes[segmentIndex + 1])"
               >
                 <span
                   class="transit-dot-ring size-1.5 shrink-0 rounded-full ring-4"
-                  :class="!route.nodes[2]?.node ? 'bg-amber-400' : route.nodes[2].node.online ? 'bg-emerald-400' : 'bg-rose-400'"
+                  :class="!route.nodes[segmentIndex + 1]?.node ? 'bg-amber-400' : route.nodes[segmentIndex + 1]?.node?.online ? 'bg-emerald-400' : 'bg-rose-400'"
                 />
                 <img
-                  v-if="route.nodes[2]?.region"
-                  :src="`/images/flags/${getRegionCode(route.nodes[2].region)}.svg`"
-                  :alt="route.nodes[2].region"
+                  v-if="route.nodes[segmentIndex + 1]?.region"
+                  :src="`/images/flags/${getRegionCode(route.nodes[segmentIndex + 1]?.region || '')}.svg`"
+                  :alt="route.nodes[segmentIndex + 1]?.region"
                   class="h-4 w-6 shrink-0 rounded-[3px] object-cover"
                 >
                 <span class="flex min-w-0 flex-col leading-tight">
-                  <span class="truncate text-[13px] font-semibold">{{ route.nodes[2]?.name }}</span>
-                  <span class="mt-0.5 truncate text-[10px] text-slate-500">{{ route.nodes[2]?.role }}</span>
+                  <span class="truncate text-[13px] font-semibold">{{ route.nodes[segmentIndex + 1]?.name }}</span>
+                  <span class="mt-0.5 truncate text-[10px] text-slate-500">{{ route.nodes[segmentIndex + 1]?.role }}</span>
                 </span>
               </button>
             </template>
@@ -733,89 +706,47 @@ function routeRankingLabel(route: RouteRow): string {
             </button>
           </div>
 
-          <div class="grid grid-cols-[22px_minmax(0,1fr)] gap-2">
-            <span class="flex justify-center"><span class="transit-rail h-full w-px" /></span>
-            <TopologyEdgeMetric
-              mobile
-              :metric="route.metrics[0] || '-,-'"
-              :nodes="nodes"
-              :source-uuid="route.nodes[1]?.uuid"
-              :source-label="route.nodes[0]?.name || '入口'"
-              :target-label="route.nodes[1]?.name || '线路机'"
-              :segment-index="0"
-              @open-detail="openRouteDetail(route)"
-              @status-change="updateRouteSegmentHealth(route.key, 0, $event)"
-              @metrics-change="updateRouteSegmentMetrics(route.key, 0, $event)"
-            />
-          </div>
-
-          <button
-            type="button"
-            data-topology-mobile-node
-            class="grid w-full grid-cols-[22px_minmax(0,1fr)] items-center gap-2 text-left disabled:cursor-default"
-            :disabled="!route.nodes[1]?.node"
-            @click="route.nodes[1] && openNode(route.nodes[1])"
-          >
-            <span class="grid place-items-center">
-              <span
-                class="transit-dot-ring size-1.5 rounded-full ring-4"
-                :class="!route.nodes[1]?.node ? 'bg-amber-400' : route.nodes[1].node.online ? 'bg-emerald-400' : 'bg-rose-400'"
-              />
-            </span>
-            <span class="flex min-w-0 items-center gap-2.5">
-              <img
-                v-if="route.nodes[1]?.region"
-                :src="`/images/flags/${getRegionCode(route.nodes[1].region)}.svg`"
-                :alt="route.nodes[1].region"
-                class="h-4 w-6 shrink-0 rounded-[3px] object-cover"
-              >
-              <span class="flex min-w-0 flex-col leading-tight">
-                <span class="truncate text-[13px] font-semibold">{{ route.nodes[1]?.name }}</span>
-                <span class="mt-0.5 truncate text-[10px] text-slate-500">{{ route.nodes[1]?.role }}</span>
-              </span>
-            </span>
-          </button>
-
-          <template v-if="route.nodes[2]">
+          <template v-for="(metric, segmentIndex) in route.metrics.slice(0, Math.max(1, route.nodes.length - 1))" :key="`${route.key}-${segmentIndex}-mobile`">
             <div class="grid grid-cols-[22px_minmax(0,1fr)] gap-2">
               <span class="flex justify-center"><span class="transit-rail h-full w-px" /></span>
               <TopologyEdgeMetric
                 mobile
-                :metric="route.metrics[1] || '-,-'"
+                :metric="metric || '-,-'"
                 :nodes="nodes"
-                :source-uuid="route.nodes[1]?.uuid"
-                :source-label="route.nodes[1]?.name || '线路机'"
-                :target-label="route.nodes[2]?.name || '落地机'"
-                :segment-index="1"
+                :source-uuid="route.nodes[Math.max(1, segmentIndex)]?.uuid"
+                :source-label="route.nodes[segmentIndex]?.name || `节点 ${segmentIndex + 1}`"
+                :target-label="route.nodes[segmentIndex + 1]?.name || `节点 ${segmentIndex + 2}`"
+                :segment-index="segmentIndex"
                 @open-detail="openRouteDetail(route)"
-                @status-change="updateRouteSegmentHealth(route.key, 1, $event)"
-                @metrics-change="updateRouteSegmentMetrics(route.key, 1, $event)"
+                @status-change="updateRouteSegmentHealth(route.key, segmentIndex, $event)"
+                @metrics-change="updateRouteSegmentMetrics(route.key, segmentIndex, $event)"
               />
             </div>
 
             <button
+              v-if="route.nodes[segmentIndex + 1]"
               type="button"
               data-topology-mobile-node
               class="grid w-full grid-cols-[22px_minmax(0,1fr)] items-center gap-2 text-left disabled:cursor-default"
-              :disabled="!route.nodes[2]?.node"
-              @click="route.nodes[2] && openNode(route.nodes[2])"
+              :disabled="!route.nodes[segmentIndex + 1]?.node"
+              @click="route.nodes[segmentIndex + 1] && openNode(route.nodes[segmentIndex + 1])"
             >
               <span class="grid place-items-center">
                 <span
                   class="transit-dot-ring size-1.5 rounded-full ring-4"
-                  :class="!route.nodes[2]?.node ? 'bg-amber-400' : route.nodes[2].node.online ? 'bg-emerald-400' : 'bg-rose-400'"
+                  :class="!route.nodes[segmentIndex + 1]?.node ? 'bg-amber-400' : route.nodes[segmentIndex + 1]?.node?.online ? 'bg-emerald-400' : 'bg-rose-400'"
                 />
               </span>
               <span class="flex min-w-0 items-center gap-2.5">
                 <img
-                  v-if="route.nodes[2]?.region"
-                  :src="`/images/flags/${getRegionCode(route.nodes[2].region)}.svg`"
-                  :alt="route.nodes[2].region"
+                  v-if="route.nodes[segmentIndex + 1]?.region"
+                  :src="`/images/flags/${getRegionCode(route.nodes[segmentIndex + 1]?.region || '')}.svg`"
+                  :alt="route.nodes[segmentIndex + 1]?.region"
                   class="h-4 w-6 shrink-0 rounded-[3px] object-cover"
                 >
                 <span class="flex min-w-0 flex-col leading-tight">
-                  <span class="truncate text-[13px] font-semibold">{{ route.nodes[2]?.name }}</span>
-                  <span class="mt-0.5 truncate text-[10px] text-slate-500">{{ route.nodes[2]?.role }}</span>
+                  <span class="truncate text-[13px] font-semibold">{{ route.nodes[segmentIndex + 1]?.name }}</span>
+                  <span class="mt-0.5 truncate text-[10px] text-slate-500">{{ route.nodes[segmentIndex + 1]?.role }}</span>
                 </span>
               </span>
             </button>
@@ -831,7 +762,7 @@ function routeRankingLabel(route: RouteRow): string {
             observe-only
             :metric="metric || '-,-'"
             :nodes="nodes"
-            :source-uuid="route.nodes[1]?.uuid"
+            :source-uuid="route.nodes[Math.max(1, segmentIndex)]?.uuid"
             :source-label="route.nodes[segmentIndex]?.name || `节点 ${segmentIndex + 1}`"
             :target-label="route.nodes[segmentIndex + 1]?.name || `节点 ${segmentIndex + 2}`"
             :segment-index="segmentIndex"
@@ -845,7 +776,7 @@ function routeRankingLabel(route: RouteRow): string {
             :key="`${route.key}-${segmentIndex}-reliability`"
             :metric="metric || '-,-'"
             :nodes="nodes"
-            :source-uuid="route.nodes[1]?.uuid"
+            :source-uuid="route.nodes[Math.max(1, segmentIndex)]?.uuid"
             :current="routeSegmentMetrics[route.key]?.[segmentIndex]"
             @snapshot-change="updateRouteSegmentReliability(route.key, segmentIndex, $event)"
           />

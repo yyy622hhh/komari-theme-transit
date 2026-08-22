@@ -24,6 +24,7 @@ function route(overrides: Partial<{
    * 有自己独立的测试套件（见 `describe('runTopologyProbeRepair entry segment')`）。
    */
   entryLabel: string
+  entryTarget: string
   entryLive: boolean
   entryNodeName: string
   entryTaskFilter: string
@@ -34,7 +35,12 @@ function route(overrides: Partial<{
     id: overrides.id ?? 1,
     enabled: true,
     nodes: [
-      { name: overrides.entryLabel ?? '自定义入口', region: 'CN', role: '入口' },
+      {
+        name: overrides.entryLabel ?? '自定义入口',
+        region: 'CN',
+        role: '入口',
+        ...(overrides.entryTarget ? { probeTarget: overrides.entryTarget } : {}),
+      },
       { name: sourceName, region: '', role: '线路机' },
       { name: landingName, region: '', role: '落地机' },
     ],
@@ -742,6 +748,31 @@ describe('runTopologyProbeRepair entry segment', () => {
     expect(outcome).toBe('no-op')
     expect(entryPlanCalls).toBe(0)
     expect(log.saveCalls).toEqual([])
+  })
+
+  test('passes the previous binding when repairing a custom target change', async () => {
+    const staleRoute = route({
+      entryLabel: '湖北电信',
+      entryTarget: 'new.example.com',
+      entryLive: true,
+      entryNodeName: relay.name,
+      entryTaskFilter: 'Transit-entry-custom-old',
+    })
+    const { manager } = createManager([staleRoute])
+    const currentTaskNames: Array<string | undefined> = []
+    const outcome = await runTopologyProbeRepair(createDeps({
+      manager,
+      planEntryProbeTask: async (_source, probe, options) => {
+        expect(probe.landmarkAddress).toBe('new.example.com')
+        currentTaskNames.push(options?.currentTaskName)
+        return entryPlan({
+          needsCreation: true,
+          task: { name: probe.taskFilter, type: 'icmp', target: 'new.example.com', clients: [relay.uuid], interval: 30 },
+        })
+      },
+    }))
+    expect(outcome).toBe('repaired')
+    expect(currentTaskNames).toEqual(['Transit-entry-custom-old', 'Transit-entry-custom-old'])
   })
 
   test('rewrites a bound community taskFilter to the matched display-label task name', async () => {

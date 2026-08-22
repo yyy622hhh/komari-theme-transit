@@ -9,6 +9,7 @@ import { formatBeijingTime } from '@/utils/topologyReport'
 
 const {
   history,
+  isCurrentEntry,
   importing,
   exporting,
   rollingBackAt,
@@ -153,14 +154,14 @@ function formatDiffValue(value: unknown): string {
         暂无记录，配置发生变化后会自动出现在这里。
       </div>
       <ul v-else class="space-y-1.5">
-        <li v-for="(entry, index) in history" :key="entry.at" class="flex flex-wrap items-center justify-between gap-2 rounded-md bg-background/60 px-3 py-2 text-xs">
+        <li v-for="(entry, index) in history" :key="`${entry.at}-${index}`" class="flex flex-wrap items-center justify-between gap-2 rounded-md bg-background/60 px-3 py-2 text-xs">
           <div class="flex flex-wrap items-baseline gap-x-2">
             <span class="font-mono">{{ formatBeijingTime(entry.at) }}</span>
-            <span class="text-muted-foreground">{{ SOURCE_LABELS[entry.source] }}</span>
-            <span v-if="index === 0" class="text-primary">当前</span>
+            <span class="text-muted-foreground">{{ SOURCE_LABELS[entry.source] ?? '外部变更（含 Komari 后台）' }}</span>
+            <span v-if="isCurrentEntry(entry)" class="text-primary">当前</span>
           </div>
           <Button
-            v-if="index !== 0"
+            v-if="!isCurrentEntry(entry)"
             size="sm"
             variant="outline"
             class="h-6 bg-background/60 px-2 text-[11px]"

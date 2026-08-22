@@ -4,8 +4,7 @@ import type { NodeData } from '@/stores/nodes'
 import type { TopologyRouteConfig } from '@/utils/topologyModel'
 import type { TopologyProbeOption } from '@/utils/topologyPresets'
 import { isStaleManagedThemeSettingsError } from '@/services/theme-settings.service'
-import { getTopologyRouteProbeKey, resolveTopologyNode, shouldAutoApplyTopologyProbe } from '@/utils/topologyHelper'
-import { getTopologyProbe } from '@/utils/topologyPresets'
+import { getTopologyRouteEntryProbe, resolveTopologyNode, shouldAutoApplyTopologyProbe } from '@/utils/topologyHelper'
 import { recordTopologyWrite, summarizeTaskNames } from '@/utils/topologyWriteLog'
 
 /**
@@ -48,7 +47,7 @@ export interface TopologyRepairDeps {
   planEntryProbeTask: (
     source: TopologyPingEndpoint,
     probe: TopologyProbeOption,
-    options?: { fresh?: boolean },
+    options?: { fresh?: boolean, currentTaskName?: string },
   ) => Promise<EntryProbePlan>
   ensureTopologyEntryProbeTask: (
     source: TopologyPingEndpoint,
@@ -139,6 +138,7 @@ export type TopologyRepairOutcome = 'skipped' | 'no-op' | 'repaired'
 
 interface PlannedProbeRepair {
   route: TopologyRouteConfig
+  segmentIndex: number
   source: NodeData
   landing: NodeData
   probe: TopologyHopProbe
@@ -180,11 +180,11 @@ export async function runTopologyProbeRepair(deps: TopologyRepairDeps): Promise<
 
   const sessionCreatedTaskIds = deps.sessionCreatedTaskIds ?? new Set<number>()
 
-  async function planRouteRepair(route: TopologyRouteConfig, options: { fresh?: boolean } = {}): Promise<PlannedProbeRepair | null> {
+  async function planRouteRepair(route: TopologyRouteConfig, segmentIndex: number, options: { fresh?: boolean } = {}): Promise<PlannedProbeRepair | null> {
     // 配置里带着 uuid，节点在 Komari 里改过名也认得回来。
-    const source = resolveTopologyNode(deps.nodes(), route.nodes[1]?.name ?? '', route.nodes[1]?.uuid ?? '')
-    const landing = resolveTopologyNode(deps.nodes(), route.nodes[2]?.name ?? '', route.nodes[2]?.uuid ?? '')
-    const metric = route.metrics[1]
+    const source = resolveTopologyNode(deps.nodes(), route.nodes[segmentIndex]?.name ?? '', route.nodes[segmentIndex]?.uuid ?? '')
+    const landing = resolveTopologyNode(deps.nodes(), route.nodes[segmentIndex + 1]?.name ?? '', route.nodes[segmentIndex + 1]?.uuid ?? '')
+    const metric = route.metrics[segmentIndex]
     if (!source || !landing || !metric?.live)
       return null
     // 离线节点不产生样本，`assessHopTask` 无法区分"这种探测方式被封"和"落地机
@@ -194,8 +194,8 @@ export async function runTopologyProbeRepair(deps: TopologyRepairDeps): Promise<
       return null
 
     const planned = await deps.planWorkingHopTask(source, landing, metric.taskFilter, options)
-    const renamed = route.nodes[1]?.name.trim() !== source.name.trim()
-      || route.nodes[2]?.name.trim() !== landing.name.trim()
+    const renamed = route.nodes[segmentIndex]?.name.trim() !== source.name.trim()
+      || route.nodes[segmentIndex + 1]?.name.trim() !== landing.name.trim()
     const bindingChanged = metric.nodeName.trim() !== source.name.trim()
       || metric.taskFilter.trim() !== planned.task.name.trim()
     if (!planned.needsCreation && !bindingChanged && !renamed)
@@ -203,6 +203,7 @@ export async function runTopologyProbeRepair(deps: TopologyRepairDeps): Promise<
 
     return {
       route,
+      segmentIndex,
       source,
       landing,
       probe: planned.probe,
@@ -220,13 +221,16 @@ export async function runTopologyProbeRepair(deps: TopologyRepairDeps): Promise<
     // 离线线路机发不出样本，判死会走空整条阶梯，理由同第 2 段。
     if (source.online === false)
       return null
-    const probeKey = getTopologyRouteProbeKey(route)
-    if (!probeKey || !shouldAutoApplyTopologyProbe(route))
+    const probe = getTopologyRouteEntryProbe(route)
+    const customEntry = Boolean(route.nodes[0]?.probeTarget?.trim())
+    if (!probe || (!customEntry && !shouldAutoApplyTopologyProbe(route)))
       return null
-    const probe = getTopologyProbe(probeKey)
     const metric = route.metrics[0]
 
-    const plan = await deps.planEntryProbeTask(source, probe, options)
+    const plan = await deps.planEntryProbeTask(source, probe, {
+      ...options,
+      currentTaskName: metric?.taskFilter,
+    })
     if (plan.exhausted)
       return null
 
@@ -253,7 +257,10 @@ export async function runTopologyProbeRepair(deps: TopologyRepairDeps): Promise<
   }
 
   const [repairs, entryRepairs] = await Promise.all([
-    Promise.all(deps.manager.routes.map(route => planRouteRepair(route).catch(() => null)))
+    Promise.all(deps.manager.routes.flatMap(route => Array.from(
+      { length: Math.max(0, route.nodes.filter(node => node.name.trim()).length - 2) },
+      (_, index) => planRouteRepair(route, index + 1).catch(() => null),
+    )))
       .then(list => list.filter((repair): repair is PlannedProbeRepair => repair !== null)),
     Promise.all(deps.manager.routes.map(route => planEntryRepair(route).catch(() => null)))
       .then(list => list.filter((repair): repair is PlannedEntryRepair => repair !== null)),
@@ -295,10 +302,10 @@ export async function runTopologyProbeRepair(deps: TopologyRepairDeps): Promise<
         // 和锁外那遍一样要吞掉单条线路的失败：这里抛出会穿过 withSaveLock 直达
         // finally，把本轮为**其他**线路刚建好的任务一并删掉，然后下一轮重建、
         // 再删——只要有一条线路持续失败，就是一个建删循环。
-        const latestRepair = await planRouteRepair(repair.route, { fresh: true }).catch(() => null)
+        const latestRepair = await planRouteRepair(repair.route, repair.segmentIndex, { fresh: true }).catch(() => null)
         if (!latestRepair)
           continue
-        const metric = latestRepair.route.metrics[1]
+        const metric = latestRepair.route.metrics[latestRepair.segmentIndex]
         if (!metric?.live)
           continue
         let taskName = latestRepair.taskName
@@ -326,10 +333,10 @@ export async function runTopologyProbeRepair(deps: TopologyRepairDeps): Promise<
           return
         // 节点改名后把线路本身也校正到新名称，收敛回按名称匹配的快路径；否则
         // 探测任务修好了，图上和下次打开管理器时看到的仍然是改名前的旧名字。
-        if (latestRepair.route.nodes[1])
-          latestRepair.route.nodes[1].name = latestRepair.source.name
-        if (latestRepair.route.nodes[2])
-          latestRepair.route.nodes[2].name = latestRepair.landing.name
+        if (latestRepair.route.nodes[latestRepair.segmentIndex])
+          latestRepair.route.nodes[latestRepair.segmentIndex]!.name = latestRepair.source.name
+        if (latestRepair.route.nodes[latestRepair.segmentIndex + 1])
+          latestRepair.route.nodes[latestRepair.segmentIndex + 1]!.name = latestRepair.landing.name
         metric.nodeName = latestRepair.source.name
         metric.taskFilter = taskName
         appliedRetiredTasks.push(...latestRepair.retiredTasks)

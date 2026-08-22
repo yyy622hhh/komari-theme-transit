@@ -16,7 +16,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useDailyExchangeRates } from '@/composables/useDailyExchangeRates'
 import { useOrderMoveFeedback } from '@/composables/useOrderMoveFeedback'
 import { useServerList } from '@/composables/useServerList'
-import { hasSeenSetupWizard } from '@/composables/useSetupWizard'
 import { useSortableOrder } from '@/composables/useSortableOrder'
 import { useVisitorAudit } from '@/composables/useVisitorAudit'
 import { PRIVATE_HOME_TOOL_KEYS } from '@/constants/security'
@@ -219,10 +218,20 @@ watch(
 )
 
 // 只在管理员第一次登录且从未打开过设置向导时自动弹出；关掉或跳过之后不再自动弹。
+// 会话在 SPA 里过期时必须关掉——否则公开首页还会罩着一个管理员向导。
+let setupWizardCheckGeneration = 0
 watch(
   () => appStore.privateFeaturesAllowed,
-  (allowed) => {
-    if (allowed && !hasSeenSetupWizard())
+  async (allowed) => {
+    const generation = ++setupWizardCheckGeneration
+    if (!allowed) {
+      setupWizardOpen.value = false
+      return
+    }
+    const { hasSeenSetupWizard } = await import('@/composables/useSetupWizard')
+    if (generation !== setupWizardCheckGeneration || !appStore.privateFeaturesAllowed)
+      return
+    if (!hasSeenSetupWizard())
       setupWizardOpen.value = true
   },
   { immediate: true },

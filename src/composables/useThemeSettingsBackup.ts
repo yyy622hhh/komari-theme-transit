@@ -1,13 +1,13 @@
 import type { ThemeSettings } from '@/utils/themeSettings'
 import type { ThemeSettingsDiffEntry } from '@/utils/themeSettingsBackup'
 import type { ThemeSettingsVersionEntry } from '@/utils/themeSettingsHistory'
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { downloadText } from '@/services/snapshot.service'
 import { saveManagedThemeSettings } from '@/services/theme-settings.service'
 import { useAppStore } from '@/stores/app'
 import { message } from '@/utils/message'
 import { normalizeThemeSettings } from '@/utils/themeSettings'
-import { buildThemeSettingsExport, diffThemeSettings, parseThemeSettingsImport } from '@/utils/themeSettingsBackup'
+import { buildThemeSettingsExport, diffThemeSettings, parseThemeSettingsImport, themeSettingsEqual } from '@/utils/themeSettingsBackup'
 import { clearThemeSettingsHistory, readThemeSettingsHistory, recordThemeSettingsVersion } from '@/utils/themeSettingsHistory'
 
 function exportFilenameStamp(at: number): string {
@@ -38,6 +38,17 @@ export function useThemeSettingsBackup() {
     return normalizeThemeSettings(appStore.publicSettings?.theme_settings)
   }
 
+  const liveSettings = computed(() => currentSettings())
+
+  function isCurrentEntry(entry: ThemeSettingsVersionEntry): boolean {
+    return themeSettingsEqual(entry.settings, liveSettings.value)
+  }
+
+  function noteHistoryWrite(ok: boolean): void {
+    if (!ok)
+      message.warning('配置已保存，但本机历史记录写入失败，回滚列表可能不是最新。')
+  }
+
   function exportSettings(): void {
     exporting.value = true
     try {
@@ -51,6 +62,7 @@ export function useThemeSettingsBackup() {
   }
 
   async function stageImportFile(file: File): Promise<void> {
+    cancelRollback()
     importError.value = null
     let raw: unknown
     try {
@@ -84,17 +96,19 @@ export function useThemeSettingsBackup() {
       return
     importing.value = true
     try {
-      await saveManagedThemeSettings({
+      const saved = await saveManagedThemeSettings({
         theme: publicSettings.theme,
         patch: preview.settings,
         permission: 'configBackup',
         requestKey: `config-backup:import:${publicSettings.theme}`,
+        strategy: 'replace',
         onPublicSettings: appStore.applyPublicSettings,
       })
-      recordThemeSettingsVersion(preview.settings, 'import')
+      noteHistoryWrite(recordThemeSettingsVersion(saved, 'import'))
       refreshHistory()
       message.success('配置已导入并保存。')
       importPreview.value = null
+      rollbackPreview.value = null
     }
     catch (error) {
       message.error(error instanceof Error ? error.message : '导入失败。')
@@ -105,6 +119,7 @@ export function useThemeSettingsBackup() {
   }
 
   function stageRollback(entry: ThemeSettingsVersionEntry): void {
+    cancelImport()
     rollbackPreview.value = { entry, diff: diffThemeSettings(currentSettings(), entry.settings) }
   }
 
@@ -119,17 +134,19 @@ export function useThemeSettingsBackup() {
       return
     rollingBackAt.value = preview.entry.at
     try {
-      await saveManagedThemeSettings({
+      const saved = await saveManagedThemeSettings({
         theme: publicSettings.theme,
         patch: preview.entry.settings,
         permission: 'configBackup',
         requestKey: `config-backup:rollback:${publicSettings.theme}`,
+        strategy: 'replace',
         onPublicSettings: appStore.applyPublicSettings,
       })
-      recordThemeSettingsVersion(preview.entry.settings, 'rollback')
+      noteHistoryWrite(recordThemeSettingsVersion(saved, 'rollback'))
       refreshHistory()
       message.success('已回滚到所选版本。')
       rollbackPreview.value = null
+      importPreview.value = null
     }
     catch (error) {
       message.error(error instanceof Error ? error.message : '回滚失败。')
@@ -146,6 +163,7 @@ export function useThemeSettingsBackup() {
 
   return {
     history,
+    isCurrentEntry,
     importing,
     exporting,
     rollingBackAt,
