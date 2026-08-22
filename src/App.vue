@@ -4,6 +4,7 @@ import { defineAsyncComponent, onMounted, onUnmounted, ref } from 'vue'
 import { Alert, AlertAction, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Toaster } from '@/components/ui/sonner'
+import { useThemeSettingsHistoryRecorder } from '@/composables/useThemeSettingsHistoryRecorder'
 import { useVisitorPageAudit } from '@/composables/useVisitorAudit'
 import { useAppStore } from '@/stores/app'
 import { logAppError } from '@/utils/safeError'
@@ -16,6 +17,7 @@ import Provider from './components/Provider.vue'
 
 const appStore = useAppStore()
 useVisitorPageAudit()
+useThemeSettingsHistoryRecorder()
 
 const componentBoundaryTestEnabled = import.meta.env.VITE_COMPONENT_BOUNDARY_TEST === 'true'
   && new URLSearchParams(location.search).has('component-boundary-test')

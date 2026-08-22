@@ -15,6 +15,7 @@ export type PermissionKey
     | 'providerGeoLookup'
     | 'nodeCardPanel'
     | 'diagnostics'
+    | 'configBackup'
 
 export interface AuthSession {
   status: AuthStatus
