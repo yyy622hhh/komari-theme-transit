@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-08-23
+
+### Fixed
+
+- 统一主题、回程伴生插件和节点助手的发布版本，避免同一 Release 中组件版本不一致。
+- 发布审计现在会阻止伴生插件或节点助手版本落后于 `komari-theme.json`。
+
 ## [1.3.0] - 2026-08-23
 
 ### Added
@@ -791,7 +798,8 @@
 - 亮暗主题、桌面/移动布局和 Transit 风格内嵌 Komari 管理端。
 - Playwright 视觉与交互回归、自动构建和 GitHub Release 发布流程。
 
-[Unreleased]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.3.1...HEAD
+[1.3.1]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.1.4...v1.2.0
 [1.1.4]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.1.3...v1.1.4
