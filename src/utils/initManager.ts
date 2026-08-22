@@ -5,14 +5,9 @@ import { useAppStore } from '@/stores/app'
 import { useNodesStore } from '@/stores/nodes'
 import { getSharedApi } from '@/utils/api'
 import { checkBackendHealth, fetchInitialPublicSettings, fetchInitialUserInfo } from '@/utils/init.bootstrap'
-import {
-  calculatePollingInterval,
-  CLIENTS_REFRESH_INTERVAL_MS,
-  DEFAULT_INIT_CONFIG,
-  raceWithAbort,
-  shouldLogPollingFailure,
-} from '@/utils/init.shared'
-import { getSharedRpc, RpcError } from '@/utils/rpc'
+import { CLIENTS_REFRESH_INTERVAL_MS, DEFAULT_INIT_CONFIG } from '@/utils/init.shared'
+import { TransportManager } from '@/utils/init.transport'
+import { getSharedRpc } from '@/utils/rpc'
 import { logAppError, logAppWarning } from '@/utils/safeError'
 
 /** 初始化状态管理 */
@@ -21,20 +16,14 @@ export class InitManager {
   private rpc: KomariRpc
   private appStore: ReturnType<typeof useAppStore>
   private nodesStore: ReturnType<typeof useNodesStore>
-  private pollTimer: ReturnType<typeof setTimeout> | null = null
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null
-  private unsubscribeWsClose: (() => void) | null = null
-  private pollingGeneration: number | null = null
-  private refreshAfterCurrentPoll = false
+  private readonly transport: TransportManager
   private destroyed = false
-  private postFailureCount = 0
   private lastClientsFetchedAt = 0
   private lastClientsFetchAttemptAt = 0
   private clientsRefreshPromise: Promise<Record<string, Client>> | null = null
   private isInitialized = false
   private metadataRefreshListenersAttached = false
   private redirectingToAdmin = false
-  private useWebSocket: boolean | null = null // 根据主题配置决定
   private readonly api: ReturnType<typeof getSharedApi>
   private readonly navigate: (path: string) => void
   private lifecycleController = new AbortController()
@@ -67,6 +56,26 @@ export class InitManager {
     this.navigate = dependencies.navigate ?? ((path: string) => {
       location.href = path
     })
+    this.transport = new TransportManager({
+      rpc: this.rpc,
+      appStore: this.appStore,
+      nodesStore: this.nodesStore,
+      config: this.config,
+      isTransportCurrent: generation => this.isTransportCurrent(generation),
+      getTransportSignal: () => this.transportController.signal,
+      shouldRefreshClients: (now) => {
+        const lastClientsRequestAt = Math.max(this.lastClientsFetchedAt, this.lastClientsFetchAttemptAt)
+        return now - lastClientsRequestAt >= CLIENTS_REFRESH_INTERVAL_MS
+      },
+      markClientsFetchAttempt: (now) => {
+        this.lastClientsFetchAttemptAt = now
+      },
+      fetchClients: signal => this.fetchClientsSnapshot(signal),
+      markClientsFetched: (now) => {
+        this.lastClientsFetchedAt = now
+        this.lastClientsFetchAttemptAt = now
+      },
+    })
     setManagedThemeSettingsPublisher(settings => this.appStore.applyPublicSettings?.(settings))
   }
 
@@ -81,14 +90,6 @@ export class InitManager {
       && !this.lifecycleController.signal.aborted
       && !this.transportController.signal.aborted
       && generation === this.transportGeneration
-  }
-
-  private getPollInterval(): number {
-    return calculatePollingInterval(
-      this.appStore.dataUpdateInterval * 1000,
-      this.postFailureCount,
-      this.config.postMaxRetryInterval,
-    )
   }
 
   async init(): Promise<void> {
@@ -109,7 +110,7 @@ export class InitManager {
         return
 
       // 首次数据请求即使失败，也启动实时连接和轮询以便自动恢复。
-      this.startWebSocketAndPolling(++this.transportGeneration)
+      this.transport.start(++this.transportGeneration)
       this.attachMetadataRefreshListeners()
       this.isInitialized = true
     }
@@ -142,7 +143,7 @@ export class InitManager {
     this.appStore.connectionError = !nodesAvailable
 
     if (nodesAvailable) {
-      this.postFailureCount = 0
+      this.transport.resetFailureCount()
     }
     else if (healthResult.status === 'rejected') {
       console.error('[InitManager] Backend health check and initial node load both failed')
@@ -163,7 +164,7 @@ export class InitManager {
     const canCommit = () => this.isLifecycleCurrent(generation) && !this.redirectingToAdmin
     const recovered = await this.runStartupRequests(this.lifecycleController.signal, canCommit)
     if (!this.isInitialized && this.isLifecycleCurrent(generation) && !this.redirectingToAdmin) {
-      this.startWebSocketAndPolling(++this.transportGeneration)
+      this.transport.start(++this.transportGeneration)
       this.attachMetadataRefreshListeners()
       this.isInitialized = true
     }
@@ -268,17 +269,9 @@ export class InitManager {
     this.transportController = new AbortController()
     const signal = this.transportController.signal
 
-    this.stopPolling()
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer)
-      this.reconnectTimer = null
-    }
-    this.unsubscribeWsClose?.()
-    this.unsubscribeWsClose = null
-    this.useWebSocket = false
+    this.transport.resetForSessionRecovery()
     this.clientsRefreshPromise = null
     this.lastClientsFetchAttemptAt = 0
-    this.refreshAfterCurrentPoll = false
 
     const client = this.rpc.getClient()
     client.setTransport(false)
@@ -295,7 +288,7 @@ export class InitManager {
       return
 
     this.appStore.connectionError = !recovered
-    this.startWebSocketAndPolling(generation)
+    this.transport.start(generation)
   }
 
   private attachMetadataRefreshListeners(): void {
@@ -314,256 +307,11 @@ export class InitManager {
     this.metadataRefreshListenersAttached = false
   }
 
-  private startWebSocketAndPolling(generation = this.transportGeneration): void {
-    if (!this.isTransportCurrent(generation))
-      return
-    // 根据主题配置决定初始连接模式
-    const configuredMode = this.appStore.rpcTransportMode
-    this.useWebSocket = configuredMode === 'websocket'
-
-    if (this.useWebSocket) {
-      // 尝试建立 WebSocket 连接
-      void this.connectWebSocket(generation)
-    }
-    else {
-      // HTTP 模式：直接设置 RPC 客户端为 HTTP 模式
-      const client = this.rpc.getClient()
-      client.setTransport(false)
-      this.nodesStore.updateWsState('disconnected', this.config.wsMaxReconnectAttempts)
-    }
-
-    // 开始轮询（作为 WebSocket 的补充或备选方案）
-    this.startPolling(generation)
-  }
-
-  private async connectWebSocket(generation = this.transportGeneration): Promise<void> {
-    // 如果已回落到 POST 模式或配置为 HTTP 模式，不再尝试 WebSocket
-    if (!this.isTransportCurrent(generation) || this.useWebSocket === false) {
-      return
-    }
-
-    const client = this.rpc.getClient()
-
-    // 切换到 WebSocket 模式
-    client.setTransport(true)
-    this.nodesStore.updateWsState('connecting', this.nodesStore.wsReconnectAttempts)
-
-    try {
-      // 使用 ping 验证连接，10 秒超时
-      await raceWithAbort(client.ensureWebSocketConnectedWithPing(10000), this.transportController.signal)
-      if (!this.isTransportCurrent(generation) || !this.useWebSocket) {
-        client.close()
-        return
-      }
-      this.nodesStore.updateWsState('connected', 0)
-
-      // 连接成功，重置错误状态
-      this.appStore.connectionError = false
-
-      // 监听连接状态变化
-      this.monitorWebSocketConnection(generation)
-    }
-    catch (error) {
-      if (!this.isTransportCurrent(generation) || !this.useWebSocket)
-        return
-      logAppError('WebSocket connection failed', error)
-      this.nodesStore.updateWsState('disconnected')
-      this.scheduleReconnect(generation)
-    }
-  }
-
-  /**
-   * 监控 WebSocket 连接状态
-   */
-  private monitorWebSocketConnection(generation: number): void {
-    this.unsubscribeWsClose?.()
-    const client = this.rpc.getClient()
-    this.unsubscribeWsClose = client.onWebSocketClose(() => {
-      if (!this.isTransportCurrent(generation))
-        return
-      // 如果当前是已连接状态且还在使用 WebSocket 模式，触发重连
-      if (this.useWebSocket === true && this.nodesStore.wsConnectionState === 'connected') {
-        this.nodesStore.updateWsState('disconnected')
-        this.scheduleReconnect(generation)
-      }
-    })
-  }
-
-  /**
-   * 安排重连
-   */
-  private scheduleReconnect(generation = this.transportGeneration): void {
-    if (!this.isTransportCurrent(generation) || this.useWebSocket === false || this.reconnectTimer)
-      return
-
-    const attempts = this.nodesStore.wsReconnectAttempts
-
-    // 达到最大重连次数，回落到 POST 模式
-    if (attempts >= this.config.wsMaxReconnectAttempts) {
-      console.error('[InitManager] Max reconnect attempts reached, falling back to POST mode')
-      this.fallbackToPostMode(generation)
-      return
-    }
-
-    // 首次失败时显示提示
-    if (attempts === 0) {
-      window.$message?.error('WebSocket 建立失败，正在尝试重连。')
-    }
-
-    const nextAttempts = attempts + 1
-    this.nodesStore.updateWsState('reconnecting', nextAttempts)
-    const backoff = Math.min(this.config.wsReconnectInterval * 2 ** Math.max(0, nextAttempts - 1), 30_000)
-
-    this.reconnectTimer = setTimeout(async () => {
-      this.reconnectTimer = null
-      try {
-        const client = this.rpc.getClient()
-        client.close()
-        await this.connectWebSocket(generation)
-      }
-      catch (error) {
-        if (!this.isTransportCurrent(generation))
-          return
-        logAppError('WebSocket reconnect failed', error)
-        this.scheduleReconnect(generation)
-      }
-    }, backoff)
-  }
-
-  /**
-   * 回落到 POST 模式
-   */
-  private fallbackToPostMode(generation = this.transportGeneration): void {
-    if (!this.isTransportCurrent(generation))
-      return
-    this.useWebSocket = false
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer)
-      this.reconnectTimer = null
-    }
-    this.unsubscribeWsClose?.()
-    this.unsubscribeWsClose = null
-    this.nodesStore.updateWsState('disconnected', this.config.wsMaxReconnectAttempts)
-
-    // 关闭 WebSocket 连接
-    const client = this.rpc.getClient()
-    client.setTransport(false)
-    client.close()
-
-    // 显示提示
-    window.$message?.warning('WebSocket 无法连接，尝试回落 POST 模式。')
-  }
-
-  /**
-   * 开始轮询
-   */
-  private startPolling(generation = this.transportGeneration): void {
-    if (this.pollTimer) {
-      clearTimeout(this.pollTimer)
-    }
-
-    if (!this.isTransportCurrent(generation) || (typeof document !== 'undefined' && document.visibilityState === 'hidden')) {
-      this.pollTimer = null
-      return
-    }
-
-    const schedulePoll = () => {
-      if (!this.isTransportCurrent(generation) || (typeof document !== 'undefined' && document.visibilityState === 'hidden')) {
-        this.pollTimer = null
-        return
-      }
-      this.pollTimer = setTimeout(async () => {
-        this.pollTimer = null
-        await this.poll(false, generation)
-        if (this.isTransportCurrent(generation))
-          schedulePoll()
-      }, this.getPollInterval())
-    }
-
-    schedulePoll()
-  }
-
-  /**
-   * 执行轮询任务
-   */
-  private async poll(refreshAfterCurrent = false, generation = this.transportGeneration): Promise<void> {
-    if (!this.isTransportCurrent(generation))
-      return
-    if (this.pollingGeneration !== null) {
-      if (refreshAfterCurrent)
-        this.refreshAfterCurrentPoll = true
-      return
-    }
-
-    this.pollingGeneration = generation
-
-    try {
-      const now = Date.now()
-      const lastClientsRequestAt = Math.max(this.lastClientsFetchedAt, this.lastClientsFetchAttemptAt)
-      const shouldRefreshClients = now - lastClientsRequestAt >= CLIENTS_REFRESH_INTERVAL_MS
-      if (shouldRefreshClients)
-        this.lastClientsFetchAttemptAt = now
-
-      const [statusesResult, clientsResult] = await Promise.allSettled([
-        this.rpc.getClient().call<Record<string, NodeStatus>>('common:getNodesLatestStatus', undefined, this.transportController.signal),
-        shouldRefreshClients
-          ? this.fetchClientsSnapshot(this.transportController.signal)
-          : Promise.resolve(null),
-      ])
-
-      if (!this.isTransportCurrent(generation))
-        return
-
-      if (clientsResult.status === 'fulfilled' && clientsResult.value) {
-        this.nodesStore.updateNodeClients(clientsResult.value)
-        this.lastClientsFetchedAt = now
-      }
-      else if (clientsResult.status === 'rejected') {
-        logAppWarning('Failed to refresh node metadata; keeping previous node data', clientsResult.reason)
-      }
-
-      if (statusesResult.status === 'rejected')
-        throw statusesResult.reason
-
-      this.nodesStore.updateNodeStatuses(statusesResult.value)
-
-      // 连接恢复正常，重置错误状态
-      this.postFailureCount = 0
-      this.appStore.connectionError = false
-    }
-    catch (error) {
-      if (!this.isTransportCurrent(generation))
-        return
-
-      const nextFailureCount = this.postFailureCount + 1
-      if (shouldLogPollingFailure(nextFailureCount)) {
-        if (error instanceof RpcError)
-          logAppError(`Poll RPC error (${nextFailureCount} consecutive failures)`, error)
-        else
-          logAppError(`Poll error (${nextFailureCount} consecutive failures)`, error)
-      }
-
-      this.postFailureCount = nextFailureCount
-      this.appStore.connectionError = this.postFailureCount >= this.config.postFailureThreshold
-    }
-    finally {
-      if (this.pollingGeneration === generation)
-        this.pollingGeneration = null
-      if (this.refreshAfterCurrentPoll && this.isTransportCurrent(generation)) {
-        this.refreshAfterCurrentPoll = false
-        void this.poll(false, generation)
-      }
-    }
-  }
-
   /**
    * 停止轮询
    */
   stopPolling(): void {
-    if (this.pollTimer) {
-      clearTimeout(this.pollTimer)
-      this.pollTimer = null
-    }
+    this.transport.stopPolling()
   }
 
   /**
@@ -577,19 +325,11 @@ export class InitManager {
     this.transportGeneration += 1
     this.lifecycleController.abort()
     this.transportController.abort()
-    this.stopPolling()
+    this.transport.destroy()
     this.detachMetadataRefreshListeners()
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer)
-      this.reconnectTimer = null
-    }
-    this.unsubscribeWsClose?.()
-    this.unsubscribeWsClose = null
     this.rpc.close()
     this.clientsRefreshPromise = null
     this.sessionRecoveryPromise = null
-    this.pollingGeneration = null
-    this.refreshAfterCurrentPoll = false
     this.nodesStore.clearNodes()
     this.isInitialized = false
     setManagedThemeSettingsPublisher()

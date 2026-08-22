@@ -281,23 +281,25 @@ describe('InitManager polling recovery', () => {
     const internal = manager as unknown as {
       lastClientsFetchAttemptAt: number
       lastClientsFetchedAt: number
-      poll: (refreshAfterCurrent?: boolean, generation?: number) => Promise<void>
-      postFailureCount: number
       transportGeneration: number
+      transport: {
+        poll: (generation: number, refreshAfterCurrent?: boolean) => Promise<void>
+        postFailureCount: number
+      }
     }
     internal.lastClientsFetchedAt = 0
     internal.lastClientsFetchAttemptAt = 0
 
-    await internal.poll(false, internal.transportGeneration)
+    await internal.transport.poll(internal.transportGeneration, false)
 
     expect(harness.events).toContain('nodes:statuses')
     expect(harness.events).not.toContain('nodes:clients')
     expect(harness.appStore.connectionError).toBe(false)
-    expect(internal.postFailureCount).toBe(0)
+    expect(internal.transport.postFailureCount).toBe(0)
     expect(metadataAttempts).toBe(1)
 
     harness.events.length = 0
-    await internal.poll(false, internal.transportGeneration)
+    await internal.transport.poll(internal.transportGeneration, false)
     expect(harness.events).toContain('nodes:statuses')
     expect(metadataAttempts).toBe(1)
     manager.destroy()
