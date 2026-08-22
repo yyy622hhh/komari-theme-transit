@@ -16,6 +16,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useDailyExchangeRates } from '@/composables/useDailyExchangeRates'
 import { useOrderMoveFeedback } from '@/composables/useOrderMoveFeedback'
 import { useServerList } from '@/composables/useServerList'
+import { hasSeenSetupWizard } from '@/composables/useSetupWizard'
 import { useSortableOrder } from '@/composables/useSortableOrder'
 import { useVisitorAudit } from '@/composables/useVisitorAudit'
 import { PRIVATE_HOME_TOOL_KEYS } from '@/constants/security'
@@ -67,6 +68,7 @@ defineOptions({
     ProviderValuePanel: defineAsyncComponent(() => import('@/components/ProviderValuePanel.vue')),
     RouteProbeSetupWizard: defineAsyncComponent(() => import('@/components/RouteProbeSetupWizard.vue')),
     ServerListPanel: defineAsyncComponent(() => import('@/components/ServerListPanel.vue')),
+    SetupWizardDialog: defineAsyncComponent(() => import('@/components/SetupWizardDialog.vue')),
     SnapshotExportPanel: defineAsyncComponent(() => import('@/components/SnapshotExportPanel.vue')),
     Tabs,
     TabsContent,
@@ -108,6 +110,7 @@ const activeQuickControl = ref<HomeQuickControlKey | null>(null)
 const pingDialogNode = ref<NodeData | null>(null)
 const nodeControlDialogNode = ref<NodeData | null>(null)
 const routeProbeSetupOpen = ref(false)
+const setupWizardOpen = ref(false)
 const homeOrderContainer = ref<HTMLElement | null>(null)
 const homeOrderViewBeforeEdit = ref<{
   group: string
@@ -208,6 +211,16 @@ watch(
     if (cur !== 'all' && !gs.includes(cur)) {
       appStore.nodeSelectedGroup = 'all'
     }
+  },
+  { immediate: true },
+)
+
+// 只在管理员第一次登录且从未打开过设置向导时自动弹出；关掉或跳过之后不再自动弹。
+watch(
+  () => appStore.privateFeaturesAllowed,
+  (allowed) => {
+    if (allowed && !hasSeenSetupWizard())
+      setupWizardOpen.value = true
   },
   { immediate: true },
 )
@@ -584,6 +597,17 @@ const nodeCardGridClass = computed(() => {
                 在旁边留一个小图标重新打开向导，方便后续给新加的节点补装助手。开启
                 前后都通过懒加载把依赖链移出首屏 chunk，未登录时两者都不渲染。
               -->
+              <UiButton
+                v-if="appStore.privateFeaturesAllowed"
+                variant="outline"
+                size="icon"
+                class="size-8 shrink-0 border-none bg-background/50 backdrop-blur-xs shadow-none hover:bg-background/60"
+                aria-label="打开 Transit 设置向导"
+                title="打开 Transit 设置向导"
+                @click="setupWizardOpen = true"
+              >
+                <Icon icon="tabler:wand" :width="14" :height="14" />
+              </UiButton>
               <NodeRouteProbeButton
                 v-if="appStore.routeProbeEnabled"
                 :nodes="nodesStore.visibleNodes"
@@ -854,6 +878,11 @@ const nodeCardGridClass = computed(() => {
       :open="routeProbeSetupOpen"
       :nodes="nodesStore.visibleNodes"
       @update:open="routeProbeSetupOpen = $event"
+    />
+    <SetupWizardDialog
+      v-if="setupWizardOpen"
+      :open="setupWizardOpen"
+      @update:open="setupWizardOpen = $event"
     />
   </div>
 </template>
