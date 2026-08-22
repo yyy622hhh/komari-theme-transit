@@ -60,7 +60,25 @@ test('public home navigates to a node detail and returns without private API cal
   expect(forbiddenRequests).toEqual([])
 })
 
-test('public home degrades from the realistic globe to the cobe globe when only WebGL2 is unavailable', async ({ page }) => {
+test('public home selects the best available fallback when WebGL2 is unavailable', async ({ page }) => {
+  // Headless Firefox on GitHub's Linux runner can expose neither WebGL2 nor
+  // WebGL1, while the locally bundled Firefox and WebKit commonly expose
+  // WebGL1. Detect the real lower tier before hiding WebGL2: the application
+  // must choose cobe when that tier exists and continue to the tiled map when
+  // it does not. The pure capability unit tests cover the deterministic
+  // WebGL1-present branch independently of the runner's GPU configuration.
+  const supportsWebgl1 = await page.evaluate(() => {
+    try {
+      const canvas = document.createElement('canvas')
+      const context = canvas.getContext('webgl') ?? canvas.getContext('experimental-webgl')
+      if (context && 'getExtension' in context)
+        context.getExtension('WEBGL_lose_context')?.loseContext()
+      return Boolean(context)
+    }
+    catch {
+      return false
+    }
+  })
   await page.addInitScript(() => {
     const nativeGetContext = HTMLCanvasElement.prototype.getContext
     HTMLCanvasElement.prototype.getContext = function (type: string, ...args: unknown[]) {
@@ -71,10 +89,13 @@ test('public home degrades from the realistic globe to the cobe globe when only 
   })
   await installKomariFixture(page)
   await openHome(page)
-  // WebGL1 is still available, so the adaptive wrapper should pick the lighter
-  // cobe globe instead of falling all the way back to static text.
-  await expect(page.locator('canvas.earth-globe-canvas')).toBeVisible()
-  await expect(page.locator('[data-earth-static-fallback]')).toHaveCount(0)
+  if (supportsWebgl1) {
+    await expect(page.locator('canvas.earth-globe-canvas')).toBeVisible()
+    await expect(page.locator('[data-earth-static-fallback]')).toHaveCount(0)
+  }
+  else {
+    await expect(page.getByRole('img', { name: '真实地球贴图节点世界地图' })).toBeVisible()
+  }
 })
 
 test('public home degrades all the way to the tiled map when no WebGL is available', async ({ page }) => {
