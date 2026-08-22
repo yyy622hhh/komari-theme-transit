@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { clearTopologyWriteLog, readTopologyWriteLog, recordTopologyWrite, summarizeTaskNames } from '../../src/utils/topologyWriteLog'
 
-const originalSessionStorage = globalThis.sessionStorage
+const originalLocalStorage = globalThis.localStorage
 
-function installSessionStorage(): Map<string, string> {
+function installLocalStorage(): Map<string, string> {
   const store = new Map<string, string>()
-  Object.defineProperty(globalThis, 'sessionStorage', {
+  Object.defineProperty(globalThis, 'localStorage', {
     configurable: true,
     value: {
       getItem: (key: string) => store.get(key) ?? null,
@@ -22,11 +22,11 @@ function installSessionStorage(): Map<string, string> {
 }
 
 beforeEach(() => {
-  installSessionStorage()
+  installLocalStorage()
 })
 
 afterEach(() => {
-  Object.defineProperty(globalThis, 'sessionStorage', { configurable: true, value: originalSessionStorage })
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: originalLocalStorage })
 })
 
 describe('topology write log', () => {
@@ -56,13 +56,13 @@ describe('topology write log', () => {
 
   test('drops corrupt entries instead of throwing at the caller', () => {
     // 流水是排查用的附加信息，读坏了最多是少几行，绝不能反过来让拓扑管理器打不开。
-    sessionStorage.setItem('transit:topology-write-log', '[{"at":1,"action":"good","trigger":"auto","outcome":"ok"},null,{"action":"missing-at"},42]')
+    localStorage.setItem('transit:topology-write-log', '[{"at":1,"action":"good","trigger":"auto","outcome":"ok"},null,{"action":"missing-at"},42]')
     expect(readTopologyWriteLog()).toEqual([{ at: 1, action: 'good', trigger: 'auto', outcome: 'ok' }])
 
-    sessionStorage.setItem('transit:topology-write-log', 'not json')
+    localStorage.setItem('transit:topology-write-log', 'not json')
     expect(readTopologyWriteLog()).toEqual([])
 
-    sessionStorage.setItem('transit:topology-write-log', '{"not":"an array"}')
+    localStorage.setItem('transit:topology-write-log', '{"not":"an array"}')
     expect(readTopologyWriteLog()).toEqual([])
   })
 
@@ -72,8 +72,8 @@ describe('topology write log', () => {
     expect(readTopologyWriteLog()).toEqual([])
   })
 
-  test('is a no-op without sessionStorage rather than crashing', () => {
-    Object.defineProperty(globalThis, 'sessionStorage', { configurable: true, value: undefined })
+  test('is a no-op without localStorage rather than crashing', () => {
+    Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: undefined })
     expect(() => recordTopologyWrite({ trigger: 'auto', action: '创建', outcome: 'ok' })).not.toThrow()
     expect(readTopologyWriteLog()).toEqual([])
   })

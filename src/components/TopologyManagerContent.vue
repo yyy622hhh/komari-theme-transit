@@ -292,7 +292,7 @@ const {
 
       <details v-if="writeLog.length" data-topology-write-log class="rounded-xl border border-border/60 px-4 py-3">
         <summary class="cursor-pointer text-xs text-muted-foreground">
-          本次会话的后端写入记录（{{ writeLog.length }} 条）
+          本机后端写入记录（{{ writeLog.length }} 条，保存在本浏览器）
         </summary>
         <ul class="mt-2 flex flex-col gap-1.5">
           <li v-for="(entry, index) in writeLog" :key="`${entry.at}-${index}`" class="flex flex-wrap items-baseline gap-x-2 text-[11px]">

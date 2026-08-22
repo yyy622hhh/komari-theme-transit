@@ -49,10 +49,10 @@ function createHarness(options: { blockingErrors?: string[], pendingValidation?:
   return { notifications, persistence, saveCalls: () => saveCalls }
 }
 
-/** 写入流水存在 sessionStorage 里；测试环境没有，装一个内存实现才能观察到。 */
-function installSessionStorage(): void {
+/** 写入流水存在 localStorage 里；测试环境没有，装一个内存实现才能观察到。 */
+function installLocalStorage(): void {
   const store = new Map<string, string>()
-  Object.defineProperty(globalThis, 'sessionStorage', {
+  Object.defineProperty(globalThis, 'localStorage', {
     configurable: true,
     value: {
       getItem: (key: string) => store.get(key) ?? null,
@@ -69,7 +69,7 @@ function installSessionStorage(): void {
 
 describe('topology persistence orchestration', () => {
   beforeEach(() => {
-    installSessionStorage()
+    installLocalStorage()
     clearTopologyWriteLog()
   })
 

@@ -22,11 +22,14 @@ export interface TopologyWriteEntry {
  * 也没有任何地方能回答「昨天这个任务是谁建的」——只有失败时首页角标一闪。出问题
  * 时这是唯一能自证清白的东西。
  *
- * 只写 sessionStorage：这是给操作者当场排查用的，不是审计日志，不该占用主题配置
- * 的写入配额，也不该在多个标签页之间互相覆盖。
+ * 写 localStorage（同源跨标签页共享，刷新、关闭重开都还在）而不是后端：这仍然
+ * 是给操作者当场排查用的，不是正式审计日志，不该占用主题配置的写入配额。
+ * 跨标签页共享意味着并发写入理论上可能互相覆盖对方刚追加的一条——可接受，
+ * 丢一条排查线索不影响主流程，比"每个标签页各看各的、互相看不见"更有用。
+ * 仍然是单浏览器本地存储，不跨设备；如需真正的审计留痕请看诊断中心。
  */
-function canUseSessionStorage(): boolean {
-  return typeof sessionStorage !== 'undefined'
+function canUseLocalStorage(): boolean {
+  return typeof localStorage !== 'undefined'
 }
 
 function isEntry(value: unknown): value is TopologyWriteEntry {
@@ -40,10 +43,10 @@ function isEntry(value: unknown): value is TopologyWriteEntry {
 }
 
 export function readTopologyWriteLog(): TopologyWriteEntry[] {
-  if (!canUseSessionStorage())
+  if (!canUseLocalStorage())
     return []
   try {
-    const raw = sessionStorage.getItem(STORAGE_KEY)
+    const raw = localStorage.getItem(STORAGE_KEY)
     if (!raw)
       return []
     const parsed = JSON.parse(raw) as unknown
@@ -56,21 +59,21 @@ export function readTopologyWriteLog(): TopologyWriteEntry[] {
 
 /** 最新的在前，超出上限的丢弃。写失败静默——流水本身不该反过来影响主流程。 */
 export function recordTopologyWrite(entry: Omit<TopologyWriteEntry, 'at'> & { at?: number }): void {
-  if (!canUseSessionStorage())
+  if (!canUseLocalStorage())
     return
   const next = [{ at: entry.at ?? Date.now(), ...entry }, ...readTopologyWriteLog()].slice(0, MAX_ENTRIES)
   try {
-    sessionStorage.setItem(STORAGE_KEY, JSON.stringify(next))
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
   }
   catch {
   }
 }
 
 export function clearTopologyWriteLog(): void {
-  if (!canUseSessionStorage())
+  if (!canUseLocalStorage())
     return
   try {
-    sessionStorage.removeItem(STORAGE_KEY)
+    localStorage.removeItem(STORAGE_KEY)
   }
   catch {
   }
