@@ -1,7 +1,15 @@
-import type { AdminPingTask } from '../../src/services/ping-task.service'
+import type { AdminPingTask, TopologyHopProbe } from '../../src/services/ping-task.service'
+import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, mock, test } from 'bun:test'
+import { OPS_TOPOLOGY_CUSTOM_ENTRY_PROBE_LADDER, OPS_TOPOLOGY_ENTRY_PROBE_LADDER, OPS_TOPOLOGY_HOP_PROBE_LADDER } from '../../src/constants/ops'
 import { setAuthSessionFromLogin } from '../../src/services/auth.service'
-import { invalidateAdminPingTasksCache } from '../../src/services/ping-task.service'
+import {
+  buildTopologyEntryTarget,
+  buildTopologyHopTarget,
+  describeTopologyHopProbe,
+  invalidateAdminPingTasksCache,
+  topologyHopTaskName,
+} from '../../src/services/ping-task.service'
 import {
   assessHopTask,
   chooseInitialHopProbe,
@@ -10,7 +18,7 @@ import {
   planWorkingHopTask,
 } from '../../src/services/topology-probe.service'
 import { resetSharedRpc } from '../../src/utils/rpc'
-import { createCustomTopologyProbe, getTopologyProbe, topologyEntryTaskName } from '../../src/utils/topologyPresets'
+import { createCustomTopologyProbe, getTopologyProbe, getTopologyProbeTarget, topologyEntryTaskName } from '../../src/utils/topologyPresets'
 
 const source = { uuid: 'relay-uuid', name: 'Relay-JP', ipv4: '192.0.2.10' }
 const landing = { uuid: 'exit-uuid', name: 'Exit-SG', ipv4: '203.0.113.20' }
@@ -943,5 +951,263 @@ describe('planEntryProbeTask', () => {
     finally {
       restore()
     }
+  })
+})
+
+/**
+ * 系统性穷举阶梯降级：不同 fix 分别补过「跳过一个死档」「自定义入口换挡改名」
+ * 「判死样本数边界」等个案，但都是各补各的，没有一次性把「从第几档开始、
+ * 中间有几档已死、落到哪一档」这件事按坐标穷举过。这里把三条阶梯
+ * （第 2 段、自定义入口、内置入口）各自的降级逻辑按「死档前缀长度 × 落点状态」
+ * 系统性跑一遍，取代零散补的个案回归测试。
+ */
+describe('probe ladder escalation matrix', () => {
+  type RungState = 'missing' | 'pending' | 'healthy' | 'dead'
+
+  interface LadderRung {
+    probe: TopologyHopProbe
+    name: string
+    target: string
+  }
+
+  function samplesForState(state: Exclude<RungState, 'missing'>): { total: number, valid: number } {
+    if (state === 'pending')
+      return { total: 1, valid: 0 }
+    if (state === 'healthy')
+      return { total: 40, valid: 40 }
+    return { total: 40, valid: 0 }
+  }
+
+  function buildLadderFixture(
+    rungs: readonly LadderRung[],
+    states: readonly RungState[],
+  ): { tasks: AdminPingTask[], stats: StatFixture[] } {
+    const tasks: AdminPingTask[] = []
+    const stats: StatFixture[] = []
+    rungs.forEach((rung, index) => {
+      const state = states[index]
+      if (!state || state === 'missing')
+        return
+      const id = index + 1
+      tasks.push({ id, name: rung.name, clients: [source.uuid], type: rung.probe.type, target: rung.target, interval: 30 })
+      const samples = samplesForState(state)
+      stats.push({ task_id: String(id), total: samples.total, valid: samples.valid })
+    })
+    return { tasks, stats }
+  }
+
+  describe('second-hop ladder (planWorkingHopTask)', () => {
+    const rungs: LadderRung[] = OPS_TOPOLOGY_HOP_PROBE_LADDER.map(probe => ({
+      probe,
+      name: topologyHopTaskName(source, landing, probe),
+      target: buildTopologyHopTarget(landing, probe),
+    }))
+
+    for (let deadPrefix = 0; deadPrefix <= rungs.length; deadPrefix++) {
+      const deadIds = Array.from({ length: deadPrefix }, (_, index) => index + 1)
+
+      if (deadPrefix === rungs.length) {
+        test(`exhausts once all ${deadPrefix} rungs are dead`, async () => {
+          const { tasks, stats } = buildLadderFixture(rungs, rungs.map(() => 'dead'))
+          const restore = mockKomari(tasks, stats)
+          try {
+            const planned = await planWorkingHopTask(source, landing, rungs[0]!.name)
+            expect(planned.exhausted).toBe(true)
+            expect(planned.verdict).toBe('dead')
+            expect(planned.needsCreation).toBe(false)
+            expect(planned.switchedFrom).toBeNull()
+            // 阶梯走完时保留全部死档记录，删掉只会让下次复检重新建回来。
+            expect(planned.retiredTasks).toEqual([])
+          }
+          finally {
+            restore()
+          }
+        })
+        continue
+      }
+
+      for (const landingState of ['missing', 'pending', 'healthy'] as const) {
+        test(`skips ${deadPrefix} dead rung(s) and lands on ${describeTopologyHopProbe(rungs[deadPrefix]!.probe)} (${landingState})`, async () => {
+          const states: RungState[] = rungs.map((_, index) => {
+            if (index < deadPrefix)
+              return 'dead'
+            return index === deadPrefix ? landingState : 'missing'
+          })
+          const { tasks, stats } = buildLadderFixture(rungs, states)
+          const restore = mockKomari(tasks, stats)
+          try {
+            const planned = await planWorkingHopTask(source, landing, rungs[0]!.name)
+            expect(planned.probe).toEqual(rungs[deadPrefix]!.probe)
+            expect(planned.exhausted).toBe(false)
+            expect(planned.switchedFrom).toEqual(deadPrefix === 0 ? null : rungs[0]!.probe)
+            if (landingState === 'missing') {
+              expect(planned.needsCreation).toBe(true)
+              expect(planned.task.name).toBe(rungs[deadPrefix]!.name)
+              expect(planned.task.target).toBe(rungs[deadPrefix]!.target)
+            }
+            else {
+              expect(planned.needsCreation).toBe(false)
+              expect(planned.verdict).toBe(landingState)
+              expect(planned.task.id).toBe(deadPrefix + 1)
+            }
+            expect(planned.retiredTasks.map(task => task.id).sort((a, b) => a - b)).toEqual(deadIds)
+          }
+          finally {
+            restore()
+          }
+        })
+      }
+    }
+  })
+
+  describe('custom entry ladder (planEntryProbeTask)', () => {
+    const custom = createCustomTopologyProbe('矩阵自定义入口', '198.51.100.200')!
+    const rungs: LadderRung[] = OPS_TOPOLOGY_CUSTOM_ENTRY_PROBE_LADDER.map((probe) => {
+      const targetHost = getTopologyProbeTarget(custom, probe)
+      return { probe, name: topologyEntryTaskName(custom, probe), target: buildTopologyEntryTarget(targetHost, probe) }
+    })
+
+    for (let deadPrefix = 0; deadPrefix <= rungs.length; deadPrefix++) {
+      const deadIds = Array.from({ length: deadPrefix }, (_, index) => index + 1)
+
+      if (deadPrefix === rungs.length) {
+        test(`exhausts once all ${deadPrefix} rungs are dead`, async () => {
+          const { tasks, stats } = buildLadderFixture(rungs, rungs.map(() => 'dead'))
+          const restore = mockKomari(tasks, stats)
+          try {
+            const planned = await planEntryProbeTask(source, custom)
+            expect(planned.exhausted).toBe(true)
+            expect(planned.verdict).toBe('dead')
+            expect(planned.needsCreation).toBe(false)
+          }
+          finally {
+            restore()
+          }
+        })
+        continue
+      }
+
+      for (const landingState of ['missing', 'pending', 'healthy'] as const) {
+        test(`skips ${deadPrefix} dead rung(s) and lands on ${describeTopologyHopProbe(rungs[deadPrefix]!.probe)} (${landingState})`, async () => {
+          const states: RungState[] = rungs.map((_, index) => {
+            if (index < deadPrefix)
+              return 'dead'
+            return index === deadPrefix ? landingState : 'missing'
+          })
+          const { tasks, stats } = buildLadderFixture(rungs, states)
+          const restore = mockKomari(tasks, stats)
+          try {
+            const planned = await planEntryProbeTask(source, custom)
+            expect(planned.probe).toEqual(rungs[deadPrefix]!.probe)
+            expect(planned.exhausted).toBe(false)
+            // 只有真正落到「新建」才算换挡；命中一个健康/待定的候选时不算换挡，
+            // 即便中间跳过了几个死档——这与第 2 段阶梯不同，第 2 段只要绑定
+            // 判死就报告换挡，不看落点状态。
+            expect(planned.switchedFrom).toEqual(deadPrefix > 0 && landingState === 'missing' ? rungs[deadPrefix - 1]!.probe : null)
+            if (landingState === 'missing') {
+              expect(planned.needsCreation).toBe(true)
+              expect(planned.task.target).toBe(rungs[deadPrefix]!.target)
+              // 自定义入口换挡时任务名带协议/端口后缀，从零新建时退回纯 taskFilter。
+              expect(planned.task.name).toBe(deadPrefix === 0 ? custom.taskFilter : rungs[deadPrefix]!.name)
+            }
+            else {
+              expect(planned.needsCreation).toBe(false)
+              expect(planned.verdict).toBe(landingState)
+            }
+            expect(planned.retiredTasks.map(task => task.id).sort((a, b) => a - b)).toEqual(deadIds)
+          }
+          finally {
+            restore()
+          }
+        })
+      }
+    }
+  })
+
+  describe('built-in entry ladder (planEntryProbeTask)', () => {
+    const beijingTelecom = getTopologyProbe('beijing-telecom')
+    const rungs: LadderRung[] = OPS_TOPOLOGY_ENTRY_PROBE_LADDER.map((probe) => {
+      const targetHost = getTopologyProbeTarget(beijingTelecom, probe)
+      return { probe, name: topologyEntryTaskName(beijingTelecom, probe), target: buildTopologyEntryTarget(targetHost, probe) }
+    })
+
+    for (let deadPrefix = 0; deadPrefix <= rungs.length; deadPrefix++) {
+      const deadIds = Array.from({ length: deadPrefix }, (_, index) => index + 1)
+
+      if (deadPrefix === rungs.length) {
+        test(`exhausts once all ${deadPrefix} rungs are dead`, async () => {
+          const { tasks, stats } = buildLadderFixture(rungs, rungs.map(() => 'dead'))
+          const restore = mockKomari(tasks, stats)
+          try {
+            const planned = await planEntryProbeTask(source, beijingTelecom)
+            expect(planned.exhausted).toBe(true)
+            expect(planned.verdict).toBe('dead')
+            expect(planned.needsCreation).toBe(false)
+          }
+          finally {
+            restore()
+          }
+        })
+        continue
+      }
+
+      for (const landingState of ['missing', 'pending', 'healthy'] as const) {
+        test(`skips ${deadPrefix} dead rung(s) and lands on ${describeTopologyHopProbe(rungs[deadPrefix]!.probe)} (${landingState})`, async () => {
+          const states: RungState[] = rungs.map((_, index) => {
+            if (index < deadPrefix)
+              return 'dead'
+            return index === deadPrefix ? landingState : 'missing'
+          })
+          const { tasks, stats } = buildLadderFixture(rungs, states)
+          const restore = mockKomari(tasks, stats)
+          try {
+            const planned = await planEntryProbeTask(source, beijingTelecom)
+            expect(planned.probe).toEqual(rungs[deadPrefix]!.probe)
+            expect(planned.exhausted).toBe(false)
+            // 只有真正落到「新建」才算换挡；命中一个健康/待定的候选时不算换挡，
+            // 即便中间跳过了几个死档——这与第 2 段阶梯不同，第 2 段只要绑定
+            // 判死就报告换挡，不看落点状态。
+            expect(planned.switchedFrom).toEqual(deadPrefix > 0 && landingState === 'missing' ? rungs[deadPrefix - 1]!.probe : null)
+            if (landingState === 'missing') {
+              expect(planned.needsCreation).toBe(true)
+              expect(planned.task.target).toBe(rungs[deadPrefix]!.target)
+              // 内置入口换挡沿用旧任务名（界面按名字识别），只有从零新建时才是 taskFilter。
+              expect(planned.task.name).toBe(deadPrefix === 0 ? beijingTelecom.taskFilter : rungs[deadPrefix - 1]!.name)
+            }
+            else {
+              expect(planned.needsCreation).toBe(false)
+              expect(planned.verdict).toBe(landingState)
+            }
+            expect(planned.retiredTasks.map(task => task.id).sort((a, b) => a - b)).toEqual(deadIds)
+          }
+          finally {
+            restore()
+          }
+        })
+      }
+    }
+  })
+})
+
+/**
+ * `topology-probe.service.ts` 里有两处按版本号写死的迁移兼容分支（"v1.3.2 曾…"
+ * "v1.3.3 以前…"），处理的是站点还没跑过对应新版主题时留下的旧任务命名。这类
+ * 分支删不删得看有没有站点还没升级过，代码本身判断不出来，只能留给维护者
+ * 定期回头看一眼。这条测试到了目标版本还没人挪过阈值就会失败，逼着做一次
+ * 有意识的判断——继续保留就把 REMOVAL_REVIEW_VERSION 往后挪并说明理由，
+ * 判断可以删了就顺手把两处兼容分支和这条测试一起删掉。
+ */
+describe('legacy custom-entry migration shims', () => {
+  const REMOVAL_REVIEW_VERSION = '1.6.0'
+
+  test(`flags topology-probe.service.ts's v1.3.2/v1.3.3 custom-entry migration shims for review once the theme reaches ${REMOVAL_REVIEW_VERSION}`, () => {
+    const themeJson = JSON.parse(readFileSync(new URL('../../komari-theme.json', import.meta.url), 'utf8')) as { version: string }
+    const [major = 0, minor = 0] = themeJson.version.split('.').map(Number)
+    const [reviewMajor = 0, reviewMinor = 0] = REMOVAL_REVIEW_VERSION.split('.').map(Number)
+    const reachedReviewVersion = major > reviewMajor || (major === reviewMajor && minor >= reviewMinor)
+    expect(
+      reachedReviewVersion,
+      `komari-theme.json is now ${themeJson.version}. Go re-check the "v1.3.2 曾…" / "v1.3.3 以前…" custom-entry migration branches in src/services/topology-entry-probe.service.ts (inside planEntryProbeTask). If deployed stations have long since migrated, delete both branches and this test; otherwise bump REMOVAL_REVIEW_VERSION here with a one-line reason.`,
+    ).toBe(false)
   })
 })
