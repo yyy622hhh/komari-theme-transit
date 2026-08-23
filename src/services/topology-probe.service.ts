@@ -1,7 +1,7 @@
 import type { AdminPingTask, TopologyHopProbe, TopologyPingEndpoint } from '@/services/ping-task.service'
 import type { PingMetricTaskStats } from '@/utils/rpc'
 import type { TopologyProbeOption } from '@/utils/topologyPresets'
-import { OPS_TOPOLOGY_ENTRY_PROBE_LADDER, OPS_TOPOLOGY_HOP_PROBE, OPS_TOPOLOGY_HOP_PROBE_LADDER } from '@/constants/ops'
+import { OPS_TOPOLOGY_CUSTOM_ENTRY_PROBE_LADDER, OPS_TOPOLOGY_ENTRY_PROBE_LADDER, OPS_TOPOLOGY_HOP_PROBE, OPS_TOPOLOGY_HOP_PROBE_LADDER } from '@/constants/ops'
 import { loadPingRecordsWithTasks } from '@/services/history.service'
 import { loadPingMetricStats, partitionMetricEntityIds } from '@/services/metrics.service'
 import {
@@ -59,6 +59,7 @@ export interface HopTaskPlan {
 
 const LADDER: TopologyHopProbe[] = OPS_TOPOLOGY_HOP_PROBE_LADDER.map(rung => normalizeTopologyHopProbe(rung))
 const ENTRY_LADDER: TopologyHopProbe[] = OPS_TOPOLOGY_ENTRY_PROBE_LADDER.map(rung => normalizeTopologyHopProbe(rung))
+const CUSTOM_ENTRY_LADDER: TopologyHopProbe[] = OPS_TOPOLOGY_CUSTOM_ENTRY_PROBE_LADDER.map(rung => normalizeTopologyHopProbe(rung))
 
 function readSamples(stat: PingMetricTaskStats): HopTaskSamples {
   return {
@@ -282,11 +283,15 @@ function entryTaskNameCandidates(probe: TopologyProbeOption): Set<string> {
  * `chooseInitialHopProbe` 会返回第 2 段阶梯上的端口（443/80/22），那些端口在
  * 运营商测速点上没有意义，必须落回入口阶梯自己的档位。
  */
-function chooseInitialEntryProbe(profile: SourceProbeProfile): TopologyHopProbe {
+function entryProbeLadder(probe: TopologyProbeOption): readonly TopologyHopProbe[] {
+  return isCustomTopologyProbe(probe) ? CUSTOM_ENTRY_LADDER : ENTRY_LADDER
+}
+
+function chooseInitialEntryProbe(profile: SourceProbeProfile, probe: TopologyProbeOption): TopologyHopProbe {
   const initial = chooseInitialHopProbe(profile)
   if (initial.type === 'icmp')
     return initial
-  return ENTRY_LADDER.find(rung => rung.type !== 'icmp') ?? DEFAULT_TOPOLOGY_HOP_PROBE
+  return entryProbeLadder(probe).find(rung => rung.type !== 'icmp') ?? DEFAULT_TOPOLOGY_HOP_PROBE
 }
 
 function entryProbeTarget(probe: TopologyProbeOption, hopProbe: TopologyHopProbe): string {
@@ -490,7 +495,7 @@ export async function planEntryProbeTask(
   }
 
   if (!candidates.length) {
-    const initialProbe = chooseInitialEntryProbe(profile)
+    const initialProbe = chooseInitialEntryProbe(profile, probe)
     return {
       task: draftAt(initialProbe),
       probe: initialProbe,
@@ -524,7 +529,12 @@ export async function planEntryProbeTask(
     }
   }
 
-  const nextRung = nextLadderProbe(profile, currentProbe, candidates, ENTRY_LADDER)
+  const ladder = entryProbeLadder(probe)
+  // v1.3.2 曾把自定义地址误当运营商 DNS，ICMP 失败后会留下 TCP 53 任务。
+  // 53 不在新的自定义阶梯中；已判死时直接迁移到首个常见 TCP 档，不重试 ICMP。
+  const nextRung = isCustomTopologyProbe(probe) && ladderIndex(currentProbe, ladder) < 0
+    ? nextLadderProbe(profile, DEFAULT_TOPOLOGY_HOP_PROBE, candidates, ladder)
+    : nextLadderProbe(profile, currentProbe, candidates, ladder)
   const nextProbe = nextRung && entryProbeTarget(probe, nextRung) ? nextRung : null
   if (!nextProbe) {
     return {

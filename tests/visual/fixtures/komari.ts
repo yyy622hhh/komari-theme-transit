@@ -862,7 +862,7 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
   let topologyRoute = options.opsTwoNodeRoute
     ? '北京电信|CN|入口;主控-洛杉矶|US|落地机||北京电信|CN|入口;东京-高负载|JP|线路机;新加坡-A100|SG|落地机'
     : options.opsCustomFirstMetric
-      ? defaultTopologyRoute.replace('北京电信|CN|入口', '自定义入口|CN|入口')
+      ? defaultTopologyRoute.replace('北京电信|CN|入口', '北京联通家宽|CN|入口')
       : defaultTopologyRoute
   if (options.opsTopologyInsights) {
     topologyRoute = '北京电信|CN|入口;主控-洛杉矶|US|线路机;香港边缘节点-超长名称布局测试|HK|落地机||北京电信|CN|入口;香港边缘节点-超长名称布局测试|HK|线路机;主控-洛杉矶|US|落地机'

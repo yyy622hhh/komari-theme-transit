@@ -77,3 +77,6 @@ export const OPS_TOPOLOGY_ENTRY_PROBE_LADDER = [
   { type: 'icmp' },
   { type: 'tcp', port: 53 },
 ] as const
+
+/** 自定义入口是操作者自己的 IP/域名，不假定它提供 DNS，沿用常见服务端口阶梯。 */
+export const OPS_TOPOLOGY_CUSTOM_ENTRY_PROBE_LADDER = OPS_TOPOLOGY_HOP_PROBE_LADDER

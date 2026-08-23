@@ -678,6 +678,43 @@ describe('planEntryProbeTask', () => {
     }
   })
 
+  test('uses common service ports instead of DNS 53 when a custom entry ICMP task is dead', async () => {
+    const custom = createCustomTopologyProbe('北京联通家宽', '111.197.38.247')!
+    const restore = mockKomari(
+      [{ id: 56, name: custom.taskFilter, clients: [source.uuid], type: 'icmp', target: custom.landmarkAddress, interval: 30 }],
+      [{ task_id: '56', total: 40, valid: 0 }],
+    )
+    try {
+      const planned = await planEntryProbeTask(source, custom)
+      expect(planned.needsCreation).toBe(true)
+      expect(planned.switchedFrom).toEqual({ type: 'icmp' })
+      expect(planned.probe).toEqual({ type: 'tcp', port: 443 })
+      expect(planned.task.target).toBe('111.197.38.247:443')
+    }
+    finally {
+      restore()
+    }
+  })
+
+  test('migrates a dead legacy custom TCP 53 task to TCP 443', async () => {
+    const custom = createCustomTopologyProbe('北京联通家宽', '111.197.38.247')!
+    const restore = mockKomari(
+      [{ id: 57, name: custom.taskFilter, clients: [source.uuid], type: 'tcp', target: '111.197.38.247:53', interval: 30 }],
+      [{ task_id: '57', total: 40, valid: 0 }],
+    )
+    try {
+      const planned = await planEntryProbeTask(source, custom)
+      expect(planned.needsCreation).toBe(true)
+      expect(planned.switchedFrom).toEqual({ type: 'tcp', port: 53 })
+      expect(planned.probe).toEqual({ type: 'tcp', port: 443 })
+      expect(planned.task.target).toBe('111.197.38.247:443')
+      expect(planned.retiredTasks.map(task => task.id)).toEqual([57])
+    }
+    finally {
+      restore()
+    }
+  })
+
   test('creates a fresh ICMP task named after the taskFilter, targeting the landmark address, when nothing exists', async () => {
     const restore = mockKomari([], [])
     try {

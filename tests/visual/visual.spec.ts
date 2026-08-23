@@ -852,7 +852,10 @@ test('Transit preserves a custom first-segment task and entry label', async ({ p
   await installKomariFixture(page, { opsDashboard: true, dark: true, opsCustomFirstMetric: true })
   await openStablePage(page)
 
-  await expect(page.getByLabel('当前入口 自定义入口，点击切换').first()).toBeVisible()
+  const customEntry = page.getByLabel('当前入口 北京联通家宽，点击切换').first()
+  await expect(customEntry).toBeVisible()
+  await expect(customEntry).toHaveAttribute('title', '北京联通家宽')
+  expect((await customEntry.boundingBox())?.width ?? 0).toBeGreaterThan(90)
   await expect(page.locator('[data-topology-sample]').first()).toHaveAttribute('aria-label', /Ping 任务：Relay-JP-to-Exit-US/)
 })
 
@@ -1591,7 +1594,7 @@ test('Transit topology can switch a custom entry to a preset and back without lo
   await expect(entrySelect).toHaveValue('beijing-unicom')
 
   // 自定义项必须仍然留在下拉里，否则这一步就是不可逆的数据丢失。
-  const customOption = entrySelect.getByRole('option', { name: '自定义入口', exact: true })
+  const customOption = entrySelect.getByRole('option', { name: '北京联通家宽', exact: true })
   await expect(customOption).toHaveCount(1)
 
   await entrySelect.selectOption('__custom_probe__')

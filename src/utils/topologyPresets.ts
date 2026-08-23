@@ -109,7 +109,9 @@ export function createCustomTopologyProbe(labelValue: string, targetValue: strin
     taskFilter: `Transit-entry-${key}`,
     landmarkAddress: target,
     dnsAddress: target,
-    probeTargets: { icmp: target, tcp: { 53: target } },
+    // 自定义地址不一定是 DNS 服务器，不能像内置运营商预设那样盲探 TCP 53。
+    // ICMP 被屏蔽时改试服务器最常见的公开端口。
+    probeTargets: { icmp: target, tcp: { 443: target, 80: target, 22: target } },
   }
 }
 

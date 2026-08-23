@@ -4,6 +4,13 @@
 
 ## [Unreleased]
 
+## [1.3.3] - 2026-08-23
+
+### Fixed
+
+- 自定义入口不再把任意 IP/域名误当作运营商 DNS：ICMP 无响应后改按 TCP 443 → 80 → 22 回退，并会把 v1.3.2 已生成且无响应的 TCP 53 任务自动迁移到正确阶梯；内置三网入口仍保持 ICMP → TCP 53。
+- 压缩首页入口选择器的旗帜、文字和箭头间距，让“北京联通家宽”等较长自定义名称在原有紧凑列宽内完整显示，并增加完整名称悬停提示。
+
 ## [1.3.2] - 2026-08-23
 
 ### Fixed
@@ -805,7 +812,8 @@
 - 亮暗主题、桌面/移动布局和 Transit 风格内嵌 Komari 管理端。
 - Playwright 视觉与交互回归、自动构建和 GitHub Release 发布流程。
 
-[Unreleased]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.3.2...HEAD
+[Unreleased]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.3.3...HEAD
+[1.3.3]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.3.2...v1.3.3
 [1.3.2]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.3.1...v1.3.2
 [1.3.1]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.2.0...v1.3.0
