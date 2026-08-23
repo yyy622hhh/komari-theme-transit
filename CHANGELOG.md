@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+## [1.3.4] - 2026-08-23
+
+### Fixed
+
+- 自定义入口在 ICMP 或旧版 TCP 53 无响应后，换挡任务改用带协议和端口的唯一名称。即使旧任务来自升级前或其他管理员会话、因安全策略不能自动删除，新建的 TCP 443/80/22 任务也能被拓扑精确绑定，不再被同名旧任务持续污染采样。
+
 ## [1.3.3] - 2026-08-23
 
 ### Fixed
@@ -812,7 +818,8 @@
 - 亮暗主题、桌面/移动布局和 Transit 风格内嵌 Komari 管理端。
 - Playwright 视觉与交互回归、自动构建和 GitHub Release 发布流程。
 
-[Unreleased]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.3.3...HEAD
+[Unreleased]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.3.4...HEAD
+[1.3.4]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.3.3...v1.3.4
 [1.3.3]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.3.2...v1.3.3
 [1.3.2]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.3.1...v1.3.2
 [1.3.1]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.3.0...v1.3.1

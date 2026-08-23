@@ -547,8 +547,16 @@ export async function planEntryProbeTask(
       retiredTasks: [...duplicates, ...obsoleteCustomBindings],
     }
   }
+  // 内置入口继续复用“北京电信”这类固定任务名；自定义入口换挡必须使用带协议/
+  // 端口的唯一名称。旧自定义任务可能来自升级前、另一个标签页或另一位管理员，
+  // 当前会话没有所有权时不能安全删除。若新旧任务仍同名，保存后的绑定只能按名
+  // 命中多个任务，旧的 TCP 53 会继续污染采样；唯一名称让新任务即使与旧任务
+  // 并存，也能被拓扑精确绑定和继续走完 443 -> 80 -> 22 阶梯。
+  const replacementTaskName = isCustomTopologyProbe(probe)
+    ? topologyEntryTaskName(probe, nextProbe)
+    : existing!.name
   return {
-    task: draftAt(nextProbe, existing!.name),
+    task: draftAt(nextProbe, replacementTaskName),
     probe: nextProbe,
     verdict: 'pending',
     needsCreation: true,

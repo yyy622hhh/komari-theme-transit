@@ -11,7 +11,7 @@ const API_ROOT = '/api/transit-route-probe/v1'
 // helper.sh's own VERSION constant) rather than `require('./komari-plugin.json')` —
 // Komari's goja module loader has never been exercised against a JSON require
 // anywhere in this plugin, and a load-time failure there would take down every route.
-const PLUGIN_VERSION = '1.3.3'
+const PLUGIN_VERSION = '1.3.4'
 const coordinator = new RouteProbeCoordinator({
   // Hex is supported by every Buffer implementation bundled with Komari's
   // goja runtime; unlike base64url it also needs no punctuation filtering.

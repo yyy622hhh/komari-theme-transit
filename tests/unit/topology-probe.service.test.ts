@@ -10,7 +10,7 @@ import {
   planWorkingHopTask,
 } from '../../src/services/topology-probe.service'
 import { resetSharedRpc } from '../../src/utils/rpc'
-import { createCustomTopologyProbe, getTopologyProbe } from '../../src/utils/topologyPresets'
+import { createCustomTopologyProbe, getTopologyProbe, topologyEntryTaskName } from '../../src/utils/topologyPresets'
 
 const source = { uuid: 'relay-uuid', name: 'Relay-JP', ipv4: '192.0.2.10' }
 const landing = { uuid: 'exit-uuid', name: 'Exit-SG', ipv4: '203.0.113.20' }
@@ -689,6 +689,7 @@ describe('planEntryProbeTask', () => {
       expect(planned.needsCreation).toBe(true)
       expect(planned.switchedFrom).toEqual({ type: 'icmp' })
       expect(planned.probe).toEqual({ type: 'tcp', port: 443 })
+      expect(planned.task.name).toBe(topologyEntryTaskName(custom, { type: 'tcp', port: 443 }))
       expect(planned.task.target).toBe('111.197.38.247:443')
     }
     finally {
@@ -707,6 +708,7 @@ describe('planEntryProbeTask', () => {
       expect(planned.needsCreation).toBe(true)
       expect(planned.switchedFrom).toEqual({ type: 'tcp', port: 53 })
       expect(planned.probe).toEqual({ type: 'tcp', port: 443 })
+      expect(planned.task.name).toBe(topologyEntryTaskName(custom, { type: 'tcp', port: 443 }))
       expect(planned.task.target).toBe('111.197.38.247:443')
       expect(planned.retiredTasks.map(task => task.id)).toEqual([57])
     }
