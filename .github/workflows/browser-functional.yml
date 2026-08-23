@@ -45,6 +45,7 @@ jobs:
           name: browser-functional-diagnostics-${{ github.sha }}
           path: |
             test-results/functional/
+            test-results/performance/
             playwright-functional-report/
           if-no-files-found: ignore
           retention-days: 14
