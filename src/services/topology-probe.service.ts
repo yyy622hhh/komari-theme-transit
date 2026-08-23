@@ -169,9 +169,12 @@ function ladderIndex(probe: TopologyHopProbe, ladder: readonly TopologyHopProbe[
 /**
  * 首次建任务时先挑对探测方式。
  *
- * 依据是这台线路机上**已经在正常出数**的任务：ICMP 有出数就说明这台机器能发
- * ICMP；否则改用出数的 TCP 端口。这样在 ICMP 被禁的机器上第一次就建对，不用
- * 等阶梯回退。
+ * 依据是这台线路机上**已经在正常出数**的任务，但只借用「这台机器能不能发
+ * ICMP / TCP」这一个结论，不借用具体用了哪个端口：来源节点其他任务用 80 出
+ * 数，只能证明这台线路机的出站 TCP 没被墙，不能证明**新落地机**上开着 80——
+ * 运营商入口任务和这台落地机是完全不同的目的地。ICMP 有出数就用 ICMP；确定
+ * 发不了 ICMP 但有 TCP 在出数时，一律从阶梯里第一个 TCP 档（443）开始，交给
+ * 逐档判死的阶梯自己走到真正开放的端口，不在这里猜。
  */
 export function chooseInitialHopProbe(profile: SourceProbeProfile): TopologyHopProbe {
   const healthyTasks = profile.tasks.filter((task) => {
@@ -183,20 +186,11 @@ export function chooseInitialHopProbe(profile: SourceProbeProfile): TopologyHopP
   if (healthyTasks.some(task => task.type.trim().toLowerCase() === 'icmp'))
     return DEFAULT_TOPOLOGY_HOP_PROBE
 
-  const portCounts = new Map<number, number>()
-  for (const task of healthyTasks) {
-    const probe = topologyHopProbeFromTask(task)
-    if (probe?.type === 'tcp' && probe.port)
-      portCounts.set(probe.port, (portCounts.get(probe.port) ?? 0) + 1)
-  }
-  if (!portCounts.size)
+  const hasHealthyTcp = healthyTasks.some(task => topologyHopProbeFromTask(task)?.type === 'tcp')
+  if (!hasHealthyTcp)
     return DEFAULT_TOPOLOGY_HOP_PROBE
 
-  // 用得最多的端口优先；打平时按阶梯顺序，保证结果稳定可预期。
-  const [port] = [...portCounts.entries()].sort((left, right) => right[1] - left[1]
-    || ladderIndex({ type: 'tcp', port: left[0] }) - ladderIndex({ type: 'tcp', port: right[0] })
-    || left[0] - right[0])[0]!
-  return { type: 'tcp', port }
+  return LADDER.find(rung => rung.type === 'tcp') ?? DEFAULT_TOPOLOGY_HOP_PROBE
 }
 
 /** 从当前探测方式往后找下一个还没被判死的阶梯档位。 */

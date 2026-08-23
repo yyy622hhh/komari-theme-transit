@@ -38,7 +38,9 @@ const archiveManifest = JSON.parse(execFileSync('unzip', ['-p', zipPath, 'komari
 const sourceManifest = JSON.parse(readFileSync(resolve(process.cwd(), 'komari-theme.json'), 'utf8')) as { version?: unknown }
 const companionManifest = JSON.parse(readFileSync(resolve(process.cwd(), 'companion/transit-route-probe/komari-plugin.json'), 'utf8')) as { version?: unknown }
 const routeProbeHelper = readFileSync(resolve(process.cwd(), 'scripts/transit-route-probe-helper.sh'), 'utf8')
-const routeProbeHelperVersion = /^VERSION="([^"]+)"$/m.exec(routeProbeHelper)?.[1]
+const routeProbeHelperVersion = /^VERSION="([^"]+)"/m.exec(routeProbeHelper)?.[1]
+const routeProbeScript = readFileSync(resolve(process.cwd(), 'companion/transit-route-probe/script.js'), 'utf8')
+const routeProbeScriptVersion = /^const PLUGIN_VERSION = '([^']+)'/m.exec(routeProbeScript)?.[1]
 const detailedEntries = execFileSync('unzip', ['-ZTs', zipPath], { encoding: 'utf8' })
   .split('\n')
   .flatMap((line) => {
@@ -75,6 +77,7 @@ if (
   || archiveManifest.version !== sourceManifest.version
   || companionManifest.version !== sourceManifest.version
   || routeProbeHelperVersion !== sourceManifest.version
+  || routeProbeScriptVersion !== sourceManifest.version
   || detailedEntries.length !== entries.length
   || archiveTimestamps.size !== 1
   || invalidModes.length
@@ -93,6 +96,7 @@ if (
     archiveManifest.version !== sourceManifest.version ? 'Packaged manifest version does not match the source manifest' : '',
     companionManifest.version !== sourceManifest.version ? 'Companion plugin version does not match the theme manifest' : '',
     routeProbeHelperVersion !== sourceManifest.version ? 'Route probe helper version does not match the theme manifest' : '',
+    routeProbeScriptVersion !== sourceManifest.version ? 'Route probe companion script version does not match the theme manifest' : '',
     detailedEntries.length !== entries.length ? 'Could not inspect every archive entry metadata record' : '',
     archiveTimestamps.size !== 1 ? 'Archive entry timestamps are not deterministic' : '',
     invalidModes.length ? `Unexpected archive modes: ${invalidModes.slice(0, 5).map(entry => `${entry.mode} ${entry.name}`).join(', ')}` : '',

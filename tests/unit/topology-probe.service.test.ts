@@ -114,7 +114,7 @@ describe('topology hop probe selection', () => {
     }
   })
 
-  test('breaks a TCP port tie by the probe ladder order', async () => {
+  test('starts at TCP 443 when both 443 and 80 already have healthy samples', async () => {
     const restore = mockKomari(
       [
         { id: 1, name: 'https', clients: [source.uuid], type: 'tcp', target: '198.51.100.2:443', interval: 30 },
@@ -133,7 +133,9 @@ describe('topology hop probe selection', () => {
     }
   })
 
-  test('falls back to the most common healthy TCP port when ICMP produces nothing', async () => {
+  test('always starts a new line at TCP 443 when ICMP is unusable, regardless of which port other tasks use most', async () => {
+    // V.PS-SEA 上有两个健康的运营商入口任务用 TCP 80，一个用 TCP 443；这些任务
+    // 打的是别的目的地，只能证明这台线路机能发 TCP，不能证明新落地机开着 80。
     const restore = mockKomari(
       [
         { id: 1, name: 'icmp-dead', clients: [source.uuid], type: 'icmp', target: '198.51.100.1', interval: 30 },
@@ -151,7 +153,7 @@ describe('topology hop probe selection', () => {
       ],
     )
     try {
-      expect(chooseInitialHopProbe(await loadSourceProbeProfile(source.uuid))).toEqual({ type: 'tcp', port: 80 })
+      expect(chooseInitialHopProbe(await loadSourceProbeProfile(source.uuid))).toEqual({ type: 'tcp', port: 443 })
     }
     finally {
       restore()
@@ -350,6 +352,63 @@ describe('topology hop task planning', () => {
       expect(planned.verdict).toBe('healthy')
       expect(planned.needsCreation).toBe(false)
       expect(planned.switchedFrom).toEqual({ type: 'tcp', port: 80 })
+    }
+    finally {
+      restore()
+    }
+  })
+
+  test('escalates a dead TCP 80 binding forward to TCP 22 instead of stalling', async () => {
+    // 复现事故现场：北京电信 -> Riven-JP -> V.PS-SEA -> V.PS-US-SJC，任务 44 绑
+    // 在落地机不开放的 TCP 80 上，累计 62 次失败后必须继续换到 TCP 22。
+    const relay = { uuid: 'vps-sea-uuid', name: 'V.PS-SEA', ipv4: '198.51.100.9' }
+    const exit = { uuid: 'vps-sjc-uuid', name: 'V.PS-US-SJC', ipv4: '146.19.116.171' }
+    const taskName = 'Transit-V.PS-SEA-to-V.PS-US-SJC-tcp-80'
+    const restore = mockKomari(
+      [{ id: 44, name: taskName, clients: [relay.uuid], type: 'tcp', target: `${exit.ipv4}:80`, interval: 30 }],
+      [{ entity_id: relay.uuid, task_id: '44', total: 62, valid: 0 }],
+    )
+    try {
+      const planned = await planWorkingHopTask(relay, exit, taskName)
+      expect(planned.probe).toEqual({ type: 'tcp', port: 22 })
+      expect(planned.needsCreation).toBe(true)
+      expect(planned.switchedFrom).toEqual({ type: 'tcp', port: 80 })
+      expect(planned.task.name).toBe('Transit-V.PS-SEA-to-V.PS-US-SJC-tcp-22')
+      expect(planned.retiredTasks.map(task => task.id)).toEqual([44])
+    }
+    finally {
+      restore()
+    }
+  })
+
+  test('keeps a bound task pending instead of switching after only one or two failed samples', async () => {
+    const restore = mockKomari(
+      [{ id: 44, name: 'Transit-Relay-JP-to-Exit-SG-tcp-80', clients: [source.uuid], type: 'tcp', target: `${landing.ipv4}:80`, interval: 30 }],
+      [{ task_id: '44', total: 2, valid: 0 }],
+    )
+    try {
+      const planned = await planWorkingHopTask(source, landing, 'Transit-Relay-JP-to-Exit-SG-tcp-80')
+      expect(planned.verdict).toBe('pending')
+      expect(planned.needsCreation).toBe(false)
+      expect(planned.switchedFrom).toBeNull()
+      expect(planned.task.name).toBe('Transit-Relay-JP-to-Exit-SG-tcp-80')
+    }
+    finally {
+      restore()
+    }
+  })
+
+  test('reuses an existing healthy hop task for the landing instead of creating a duplicate', async () => {
+    const restore = mockKomari(
+      [{ id: 30, name: 'existing-tcp-443', clients: [source.uuid], type: 'tcp', target: `${landing.ipv4}:443`, interval: 30 }],
+      [{ task_id: '30', total: 40, valid: 40 }],
+    )
+    try {
+      const planned = await planWorkingHopTask(source, landing)
+      expect(planned.task.name).toBe('existing-tcp-443')
+      expect(planned.probe).toEqual({ type: 'tcp', port: 443 })
+      expect(planned.verdict).toBe('healthy')
+      expect(planned.needsCreation).toBe(false)
     }
     finally {
       restore()

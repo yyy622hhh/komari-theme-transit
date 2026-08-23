@@ -123,6 +123,8 @@ export interface TopologyRepairAvailability {
   privateFeaturesAllowed: boolean
   /** appStore.topologyRoute：还没配置任何线路时没什么可修的。 */
   topologyRoute: string
+  /** 标签页在后台时没人看结果，也不需要发起写操作；恢复可见后由调用方立即重查一次。 */
+  pageVisible: boolean
 }
 
 /** 是否可以跑一轮自愈。抽成纯函数，每个分支各自独立可测，不需要 Pinia。 */
@@ -132,6 +134,7 @@ export function canRunTopologyProbeRepair(state: TopologyRepairAvailability): bo
     && !state.managerOpen
     && state.privateFeaturesAllowed
     && Boolean(state.topologyRoute.trim())
+    && state.pageVisible
 }
 
 export type TopologyRepairOutcome = 'skipped' | 'no-op' | 'repaired'

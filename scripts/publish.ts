@@ -6,17 +6,26 @@ import { createInterface } from 'node:readline/promises'
 
 const VERSION_RE = /^\d+\.\d+\.\d+(?:[-+][0-9A-Z.-]+)?$/i
 const VERSION_FIELD_RE = /^(\s*"version"\s*:\s*")([^"]*)(")/m
+const HELPER_VERSION_RE = /^(VERSION=")([^"]*)(")/m
+const SCRIPT_VERSION_RE = /^(const PLUGIN_VERSION = ')([^']*)(')/m
 const PATCH_VERSION_RE = /^(\d+)\.(\d+)\.(\d+)$/
 const VERSION_SOURCE_FILE = 'komari-theme.json'
+const COMPANION_MANIFEST_FILE = 'companion/transit-route-probe/komari-plugin.json'
+const ROUTE_PROBE_HELPER_FILE = 'scripts/transit-route-probe-helper.sh'
+const ROUTE_PROBE_SCRIPT_FILE = 'companion/transit-route-probe/script.js'
 
-function readThemeVersion(): string {
-  const themeManifest = JSON.parse(readFileSync(resolve(process.cwd(), VERSION_SOURCE_FILE), 'utf8')) as { version?: unknown }
+function readJsonVersion(relativePath: string): string {
+  const parsed = JSON.parse(readFileSync(resolve(process.cwd(), relativePath), 'utf8')) as { version?: unknown }
 
-  if (typeof themeManifest.version !== 'string') {
-    throw new TypeError(`${VERSION_SOURCE_FILE} does not contain a top-level string version field`)
+  if (typeof parsed.version !== 'string') {
+    throw new TypeError(`${relativePath} does not contain a top-level string version field`)
   }
 
-  return themeManifest.version
+  return parsed.version
+}
+
+function readThemeVersion(): string {
+  return readJsonVersion(VERSION_SOURCE_FILE)
 }
 
 function bumpPatchVersion(version: string): string {
@@ -83,19 +92,47 @@ async function resolveVersion(): Promise<string> {
   }
 }
 
-function updateThemeVersion(version: string): void {
-  const filePath = resolve(process.cwd(), VERSION_SOURCE_FILE)
-  const content = readFileSync(filePath, 'utf8')
-  const parsed = JSON.parse(content) as { version?: unknown }
+function assertJsonHasVersionField(relativePath: string): void {
+  readJsonVersion(relativePath)
+  assertPatternMatches(relativePath, VERSION_FIELD_RE)
+}
 
-  if (typeof parsed.version !== 'string') {
-    throw new TypeError(`${VERSION_SOURCE_FILE} does not contain a top-level string version field`)
+function assertPatternMatches(relativePath: string, pattern: RegExp): void {
+  const content = readFileSync(resolve(process.cwd(), relativePath), 'utf8')
+
+  if (!pattern.test(content)) {
+    throw new Error(`${relativePath} does not contain the expected version field`)
   }
+}
 
+function updateJsonVersion(relativePath: string, version: string): void {
+  const filePath = resolve(process.cwd(), relativePath)
+  const content = readFileSync(filePath, 'utf8')
   const nextContent = content.replace(VERSION_FIELD_RE, `$1${version}$3`)
 
   JSON.parse(nextContent)
   writeFileSync(filePath, nextContent)
+}
+
+function updatePatternVersion(relativePath: string, pattern: RegExp, version: string): void {
+  const filePath = resolve(process.cwd(), relativePath)
+  const content = readFileSync(filePath, 'utf8')
+
+  writeFileSync(filePath, content.replace(pattern, `$1${version}$3`))
+}
+
+function updateAllVersions(version: string): void {
+  // Validate every file up front so a bad pattern in a later file can't leave
+  // earlier files already bumped while the run aborts partway through.
+  assertJsonHasVersionField(VERSION_SOURCE_FILE)
+  assertJsonHasVersionField(COMPANION_MANIFEST_FILE)
+  assertPatternMatches(ROUTE_PROBE_HELPER_FILE, HELPER_VERSION_RE)
+  assertPatternMatches(ROUTE_PROBE_SCRIPT_FILE, SCRIPT_VERSION_RE)
+
+  updateJsonVersion(VERSION_SOURCE_FILE, version)
+  updateJsonVersion(COMPANION_MANIFEST_FILE, version)
+  updatePatternVersion(ROUTE_PROBE_HELPER_FILE, HELPER_VERSION_RE, version)
+  updatePatternVersion(ROUTE_PROBE_SCRIPT_FILE, SCRIPT_VERSION_RE, version)
 }
 
 function gitAdd(files: string[]): void {
@@ -116,8 +153,8 @@ async function main(): Promise<void> {
     throw new Error(`Invalid version: ${version}`)
   }
 
-  updateThemeVersion(version)
-  gitAdd([VERSION_SOURCE_FILE])
+  updateAllVersions(version)
+  gitAdd([VERSION_SOURCE_FILE, COMPANION_MANIFEST_FILE, ROUTE_PROBE_HELPER_FILE, ROUTE_PROBE_SCRIPT_FILE])
   console.log(`Prepared release version ${version}`)
   console.log(`Version source: ${VERSION_SOURCE_FILE}`)
 }

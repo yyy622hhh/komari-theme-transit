@@ -1046,7 +1046,9 @@ test('Transit topology creates a TCP hop when the relay cannot use ICMP', async 
     opsDashboard: true,
     authenticated: true,
     emptyTopology: true,
-    // 线路机上 ICMP 任务一次都没成功，三网 TCP:80 任务健康——主题应当直接建 TCP。
+    // 线路机上 ICMP 任务一次都没成功；三网入口任务健康，但它们打的是运营商测速
+    // 点，不是这条新线路的落地机，不能拿它们用的端口（TCP 80）当作新落地机也
+    // 开放同一端口的证据——新线路必须统一从阶梯第一个 TCP 档（443）开始试。
     topologyProbeStats: [
       { task_id: 1, name: 'Tokyo', total: 48, valid: 0 },
       { task_id: 11, name: '北京联通', total: 48, valid: 47 },
@@ -1065,10 +1067,10 @@ test('Transit topology creates a TCP hop when the relay cannot use ICMP', async 
   await dialog.getByRole('button', { name: '添加线路' }).click()
 
   const route = dialog.locator('[data-topology-route-id]').first()
-  await expect(route).toHaveAttribute('data-topology-hop-probe', 'TCP 80')
-  await expect(route).toHaveAttribute('data-topology-hop-task', 'Transit-东京-高负载-to-新加坡-A100-tcp-80')
+  await expect(route).toHaveAttribute('data-topology-hop-probe', 'TCP 443')
+  await expect(route).toHaveAttribute('data-topology-hop-task', 'Transit-东京-高负载-to-新加坡-A100-tcp-443')
   await expect.poll(() => addedTasks.length).toBe(1)
-  expect(addedTasks[0]).toMatchObject({ type: 'tcp', target: '192.0.2.13:80' })
+  expect(addedTasks[0]).toMatchObject({ type: 'tcp', target: '192.0.2.13:443' })
 })
 
 test('Transit topology switches the hop probe once ICMP is proven dead', async ({ page }) => {
@@ -1881,8 +1883,12 @@ test('Transit node maintenance saves globally and updates alerts immediately', a
   await expect(dialog).toBeVisible()
   await dialog.getByRole('button', { name: '30 分钟' }).click()
 
-  await expect.poll(() => saves.length).toBe(1)
-  const controls = JSON.parse(String(saves[0]?.pandaOpsNodeControls)) as Record<string, { maintenanceUntil?: number }>
+  // 拓扑后台自愈现在页面一打开就可能立即跑一轮，也会写同一个主题设置接口；
+  // 两次保存互相独立、按内容而非到达顺序区分，不能假设这次点击触发的一定是
+  // saves[0]。
+  await expect.poll(() => saves.some(save => 'pandaOpsNodeControls' in save)).toBe(true)
+  const maintenanceSave = saves.find(save => 'pandaOpsNodeControls' in save)!
+  const controls = JSON.parse(String(maintenanceSave.pandaOpsNodeControls)) as Record<string, { maintenanceUntil?: number }>
   expect(Object.values(controls).some(control => Number(control.maintenanceUntil) > 0)).toBe(true)
   await dialog.getByRole('button', { name: '关闭' }).click()
   await expect(nodeCard).toContainText('维护中')
@@ -1971,8 +1977,11 @@ test('Transit node panel editor saves selected custom Ping tasks by UUID', async
   await dialog.getByRole('checkbox', { name: '浙江移动' }).check()
   await dialog.getByRole('button', { name: '保存面板' }).click()
 
-  await expect.poll(() => saves.length).toBe(1)
-  const configs = JSON.parse(String(saves[0]?.nodeCardPanels)) as Record<string, { mode: string, pingTasks: string[] }>
+  // 同上：拓扑后台自愈可能抢在这次保存前先写一次同一个接口，按内容而非到达
+  // 顺序区分。
+  await expect.poll(() => saves.some(save => 'nodeCardPanels' in save)).toBe(true)
+  const panelSave = saves.find(save => 'nodeCardPanels' in save)!
+  const configs = JSON.parse(String(panelSave.nodeCardPanels)) as Record<string, { mode: string, pingTasks: string[] }>
   expect(configs['00000000-0000-4000-8000-000000000001']).toEqual({
     mode: 'ping',
     pingTasks: ['浙江联通', '浙江移动'],

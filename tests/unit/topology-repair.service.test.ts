@@ -170,7 +170,7 @@ describe('owned retired task selection', () => {
 })
 
 describe('canRunTopologyProbeRepair', () => {
-  const healthy = { disposed: false, autoRepairEnabled: true, managerOpen: false, privateFeaturesAllowed: true, topologyRoute: '北京电信|CN|入口' }
+  const healthy = { disposed: false, autoRepairEnabled: true, managerOpen: false, privateFeaturesAllowed: true, topologyRoute: '北京电信|CN|入口', pageVisible: true }
 
   test('allows when every condition is satisfied', () => {
     expect(canRunTopologyProbeRepair(healthy)).toBe(true)
@@ -195,6 +195,10 @@ describe('canRunTopologyProbeRepair', () => {
   test('blocks when no topology has been configured yet', () => {
     expect(canRunTopologyProbeRepair({ ...healthy, topologyRoute: '' })).toBe(false)
     expect(canRunTopologyProbeRepair({ ...healthy, topologyRoute: '   ' })).toBe(false)
+  })
+
+  test('blocks while the page is hidden in the background', () => {
+    expect(canRunTopologyProbeRepair({ ...healthy, pageVisible: false })).toBe(false)
   })
 })
 
