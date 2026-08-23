@@ -204,7 +204,10 @@ test('global diagnostics downloads the report when clipboard is unavailable', as
 })
 
 test('config backup panel exports the current settings and records an initial history snapshot', async ({ page }) => {
-  await installKomariFixture(page, { authenticated: true, opsDashboard: true })
+  // This test owns the configuration-history lifecycle. Keep topology empty so
+  // the unrelated authenticated-home auto-repair cannot race its initial
+  // snapshot/write path.
+  await installKomariFixture(page, { authenticated: true, opsDashboard: true, emptyTopology: true })
   await openHome(page)
   await page.getByRole('button', { name: '显示首页工具' }).click()
   await page.getByRole('button', { name: /配置：/ }).click()
@@ -229,7 +232,7 @@ test('config backup import replaces the live snapshot including removed keys', a
       posted.push(body)
   })
 
-  await installKomariFixture(page, { authenticated: true, opsDashboard: true })
+  await installKomariFixture(page, { authenticated: true, opsDashboard: true, emptyTopology: true })
   await openHome(page)
   await page.getByRole('button', { name: '显示首页工具' }).click()
   await page.getByRole('button', { name: /配置：/ }).click()
@@ -323,7 +326,7 @@ test('setup wizard applies a preset and writes the expected patch', async ({ pag
 })
 
 test('setup wizard surfaces a save failure instead of silently closing or marking itself seen', async ({ page }) => {
-  await installKomariFixture(page, { authenticated: true, opsDashboard: true, setupWizardFirstRun: true, routeProbeCompanion: true })
+  await installKomariFixture(page, { authenticated: true, opsDashboard: true, emptyTopology: true, setupWizardFirstRun: true, routeProbeCompanion: true })
   // Override the fixture's success handler to simulate the save request reaching
   // the server and failing there, mirroring "任务创建成功、主题配置保存失败".
   await page.route('**/api/admin/theme/settings?theme=*', route => route.fulfill({
@@ -350,7 +353,10 @@ test('setup wizard surfaces a save failure instead of silently closing or markin
 })
 
 test('config backup surfaces an import failure and keeps the staged diff for retry', async ({ page }) => {
-  await installKomariFixture(page, { authenticated: true, opsDashboard: true })
+  // The injected 500 belongs to the import being tested. With a configured
+  // topology, immediate auto-repair can legitimately reach the same endpoint
+  // first and consume the fault, producing two unrelated error notices.
+  await installKomariFixture(page, { authenticated: true, opsDashboard: true, emptyTopology: true })
   await page.route('**/api/admin/theme/settings?theme=*', route => route.fulfill({
     status: 500,
     contentType: 'application/json',
