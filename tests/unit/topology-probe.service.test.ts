@@ -717,6 +717,33 @@ describe('planEntryProbeTask', () => {
     }
   })
 
+  test('disambiguates legacy same-named custom tasks even after the probe ladder is exhausted', async () => {
+    const custom = createCustomTopologyProbe('北京联通家宽', '111.197.38.247')!
+    const restore = mockKomari(
+      [
+        { id: 47, name: custom.taskFilter, clients: [source.uuid], type: 'tcp', target: '111.197.38.247:443', interval: 30 },
+        { id: 50, name: custom.taskFilter, clients: [source.uuid], type: 'tcp', target: '111.197.38.247:22', interval: 30 },
+      ],
+      [
+        { task_id: '47', total: 40, valid: 0 },
+        { task_id: '50', total: 40, valid: 0 },
+      ],
+    )
+    try {
+      const planned = await planEntryProbeTask(source, custom, { currentTaskName: custom.taskFilter })
+      expect(planned.needsCreation).toBe(true)
+      expect(planned.exhausted).toBe(false)
+      expect(planned.switchedFrom).toBeNull()
+      expect(planned.probe).toEqual({ type: 'tcp', port: 22 })
+      expect(planned.task.name).toBe(topologyEntryTaskName(custom, { type: 'tcp', port: 22 }))
+      expect(planned.task.target).toBe('111.197.38.247:22')
+      expect(planned.retiredTasks.map(task => task.id)).toEqual([50, 47])
+    }
+    finally {
+      restore()
+    }
+  })
+
   test('creates a fresh ICMP task named after the taskFilter, targeting the landmark address, when nothing exists', async () => {
     const restore = mockKomari([], [])
     try {

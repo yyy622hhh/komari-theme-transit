@@ -517,6 +517,30 @@ export async function planEntryProbeTask(
 
   const currentProbe = topologyHopProbeFromTask(existing!) ?? DEFAULT_TOPOLOGY_HOP_PROBE
   const verdict = assessHopTask(profile, existing!)
+  const currentName = normalizePingTaskName(existing!.name)
+  const sameNamedCandidates = candidates.filter(task => normalizePingTaskName(task.name) === currentName)
+  const generatedCurrentName = topologyEntryTaskName(probe, currentProbe)
+  const generatedCurrentCandidates = candidates.filter(task => normalizePingTaskName(task.name) === normalizePingTaskName(generatedCurrentName))
+
+  // v1.3.3 以前自定义入口换挡仍沿用同一个基础名。若升级时阶梯已经走到最后
+  // 一档，下面的 exhausted 分支不会再触发“换下一档”，于是两个同名旧任务会
+  // 永久留在配置里，按名称绑定也无法确定读哪一个。先把当前档迁移到带协议/
+  // 端口的精确名称；即使旧任务不属于本会话、不能安全删除，新绑定也不再歧义。
+  if (isCustomTopologyProbe(probe)
+    && sameNamedCandidates.length > 1
+    && currentName !== normalizePingTaskName(generatedCurrentName)) {
+    const reusable = generatedCurrentCandidates.length === 1 ? generatedCurrentCandidates[0] : null
+    return {
+      task: reusable ?? draftAt(currentProbe, generatedCurrentName),
+      probe: currentProbe,
+      verdict: reusable ? assessHopTask(profile, reusable) : 'pending',
+      needsCreation: reusable === null,
+      exhausted: false,
+      switchedFrom: null,
+      retiredTasks: [existing!, ...duplicates, ...obsoleteCustomBindings]
+        .filter(task => task !== reusable),
+    }
+  }
   if (verdict !== 'dead') {
     return {
       task: existing!,

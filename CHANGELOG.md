@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+## [1.3.5] - 2026-08-23
+
+### Fixed
+
+- 升级前已经耗尽自定义入口探测阶梯、并遗留多个同名任务时，后台自愈现在会把当前探测档迁移到带协议和端口的唯一名称并更新拓扑绑定；旧任务若不属于当前会话仍会安全保留，不会按名称误删用户数据。
+
 ## [1.3.4] - 2026-08-23
 
 ### Fixed
@@ -818,7 +824,8 @@
 - 亮暗主题、桌面/移动布局和 Transit 风格内嵌 Komari 管理端。
 - Playwright 视觉与交互回归、自动构建和 GitHub Release 发布流程。
 
-[Unreleased]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.3.4...HEAD
+[Unreleased]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.3.5...HEAD
+[1.3.5]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.3.4...v1.3.5
 [1.3.4]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.3.3...v1.3.4
 [1.3.3]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.3.2...v1.3.3
 [1.3.2]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.3.1...v1.3.2

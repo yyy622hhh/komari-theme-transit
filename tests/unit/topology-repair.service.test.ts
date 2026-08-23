@@ -822,6 +822,53 @@ describe('runTopologyProbeRepair entry segment', () => {
     expect(staleRoute.metrics[0]).toMatchObject({ live: true, nodeName: relay.name, taskFilter: '北京电信' })
   })
 
+  test('persists an exact custom task name when repairing exhausted legacy duplicates', async () => {
+    const staleRoute = route({
+      taskFilter: 'Transit-Relay-JP-to-Exit-SG',
+      entryLabel: '北京联通家宽',
+      entryTarget: '111.197.38.247',
+      entryLive: true,
+      entryNodeName: relay.name,
+      entryTaskFilter: 'Transit-entry-custom-15yv9lt',
+    })
+    const exactName = 'Transit-entry-custom-15yv9lt-tcp-22'
+    const oldTasks = [
+      { id: 47, name: 'Transit-entry-custom-15yv9lt', type: 'tcp', target: '111.197.38.247:443', clients: [relay.uuid], interval: 30 },
+      { id: 50, name: 'Transit-entry-custom-15yv9lt', type: 'tcp', target: '111.197.38.247:22', clients: [relay.uuid], interval: 30 },
+    ]
+    const { manager, log } = createManager([staleRoute])
+    const deleted: number[][] = []
+    let ensureCalls = 0
+    const outcome = await runTopologyProbeRepair(createDeps({
+      manager,
+      sessionCreatedTaskIds: new Set(),
+      planEntryProbeTask: async () => entryPlan({
+        task: { name: exactName, type: 'tcp', target: '111.197.38.247:22', clients: [relay.uuid], interval: 30 },
+        probe: { type: 'tcp', port: 22 },
+        verdict: 'pending',
+        needsCreation: true,
+        exhausted: false,
+        switchedFrom: null,
+        retiredTasks: oldTasks,
+      }),
+      ensureTopologyEntryProbeTask: async (_source, _probe, options) => {
+        ensureCalls += 1
+        expect(options).toMatchObject({ hopProbe: { type: 'tcp', port: 22 }, taskName: exactName })
+        return { task: { id: 51, name: exactName, type: 'tcp', target: '111.197.38.247:22', clients: [relay.uuid], interval: 30 }, created: true }
+      },
+      deleteTopologyPingTasks: async (ids) => {
+        deleted.push([...ids])
+        return true
+      },
+    }))
+    expect(outcome).toBe('repaired')
+    expect(ensureCalls).toBe(1)
+    expect(log.saveCalls).toEqual([{ lockHeld: true }])
+    expect(staleRoute.metrics[0]).toMatchObject({ live: true, nodeName: relay.name, taskFilter: exactName })
+    // 两个旧任务都不是本会话创建的，迁移只改绑定，不按名称误删用户任务。
+    expect(deleted).toEqual([])
+  })
+
   test('escalates a dead entry task the current session created, creating the replacement before cleaning up the old one', async () => {
     const staleRoute = route({
       taskFilter: 'Transit-Relay-JP-to-Exit-SG',
