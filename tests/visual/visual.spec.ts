@@ -449,6 +449,11 @@ test('Transit desktop topology and cards remain contained', async ({ page }) => 
   const healthySubMillisecondSamples = segmentGroups.nth(2).locator('[data-topology-sample][aria-label*="<1ms"][aria-label*="丢包 0.0%"]')
   await expect.poll(() => healthySubMillisecondSamples.count()).toBeGreaterThan(0)
   await expect.poll(() => healthySubMillisecondSamples.evaluateAll(samples => samples.every(sample => sample.firstElementChild?.classList.contains('bg-emerald-400')))).toBe(true)
+  const staticSamples = page.locator('[data-topology-static-samples]')
+  await expect(staticSamples).toHaveCount(1)
+  await expect(staticSamples.locator('span')).toHaveCount(10)
+  await expect(staticSamples.locator('button')).toHaveCount(0)
+  await expect(staticSamples.locator('xpath=ancestor::*[@title][1]')).toHaveAttribute('title', '静态基线')
   const averageRenderedHeight = async (groupIndex: number) => {
     const heights = await segmentGroups.nth(groupIndex).locator('[data-topology-sample]').evaluateAll(elements => elements.map(element => Number(element.getAttribute('data-topology-sample-height'))))
     return heights.reduce((sum, height) => sum + height, 0) / heights.length

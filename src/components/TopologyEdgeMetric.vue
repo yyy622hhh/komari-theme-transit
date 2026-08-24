@@ -147,6 +147,7 @@ const sampleBars = computed<TelemetrySample[]>(() => {
       :bars="sampleBars"
       :line-class="sourceState.line"
       :label="telemetryLabel"
+      :static-baseline="!config.live"
     />
     <button
       type="button"
