@@ -803,6 +803,7 @@ test('Transit shows an automatic segment as waiting for a task instead of a stat
   const firstMetric = page.locator('[data-topology-current-metric]').first()
   await expect(firstMetric.locator('xpath=..')).toHaveAttribute('title', /^等待自动创建探测任务/)
   await expect(firstMetric.locator('xpath=..')).not.toHaveAttribute('title', /^静态基线/)
+  await expect(firstMetric.locator('xpath=..').locator('[data-topology-static-samples]')).toHaveCount(0)
 })
 
 test('opening topology manager never promotes an explicit static hop to a live task', async ({ page }) => {
