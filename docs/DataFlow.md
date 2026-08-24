@@ -118,7 +118,7 @@ Changing pages or filters and unmounting the panel aborts the superseded request
 
 ## Request lifecycle
 
-History requests are keyed by record type, node UUID or batch scope, time range, and `maxCount`. The shared request manager deduplicates identical in-flight requests, enforces the global concurrency cap, applies timeout and exponential retry backoff with jitter, and exposes abort hooks used when shared load-history subscribers are released. Backoff waits are abortable, so navigation or cache release does not leave retries sleeping in the background.
+History requests are keyed by record type, node UUID or batch scope, time range, and `maxCount`. The shared request manager deduplicates identical in-flight requests, enforces the global concurrency cap, applies timeout and exponential retry backoff with jitter, and gives every caller an independent abort signal. Releasing a view or shared-cache entry detaches only that consumer; the underlying request is aborted only after no consumers remain. Backoff waits are abortable, so navigation or cache release does not leave retries sleeping in the background.
 
 Detail charts add a component-local generation gate above shared requests. Rapid node/range changes and component disposal invalidate older generations, so late results cannot publish into the current view while the underlying request remains available to other deduplicated consumers. Metric Store compatibility fallback is restricted to explicit unsupported-method/route errors; authentication, cancellation, validation, timeout and server failures remain visible and never trigger a second private request.
 

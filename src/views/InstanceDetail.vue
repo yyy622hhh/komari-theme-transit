@@ -15,7 +15,7 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useDailyExchangeRates } from '@/composables/useDailyExchangeRates'
 import { useNodeProviderMetadata } from '@/composables/useNodeProviderMetadata'
 import { LOAD_RECORD_MAX_COUNT } from '@/constants/load'
-import { abortNodeLoadRecords, loadNodeLoadRecords } from '@/services/history.service'
+import { loadNodeLoadRecords } from '@/services/history.service'
 import { useAppStore } from '@/stores/app'
 import { useNodesStore } from '@/stores/nodes'
 import { createAsyncGeneration } from '@/utils/asyncGeneration'
@@ -106,10 +106,10 @@ watch(
   }),
   async ({ uuid, allowed }, _previous, onCleanup) => {
     const generation = trafficPeakRequests.begin()
+    const controller = new AbortController()
     onCleanup(() => {
       trafficPeakRequests.invalidate()
-      if (uuid)
-        abortNodeLoadRecords(uuid, TRAFFIC_PEAK_HOURS, LOAD_RECORD_MAX_COUNT)
+      controller.abort()
     })
 
     peakNetOut.value = 0
@@ -118,7 +118,7 @@ watch(
       return
 
     try {
-      const records = await loadNodeLoadRecords(uuid, TRAFFIC_PEAK_HOURS, LOAD_RECORD_MAX_COUNT)
+      const records = await loadNodeLoadRecords(uuid, TRAFFIC_PEAK_HOURS, LOAD_RECORD_MAX_COUNT, controller.signal)
       if (!trafficPeakRequests.isCurrent(generation))
         return
       applyTrafficPeaks(records)

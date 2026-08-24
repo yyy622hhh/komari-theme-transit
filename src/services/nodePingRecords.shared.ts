@@ -4,7 +4,7 @@ import { ref, shallowRef } from 'vue'
 import { CACHE_CONFIG } from '@/constants/cache'
 import { OPS_PING_FRESHNESS } from '@/constants/ops'
 import { SharedCache } from '@/services/cache.service'
-import { abortPingRecords, loadPingRecordsWithTasks } from '@/services/history.service'
+import { loadPingRecordsWithTasks } from '@/services/history.service'
 import { loadPingMetricStats, loadPublicPingTasks, partitionMetricEntityIds, queryMetrics } from '@/services/metrics.service'
 import { isPingMetric, normalizeMetricSeriesList, PING_LATENCY_METRIC, PING_LOSS_METRIC, pingTaskId } from '@/utils/metricSeries'
 import { detectPingCommonModeLossKeys, getPingCommonModeLossKey } from '@/utils/pingCommonMode'
@@ -35,6 +35,7 @@ interface SharedPingRecordsEntry {
   loading: ReturnType<typeof ref<boolean>>
   error: ReturnType<typeof ref<string | null>>
   promise: Promise<void> | null
+  controller: AbortController | null
   subscribers: number
   lastFetchedAt: number
 }
@@ -207,6 +208,7 @@ function createSharedPingRecordsEntry(): SharedPingRecordsEntry {
     loading: ref(false),
     error: ref<string | null>(null),
     promise: null,
+    controller: null,
     subscribers: 0,
     lastFetchedAt: 0,
   }
@@ -436,11 +438,17 @@ function loadPingMetricRecords(nodeUuid: string, hours: number, maxCount?: numbe
 }
 
 export async function loadSharedPingRecords(entry: SharedPingRecordsEntry, hours: number, maxCount?: number, nodeUuid?: string): Promise<void> {
-  if (entry.promise)
-    return entry.promise
+  if (entry.promise) {
+    if (!entry.controller?.signal.aborted)
+      return entry.promise
+    await entry.promise.catch(() => {})
+    return loadSharedPingRecords(entry, hours, maxCount, nodeUuid)
+  }
 
   entry.loading.value = true
   entry.error.value = null
+  const controller = new AbortController()
+  entry.controller = controller
 
   entry.promise = (async () => {
     try {
@@ -464,7 +472,7 @@ export async function loadSharedPingRecords(entry: SharedPingRecordsEntry, hours
         entry.data.value = { ...metricState, taskNamesById, taskClientsById }
       }
       else {
-        const { records, tasks } = await loadPingRecordsWithTasks(hours, maxCount, nodeUuid)
+        const { records, tasks } = await loadPingRecordsWithTasks(hours, maxCount, nodeUuid, controller.signal)
         for (const task of tasks) {
           const name = task.name.trim()
           const taskId = normalizeTaskId(String(task.id))
@@ -494,6 +502,8 @@ export async function loadSharedPingRecords(entry: SharedPingRecordsEntry, hours
     finally {
       entry.loading.value = false
       entry.promise = null
+      if (entry.controller === controller)
+        entry.controller = null
       sharedPingRecordsCache.sweep()
     }
   })()
@@ -551,7 +561,7 @@ export function retainSharedPingRecordsEntry(hours: number, maxCount?: number, u
     entry.subscribers = Math.max(0, entry.subscribers - 1)
     if (entry.subscribers === 0) {
       releasePingRefreshGroupEntry(hours, maxCount, entryKey)
-      abortPingRecords(hours, maxCount, uuid)
+      entry.controller?.abort()
       sharedPingRecordsCache.sweep()
     }
   }

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { loadNodeLoadRecords, loadRecentNodeStatus, normalizeStatusRecord } from '../../src/services/history.service'
+import { loadNodeLoadRecords, loadPingRecordsWithTasks, loadRecentNodeStatus, normalizeStatusRecord } from '../../src/services/history.service'
 import { resetSharedApi } from '../../src/utils/api'
 import { normalizeConnectionCounts } from '../../src/utils/nodeMetricsHelper'
 import { resetSharedRpc } from '../../src/utils/rpc'
@@ -19,6 +19,65 @@ function rpcErrorResponse(id: number, code: number, message: string): Response {
 }
 
 describe('loadNodeLoadRecords compatibility fallback', () => {
+  test('cancels one deduplicated history consumer without aborting the other', async () => {
+    let resolveResponse!: (response: Response) => void
+    let requestId = 0
+    let fetchCalls = 0
+    globalThis.fetch = ((input, init) => {
+      expect(String(input)).toContain('/rpc2')
+      fetchCalls += 1
+      requestId = (JSON.parse(String(init?.body)) as { id: number }).id
+      return new Promise<Response>((resolve) => {
+        resolveResponse = resolve
+      })
+    }) as typeof fetch
+
+    const cancelledController = new AbortController()
+    const activeController = new AbortController()
+    const cancelled = loadNodeLoadRecords('shared-node', 1, 150, cancelledController.signal)
+    const active = loadNodeLoadRecords('shared-node', 1, 150, activeController.signal)
+
+    cancelledController.abort()
+    await expect(cancelled).rejects.toMatchObject({ name: 'AbortError' })
+    resolveResponse(new Response(JSON.stringify({
+      jsonrpc: '2.0',
+      id: requestId,
+      result: { records: [] },
+    }), { headers: { 'Content-Type': 'application/json' } }))
+
+    await expect(active).resolves.toEqual([])
+    expect(fetchCalls).toBe(1)
+  })
+
+  test('cancels one deduplicated Ping consumer without aborting the other', async () => {
+    let resolveResponse!: (response: Response) => void
+    let requestId = 0
+    let fetchCalls = 0
+    globalThis.fetch = ((_input, init) => {
+      fetchCalls += 1
+      requestId = (JSON.parse(String(init?.body)) as { id: number }).id
+      return new Promise<Response>((resolve) => {
+        resolveResponse = resolve
+      })
+    }) as typeof fetch
+
+    const cancelledController = new AbortController()
+    const activeController = new AbortController()
+    const cancelled = loadPingRecordsWithTasks(24, 300, 'shared-node', cancelledController.signal)
+    const active = loadPingRecordsWithTasks(24, 300, 'shared-node', activeController.signal)
+
+    cancelledController.abort()
+    await expect(cancelled).rejects.toMatchObject({ name: 'AbortError' })
+    resolveResponse(new Response(JSON.stringify({
+      jsonrpc: '2.0',
+      id: requestId,
+      result: { records: [], tasks: [] },
+    }), { headers: { 'Content-Type': 'application/json' } }))
+
+    await expect(active).resolves.toEqual({ records: [], tasks: [] })
+    expect(fetchCalls).toBe(1)
+  })
+
   test('uses the legacy REST endpoint only when the RPC method is unavailable', async () => {
     const urls: string[] = []
     globalThis.fetch = (async (input, init) => {

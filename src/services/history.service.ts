@@ -73,20 +73,6 @@ export function getRecentNodeStatusRequestKey(uuid: string, limit: number): stri
   return `history:recent:${uuid}:${Math.max(1, Math.floor(limit))}`
 }
 
-export function abortLoadRecords(uuid: string | undefined, hours: number, maxCount?: number): void {
-  requestManager.abort(getLoadRecordsRequestKey(uuid, hours, maxCount))
-}
-
-export function abortNodeLoadRecords(uuid: string, hours: number, maxCount?: number): void {
-  requestManager.abort(getNodeLoadRecordsRequestKey(uuid, hours, maxCount))
-}
-
-export function abortPingRecords(hours: number, maxCount?: number, uuid?: string): void {
-  const key = getPingRecordsRequestKey(hours, maxCount, uuid)
-  requestManager.abort(key)
-  requestManager.abort(`${key}:tasks`)
-}
-
 export function normalizeStatusRecord(record: Partial<StatusRecord>): StatusRecord | null {
   if (!record.client || !record.time)
     return null
@@ -146,7 +132,7 @@ export function buildRecordsByClient(records: StatusRecord[]): Map<string, Statu
   return grouped
 }
 
-export async function loadLoadRecords(uuid: string | undefined, hours: number, maxCount?: number): Promise<StatusRecord[]> {
+export async function loadLoadRecords(uuid: string | undefined, hours: number, maxCount?: number, signal?: AbortSignal): Promise<StatusRecord[]> {
   const safeHours = normalizeHours(hours)
   const safeMaxCount = normalizeMaxCount(maxCount)
   return requestManager.run(
@@ -155,11 +141,11 @@ export async function loadLoadRecords(uuid: string | undefined, hours: number, m
       const result = await getSharedRpc().getLoadRecords(uuid, safeHours, undefined, safeMaxCount, signal)
       return normalizeStatusRecordsPayload(result.records)
     },
-    { shouldRetry: shouldRetryHistoryRequest },
+    { shouldRetry: shouldRetryHistoryRequest, signal },
   )
 }
 
-export async function loadRecentNodeStatus(uuid: string, limit = 150): Promise<StatusRecord[]> {
+export async function loadRecentNodeStatus(uuid: string, limit = 150, signal?: AbortSignal): Promise<StatusRecord[]> {
   const safeLimit = Math.max(1, Math.floor(limit))
   return requestManager.run(
     getRecentNodeStatusRequestKey(uuid, safeLimit),
@@ -169,11 +155,11 @@ export async function loadRecentNodeStatus(uuid: string, limit = 150): Promise<S
       // agent 的 connections=TCP+UDP 合计，不能原样当 TCP 画。
       return normalizeStatusRecords(result.records).slice(-safeLimit)
     },
-    { shouldRetry: shouldRetryHistoryRequest },
+    { shouldRetry: shouldRetryHistoryRequest, signal },
   )
 }
 
-export async function loadNodeLoadRecords(uuid: string, hours: number, maxCount?: number): Promise<StatusRecord[]> {
+export async function loadNodeLoadRecords(uuid: string, hours: number, maxCount?: number, signal?: AbortSignal): Promise<StatusRecord[]> {
   const safeHours = normalizeHours(hours)
   const safeMaxCount = normalizeMaxCount(maxCount)
   return requestManager.run(
@@ -192,11 +178,11 @@ export async function loadNodeLoadRecords(uuid: string, hours: number, maxCount?
         return normalizeStatusRecords(result.records)
       }
     },
-    { shouldRetry: shouldRetryHistoryRequest },
+    { shouldRetry: shouldRetryHistoryRequest, signal },
   )
 }
 
-export async function loadPingRecords(hours: number, maxCount?: number, uuid?: string): Promise<PingRecord[]> {
+export async function loadPingRecords(hours: number, maxCount?: number, uuid?: string, signal?: AbortSignal): Promise<PingRecord[]> {
   const safeHours = normalizeHours(hours)
   const safeMaxCount = normalizeMaxCount(maxCount)
   return requestManager.run(
@@ -205,11 +191,11 @@ export async function loadPingRecords(hours: number, maxCount?: number, uuid?: s
       const result = await getSharedRpc().getPingRecords(undefined, safeHours, safeMaxCount, signal, uuid)
       return result.records ?? []
     },
-    { shouldRetry: shouldRetryHistoryRequest },
+    { shouldRetry: shouldRetryHistoryRequest, signal },
   )
 }
 
-export async function loadPingRecordsWithTasks(hours: number, maxCount?: number, uuid?: string): Promise<{ records: PingRecord[], tasks: PingTaskInfo[] }> {
+export async function loadPingRecordsWithTasks(hours: number, maxCount?: number, uuid?: string, signal?: AbortSignal): Promise<{ records: PingRecord[], tasks: PingTaskInfo[] }> {
   const safeHours = normalizeHours(hours)
   const safeMaxCount = normalizeMaxCount(maxCount)
   return requestManager.run(
@@ -221,6 +207,6 @@ export async function loadPingRecordsWithTasks(hours: number, maxCount?: number,
         tasks: result.tasks ?? [],
       }
     },
-    { shouldRetry: shouldRetryHistoryRequest },
+    { shouldRetry: shouldRetryHistoryRequest, signal },
   )
 }

@@ -5,7 +5,7 @@ import { computed, onScopeDispose, ref, shallowRef, toValue, watch } from 'vue'
 import { CACHE_CONFIG } from '@/constants/cache'
 import { LOAD_CONFIG, LOAD_RECORD_MAX_COUNT } from '@/constants/load'
 import { SharedCache } from '@/services/cache.service'
-import { abortLoadRecords, abortNodeLoadRecords, buildRecordsByClient, loadLoadRecords, loadNodeLoadRecords } from '@/services/history.service'
+import { buildRecordsByClient, loadLoadRecords, loadNodeLoadRecords } from '@/services/history.service'
 import { analyzeDiskPrediction, buildDiskPrediction } from '@/services/prediction.service'
 import { useAppStore } from '@/stores/app'
 
@@ -21,7 +21,9 @@ interface SharedLoadRecordsEntry {
   loading: ReturnType<typeof ref<boolean>>
   error: ReturnType<typeof ref<string | null>>
   promise: Promise<void> | null
+  controller: AbortController | null
   nodePromises: Map<string, Promise<StatusRecord[]>>
+  nodeControllers: Map<string, AbortController>
   nodeFetchedAt: Map<string, number>
   subscribers: number
   lastFetchedAt: number
@@ -69,7 +71,9 @@ function createSharedLoadRecordsEntry(): SharedLoadRecordsEntry {
     loading: ref(false),
     error: ref<string | null>(null),
     promise: null,
+    controller: null,
     nodePromises: new Map<string, Promise<StatusRecord[]>>(),
+    nodeControllers: new Map<string, AbortController>(),
     nodeFetchedAt: new Map<string, number>(),
     subscribers: 0,
     lastFetchedAt: 0,
@@ -113,10 +117,17 @@ function warnZeroSamplesIfNeeded(entry: SharedLoadRecordsEntry, uuid: string, ca
 
 async function loadNodeRecordsIntoEntry(entry: SharedLoadRecordsEntry, uuid: string, hours: number, maxCount?: number): Promise<StatusRecord[]> {
   const existingPromise = entry.nodePromises.get(uuid)
-  if (existingPromise)
-    return existingPromise
+  if (existingPromise) {
+    const existingController = entry.nodeControllers.get(uuid)
+    if (!existingController?.signal.aborted)
+      return existingPromise
+    await existingPromise.catch(() => {})
+    return loadNodeRecordsIntoEntry(entry, uuid, hours, maxCount)
+  }
 
-  const promise = loadNodeLoadRecords(uuid, hours, maxCount)
+  const controller = new AbortController()
+  entry.nodeControllers.set(uuid, controller)
+  const promise = loadNodeLoadRecords(uuid, hours, maxCount, controller.signal)
     .then((records) => {
       setNodeRecords(entry, uuid, records)
       return records
@@ -129,6 +140,8 @@ async function loadNodeRecordsIntoEntry(entry: SharedLoadRecordsEntry, uuid: str
     .finally(() => {
       if (entry.nodePromises.get(uuid) === promise)
         entry.nodePromises.delete(uuid)
+      if (entry.nodeControllers.get(uuid) === controller)
+        entry.nodeControllers.delete(uuid)
     })
 
   entry.nodePromises.set(uuid, promise)
@@ -139,16 +152,22 @@ async function loadSharedLoadRecords(entry: SharedLoadRecordsEntry, hours: numbe
   const now = Date.now()
   if (entry.fullLoadUnavailable && now < entry.fullLoadRetryAt)
     return
-  if (entry.promise)
-    return entry.promise
+  if (entry.promise) {
+    if (!entry.controller?.signal.aborted)
+      return entry.promise
+    await entry.promise.catch(() => {})
+    return loadSharedLoadRecords(entry, hours, maxCount)
+  }
 
   entry.loading.value = true
   entry.error.value = null
+  const controller = new AbortController()
+  entry.controller = controller
 
   let promise: Promise<void> | null = null
   promise = (async () => {
     try {
-      const records = await loadLoadRecords(undefined, hours, maxCount)
+      const records = await loadLoadRecords(undefined, hours, maxCount, controller.signal)
       entry.data.value = {
         recordsByClient: buildRecordsByClient(records),
       }
@@ -168,6 +187,8 @@ async function loadSharedLoadRecords(entry: SharedLoadRecordsEntry, hours: numbe
       entry.loading.value = false
       if (entry.promise === promise)
         entry.promise = null
+      if (entry.controller === controller)
+        entry.controller = null
       sharedLoadRecordsCache.sweep()
     }
   })()
@@ -214,10 +235,10 @@ function stopSharedLoadRecordsRefresh(key: string): void {
   }
 }
 
-function abortSharedLoadRecordsEntry(entry: SharedLoadRecordsEntry, hours: number, maxCount?: number): void {
-  abortLoadRecords(undefined, hours, maxCount)
-  for (const uuid of entry.nodePromises.keys())
-    abortNodeLoadRecords(uuid, hours, maxCount)
+function abortSharedLoadRecordsEntry(entry: SharedLoadRecordsEntry): void {
+  entry.controller?.abort()
+  for (const controller of entry.nodeControllers.values())
+    controller.abort()
 }
 
 function retainSharedLoadRecordsEntry(hours: number, maxCount?: number): () => void {
@@ -235,7 +256,7 @@ function retainSharedLoadRecordsEntry(hours: number, maxCount?: number): () => v
     entry.subscribers = Math.max(0, entry.subscribers - 1)
     if (entry.subscribers === 0) {
       stopSharedLoadRecordsRefresh(key)
-      abortSharedLoadRecordsEntry(entry, hours, maxCount)
+      abortSharedLoadRecordsEntry(entry)
       sharedLoadRecordsCache.sweep()
     }
   }
@@ -245,13 +266,22 @@ export async function loadSharedNodeLoadRecords(hours: number, maxCount: number 
   const safeHours = Math.max(1, Math.floor(hours))
   const safeMaxCount = normalizeMaxCount(maxCount)
   const entry = getSharedLoadRecordsEntry(getSharedLoadRecordsKey(safeHours, safeMaxCount))
-  const shouldLoadRecords = !entry.data.value
-    || Date.now() - entry.lastFetchedAt >= LOAD_RECORD_REFRESH_INTERVAL_MS
+  // This imperative reader is also a consumer. Count it while awaiting so a
+  // component unmount cannot abort the shared source out from under it.
+  entry.subscribers += 1
+  try {
+    const shouldLoadRecords = !entry.data.value
+      || Date.now() - entry.lastFetchedAt >= LOAD_RECORD_REFRESH_INTERVAL_MS
 
-  if (shouldLoadRecords)
-    await loadSharedLoadRecords(entry, safeHours, safeMaxCount)
+    if (shouldLoadRecords)
+      await loadSharedLoadRecords(entry, safeHours, safeMaxCount)
 
-  return entry.data.value?.recordsByClient ?? new Map<string, StatusRecord[]>()
+    return entry.data.value?.recordsByClient ?? new Map<string, StatusRecord[]>()
+  }
+  finally {
+    entry.subscribers = Math.max(0, entry.subscribers - 1)
+    sharedLoadRecordsCache.sweep()
+  }
 }
 
 export function useNodeLoadStats(

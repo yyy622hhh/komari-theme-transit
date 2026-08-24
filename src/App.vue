@@ -7,6 +7,7 @@ import { Toaster } from '@/components/ui/sonner'
 import { useThemeSettingsHistoryRecorder } from '@/composables/useThemeSettingsHistoryRecorder'
 import { useVisitorPageAudit } from '@/composables/useVisitorAudit'
 import { useAppStore } from '@/stores/app'
+import { createRetryableAsyncLoader } from '@/utils/retryableAsyncLoader'
 import { logAppError } from '@/utils/safeError'
 import Background from './components/Background.vue'
 import ComponentErrorBoundary from './components/ComponentErrorBoundary.vue'
@@ -28,20 +29,13 @@ const ComponentErrorBoundaryProbe = componentBoundaryTestEnabled
 const isRetryingConnection = ref(false)
 type InitModule = typeof import('@/utils/init')
 let initModule: InitModule | null = null
-let initModulePromise: Promise<InitModule> | null = null
 let componentActive = true
 
-async function loadInitModule(): Promise<InitModule> {
-  if (initModule)
-    return initModule
-  if (!initModulePromise) {
-    initModulePromise = import('@/utils/init').then((module) => {
-      initModule = module
-      return module
-    })
-  }
-  return initModulePromise
-}
+const loadInitModule = createRetryableAsyncLoader(async () => {
+  const module = await import('@/utils/init')
+  initModule = module
+  return module
+})
 
 async function retryConnection(): Promise<void> {
   if (isRetryingConnection.value)
