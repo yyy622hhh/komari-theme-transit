@@ -603,7 +603,7 @@ function desktopRouteGridTemplate(route: RouteRow): string {
           v-for="route in visibleRoutes"
           :key="route.key"
           data-topology-route
-          class="transit-divider transit-hover-surface group relative grid w-max items-center gap-3 border-b px-2 transition-colors last:border-b-0"
+          class="transit-divider transit-hover-surface group relative grid w-full items-center gap-3 border-b px-2 transition-colors last:border-b-0"
           :class="[route.nodes.length >= 4 ? 'min-h-20' : 'min-h-16', desktopRouteMinWidthClass, routeRankingLabel(route) === '推荐' && 'bg-emerald-500/[0.025] before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-full before:bg-emerald-400/80']"
           :style="{ gridTemplateColumns: desktopRouteGridTemplate(route) }"
         >

@@ -153,7 +153,6 @@ const sampleBars = computed<TelemetrySample[]>(() => {
       :bars="sampleBars"
       :line-class="sourceState.line"
       :label="telemetryLabel"
-      :static-baseline="probeMode === 'static'"
     />
     <button
       type="button"
@@ -162,6 +161,17 @@ const sampleBars = computed<TelemetrySample[]>(() => {
       :aria-label="`${telemetryLabel}，线路状态：${sourceState.label}，${latencyText}，丢包 ${formatTopologyLoss(loss)}，查看线路历史`"
       @click="emit('openDetail')"
     >
+      <span
+        v-if="probeMode !== 'live'"
+        data-topology-probe-mode-label
+        :data-probe-mode="probeMode"
+        class="mr-1 rounded border px-1 py-px text-[8px] font-semibold tracking-wide"
+        :class="probeMode === 'auto'
+          ? 'border-amber-400/35 bg-amber-400/10 text-amber-700 dark:border-amber-400/30 dark:bg-amber-400/10 dark:text-amber-300'
+          : 'border-slate-400/30 bg-slate-400/10 text-slate-500 dark:border-slate-500/35 dark:bg-slate-500/10 dark:text-slate-400'"
+      >
+        {{ probeMode === 'auto' ? '待探测' : '静态' }}
+      </span>
       {{ latencyText }}
       <span class="mx-0.5 text-slate-400 dark:text-slate-600">/</span>
       <span :class="lossTone">{{ formatTopologyLoss(loss) }}</span>

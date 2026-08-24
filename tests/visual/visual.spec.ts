@@ -430,6 +430,12 @@ test('Transit desktop topology and cards remain contained', async ({ page }) => 
     return alertBox && topologyBox ? Math.round(topologyBox.y - alertBox.y - alertBox.height) : 0
   }).toBe(12)
   await expect(page.locator('[data-topology-direction]')).toHaveCount(3)
+  const topologyScroll = topologySection.locator('.topology-scroll')
+  const firstDesktopRoute = topologySection.locator('[data-topology-route]').first()
+  await expect.poll(async () => {
+    const [scrollBox, routeBox] = await Promise.all([topologyScroll.boundingBox(), firstDesktopRoute.boundingBox()])
+    return scrollBox && routeBox ? Math.round(Math.abs(scrollBox.width - routeBox.width)) : Number.POSITIVE_INFINITY
+  }).toBeLessThanOrEqual(40)
   const routeScores = page.locator('[data-topology-route-score]')
   await expect(routeScores).toHaveCount(2)
   await expect(routeScores.first()).toContainText(/\d+ 分/)
@@ -452,11 +458,11 @@ test('Transit desktop topology and cards remain contained', async ({ page }) => 
   const healthySubMillisecondSamples = segmentGroups.nth(2).locator('[data-topology-sample][aria-label*="<1ms"][aria-label*="丢包 0.0%"]')
   await expect.poll(() => healthySubMillisecondSamples.count()).toBeGreaterThan(0)
   await expect.poll(() => healthySubMillisecondSamples.evaluateAll(samples => samples.every(sample => sample.firstElementChild?.classList.contains('bg-emerald-400')))).toBe(true)
-  const staticSamples = page.locator('[data-topology-static-samples]')
-  await expect(staticSamples).toHaveCount(1)
-  await expect(staticSamples.locator('span')).toHaveCount(10)
-  await expect(staticSamples.locator('button')).toHaveCount(0)
-  await expect(staticSamples.locator('xpath=ancestor::*[@title][1]')).toHaveAttribute('title', '静态基线')
+  await expect(page.locator('[data-topology-static-samples]')).toHaveCount(0)
+  const staticLabel = page.locator('[data-topology-probe-mode-label][data-probe-mode="static"]')
+  await expect(staticLabel).toHaveCount(1)
+  await expect(staticLabel).toHaveText('静态')
+  await expect(staticLabel.locator('xpath=ancestor::*[@title][1]')).toHaveAttribute('title', '静态基线')
   const averageRenderedHeight = async (groupIndex: number) => {
     const heights = await segmentGroups.nth(groupIndex).locator('[data-topology-sample]').evaluateAll(elements => elements.map(element => Number(element.getAttribute('data-topology-sample-height'))))
     return heights.reduce((sum, height) => sum + height, 0) / heights.length
@@ -785,6 +791,7 @@ test('Transit keeps a configured first-segment static baseline static', async ({
 
   const firstMetric = page.locator('[data-topology-current-metric]').first()
   await expect(firstMetric).toContainText('51ms')
+  await expect(firstMetric.locator('[data-topology-probe-mode-label][data-probe-mode="static"]')).toHaveText('静态')
   await expect(firstMetric.locator('xpath=..')).toHaveAttribute('title', /^静态基线/)
   await expect(firstMetric.locator('xpath=..')).not.toHaveAttribute('data-topology-edge-samples', '')
 })
@@ -803,7 +810,7 @@ test('Transit shows an automatic segment as waiting for a task instead of a stat
   const firstMetric = page.locator('[data-topology-current-metric]').first()
   await expect(firstMetric.locator('xpath=..')).toHaveAttribute('title', /^等待自动创建探测任务/)
   await expect(firstMetric.locator('xpath=..')).not.toHaveAttribute('title', /^静态基线/)
-  await expect(firstMetric.locator('xpath=..').locator('[data-topology-static-samples]')).toHaveCount(0)
+  await expect(firstMetric.locator('[data-topology-probe-mode-label][data-probe-mode="auto"]')).toHaveText('待探测')
 })
 
 test('opening topology manager never promotes an explicit static hop to a live task', async ({ page }) => {
