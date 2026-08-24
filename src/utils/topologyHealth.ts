@@ -1,3 +1,5 @@
+import type { TopologyProbeMode } from '@/utils/topologyModel'
+
 export type TopologyRouteHealth = 'healthy' | 'warning' | 'pending' | 'error' | 'offline'
 
 export interface TopologySegmentTelemetry {
@@ -11,6 +13,7 @@ export interface TopologySegmentTelemetry {
 
 export interface TopologySegmentHealthInput {
   live: boolean
+  probeMode?: TopologyProbeMode
   sourceExists: boolean
   sourceOnline?: boolean
   loading: boolean
@@ -87,6 +90,8 @@ function scoreTone(label: TopologyRouteScore['label']): TopologyRouteScore['tone
 }
 
 export function resolveTopologySegmentHealth(input: TopologySegmentHealthInput): TopologyRouteHealth {
+  if (!input.live && input.probeMode === 'auto')
+    return 'pending'
   if (!input.live) {
     if (input.fallbackLatency === null && input.fallbackLoss === null)
       return 'pending'

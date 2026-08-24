@@ -71,10 +71,13 @@ export interface VisualFixtureOptions {
   opsMissingPingSource?: boolean
   opsNoRecentTask?: boolean
   opsComparableRoutes?: boolean
+  opsLiveFirstHop?: boolean
+  topologyAutoRepairEnabled?: boolean
   opsCustomFirstMetric?: boolean
   opsKnownEntryCustomTask?: boolean
   opsOverlappingTask?: boolean
   opsStaticFirstMetric?: boolean
+  opsAutoFirstMetric?: boolean
   opsTwoNodeRoute?: boolean
   opsTrailingEmptyNode?: boolean
   opsExternalOfflineSource?: boolean
@@ -856,7 +859,7 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
     })
   }
   const defaultTopologyRoute = `北京电信|CN|入口;主控-洛杉矶|US|线路机;${options.opsMissingNode ? '未纳管-西雅图' : '香港边缘节点-超长名称布局测试'}|${options.opsMissingNode ? 'US' : 'HK'}|落地机||北京电信|CN|入口;东京-高负载|JP|线路机;${options.opsComparableRoutes ? '香港边缘节点-超长名称布局测试-10|HK' : '新加坡-A100|SG'}|落地机`
-  const defaultTopologyMetrics = options.opsComparableRoutes
+  const defaultTopologyMetrics = options.opsComparableRoutes || options.opsLiveFirstHop
     ? 'live@主控-洛杉矶@北京电信@51@0;live@主控-洛杉矶@PandaOps-Local-Hop@84@0||live@东京-高负载@Tokyo@72@0;live@东京-高负载@PandaOps-Local-Hop@1.1@0'
     : 'live@主控-洛杉矶@北京电信@51@0;84,0||live@东京-高负载@Tokyo@72@0;live@东京-高负载@PandaOps-Local-Hop@1.1@0'
   let topologyRoute = options.opsTwoNodeRoute
@@ -910,6 +913,7 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
     homeToolsEnabled: true,
     opsDashboardEnabled: options.opsDashboard ?? false,
     topologyEnabled: options.opsDashboard ?? false,
+    topologyAutoRepairEnabled: options.topologyAutoRepairEnabled ?? true,
     carrierPingRegion: 'all',
     routeProbeEnabled: options.routeProbeEnabled,
     routeProbeAutoEnabled: options.routeProbeLegacyAutoEnabled,
@@ -923,6 +927,17 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
     topologyConfig: options.opsDashboard && !options.emptyTopology && options.opsJsonTopologyOnly
       ? legacyTopologyToJson(topologyRoute, topologyMetrics)
       : '',
+  }
+  if (options.opsAutoFirstMetric && typeof settings.topologyConfig === 'string' && settings.topologyConfig) {
+    const config = JSON.parse(settings.topologyConfig) as { routes?: Array<{ metrics?: Array<Record<string, unknown>> }> }
+    const metric = config.routes?.[0]?.metrics?.[0]
+    if (metric) {
+      metric.probeMode = 'auto'
+      metric.live = false
+      delete metric.source
+      delete metric.task
+    }
+    settings.topologyConfig = JSON.stringify(config)
   }
 
   await page.addInitScript(({ fixedNow, dark, setupWizardFirstRun }) => {

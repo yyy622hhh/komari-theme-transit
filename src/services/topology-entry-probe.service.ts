@@ -169,6 +169,19 @@ export async function planEntryProbeTask(
     : nextLadderProbe(profile, currentProbe, candidates, ladder)
   const nextProbe = nextRung && entryProbeTarget(probe, nextRung) ? nextRung : null
   if (!nextProbe) {
+    if (isCustomTopologyProbe(probe) && currentName !== normalizePingTaskName(generatedCurrentName)) {
+      const reusable = generatedCurrentCandidates.length === 1 ? generatedCurrentCandidates[0] : null
+      return {
+        task: reusable ?? draftAt(currentProbe, generatedCurrentName),
+        probe: currentProbe,
+        verdict: reusable ? assessHopTask(profile, reusable) : 'pending',
+        needsCreation: reusable === null,
+        exhausted: false,
+        switchedFrom: null,
+        retiredTasks: [existing!, ...duplicates, ...obsoleteCustomBindings]
+          .filter(task => task !== reusable),
+      }
+    }
     return {
       task: existing!,
       probe: currentProbe,
@@ -176,7 +189,7 @@ export async function planEntryProbeTask(
       needsCreation: false,
       exhausted: true,
       switchedFrom: null,
-      retiredTasks: [...duplicates, ...obsoleteCustomBindings],
+      retiredTasks: obsoleteCustomBindings,
     }
   }
   // 内置入口继续复用“北京电信”这类固定任务名；自定义入口换挡必须使用带协议/

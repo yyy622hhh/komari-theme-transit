@@ -85,7 +85,10 @@ async function dragOrderHandle(page: Page, handle: Locator, target: Locator, tar
   await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height / 2)
   await page.mouse.down()
   await page.mouse.move(sourceBox.x + sourceBox.width / 2, sourceBox.y + sourceBox.height, { steps: 4 })
-  await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + targetBox.height * targetRatio, { steps: 12 })
+  await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + targetBox.height / 2, { steps: 10 })
+  await page.waitForTimeout(80)
+  await page.mouse.move(targetBox.x + targetBox.width / 2, targetBox.y + targetBox.height * targetRatio, { steps: 4 })
+  await page.waitForTimeout(80)
   await page.mouse.up()
   await page.mouse.move(1, 1)
   await page.waitForTimeout(200)
@@ -786,6 +789,45 @@ test('Transit keeps a configured first-segment static baseline static', async ({
   await expect(firstMetric.locator('xpath=..')).not.toHaveAttribute('data-topology-edge-samples', '')
 })
 
+test('Transit shows an automatic segment as waiting for a task instead of a static baseline', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, {
+    opsDashboard: true,
+    dark: true,
+    opsJsonTopologyOnly: true,
+    opsAutoFirstMetric: true,
+    topologyAutoRepairEnabled: false,
+  })
+  await openStablePage(page)
+
+  const firstMetric = page.locator('[data-topology-current-metric]').first()
+  await expect(firstMetric.locator('xpath=..')).toHaveAttribute('title', /^等待自动创建探测任务/)
+  await expect(firstMetric.locator('xpath=..')).not.toHaveAttribute('title', /^静态基线/)
+})
+
+test('opening topology manager never promotes an explicit static hop to a live task', async ({ page }) => {
+  const addedTasks: Array<Record<string, unknown>> = []
+  const saves: Array<Record<string, unknown>> = []
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, { opsDashboard: true, authenticated: true })
+  await openStablePage(page)
+  page.on('request', (request) => {
+    if (request.method() !== 'POST')
+      return
+    if (request.url().endsWith('/api/rpc2') && request.postDataJSON().method === 'admin:addPingTask')
+      addedTasks.push(request.postDataJSON().params as Record<string, unknown>)
+    if (request.url().includes('/api/admin/theme/settings?theme=Transit'))
+      saves.push(request.postDataJSON() as Record<string, unknown>)
+  })
+
+  const dialog = await openTopologyManager(page)
+  const firstRoute = dialog.locator('[data-topology-route-id]').first()
+  await expect(firstRoute).toHaveAttribute('data-topology-hop-task', '')
+  await expect(firstRoute).toHaveAttribute('data-topology-hop-pending', 'false')
+  expect(addedTasks).toEqual([])
+  expect(saves).toEqual([])
+})
+
 test('Transit matches topology Ping tasks exactly instead of aggregating similarly named tasks', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await installKomariFixture(page, { opsDashboard: true, dark: true, opsOverlappingTask: true })
@@ -908,6 +950,15 @@ test('Transit renders and edits a two-node topology with a trailing empty slot w
 
   const desktopRoutes = page.locator('.topology-scroll article')
   await expect(desktopRoutes.first().locator('[data-topology-current-metric]')).toHaveCount(1)
+  await expect.poll(async () => {
+    const route = desktopRoutes.first()
+    const entry = route.locator(':scope > div').first()
+    const landing = route.locator(':scope > button').last()
+    const [routeBox, entryBox, landingBox] = await Promise.all([route.boundingBox(), entry.boundingBox(), landing.boundingBox()])
+    return Boolean(routeBox && entryBox && landingBox
+      && landingBox.x > routeBox.x + routeBox.width * 0.7
+      && entryBox.x < routeBox.x + routeBox.width * 0.2)
+  }).toBe(true)
   const dialog = await openTopologyManager(page)
   await expect(dialog.getByLabel('第 1 条线路落地机')).toBeVisible()
   await expect(dialog.getByLabel('第 1 条线路落地机')).toHaveValue('')
@@ -1088,6 +1139,8 @@ test('Transit topology switches the hop probe once ICMP is proven dead', async (
   await installKomariFixture(page, {
     opsDashboard: true,
     authenticated: true,
+    opsLiveFirstHop: true,
+    topologyAutoRepairEnabled: false,
     // 已绑定的 ICMP 中转任务采满样本却一次都没成功，且线路机上没有别的健康任务
     // 可以参考，只能靠阶梯回退到 TCP。
     topologyProbeStats: [{ task_id: 18, name: 'PandaOps-Local-Hop', total: 48, valid: 0 }],
@@ -1167,6 +1220,7 @@ test('Transit topology never deletes a pre-existing task based on its name alone
   await installKomariFixture(page, {
     opsDashboard: true,
     authenticated: true,
+    opsLiveFirstHop: true,
     topologyGeneratedHopName: true,
     topologyProbeStats: [{ task_id: 18, total: 48, valid: 0 }],
   })
@@ -1572,6 +1626,7 @@ test('Transit topology still reports a planning error when an existing landing l
   await installKomariFixture(page, {
     opsDashboard: true,
     authenticated: true,
+    opsLiveFirstHop: true,
     // 默认拓扑第 1 条线路的落地机正是这台被清空 IP 的节点。
     quickTopologyNoAddress: true,
   })
@@ -1643,6 +1698,7 @@ test('Transit topology rematches a live metric whose source node was deleted', a
     opsDashboard: true,
     authenticated: true,
     opsMissingPingSource: true,
+    topologyAutoRepairEnabled: false,
   })
   await openStablePage(page)
 
@@ -2321,7 +2377,7 @@ test('health range reloads the selected period and snapshot export downloads rea
   })
 
   await page.setViewportSize({ width: 1440, height: 900 })
-  await installKomariFixture(page, { opsDashboard: true, authenticated: true })
+  await installKomariFixture(page, { opsDashboard: true, authenticated: true, freePriceNode: true })
   await openStablePage(page)
   await page.getByRole('button', { name: '显示首页工具' }).click()
   await page.getByRole('button', { name: /健康：/ }).click()
@@ -2338,6 +2394,15 @@ test('health range reloads the selected period and snapshot export downloads rea
   await page.getByRole('button', { name: '导出 JSON' }).click()
   const download = await downloadPromise
   expect(download.suggestedFilename()).toMatch(/^komari-snapshot-\d+\.json$/)
+  const downloadPath = await download.path()
+  expect(downloadPath).toBeTruthy()
+  const snapshot = JSON.parse(await readFile(downloadPath!, 'utf8')) as {
+    summary: { nodes: number, online: number, offline: number }
+    nodes: Array<{ billing: { price: string }, status: string }>
+  }
+  expect(snapshot.summary.nodes).toBe(snapshot.nodes.length)
+  expect(snapshot.summary.online + snapshot.summary.offline).toBe(snapshot.nodes.length)
+  expect(snapshot.nodes[0]?.billing.price).toBe('免费')
   await expect(page.getByText(/已导出 12 台节点的 JSON 快照/)).toBeVisible()
 })
 
@@ -2783,6 +2848,16 @@ test('free node pricing stays semantic across home, finance, and detail', async 
   await expect(page.getByText('剩余价值', { exact: true })).toBeVisible()
   await expect(page.getByText('无', { exact: true })).toBeVisible()
   await expect(page.getByText('免费 / 月', { exact: true })).toHaveCount(0)
+})
+
+test('Transit node card keeps the free-price sentinel visible', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 })
+  await installKomariFixture(page, { opsDashboard: true, freePriceNode: true, hideEarth: true })
+  await openStablePage(page)
+
+  const nodeCard = page.getByRole('button', { name: '查看节点 主控-洛杉矶 详情' }).locator('xpath=..')
+  await expect(nodeCard.getByText('免费', { exact: true })).toBeVisible()
+  await expect(nodeCard.getByText('免费 / 月', { exact: true })).toHaveCount(0)
 })
 
 test('detail light desktop', async ({ page }) => {

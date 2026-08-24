@@ -2,6 +2,7 @@
 import type { NodeData } from '@/stores/nodes'
 import type { TopologySegmentTelemetry } from '@/utils/topologyHealth'
 import type { TopologyReliabilityWindow, TopologySegmentReliabilitySnapshot } from '@/utils/topologyIntelligence'
+import type { TopologyProbeMode } from '@/utils/topologyModel'
 import { computed, watch } from 'vue'
 import { useNodePingStats } from '@/composables/useNodePingStats'
 import { resolveTopologyMetricSource } from '@/utils/topologyHelper'
@@ -14,6 +15,7 @@ const props = defineProps<{
   nodes: NodeData[]
   current?: TopologySegmentTelemetry
   sourceUuid?: string
+  probeMode?: TopologyProbeMode
 }>()
 
 const emit = defineEmits<{
@@ -21,6 +23,7 @@ const emit = defineEmits<{
 }>()
 
 const config = computed(() => parseTopologyMetric(props.metric))
+const probeMode = computed(() => props.probeMode ?? config.value.probeMode ?? (config.value.live ? 'live' : 'static'))
 const sourceNode = computed(() => resolveTopologyMetricSource(props.nodes, config.value.nodeName, props.sourceUuid))
 const enabled = computed(() => config.value.live && Boolean(sourceNode.value) && sourceNode.value?.online !== false)
 
@@ -75,6 +78,7 @@ const snapshot = computed<TopologySegmentReliabilitySnapshot>(() => {
     adaptive: calculateAdaptiveBaseline(props.current?.latency ?? null, day),
     insights: {
       live: config.value.live,
+      probeMode: probeMode.value,
       sourceUuid: sourceNode.value?.uuid ?? '',
       taskId: weekPing.selectedTaskId.value ?? dayPing.selectedTaskId.value,
       taskName: weekPing.selectedTaskName.value || dayPing.selectedTaskName.value || config.value.taskFilter,

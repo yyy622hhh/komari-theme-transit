@@ -12,6 +12,7 @@ import { useAppStore } from '@/stores/app'
 import * as financeHelper from '@/utils/financeHelper'
 import { formatBytesPerSecondWithConfig, formatBytesWithConfig, formatDateTime, formatUptimeWithFormat } from '@/utils/helper'
 import { getTrafficUsed, getTrafficUsedPercentage } from '@/utils/nodeMetricsHelper'
+import { isFreePrice } from '@/utils/tagHelper'
 
 const props = defineProps<{
   nodes: NodeData[]
@@ -94,6 +95,8 @@ function formatBillingCycle(days: number): string {
 }
 
 function formatPrice(row: SnapshotRow): string {
+  if (isFreePrice(row.price))
+    return '免费'
   if (row.price <= 0)
     return '-'
 
@@ -228,19 +231,20 @@ function yieldToBrowser(): Promise<void> {
   })
 }
 
-async function buildRowsAsync(signal: AbortSignal, chunkSize = 250): Promise<SnapshotRow[]> {
-  const result: SnapshotRow[] = []
-  for (let index = 0; index < props.nodes.length; index++) {
-    signal.throwIfAborted()
-    const node = props.nodes[index]
-    if (node)
-      result.push(buildRow(node))
-    if ((index + 1) % chunkSize === 0) {
-      await yieldToBrowser()
-      signal.throwIfAborted()
-    }
+function buildSnapshotSummary(exportRows: SnapshotRow[]) {
+  const online = exportRows.filter(row => row.online).length
+  return {
+    nodes: exportRows.length,
+    online,
+    offline: exportRows.length - online,
+    cpuCores: exportRows.reduce((sum, row) => sum + row.cpuCores, 0),
+    memory: formatBytes(exportRows.reduce((sum, row) => sum + row.memoryTotalBytes, 0)),
+    disk: formatBytes(exportRows.reduce((sum, row) => sum + row.diskTotalBytes, 0)),
+    monthlyCost: financeHelper.formatFinanceAmount(
+      exportRows.reduce((sum, row) => sum + row.monthlyCostCNY, 0),
+      'CNY',
+    ),
   }
-  return result
 }
 
 function buildJsonNode(row: SnapshotRow) {
@@ -329,10 +333,12 @@ async function exportJson(): Promise<void> {
   try {
     if (!await verifySnapshotExportPermission(generation))
       return
+    // `buildRow` is deliberately synchronous: websocket updates cannot run in
+    // the middle of this map, so every exported field and the summary below
+    // describe the same point-in-time snapshot. Chunk only the expensive text
+    // serialization after the rows have been frozen.
+    const exportRows = buildRows()
     await yieldToBrowser()
-    if (!isCurrentExport(generation))
-      return
-    const exportRows = await buildRowsAsync(controller.signal)
     if (!isCurrentExport(generation))
       return
     const exportedAt = new Date()
@@ -340,15 +346,7 @@ async function exportJson(): Promise<void> {
       {
         generatedAt: formatDateTime(exportedAt),
         generatedAtIso: exportedAt.toISOString(),
-        summary: {
-          nodes: props.nodes.length,
-          online: onlineCount.value,
-          offline: props.nodes.length - onlineCount.value,
-          cpuCores: totalCpuCores.value,
-          memory: formatBytes(totalMemoryBytes.value),
-          disk: formatBytes(totalDiskBytes.value),
-          monthlyCost: financeHelper.formatFinanceAmount(totalMonthlyCostCNY.value, 'CNY'),
-        },
+        summary: buildSnapshotSummary(exportRows),
       },
       exportRows,
       buildJsonNode,
@@ -396,10 +394,8 @@ async function exportCsv(): Promise<void> {
   try {
     if (!await verifySnapshotExportPermission(generation))
       return
+    const exportRows = buildRows()
     await yieldToBrowser()
-    if (!isCurrentExport(generation))
-      return
-    const exportRows = await buildRowsAsync(controller.signal)
     if (!isCurrentExport(generation))
       return
     const content = await buildSnapshotCsvAsync(csvColumns, exportRows, yieldToBrowser, 250, controller.signal)

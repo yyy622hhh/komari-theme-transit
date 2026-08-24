@@ -3,6 +3,7 @@ import type { NodeData } from '@/stores/nodes'
 import type { TelemetrySample } from '@/types/telemetry'
 import type { TopologyRouteScore, TopologySegmentTelemetry } from '@/utils/topologyHealth'
 import type { TopologyRouteRanking, TopologyRouteReliability, TopologySegmentReliabilitySnapshot } from '@/utils/topologyIntelligence'
+import type { TopologyProbeMode } from '@/utils/topologyModel'
 import { computed, ref } from 'vue'
 import TelemetrySampleStrip from '@/components/TelemetrySampleStrip.vue'
 import TopologySegmentHistory from '@/components/TopologySegmentHistory.vue'
@@ -31,9 +32,11 @@ export interface TopologyRouteDetail {
   sourceUuids?: Array<string | undefined>
   nodeNames: string[]
   metrics: string[]
+  probeModes: TopologyProbeMode[]
   score: TopologyRouteScore
   reliability: TopologyRouteReliability
   ranking?: TopologyRouteRanking
+  probeLabel?: string
   directionLabel: string
   segmentMetrics: Array<TopologySegmentTelemetry | undefined>
   segmentReliability: Array<TopologySegmentReliabilitySnapshot | undefined>
@@ -179,6 +182,7 @@ async function copyDiagnosticReport(): Promise<void> {
       targetName: props.route?.nodeNames[index + 1] || `节点 ${index + 2}`,
       telemetry: props.route?.segmentMetrics[index],
       reliability,
+      probeMode: props.route?.probeModes[index],
     })),
     directions: props.route.directionComparison
       ? (Object.entries(props.route.directionComparison) as Array<['forward' | 'reverse', TopologyDirectionReading]>).map(([direction, reading]) => ({
@@ -233,7 +237,7 @@ async function copyDiagnosticReport(): Promise<void> {
           <div class="flex min-w-0 items-center justify-between gap-3 text-[10px] text-muted-foreground">
             <span>主要扣分项</span>
             <span v-if="route.ranking && route.ranking.total > 1" data-topology-detail-ranking class="min-w-0 truncate text-right">
-              {{ route.directionLabel }}第 {{ route.ranking.rank }} / {{ route.ranking.total }}
+              {{ route.probeLabel ? `${route.probeLabel} · ` : '' }}{{ route.directionLabel }}第 {{ route.ranking.rank }} / {{ route.ranking.total }}
               <span v-if="route.ranking.recommended" class="ml-1 text-emerald-700 dark:text-emerald-300">推荐</span>
             </span>
           </div>
@@ -526,10 +530,11 @@ async function copyDiagnosticReport(): Promise<void> {
           v-for="(metric, index) in route.metrics.slice(0, Math.max(1, route.nodeNames.length - 1))"
           :key="`${route.key}-${index}`"
           :metric="metric"
+          :probe-mode="route.probeModes[index]"
           :nodes="nodes"
           :source-label="route.nodeNames[index] || `节点 ${index + 1}`"
           :target-label="route.nodeNames[index + 1] || `节点 ${index + 2}`"
-          :source-uuid="route.sourceUuids?.[index] || route.sourceUuid"
+          :source-uuid="index === 0 ? (route.sourceUuids?.[0] || route.sourceUuid) : route.sourceUuids?.[index]"
           :hours="hours"
         />
       </div>

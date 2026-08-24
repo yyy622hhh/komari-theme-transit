@@ -2,6 +2,7 @@
 import type { NodeData } from '@/stores/nodes'
 import type { TelemetrySample } from '@/types/telemetry'
 import type { TopologyRouteHealth, TopologySegmentTelemetry } from '@/utils/topologyHealth'
+import type { TopologyProbeMode } from '@/utils/topologyModel'
 import { computed, watch } from 'vue'
 import TopologyEdgeSamples from '@/components/TopologyEdgeSamples.vue'
 import { useNodePingStats } from '@/composables/useNodePingStats'
@@ -17,6 +18,7 @@ const props = defineProps<{
   targetLabel: string
   segmentIndex: number
   sourceUuid?: string
+  probeMode?: TopologyProbeMode
   mobile?: boolean
   observeOnly?: boolean
 }>()
@@ -26,6 +28,7 @@ const emit = defineEmits<{
   metricsChange: [metrics: TopologySegmentTelemetry]
 }>()
 const config = computed(() => parseTopologyMetric(props.metric))
+const probeMode = computed(() => props.probeMode ?? config.value.probeMode ?? (config.value.live ? 'live' : 'static'))
 const telemetryLabel = computed(() => formatTopologyTelemetryLabel(props.metric, props.sourceLabel, props.targetLabel))
 const sourceNode = computed(() => resolveTopologyMetricSource(props.nodes, config.value.nodeName, props.sourceUuid))
 const ping = useNodePingStats(
@@ -46,6 +49,8 @@ const latencyText = computed(() => config.value.live && ping.hasData.value && !p
   ? '无响应'
   : formatTopologyLatency(latency.value))
 const sourceState = computed(() => {
+  if (probeMode.value === 'auto')
+    return { label: '等待自动创建探测任务', line: 'bg-amber-400/55' }
   if (!config.value.live)
     return { label: '静态基线', line: 'bg-slate-400/70 dark:bg-slate-500/55' }
   if (!sourceNode.value)
@@ -78,6 +83,7 @@ const lossTone = computed(() => {
 const health = computed<TopologyRouteHealth>(() => {
   return resolveTopologySegmentHealth({
     live: config.value.live,
+    probeMode: probeMode.value,
     sourceExists: Boolean(sourceNode.value),
     sourceOnline: sourceNode.value?.online,
     loading: ping.loading.value,
@@ -138,7 +144,7 @@ const sampleBars = computed<TelemetrySample[]>(() => {
   <div
     v-if="!observeOnly"
     class="relative flex h-10 flex-1 items-center"
-    :class="mobile ? 'min-w-0' : 'min-w-[190px]'"
+    :class="mobile ? 'min-w-0' : 'min-w-[150px]'"
     :data-topology-edge-samples="sampleBars.length ? '' : undefined"
     :title="`${sourceState.label}${config.live ? ` · ${config.taskFilter || '未指定任务'}` : ''}`"
     :aria-label="`${sourceState.label}：${latencyText}，丢包 ${formatTopologyLoss(loss)}`"

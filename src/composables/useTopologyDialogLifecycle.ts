@@ -39,6 +39,8 @@ export interface TopologyDialogLifecycleDeps {
   refreshWriteLog: () => void
   getDialogSession: () => number
   bumpDialogSession: () => number
+  /** 打开对话框前等后台自愈这一轮结束，避免两份 expected 快照互相踩。 */
+  waitForRepairIdle?: () => Promise<void>
 }
 
 /**
@@ -88,11 +90,11 @@ export function useTopologyDialogLifecycle(deps: TopologyDialogLifecycleDeps) {
   async function rematchOpenRoutes(session: number): Promise<void> {
     rematching.value = true
     try {
-      await Promise.all(Array.from(manager.routes, (route) => {
+      for (const route of manager.routes) {
         if (session !== deps.getDialogSession() || !props.open)
-          return Promise.resolve()
-        return planner.planRouteTasks(route)
-      }))
+          return
+        await planner.planRouteTasks(route)
+      }
       if (session !== deps.getDialogSession() || !props.open)
         return
       if (deps.hasPendingWork() && !deps.persistBlockingErrors.value.length) {
@@ -118,6 +120,7 @@ export function useTopologyDialogLifecycle(deps: TopologyDialogLifecycleDeps) {
     rematching.value = true
     const session = deps.getDialogSession()
     void (async () => {
+      await deps.waitForRepairIdle?.()
       await persistence.waitForIdle()
       if (session !== deps.getDialogSession() || !props.open)
         return
@@ -145,6 +148,7 @@ export function useTopologyDialogLifecycle(deps: TopologyDialogLifecycleDeps) {
     rematching.value = true
     deps.resetQuickProbeKey()
     void (async () => {
+      await deps.waitForRepairIdle?.()
       await persistence.waitForIdle()
       if (session !== deps.getDialogSession() || !props.open)
         return

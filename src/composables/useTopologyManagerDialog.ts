@@ -1,3 +1,4 @@
+import type { TopologyManager } from '@/composables/useTopologyManager'
 import type { NodeData } from '@/stores/nodes'
 import type { TopologyRouteConfig } from '@/utils/topologyModel'
 import { computed, reactive, ref } from 'vue'
@@ -12,16 +13,18 @@ import { createTopologyPersistence } from '@/services/topology-persistence.servi
 import { message } from '@/utils/message'
 import { getTopologyCreatedTaskIds } from '@/utils/topologyCreatedTasks'
 import { applyTopologyProbeToRoute, resolveTopologyNode } from '@/utils/topologyHelper'
+import { createAutoTopologyMetric } from '@/utils/topologyModel'
 import { createCustomTopologyProbe, normalizeTopologyProbeTarget, TOPOLOGY_PROBE_OPTIONS } from '@/utils/topologyPresets'
 import { readTopologyWriteLog } from '@/utils/topologyWriteLog'
 
 export function useTopologyManagerDialog(
   props: { nodes: NodeData[], open: boolean },
   onOpenChange: (open: boolean) => void,
+  options: { manager?: TopologyManager, waitForRepairIdle?: () => Promise<void> } = {},
 ) {
   const CUSTOM_PROBE = '__custom_probe__'
   const PROBE_CITIES = [...new Set(TOPOLOGY_PROBE_OPTIONS.map(option => option.city))]
-  const manager = reactive(useTopologyManager(() => props.nodes))
+  const manager = reactive(options.manager ?? useTopologyManager(() => props.nodes))
 
   // 由本文件持有的跨子模块共享状态：拆到 useTopologyQuickRoute/useTopologyDialogLifecycle
   // 之后，它们仍然需要读写同一份 quickConfiguring/rematching，而 catalog 的完成回调
@@ -166,6 +169,8 @@ export function useTopologyManagerDialog(
     return manager.dirty
       || Object.keys(pendingRouteTasks.value).length > 0
       || Object.keys(pendingEntryTasks.value).length > 0
+      || Object.keys(routeRetiredTasks.value).length > 0
+      || Object.keys(routeEntryRetiredTasks.value).length > 0
   }
   const taskValidationPending = computed(() => rematching.value || Object.values(routeTaskPlanning.value).some(Boolean) || manager.routes.some(route => route.metrics.some((metric) => {
     if (!metric.live || !metric.nodeName.trim() || !metric.taskFilter.trim())
@@ -239,6 +244,7 @@ export function useTopologyManagerDialog(
     refreshWriteLog,
     getDialogSession,
     bumpDialogSession,
+    waitForRepairIdle: options.waitForRepairIdle,
   })
 
   const isOpen = computed({
@@ -263,7 +269,7 @@ export function useTopologyManagerDialog(
     bumpRouteRun(route.id)
     clearPendingRouteTask(route.id)
     clearRouteProbeState(route.id)
-    const emptyMetric = () => ({ live: false, nodeName: '', taskFilter: '', fallbackLatency: null, fallbackLoss: null })
+    const emptyMetric = createAutoTopologyMetric
     if (!nodeName.trim()) {
       if (route.nodes.length >= 4) {
         route.nodes.splice(2, 1)
@@ -306,14 +312,14 @@ export function useTopologyManagerDialog(
     const savedCustom = customEntryOption(probeKey)
     if (savedCustom) {
       route.nodes[0] = { name: savedCustom.label, region: 'CN', role: '入口', probeTarget: savedCustom.target }
-      route.metrics[0] = { live: false, nodeName: '', taskFilter: '', fallbackLatency: null, fallbackLoss: null }
+      route.metrics[0] = createAutoTopologyMetric()
       void planRouteTasksAndSave(route)
       return
     }
     if (probeKey === CUSTOM_PROBE) {
       if (!entryDraft.restore(route)) {
         route.nodes[0] = { name: '自定义入口', region: '', role: '入口' }
-        route.metrics[0] = { live: false, nodeName: '', taskFilter: '', fallbackLatency: null, fallbackLoss: null }
+        route.metrics[0] = createAutoTopologyMetric()
       }
       void planRouteTasksAndSave(route)
       return
@@ -342,7 +348,7 @@ export function useTopologyManagerDialog(
     route.nodes[0].name = value
     route.nodes[0].region = ''
     route.nodes[0].role = '入口'
-    route.metrics[0] = { live: false, nodeName: '', taskFilter: '', fallbackLatency: null, fallbackLoss: null }
+    route.metrics[0] = createAutoTopologyMetric()
     if (route.nodes[0].probeTarget)
       void planRouteTasksAndSave(route)
     else
@@ -364,7 +370,7 @@ export function useTopologyManagerDialog(
     else
       delete entry.probeTarget
     entry.region = value ? 'CN' : ''
-    route.metrics[0] = { live: false, nodeName: '', taskFilter: '', fallbackLatency: null, fallbackLoss: null }
+    route.metrics[0] = createAutoTopologyMetric()
     void planRouteTasksAndSave(route)
   }
 

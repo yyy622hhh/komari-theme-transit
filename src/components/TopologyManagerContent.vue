@@ -359,10 +359,10 @@ const {
           <label class="space-y-1 text-[11px] text-muted-foreground">
             落地机
             <select
-              :value="route.nodes[route.nodes.length - 1]?.uuid || route.nodes[route.nodes.length - 1]?.name || ''"
+              :value="route.nodes[route.nodes.length >= 4 ? 3 : 2]?.uuid || route.nodes[route.nodes.length >= 4 ? 3 : 2]?.name || ''"
               :aria-label="`第 ${routeIndex + 1} 条线路落地机`"
               :class="selectClass"
-              @change="selectRouteNode(route, route.nodes.length - 1, ($event.target as HTMLSelectElement).value)"
+              @change="selectRouteNode(route, route.nodes.length >= 4 ? 3 : 2, ($event.target as HTMLSelectElement).value)"
             >
               <option value="">
                 选择节点

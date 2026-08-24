@@ -226,6 +226,11 @@ watch(
     const generation = ++setupWizardCheckGeneration
     if (!allowed) {
       setupWizardOpen.value = false
+      routeProbeSetupOpen.value = false
+      nodeControlDialogNode.value = null
+      pingDialogNode.value = null
+      if (homeOrder.editingOrder.value)
+        cancelHomeOrderEdit()
       return
     }
     const { hasSeenSetupWizard } = await import('@/composables/useSetupWizard')

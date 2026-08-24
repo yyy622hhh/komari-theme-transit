@@ -15,6 +15,7 @@ import {
   findTopologyPingTask,
   isPingTaskAssignedToSource,
   isSameTopologyHopProbe,
+  listMatchingHopTaskIds,
   normalizeTopologyHopProbe,
   supportedPingTaskNames,
   topologyHopProbeFromTask,
@@ -218,6 +219,7 @@ export async function ensureTopologyPingTask(
     const existing = findTopologyPingTask(tasks, source.uuid, target, probe)
     if (existing)
       return { task: existing, created: false }
+    const previousIds = listMatchingHopTaskIds(tasks, source.uuid, target, probe)
 
     throwIfAborted(signal)
     try {
@@ -231,12 +233,13 @@ export async function ensureTopologyPingTask(
       if (isRpcPermissionError(error))
         handlePingPermissionError(error)
       // The response may fail after the server commits. Reconcile without the
-      // caller's abort signal before deciding whether this was a real failure;
-      // a second tab may also have created the same task concurrently.
+      // caller's abort signal before deciding whether this was a real failure.
+      // Same-key creates are serialized by the cross-tab lock, so a newly
+      // visible id was almost certainly this tab's add and must be owned.
       tasks = await fetchAdminPingTasks(undefined, `admin:ping:list:ensure:${requestKey}:retry`)
       const concurrent = findTopologyPingTask(tasks, source.uuid, target, probe)
       if (concurrent)
-        return { task: concurrent, created: false }
+        return { task: concurrent, created: Number.isInteger(concurrent.id) && !previousIds.has(concurrent.id!) }
       throw error
     }
 
@@ -264,7 +267,7 @@ function entryTaskMatchesName(task: AdminPingTask, sourceUuid: string, taskName:
   return isPingTaskAssignedToSource(task, sourceUuid) && task.name.trim() === taskName.trim()
 }
 
-function entryTaskIds(
+export function entryTaskIds(
   tasks: readonly AdminPingTask[],
   sourceUuid: string,
   taskName: string,
@@ -423,7 +426,7 @@ export async function createTopologyEntryProbeTask(
   probe: TopologyProbeOption,
   hopProbe: TopologyHopProbe,
   options: { signal?: AbortSignal, taskName?: string } = {},
-): Promise<AdminPingTask> {
+): Promise<{ task: AdminPingTask, created: boolean }> {
   const { signal } = options
   const normalized = normalizeTopologyHopProbe(hopProbe)
   throwIfAborted(signal)
@@ -436,6 +439,9 @@ export async function createTopologyEntryProbeTask(
     throwIfAborted(signal)
     const taskName = options.taskName?.trim() || probe.taskFilter
     let tasks = await fetchAdminPingTasks(signal, `admin:ping:list:entry:switch:${requestKey}:before`)
+    const reused = findTopologyEntryProbeTask(tasks, source.uuid, probe, normalized, taskName)
+    if (reused)
+      return { task: reused, created: false }
     const previousIds = entryTaskIds(tasks, source.uuid, taskName)
     const draft = buildTopologyEntryProbeDraft(source, probe, normalized, taskName)
     const body = { ...draft, default_on: draft.default_on ?? false }
@@ -454,7 +460,7 @@ export async function createTopologyEntryProbeTask(
       tasks = await fetchAdminPingTasks(undefined, `admin:ping:list:entry:switch:${requestKey}:retry`)
       const committed = findNewEntryTask(tasks, source.uuid, taskName, normalized, previousIds)
       if (committed)
-        return committed
+        return { task: committed, created: true }
       throw error
     }
 
@@ -464,6 +470,6 @@ export async function createTopologyEntryProbeTask(
     const created = findNewEntryTask(tasks, source.uuid, taskName, normalized, previousIds)
     if (!created)
       throw new Error('Ping 任务已提交，但服务器未返回对应任务，请稍后重试。')
-    return created
+    return { task: created, created: true }
   })
 }

@@ -8,11 +8,10 @@ import {
   getCompanionRouteProbeRoster,
   RouteProbeCompanionUnavailableError,
 } from '@/services/route-probe-companion.service'
-import { isRouteProbeOnlineNode } from '@/services/route-probe.service'
+import { isRouteProbeOnlineNode, loadRouteProbeNodeTokens } from '@/services/route-probe.service'
 import { saveManagedThemeSettings } from '@/services/theme-settings.service'
 import { useAppStore } from '@/stores/app'
 import { getRegionCode } from '@/utils/regionHelper'
-import { getSharedRpc } from '@/utils/rpc'
 
 /**
  * 三网回程检测设置向导：环境检查 → 安装节点助手 → 启用检测。
@@ -53,6 +52,19 @@ function chunk<T>(items: readonly T[], size: number): T[][] {
   return chunks
 }
 
+function shellSingleQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`
+}
+
+export function buildRouteProbeInstallCommand(endpoint: string, release: string): string {
+  const insecure = endpoint.startsWith('http://') ? ' --allow-insecure-http' : ''
+  return [
+    `curl -fsSLO https://github.com/yyy622hhh/komari-theme-transit/releases/download/${release}/transit-route-probe-helper.sh`,
+    `curl -fsSLO https://github.com/yyy622hhh/komari-theme-transit/releases/download/${release}/collect-return-route.sh`,
+    `sudo bash transit-route-probe-helper.sh install --endpoint ${shellSingleQuote(endpoint)}${insecure}`,
+  ].join('\n')
+}
+
 export function useRouteProbeSetupWizard(nodes: MaybeRefOrGetter<NodeData[]>) {
   const appStore = useAppStore()
   const step = ref<WizardStep>('check')
@@ -74,6 +86,8 @@ export function useRouteProbeSetupWizard(nodes: MaybeRefOrGetter<NodeData[]>) {
   const onlineHelperCount = computed(() => eligibleNodes.value.length - missingHelperNodes.value.length)
   // 检查出错时不能让运营者带着一次不完整的结果直接启用——哪怕插件确认已装。
   const canEnable = computed(() => pluginInstalled.value === true && !checkError.value)
+  let refreshing = false
+  let rosterGeneration = 0
 
   /**
    * 离线节点和没有 uuid 的节点直接跳过，不计入任何一边——`isRouteProbeOnlineNode`
@@ -119,6 +133,7 @@ export function useRouteProbeSetupWizard(nodes: MaybeRefOrGetter<NodeData[]>) {
   async function runCheck(): Promise<void> {
     checking.value = true
     checkError.value = ''
+    const generation = ++rosterGeneration
     try {
       const permission = await requirePermission('advancedTools', { force: true })
       if (!permission.granted)
@@ -137,15 +152,18 @@ export function useRouteProbeSetupWizard(nodes: MaybeRefOrGetter<NodeData[]>) {
           throw error
         pluginInstalled.value = false
         pluginVersion.value = null
+        if (generation !== rosterGeneration)
+          return
         eligibleNodes.value = eligible.map(node => ({ ...node, helperOnline: false }))
+        await loadMissingHelperTokens()
         return
       }
 
-      eligibleNodes.value = await classifyHelperStatus(eligible)
-
-      // 只在真的要展示安装命令时才读节点 token，减少不必要的敏感信息读取。
-      if (eligibleNodes.value.some(node => !node.helperOnline))
-        await loadNodeTokens()
+      const classified = await classifyHelperStatus(eligible)
+      if (generation !== rosterGeneration)
+        return
+      eligibleNodes.value = classified
+      await loadMissingHelperTokens()
     }
     catch (error) {
       checkError.value = error instanceof Error ? error.message : '环境检查失败'
@@ -159,22 +177,24 @@ export function useRouteProbeSetupWizard(nodes: MaybeRefOrGetter<NodeData[]>) {
    * 后台自动补测：装完助手后不用手动点“重新检查”。只在插件已确认安装、还有
    * 缺助手节点、且没有别的检查正在跑时才做事；失败静默吞掉——这是后台轮询，
    * 不该用告警打断运营者，出问题时手动“重新检查”仍会完整校验并报错。不重复
-   * `requirePermission`，理由同 `loadNodeTokens`。
+   * `requirePermission`，会话校验已在 `runCheck` 里做过。
    *
    * `refreshing` 是这个函数自己的重入锁：`checking` 只在 `runCheck` 里置位，
    * 挡不住这个函数被两次定时器 tick 同时触发——上一轮还没返回、下一轮 15 秒
    * 又到了的话，两次请求谁先回来谁写结果，慢的那次可能用过期数据覆盖新结果，
    * 把刚上线的节点重新判成缺助手。
    */
-  let refreshing = false
   async function refreshMissingHelpers(): Promise<void> {
     if (refreshing || step.value !== 'check' || checking.value || pluginInstalled.value !== true || !missingHelperNodes.value.length)
       return
     refreshing = true
+    const generation = rosterGeneration
     try {
-      eligibleNodes.value = await classifyHelperStatus(eligibleNodes.value)
-      if (eligibleNodes.value.some(node => !node.helperOnline))
-        await loadNodeTokens()
+      const next = await classifyHelperStatus(eligibleNodes.value)
+      if (generation !== rosterGeneration || checking.value)
+        return
+      eligibleNodes.value = next
+      await loadMissingHelperTokens()
     }
     catch {
       // 静默失败，等下一轮定时器或手动重新检查。
@@ -189,19 +209,19 @@ export function useRouteProbeSetupWizard(nodes: MaybeRefOrGetter<NodeData[]>) {
   }, ROSTER_REFRESH_INTERVAL_MS)
   onScopeDispose(() => clearInterval(refreshTimer))
 
-  /**
-   * 缺助手节点复制 token 要用到节点自己的 Agent token，只在需要展示时才去读。
-   * 不在这里重复 `requirePermission`——唯一的调用方 `runCheck` 已经在同一轮里
-   * 刚验证过，没必要再多一次强制的会话校验请求。
-   */
-  async function loadNodeTokens(): Promise<void> {
-    const clients = await getSharedRpc().getNodesOverHttp(controller.signal)
-    const tokens: Record<string, string> = {}
-    for (const [uuid, client] of Object.entries(clients)) {
-      if (client.token)
-        tokens[uuid] = client.token
-    }
+  async function loadMissingHelperTokens(): Promise<void> {
+    const generation = rosterGeneration
+    const missing = missingHelperNodes.value.map(node => node.uuid)
+    const tokens = missing.length
+      ? await loadRouteProbeNodeTokens(missing, controller.signal)
+      : {}
+    if (generation !== rosterGeneration)
+      return
     nodeTokens.value = tokens
+  }
+
+  async function loadNodeTokens(): Promise<void> {
+    await loadMissingHelperTokens()
   }
 
   /**
@@ -213,11 +233,7 @@ export function useRouteProbeSetupWizard(nodes: MaybeRefOrGetter<NodeData[]>) {
   const installCommand = computed(() => {
     const release = `v${__BUILD_VERSION__}`
     const endpoint = typeof window === 'undefined' ? '' : window.location.origin
-    return [
-      `curl -fsSLO https://github.com/yyy622hhh/komari-theme-transit/releases/download/${release}/transit-route-probe-helper.sh`,
-      `curl -fsSLO https://github.com/yyy622hhh/komari-theme-transit/releases/download/${release}/collect-return-route.sh`,
-      `sudo bash transit-route-probe-helper.sh install --endpoint ${endpoint}`,
-    ].join('\n')
+    return buildRouteProbeInstallCommand(endpoint, release)
   })
 
   function tokenFor(uuid: string): string {

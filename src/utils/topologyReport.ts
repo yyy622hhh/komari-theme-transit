@@ -1,5 +1,6 @@
 import type { TopologySegmentTelemetry } from '@/utils/topologyHealth'
 import type { TopologySegmentReliabilitySnapshot } from '@/utils/topologyIntelligence'
+import type { TopologyProbeMode } from '@/utils/topologyModel'
 import { describeTopologyPeakInsight } from '@/utils/topologyInsights'
 
 export interface TopologyReportSegment {
@@ -7,6 +8,7 @@ export interface TopologyReportSegment {
   targetName: string
   telemetry?: TopologySegmentTelemetry
   reliability?: TopologySegmentReliabilitySnapshot
+  probeMode?: TopologyProbeMode
 }
 
 export interface TopologyReportDirection {
@@ -84,10 +86,11 @@ export function buildTopologyDiagnosticReport(input: TopologyDiagnosticReportInp
   input.segments.forEach((segment, index) => {
     const insights = segment.reliability?.insights
     const evidence = insights?.evidence
+    const probeMode = segment.probeMode ?? insights?.probeMode ?? (insights?.live ? 'live' : 'static')
     lines.push('', `分段 ${index + 1}：${segment.sourceName} → ${segment.targetName}`)
     lines.push(`当前：延迟 ${latency(segment.telemetry?.latency)} / 丢包 ${loss(segment.telemetry?.loss)}`)
     if (!insights?.live || !evidence) {
-      lines.push(`数据依据：${insights?.live === false ? '静态基线' : '待积累'}`)
+      lines.push(`数据依据：${probeMode === 'auto' ? '等待自动探测任务' : insights?.live === false ? '静态基线' : '待积累'}`)
       return
     }
     lines.push(`数据状态：${freshness(insights)}，最后样本 ${formatBeijingTime(evidence.latestSampleAt)}`)

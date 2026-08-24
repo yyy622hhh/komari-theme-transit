@@ -3,16 +3,16 @@ import type { HopTaskSamples, HopTaskVerdict, SourceProbeProfile } from '@/servi
 import {
   DEFAULT_TOPOLOGY_HOP_PROBE,
   draftTopologyPingTask,
-  findTopologyPingTask,
   findTopologyPingTaskByName,
+  isPingTaskAssignedToSource,
   isSameTopologyHopProbe,
   listTopologyPingTasks,
   pingTaskTargetHost,
   topologyHopProbeFromTask,
-  topologyHopTaskNameCandidates,
+  topologyHopTaskName,
   topologyPingTargets,
 } from '@/services/ping-task.service'
-import { assessHopTask, chooseInitialHopProbe, LADDER, loadSourceProbeProfile, nextLadderProbe } from '@/services/topology-probe-profile.service'
+import { assessHopTask, chooseInitialHopProbe, loadSourceProbeProfile, nextLadderProbe } from '@/services/topology-probe-profile.service'
 
 /** 第 2 段（线路机 → 落地机）探测任务的规划：只读，不发写请求。 */
 
@@ -46,12 +46,16 @@ function getObservedTaskSamples(
  * 找出其他来源访问同一落地地址时已经实际成功过的探测方式。
  *
  * 这里只学习协议和端口，不能把跨来源样本用于当前来源的健康判定。
+ * ICMP 还要和本源能力求交：本机已经证明发不出 ICMP 时，不能因为别的线路机
+ * ping 得通就把本源已经删掉的 ICMP 任务再建模回来。
  */
 function healthyLandingProbes(
   profile: SourceProbeProfile,
+  source: TopologyPingEndpoint,
   landing: TopologyPingEndpoint,
 ): TopologyHopProbe[] {
   const targetHosts = new Set(topologyPingTargets(landing))
+  const skipIcmp = chooseInitialHopProbe(profile).type !== 'icmp'
   const probes: TopologyHopProbe[] = []
   for (const task of profile.tasks) {
     if (!targetHosts.has(pingTaskTargetHost(task.target)))
@@ -60,6 +64,19 @@ function healthyLandingProbes(
       continue
     const probe = topologyHopProbeFromTask(task)
     if (!probe || probes.some(existing => isSameTopologyHopProbe(existing, probe)))
+      continue
+    if (skipIcmp && probe.type === 'icmp')
+      continue
+    const learnedHost = pingTaskTargetHost(task.target)
+    const localSameHost = profile.tasks.filter((candidate) => {
+      if (!isPingTaskAssignedToSource(candidate, source.uuid))
+        return false
+      if (pingTaskTargetHost(candidate.target) !== learnedHost)
+        return false
+      const candidateProbe = topologyHopProbeFromTask(candidate)
+      return candidateProbe !== null && isSameTopologyHopProbe(candidateProbe, probe)
+    })
+    if (localSameHost.length && localSameHost.every(task => assessHopTask(profile, task) === 'dead'))
       continue
     probes.push(probe)
   }
@@ -82,7 +99,31 @@ function isThemeGeneratedHopTask(
   taskName: string,
 ): boolean {
   const name = taskName.trim()
-  return LADDER.some(rung => topologyHopTaskNameCandidates(source, landing, rung).includes(name))
+  const base = topologyHopTaskName(source, landing)
+  return name === base || name.startsWith(`${base}-`)
+}
+
+function landingForProbe(
+  landing: TopologyPingEndpoint,
+  profile: SourceProbeProfile,
+  source: TopologyPingEndpoint,
+  probe: TopologyHopProbe,
+): TopologyPingEndpoint {
+  const hosts = topologyPingTargets(landing)
+  if (hosts.length <= 1)
+    return landing
+  const v4Host = hosts[0]!
+  const localV4 = profile.tasks.filter((candidate) => {
+    if (!isPingTaskAssignedToSource(candidate, source.uuid))
+      return false
+    if (pingTaskTargetHost(candidate.target) !== v4Host)
+      return false
+    const candidateProbe = topologyHopProbeFromTask(candidate)
+    return candidateProbe !== null && isSameTopologyHopProbe(candidateProbe, probe)
+  })
+  if (localV4.length && localV4.every(task => assessHopTask(profile, task) === 'dead'))
+    return { ...landing, ipv4: undefined }
+  return landing
 }
 
 function collectRetiredTasks(
@@ -90,10 +131,13 @@ function collectRetiredTasks(
   source: TopologyPingEndpoint,
   landing: TopologyPingEndpoint,
   hopTasks: readonly AdminPingTask[],
-  selectedTaskName: string,
+  selectedTask: AdminPingTask,
 ): AdminPingTask[] {
   return hopTasks.filter((task) => {
-    if (task.name.trim() === selectedTaskName.trim() || !Number.isInteger(task.id))
+    const selected = Number.isInteger(task.id) && Number.isInteger(selectedTask.id)
+      ? task.id === selectedTask.id
+      : task === selectedTask
+    if (selected || !Number.isInteger(task.id))
       return false
     if (!isThemeGeneratedHopTask(source, landing, task.name))
       return false
@@ -113,15 +157,34 @@ export async function planWorkingHopTask(
   if (!targetAddress)
     throw new Error(`落地机“${landing.name}”没有可用于 Ping 的 IPv4 或 IPv6 地址。`)
 
+  const addressOf = (task?: Pick<AdminPingTask, 'target'>, endpoint: TopologyPingEndpoint = landing) =>
+    (task ? pingTaskTargetHost(task.target) : '') || topologyPingTargets(endpoint)[0] || targetAddress
   const profile = await loadSourceProbeProfile(source.uuid, options)
   const hopTasks = listTopologyPingTasks(profile.tasks, source.uuid, landing)
+  const verdictRank: Record<HopTaskVerdict, number> = { healthy: 0, pending: 1, missing: 1, dead: 2 }
+  const preferredTask = (tasks: readonly AdminPingTask[]): AdminPingTask | undefined => {
+    const ranked = tasks
+      .map((task, index) => ({ task, index, rank: verdictRank[assessHopTask(profile, task)] }))
+      .sort((left, right) => left.rank - right.rank || left.index - right.index)
+    return ranked[0]?.task
+  }
   // 只有当按名字认回来的任务确实指向当前落地机时才认它。绑错落地机或落地机被
   // 改过时，仍然按地址重新推导，让主题自己纠正。
   const named = findTopologyPingTaskByName(profile.tasks, source.uuid, currentTaskName)
-  const bound = (named && hopTasks.some(task => task.name === named.name) ? named : undefined)
-    ?? findTopologyPingTask(profile.tasks, source.uuid, landing)
+  const namedCandidates = currentTaskName.trim()
+    ? hopTasks.filter(task => task.name.trim() === currentTaskName.trim())
+    : []
+  const legacyIcmpCandidates = hopTasks.filter((task) => {
+    const probe = topologyHopProbeFromTask(task)
+    return probe !== null && isSameTopologyHopProbe(probe, DEFAULT_TOPOLOGY_HOP_PROBE)
+  })
+  const bound = (named && hopTasks.some(task => task.id === named.id) ? named : undefined)
+    ?? preferredTask(namedCandidates)
+    // 旧版没有 taskFilter 时只会按落地地址认回 ICMP；其它协议仍由
+    // chooseInitialHopProbe/planForProbe 规划，否则一个旧的死 TCP 任务会阻止双栈落地改试 IPv6。
+    ?? preferredTask(legacyIcmpCandidates)
 
-  const retire = (selectedTaskName: string) => collectRetiredTasks(profile, source, landing, hopTasks, selectedTaskName)
+  const retire = (selectedTask: AdminPingTask) => collectRetiredTasks(profile, source, landing, hopTasks, selectedTask)
   const planForTask = (
     task: AdminPingTask,
     probe: TopologyHopProbe,
@@ -133,19 +196,24 @@ export async function planWorkingHopTask(
     needsCreation: false,
     exhausted: false,
     switchedFrom,
-    targetAddress,
-    retiredTasks: retire(task.name),
+    targetAddress: addressOf(task),
+    retiredTasks: retire(task),
   })
   const planForProbe = (
     probe: TopologyHopProbe,
     switchedFrom: TopologyHopProbe | null,
   ): HopTaskPlan | null => {
-    const reused = findTopologyPingTask(profile.tasks, source.uuid, landing, probe)
+    const endpoint = landingForProbe(landing, profile, source, probe)
+    const sameProbeTasks = listTopologyPingTasks(profile.tasks, source.uuid, endpoint).filter((task) => {
+      const taskProbe = topologyHopProbeFromTask(task)
+      return taskProbe !== null && isSameTopologyHopProbe(taskProbe, probe)
+    })
+    const reused = preferredTask(sameProbeTasks)
     if (reused && assessHopTask(profile, reused) === 'dead')
       return null
     if (reused)
       return planForTask(reused, probe, switchedFrom)
-    const task = draftTopologyPingTask(source, landing, probe, profile.tasks)
+    const task = draftTopologyPingTask(source, endpoint, probe, profile.tasks)
     return {
       task,
       probe,
@@ -153,13 +221,17 @@ export async function planWorkingHopTask(
       needsCreation: true,
       exhausted: false,
       switchedFrom,
-      targetAddress,
-      retiredTasks: retire(task.name),
+      targetAddress: addressOf(task, endpoint),
+      retiredTasks: retire(task),
     }
   }
-  const existingHealthy = (excludedName = ''): AdminPingTask | undefined => hopTasks.find(task => (
-    task.name.trim() !== excludedName.trim() && assessHopTask(profile, task) === 'healthy'
-  ))
+  const existingHealthy = (excluded?: AdminPingTask): AdminPingTask | undefined => hopTasks.find((task) => {
+    if (assessHopTask(profile, task) !== 'healthy')
+      return false
+    if (excluded && Number.isInteger(excluded.id) && Number.isInteger(task.id))
+      return task.id !== excluded.id
+    return task !== excluded
+  })
 
   if (bound) {
     const boundProbe = topologyHopProbeFromTask(bound) ?? DEFAULT_TOPOLOGY_HOP_PROBE
@@ -172,18 +244,18 @@ export async function planWorkingHopTask(
         needsCreation: false,
         exhausted: false,
         switchedFrom: null,
-        targetAddress,
-        retiredTasks: retire(bound.name),
+        targetAddress: addressOf(bound),
+        retiredTasks: retire(bound),
       }
     }
 
-    const healthyTask = existingHealthy(bound.name)
+    const healthyTask = existingHealthy(bound)
     if (healthyTask) {
       const healthyProbe = topologyHopProbeFromTask(healthyTask) ?? DEFAULT_TOPOLOGY_HOP_PROBE
       return planForTask(healthyTask, healthyProbe, boundProbe)
     }
 
-    for (const provenProbe of healthyLandingProbes(profile, landing)) {
+    for (const provenProbe of healthyLandingProbes(profile, source, landing)) {
       const provenPlan = planForProbe(provenProbe, boundProbe)
       if (provenPlan)
         return provenPlan
@@ -198,7 +270,7 @@ export async function planWorkingHopTask(
         needsCreation: false,
         exhausted: true,
         switchedFrom: null,
-        targetAddress,
+        targetAddress: addressOf(bound),
         // 阶梯已经走完，留着这些任务当作「这一档试过了」的记录，删掉只会让下次
         // 复检重新把它们建回来。
         retiredTasks: [],
@@ -213,23 +285,32 @@ export async function planWorkingHopTask(
     return planForTask(healthyTask, healthyProbe, null)
   }
 
-  for (const provenProbe of healthyLandingProbes(profile, landing)) {
+  for (const provenProbe of healthyLandingProbes(profile, source, landing)) {
     const provenPlan = planForProbe(provenProbe, null)
     if (provenPlan)
       return provenPlan
   }
 
   const initialProbe = chooseInitialHopProbe(profile)
-  const reused = findTopologyPingTask(profile.tasks, source.uuid, landing, initialProbe)
-  const task = reused ?? draftTopologyPingTask(source, landing, initialProbe, profile.tasks)
+  const initialPlan = planForProbe(initialProbe, null)
+  if (initialPlan)
+    return initialPlan
+  const nextProbe = nextLadderProbe(profile, initialProbe, hopTasks)
+  if (nextProbe) {
+    const nextPlan = planForProbe(nextProbe, initialProbe)
+    if (nextPlan)
+      return nextPlan
+  }
+  const initialLanding = landingForProbe(landing, profile, source, initialProbe)
+  const task = draftTopologyPingTask(source, initialLanding, initialProbe, profile.tasks)
   return {
     task,
     probe: initialProbe,
-    verdict: reused ? assessHopTask(profile, reused) : 'pending',
-    needsCreation: !reused,
+    verdict: 'pending',
+    needsCreation: true,
     exhausted: false,
     switchedFrom: null,
-    targetAddress,
-    retiredTasks: retire(task.name),
+    targetAddress: addressOf(task, initialLanding),
+    retiredTasks: retire(task),
   }
 }

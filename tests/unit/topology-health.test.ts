@@ -69,6 +69,23 @@ describe('topology health scoring', () => {
     })).toBe('error')
   })
 
+  test('keeps an automatic segment pending even when it still carries an old fallback baseline', () => {
+    expect(resolveTopologySegmentHealth({
+      live: false,
+      probeMode: 'auto',
+      sourceExists: false,
+      loading: false,
+      error: null,
+      stale: false,
+      hasData: false,
+      avgLatency: null,
+      avgLoss: 0,
+      avgVolatility: 0,
+      fallbackLatency: 40,
+      fallbackLoss: 0,
+    })).toBe('pending')
+  })
+
   test('scores severe loss as an outage deduction', () => {
     const score = calculateTopologyRouteScore({
       segments: [segment({ status: 'error', loss: 100 })],

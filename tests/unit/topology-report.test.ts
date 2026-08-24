@@ -73,4 +73,20 @@ describe('topology diagnostic report', () => {
     expect(value).not.toMatch(/00000000|203\.0\.113\.5|2001:db8|task_id=18|任务 ID：19/)
     expect(value.match(/\[已隐藏\]/g)?.length).toBeGreaterThanOrEqual(6)
   })
+
+  test('describes an automatic segment as waiting for a task instead of a static baseline', () => {
+    const report = buildTopologyDiagnosticReport({
+      version: '1.0.43',
+      generatedAt: Date.parse('2026-08-20T01:00:00Z'),
+      routeName: '湖北电信 → 东京',
+      segments: [{
+        sourceName: '湖北电信',
+        targetName: '东京',
+        probeMode: 'auto',
+        telemetry: { status: 'pending', latency: null, loss: null, volatility: null, hasLiveData: false, stale: false },
+      }],
+    })
+    expect(report).toContain('数据依据：等待自动探测任务')
+    expect(report).not.toContain('数据依据：静态基线')
+  })
 })

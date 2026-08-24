@@ -3,14 +3,14 @@ import type { EntryProbePlan, HopTaskPlan } from '@/services/topology-probe.serv
 import type { NodeData } from '@/stores/nodes'
 import type { TopologyRouteConfig } from '@/utils/topologyModel'
 import type { TopologyProbeOption } from '@/utils/topologyPresets'
+import { entryTaskIds, restrictTopologyPingEndpoint } from '@/services/ping-task.service'
 import { isStaleManagedThemeSettingsError } from '@/services/theme-settings.service'
+import { isTopologySaveCommittedError } from '@/services/topology.service'
 import { getTopologyRouteEntryProbe, resolveTopologyNode, shouldAutoApplyTopologyProbe } from '@/utils/topologyHelper'
+import { getTopologyMetricProbeMode } from '@/utils/topologyModel'
 import { recordTopologyWrite, summarizeTaskNames } from '@/utils/topologyWriteLog'
 
-/**
- * `useTopologyManager()` 的最小切面：只暴露自愈流程需要读写的部分，且用取值
- * 器代替 Ref，让测试可以传入普通对象而不必启动 Vue/Pinia。
- */
+/** 自愈流程使用的 `useTopologyManager()` 最小切面。 */
 export interface TopologyRepairManagerLike {
   readonly routes: TopologyRouteConfig[]
   readonly validationErrors: readonly string[]
@@ -18,7 +18,7 @@ export interface TopologyRepairManagerLike {
   reset: () => void
   withSaveLock: <T>(save: () => Promise<T>) => Promise<T>
   preflightSave: () => Promise<void>
-  save: (options?: { lockHeld?: boolean }) => Promise<'invalid' | 'saved' | 'changed'>
+  save: (options?: { lockHeld?: boolean, signal?: AbortSignal }) => Promise<'invalid' | 'saved' | 'changed'>
 }
 
 export interface TopologyRepairDeps {
@@ -54,13 +54,19 @@ export interface TopologyRepairDeps {
     probe: TopologyProbeOption,
     options?: { hopProbe?: TopologyHopProbe, signal?: AbortSignal, taskName?: string },
   ) => Promise<{ task: AdminPingTask, created: boolean }>
-  /** 换挡专用：不查是否已存在同名任务，直接新建，见 `ping-task.service.ts`。 */
+  /** 换挡专用：不按同名复用死任务；同探针已存在则 created=false。 */
   createTopologyEntryProbeTask: (
     source: TopologyPingEndpoint,
     probe: TopologyProbeOption,
     hopProbe: TopologyHopProbe,
     options?: { signal?: AbortSignal, taskName?: string },
-  ) => Promise<AdminPingTask>
+  ) => Promise<{ task: AdminPingTask, created: boolean }>
+  /**
+   * 入口任务清理前用来按「线路机 + 当前绑定名」反查真实任务 id：入口任务换挡
+   * 后经常沿用旧名字，不能靠名字判断是否还在用，只能落到 id 上。缺省时退回
+   * 只按会话所有权清理，不做这层额外保护。
+   */
+  loadAdminPingTasks?: (options?: { fresh?: boolean }) => Promise<AdminPingTask[]>
   signal?: AbortSignal
 }
 
@@ -76,14 +82,44 @@ export function liveTopologyTaskNames(routes: readonly Pick<TopologyRouteConfig,
     .filter(Boolean)))
 }
 
-/** 只删本会话创建、且当前没有线路再绑定的探测任务。 */
+/**
+ * 按「线路机 + 当前绑定名」反查仍需保留的入口任务 id。
+ * 换挡前后故意同名，所以本轮退休 id 要从保护名单拿掉；若扣掉后一个匹配都不剩，把匹配到的 id 重新保护回去。
+ */
+export function listLiveEntryTaskIds(
+  routes: readonly Pick<TopologyRouteConfig, 'nodes' | 'metrics'>[],
+  nodes: readonly NodeData[],
+  tasks: readonly AdminPingTask[],
+  retiredIds: ReadonlySet<number> = new Set(),
+): Set<number> {
+  return new Set(routes.flatMap((route) => {
+    const metric = route.metrics[0]
+    const boundName = metric?.taskFilter.trim()
+    if (!metric?.live || !boundName)
+      return []
+    const source = resolveTopologyNode(nodes, route.nodes[1]?.name ?? '', route.nodes[1]?.uuid ?? '')
+    if (!source?.uuid)
+      return []
+    const matchingIds = [...entryTaskIds(tasks, source.uuid, boundName)]
+    const remaining = matchingIds.filter(id => !retiredIds.has(id))
+    return remaining.length ? remaining : matchingIds
+  }))
+}
+
+/**
+ * 只删本会话创建、且不在排除名单里的探测任务。跳数段按「名字是否仍被某条线路
+ * 绑定」排除；入口段名字在换挡前后常常不变，只能按「是不是本轮刚建的」排除，
+ * 见 `runTopologyProbeRepair` 里对 entryRetiredIds 的调用和旁边的注释。
+ */
 export function listOwnedRetiredTaskIds(
   retired: readonly TopologyRetiredTask[],
   sessionCreatedIds: ReadonlySet<number>,
-  boundTaskNames: ReadonlySet<string>,
+  exclude: { boundTaskNames?: ReadonlySet<string>, excludeIds?: ReadonlySet<number> },
 ): number[] {
   return [...new Set(retired
-    .filter(task => sessionCreatedIds.has(task.id) && !boundTaskNames.has(task.name.trim()))
+    .filter(task => sessionCreatedIds.has(task.id)
+      && !exclude.boundTaskNames?.has(task.name.trim())
+      && !exclude.excludeIds?.has(task.id))
     .map(task => task.id))]
 }
 
@@ -121,8 +157,10 @@ export interface TopologyRepairAvailability {
   managerOpen: boolean
   /** 对应 appStore.privateFeaturesAllowed：只有已登录管理员才能触发写操作。 */
   privateFeaturesAllowed: boolean
-  /** appStore.topologyRoute：还没配置任何线路时没什么可修的。 */
+  /** appStore.topologyRoute：旧格式线路串。JSON-only 配置可能为空。 */
   topologyRoute: string
+  /** JSON 拓扑里是否已经有线路。与 topologyRoute 任一有值即可自愈。 */
+  topologyConfigured?: boolean
   /** 标签页在后台时没人看结果，也不需要发起写操作；恢复可见后由调用方立即重查一次。 */
   pageVisible: boolean
 }
@@ -133,11 +171,11 @@ export function canRunTopologyProbeRepair(state: TopologyRepairAvailability): bo
     && state.autoRepairEnabled
     && !state.managerOpen
     && state.privateFeaturesAllowed
-    && Boolean(state.topologyRoute.trim())
+    && (Boolean(state.topologyRoute.trim()) || Boolean(state.topologyConfigured))
     && state.pageVisible
 }
 
-export type TopologyRepairOutcome = 'skipped' | 'no-op' | 'repaired'
+export type TopologyRepairOutcome = 'skipped' | 'no-op' | 'repaired' | 'cleanup-failed'
 
 interface PlannedProbeRepair {
   route: TopologyRouteConfig
@@ -147,6 +185,7 @@ interface PlannedProbeRepair {
   probe: TopologyHopProbe
   taskName: string
   needsCreation: boolean
+  targetHost: string
   retiredTasks: TopologyRetiredTask[]
 }
 
@@ -157,9 +196,8 @@ interface PlannedEntryRepair {
   hopProbe: TopologyHopProbe
   taskName: string
   needsCreation: boolean
-  /** 换挡（判死后改用别的探测方式）时为真：必须无条件新建，不能按名字找到就复用。 */
+  /** 换挡或自定义入口迁移时必须新建，不能按名字找到就复用。 */
   forceCreate: boolean
-  /** 名字符合但不是这次绑定的同名任务，绑定成功后按会话所有权尝试清理。 */
   retiredTasks: AdminPingTask[]
 }
 
@@ -178,17 +216,29 @@ export async function runTopologyProbeRepair(deps: TopologyRepairDeps): Promise<
     return 'skipped'
 
   deps.manager.reset()
-  if (deps.manager.validationErrors.length)
+  const validationErrors = deps.manager.validationErrors
+  const unlabeledValidation = validationErrors.some(error => !/^第 \d+ 条线路/.test(error))
+  if (unlabeledValidation)
+    return 'skipped'
+  const blockedRouteIndexes = new Set(
+    validationErrors.flatMap((error) => {
+      const match = /^第 (\d+) 条线路/.exec(error)
+      return match ? [Number(match[1]) - 1] : []
+    }),
+  )
+  if (deps.manager.routes.length > 0 && blockedRouteIndexes.size === deps.manager.routes.length)
     return 'skipped'
 
   const sessionCreatedTaskIds = deps.sessionCreatedTaskIds ?? new Set<number>()
 
   async function planRouteRepair(route: TopologyRouteConfig, segmentIndex: number, options: { fresh?: boolean } = {}): Promise<PlannedProbeRepair | null> {
+    if (blockedRouteIndexes.has(deps.manager.routes.indexOf(route)))
+      return null
     // 配置里带着 uuid，节点在 Komari 里改过名也认得回来。
     const source = resolveTopologyNode(deps.nodes(), route.nodes[segmentIndex]?.name ?? '', route.nodes[segmentIndex]?.uuid ?? '')
     const landing = resolveTopologyNode(deps.nodes(), route.nodes[segmentIndex + 1]?.name ?? '', route.nodes[segmentIndex + 1]?.uuid ?? '')
     const metric = route.metrics[segmentIndex]
-    if (!source || !landing || !metric?.live)
+    if (!source || !landing || !metric || getTopologyMetricProbeMode(metric) === 'static')
       return null
     // 离线节点不产生样本，`assessHopTask` 无法区分"这种探测方式被封"和"落地机
     // 挂了"。不加这道闸，一次十分钟的宕机就会把整条探测阶梯走完，留下一串谁也
@@ -212,12 +262,15 @@ export async function runTopologyProbeRepair(deps: TopologyRepairDeps): Promise<
       probe: planned.probe,
       taskName: planned.task.name,
       needsCreation: planned.needsCreation,
+      targetHost: planned.targetAddress,
       retiredTasks: ownedRetiredTasks(planned.retiredTasks),
     }
   }
 
   /** 入口段：绑定规划出的真实任务名，换挡先建后清。 */
   async function planEntryRepair(route: TopologyRouteConfig, options: { fresh?: boolean } = {}): Promise<PlannedEntryRepair | null> {
+    if (blockedRouteIndexes.has(deps.manager.routes.indexOf(route)))
+      return null
     const source = resolveTopologyNode(deps.nodes(), route.nodes[1]?.name ?? '', route.nodes[1]?.uuid ?? '')
     if (!source)
       return null
@@ -229,6 +282,8 @@ export async function runTopologyProbeRepair(deps: TopologyRepairDeps): Promise<
     if (!probe || (!customEntry && !shouldAutoApplyTopologyProbe(route)))
       return null
     const metric = route.metrics[0]
+    if (!metric || getTopologyMetricProbeMode(metric) === 'static')
+      return null
 
     const plan = await deps.planEntryProbeTask(source, probe, {
       ...options,
@@ -254,28 +309,51 @@ export async function runTopologyProbeRepair(deps: TopologyRepairDeps): Promise<
       hopProbe: plan.probe,
       taskName,
       needsCreation: plan.needsCreation,
-      forceCreate: plan.switchedFrom !== null,
+      forceCreate: plan.switchedFrom !== null || customEntry,
       retiredTasks: plan.retiredTasks,
     }
   }
 
+  const planErrors: unknown[] = []
+  const settlePlan = <T>(work: Promise<T | null>): Promise<T | null> => work.catch((error) => {
+    planErrors.push(error)
+    return null
+  })
   const [repairs, entryRepairs] = await Promise.all([
     Promise.all(deps.manager.routes.flatMap(route => Array.from(
       { length: Math.max(0, route.nodes.filter(node => node.name.trim()).length - 2) },
-      (_, index) => planRouteRepair(route, index + 1).catch(() => null),
+      (_, index) => settlePlan(planRouteRepair(route, index + 1)),
     )))
       .then(list => list.filter((repair): repair is PlannedProbeRepair => repair !== null)),
-    Promise.all(deps.manager.routes.map(route => planEntryRepair(route).catch(() => null)))
+    Promise.all(deps.manager.routes.map(route => settlePlan(planEntryRepair(route))))
       .then(list => list.filter((repair): repair is PlannedEntryRepair => repair !== null)),
   ])
-  if ((!repairs.length && !entryRepairs.length) || !canContinue())
+  if (!repairs.length && !entryRepairs.length) {
+    if (planErrors.length)
+      throw planErrors[0]
+    return 'no-op'
+  }
+  if (!canContinue())
     return 'no-op'
 
   let outcome: TopologyRepairOutcome = 'no-op'
   const createdTaskIds = new Set<number>()
   /** 用于流水记录：本轮实际建过哪些任务，按名字记，操作者在 Komari 里看到的就是名字。 */
   const createdTaskNames: string[] = []
+  const recordCreatedTask = (ensured: { created: boolean, task: AdminPingTask }) => {
+    if (!ensured.created || !Number.isInteger(ensured.task.id))
+      return
+    createdTaskIds.add(ensured.task.id!)
+    createdTaskNames.push(ensured.task.name)
+    sessionCreatedTaskIds.add(ensured.task.id!)
+  }
   const appliedRetiredTasks: TopologyRetiredTask[] = []
+  /**
+   * 入口换挡前后任务名经常不变（ICMP → TCP 443 仍叫「北京电信」），不能走
+   * `listOwnedRetiredTaskIds` 那种「名字已经没人绑」过滤，只能按会话所有权
+   * 和 ID 清。同样必须等绑定落盘后再删，否则 save 失败会把新旧任务都弄丢。
+   */
+  const appliedEntryRetiredTasks: TopologyRetiredTask[] = []
   let saveAttempted = false
   let bindingPersisted = false
   try {
@@ -286,8 +364,7 @@ export async function runTopologyProbeRepair(deps: TopologyRepairDeps): Promise<
         await deps.manager.preflightSave()
       }
       catch (error) {
-        // GET 已经通过 onPublicSettings 把权威值写回 store。这里 reset 一次，
-        // 下一轮按新快照规划；不要把本轮按陈旧线路算好的补丁写上去。
+        // GET 已把权威值写回 store；reset 后下一轮按新快照规划。
         if (isStaleManagedThemeSettingsError(error)) {
           deps.manager.reset()
           return
@@ -309,21 +386,18 @@ export async function runTopologyProbeRepair(deps: TopologyRepairDeps): Promise<
         if (!latestRepair)
           continue
         const metric = latestRepair.route.metrics[latestRepair.segmentIndex]
-        if (!metric?.live)
+        if (!metric || getTopologyMetricProbeMode(metric) === 'static')
           continue
         let taskName = latestRepair.taskName
         if (latestRepair.needsCreation) {
           try {
-            const ensured = await deps.ensureTopologyPingTask(latestRepair.source, latestRepair.landing, {
+            const landing = restrictTopologyPingEndpoint(latestRepair.landing, latestRepair.targetHost)
+            const ensured = await deps.ensureTopologyPingTask(latestRepair.source, landing, {
               probe: latestRepair.probe,
               signal: deps.signal,
             })
             taskName = ensured.task.name
-            if (ensured.created && Number.isInteger(ensured.task.id)) {
-              createdTaskIds.add(ensured.task.id!)
-              createdTaskNames.push(ensured.task.name)
-              sessionCreatedTaskIds.add(ensured.task.id!)
-            }
+            recordCreatedTask(ensured)
           }
           catch {
             // 单条建任务失败不能掀翻整轮：否则 finally 会把已经建好的其他线路任务删掉。
@@ -342,14 +416,17 @@ export async function runTopologyProbeRepair(deps: TopologyRepairDeps): Promise<
           latestRepair.route.nodes[latestRepair.segmentIndex + 1]!.name = latestRepair.landing.name
         metric.nodeName = latestRepair.source.name
         metric.taskFilter = taskName
+        metric.live = true
+        metric.probeMode = 'live'
         appliedRetiredTasks.push(...latestRepair.retiredTasks)
       }
 
       for (const repair of entryRepairs) {
         if (!canContinue())
           return
-        // 同样在锁内重新规划一次，理由与第 2 段一致。
-        const latestEntryRepair = await planEntryRepair(repair.route, { fresh: true })
+        // 同样在锁内重新规划一次，理由与第 2 段一致；单条失败也必须吞掉，
+        // 否则会穿过 withSaveLock 把本轮已经建好的第 2 段任务一并回滚。
+        const latestEntryRepair = await planEntryRepair(repair.route, { fresh: true }).catch(() => null)
         if (!latestEntryRepair)
           continue
         const metric = latestEntryRepair.route.metrics[0]
@@ -357,18 +434,22 @@ export async function runTopologyProbeRepair(deps: TopologyRepairDeps): Promise<
           continue
         let taskName = latestEntryRepair.taskName
         if (latestEntryRepair.needsCreation) {
-          const ensured = latestEntryRepair.forceCreate
-            ? { task: await deps.createTopologyEntryProbeTask(latestEntryRepair.source, latestEntryRepair.probe, latestEntryRepair.hopProbe, { signal: deps.signal, taskName: latestEntryRepair.taskName }), created: true }
-            : await deps.ensureTopologyEntryProbeTask(latestEntryRepair.source, latestEntryRepair.probe, {
-                hopProbe: latestEntryRepair.hopProbe,
-                signal: deps.signal,
-                taskName: latestEntryRepair.taskName,
-              })
-          taskName = ensured.task.name
-          if (ensured.created && Number.isInteger(ensured.task.id)) {
-            createdTaskIds.add(ensured.task.id!)
-            createdTaskNames.push(ensured.task.name)
-            sessionCreatedTaskIds.add(ensured.task.id!)
+          try {
+            const ensured = latestEntryRepair.forceCreate
+              ? await deps.createTopologyEntryProbeTask(latestEntryRepair.source, latestEntryRepair.probe, latestEntryRepair.hopProbe, { signal: deps.signal, taskName: latestEntryRepair.taskName })
+              : await deps.ensureTopologyEntryProbeTask(latestEntryRepair.source, latestEntryRepair.probe, {
+                  hopProbe: latestEntryRepair.hopProbe,
+                  signal: deps.signal,
+                  taskName: latestEntryRepair.taskName,
+                })
+            taskName = ensured.task.name
+            recordCreatedTask(ensured)
+          }
+          catch {
+            // 单条入口任务失败不能掀翻整轮：否则 finally 会把已经建好的其他线路任务删掉。
+            if (!canContinue())
+              return
+            continue
           }
         }
         if (!canContinue())
@@ -378,26 +459,18 @@ export async function runTopologyProbeRepair(deps: TopologyRepairDeps): Promise<
         metric.nodeName = latestEntryRepair.source.name
         metric.taskFilter = taskName
         metric.live = true
-
-        const retirableIds = latestEntryRepair.retiredTasks
-          .filter(task => Number.isInteger(task.id) && sessionCreatedTaskIds.has(task.id!))
-          .map(task => task.id!)
-        if (retirableIds.length && await deps.deleteTopologyPingTasks(retirableIds)) {
-          for (const id of retirableIds)
-            sessionCreatedTaskIds.delete(id)
-        }
+        metric.probeMode = 'live'
+        appliedEntryRetiredTasks.push(...ownedRetiredTasks(latestEntryRepair.retiredTasks))
       }
 
       if (deps.manager.dirty && canContinue()) {
-        // Task creation is a separate RPC from the theme save. Recheck auth and
-        // the expected topology snapshot once more before starting the write;
-        // if this fails, the finally block can safely remove tasks created above.
+        // 建任务和写主题是两次 RPC；写之前再核一次 expected，失败才能安全回滚。
         await deps.manager.preflightSave()
         if (!canContinue())
           return
         saveAttempted = true
         try {
-          const result = await deps.manager.save({ lockHeld: true })
+          const result = await deps.manager.save({ lockHeld: true, signal: deps.signal })
           if (result === 'saved' || result === 'changed') {
             outcome = 'repaired'
             bindingPersisted = true
@@ -407,10 +480,23 @@ export async function runTopologyProbeRepair(deps: TopologyRepairDeps): Promise<
           }
         }
         catch (error) {
-          // If the old expected snapshot is still current, the save definitely
-          // did not persist and newly created tasks are safe to remove. If this
-          // check fails, persistence is ambiguous; preserve the task because a
-          // successful POST followed by a failed verification may already bind it.
+          if (isTopologySaveCommittedError(error)) {
+            outcome = 'repaired'
+            bindingPersisted = true
+            createdTaskIds.clear()
+            return
+          }
+          if (error instanceof Error && error.name === 'AbortError') {
+            try {
+              await deps.manager.preflightSave()
+              saveAttempted = false
+            }
+            catch {
+              bindingPersisted = true
+              createdTaskIds.clear()
+            }
+            return
+          }
           try {
             await deps.manager.preflightSave()
             saveAttempted = false
@@ -421,8 +507,6 @@ export async function runTopologyProbeRepair(deps: TopologyRepairDeps): Promise<
         }
       }
       else if (!deps.manager.dirty) {
-        // The server snapshot already contains this task name. Creating the
-        // missing task alone completed the repair, so it must not be cleaned up.
         createdTaskIds.clear()
         bindingPersisted = true
       }
@@ -452,20 +536,63 @@ export async function runTopologyProbeRepair(deps: TopologyRepairDeps): Promise<
     const retiredIds = listOwnedRetiredTaskIds(
       appliedRetiredTasks,
       sessionCreatedTaskIds,
-      liveTopologyTaskNames(deps.manager.routes),
+      { boundTaskNames: liveTopologyTaskNames(deps.manager.routes) },
     )
-    if (retiredIds.length) {
-      const removed = await deps.deleteTopologyPingTasks(retiredIds)
+    // 入口换挡后新任务经常沿用旧名字，不能按「名字是否仍被绑定」过滤，只能
+    // 按线路机 + 当前绑定名反查真实 id：如果另一条共用同一台线路机的线路，
+    // 保存后仍然绑着这个 id（哪怕名字和被清理的旧任务相同），也要保护它。
+    // 任务列表读失败时不要删入口候选——id 级保护正是为这种情况准备的。
+    // 没接 loadAdminPingTasks 时退回只按会话所有权 + 本轮新建 id 清理。
+    const appliedEntryRetiredIds = new Set(appliedEntryRetiredTasks.map(task => task.id))
+    let liveEntryTaskIds: Set<number> | null = new Set()
+    if (appliedEntryRetiredTasks.length && deps.loadAdminPingTasks) {
+      try {
+        const tasks = await deps.loadAdminPingTasks({ fresh: true })
+        liveEntryTaskIds = listLiveEntryTaskIds(
+          deps.manager.routes,
+          deps.nodes(),
+          tasks,
+          appliedEntryRetiredIds,
+        )
+      }
+      catch {
+        liveEntryTaskIds = null
+      }
+    }
+    const entryRetiredIds = liveEntryTaskIds
+      ? listOwnedRetiredTaskIds(
+          appliedEntryRetiredTasks,
+          sessionCreatedTaskIds,
+          { excludeIds: new Set([...createdTaskIds, ...liveEntryTaskIds]) },
+        )
+      : []
+    const cleanupIds = [...new Set([...retiredIds, ...entryRetiredIds])]
+    if (cleanupIds.length) {
+      const removed = await deps.deleteTopologyPingTasks(cleanupIds)
       if (removed) {
-        for (const id of retiredIds)
+        for (const id of cleanupIds)
           sessionCreatedTaskIds.delete(id)
       }
+      // 同一个旧任务可能被多条线路各自的 retiredTasks 记录到（比如它们共用
+      // 同一个入口任务），按 id 去重后再拼流水文案，避免同一个任务名重复出现。
+      const cleanupTaskNames = new Map<number, string>()
+      for (const task of appliedRetiredTasks) {
+        if (retiredIds.includes(task.id))
+          cleanupTaskNames.set(task.id, task.name)
+      }
+      for (const task of appliedEntryRetiredTasks) {
+        if (entryRetiredIds.includes(task.id))
+          cleanupTaskNames.set(task.id, task.name)
+      }
+      const cleanupNames = [...cleanupTaskNames.values()]
       recordTopologyWrite({
         trigger: 'auto',
-        action: `清理已换掉的旧探测任务 ${summarizeTaskNames(appliedRetiredTasks.filter(task => retiredIds.includes(task.id)).map(task => task.name))}`,
+        action: `清理已换掉的旧探测任务 ${summarizeTaskNames(cleanupNames)}`,
         outcome: removed ? 'ok' : 'failed',
         detail: removed ? undefined : '删除请求未成功，新任务不受影响，下一轮会重试',
       })
+      if (!removed)
+        return 'cleanup-failed'
     }
   }
 

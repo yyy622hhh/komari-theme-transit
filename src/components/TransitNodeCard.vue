@@ -14,7 +14,7 @@ import { getConfiguredNodeRole, getNodeRole } from '@/utils/nodeRoleHelper'
 import { getOSImage, getOSName } from '@/utils/osImageHelper'
 import { getRegionCode, getRegionDisplayName } from '@/utils/regionHelper'
 import { parseNodeRouteTag } from '@/utils/routeTag'
-import { formatPriceWithCycle, getDaysUntilExpired, getExpireStatus, parseTags } from '@/utils/tagHelper'
+import { formatPriceWithCycle, getDaysUntilExpired, getExpireStatus, isFreePrice, parseTags } from '@/utils/tagHelper'
 
 const props = defineProps<{ node: NodeData }>()
 const emit = defineEmits<{ click: [], manage: [] }>()
@@ -37,9 +37,15 @@ const tags = computed(() => parseTags(props.node.tags)
   .filter(tag => tag !== role.value)
   .slice(0, 5))
 
-const price = computed(() => props.node.price > 0 && showPrice.value
-  ? formatPriceWithCycle(props.node.price, props.node.billing_cycle, props.node.currency, appStore.lang)
-  : '')
+const price = computed(() => {
+  if (!showPrice.value || props.node.price === 0)
+    return ''
+  if (isFreePrice(props.node.price))
+    return appStore.lang === 'zh-CN' ? '免费' : 'Free'
+  return props.node.price > 0
+    ? formatPriceWithCycle(props.node.price, props.node.billing_cycle, props.node.currency, appStore.lang)
+    : ''
+})
 const expiryStatus = computed(() => getExpireStatus(props.node.expired_at))
 const expiryDays = computed(() => getDaysUntilExpired(props.node.expired_at))
 const expiryText = computed(() => {
@@ -59,6 +65,14 @@ const primaryAlert = useNodeAlert(() => props.node.uuid)
 const visibleAlert = computed(() => isMaintenance.value ? null : primaryAlert.value)
 const formatBytes = (value: number) => formatBytesWithConfig(value, appStore.byteDecimals)
 const formatSpeed = (value: number) => formatBytesPerSecondWithConfig(value, appStore.byteDecimals)
+
+function hasRegion(region: string | null | undefined): boolean {
+  return Boolean(region?.trim())
+}
+
+function getRegionAltText(region: string): string {
+  return getRegionDisplayName(region) || getRegionCode(region)
+}
 
 function resourceStatus(value: number) {
   return getStatus(value)
@@ -128,9 +142,9 @@ const statusEdgeStyle = computed(() => ({ '--node-status-tone': statusEdgeTone.v
           </button>
           <img :src="getOSImage(node.os)" :alt="getOSName(node.os)" class="size-3.5 opacity-75">
           <img
-            v-if="node.region"
+            v-if="hasRegion(node.region)"
             :src="`/images/flags/${getRegionCode(node.region)}.svg`"
-            :alt="getRegionDisplayName(node.region)"
+            :alt="getRegionAltText(node.region)"
             class="h-4 w-6 rounded-[2px] object-cover"
           >
         </div>

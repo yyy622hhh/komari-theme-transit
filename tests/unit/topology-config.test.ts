@@ -28,8 +28,8 @@ describe('serializeTopologyConfig', () => {
       { name: '香港边缘', region: 'HK', role: '落地机', uuid: 'exit-uuid' },
     ])
     expect(parsed!.metrics).toEqual([
-      { live: true, nodeName: '主控-洛杉矶', taskFilter: '北京电信', fallbackLatency: null, fallbackLoss: null },
-      { live: false, nodeName: '', taskFilter: '', fallbackLatency: 51, fallbackLoss: 0 },
+      { probeMode: 'live', live: true, nodeName: '主控-洛杉矶', taskFilter: '北京电信', fallbackLatency: null, fallbackLoss: null },
+      { probeMode: 'static', live: false, nodeName: '', taskFilter: '', fallbackLatency: 51, fallbackLoss: 0 },
     ])
   })
 
@@ -151,17 +151,37 @@ describe('parseTopologyConfig', () => {
     expect(parsed!.nodes.map(node => node.role)).toEqual(['入口', '线路机', '落地机'])
     expect(parsed!.metrics).toHaveLength(2)
     expect(parsed!.metrics.every(metric => !metric.live)).toBe(true)
+    expect(parsed!.metrics.every(metric => metric.probeMode === 'auto')).toBe(true)
   })
 
   test('tolerates junk field types without throwing', () => {
     const [parsed] = parseTopologyConfig('{"version":1,"routes":[{"nodes":[{"name":"a","uuid":5},null],"metrics":[{"live":"yes"}]}]}')!
     expect(parsed!.nodes[0]).toEqual({ name: 'a', region: '', role: '入口' })
     expect(parsed!.metrics[0]!.live).toBe(false)
+    expect(parsed!.metrics[0]!.probeMode).toBe('static')
   })
 
   test('caps routes at the configured maximum', () => {
     const many = { version: 1, routes: Array.from({ length: 80 }, () => ({ nodes: [{ name: 'a' }, { name: 'b' }], metrics: [] })) }
     expect(parseTopologyConfig(JSON.stringify(many))).toHaveLength(50)
+  })
+
+  test('records a parse error instead of silently dropping extra nodes', () => {
+    const [parsed] = parseTopologyConfig(JSON.stringify({
+      version: 1,
+      routes: [{
+        nodes: [
+          { name: '入口' },
+          { name: '线路机' },
+          { name: '跳板' },
+          { name: '落地机' },
+          { name: '多余' },
+        ],
+        metrics: [{}, {}, {}, {}],
+      }],
+    }))!
+    expect(parsed!.nodes.map(node => node.name)).toEqual(['入口', '线路机', '跳板', '落地机'])
+    expect(parsed!.parseErrors).toEqual(['最多支持 4 个节点'])
   })
 })
 
@@ -177,7 +197,7 @@ describe('readTopologyRoutes', () => {
     expect(routes[0]!.nodes.map(node => node.name)).toEqual(['北京电信', '主控-洛杉矶', '香港边缘'])
     expect(routes[0]!.nodes[1]!.uuid).toBe('relay-uuid')
     expect(routes[0]!.metrics[0]).toMatchObject({ live: true, nodeName: '主控-洛杉矶', taskFilter: '北京电信' })
-    expect(routes[0]!.metrics[1]).toMatchObject({ live: false, fallbackLatency: 51, fallbackLoss: 0 })
+    expect(routes[0]!.metrics[1]).toMatchObject({ probeMode: 'static', live: false, fallbackLatency: 51, fallbackLoss: 0 })
   })
 
   test('an old install upgrades to JSON without changing what the user sees', () => {

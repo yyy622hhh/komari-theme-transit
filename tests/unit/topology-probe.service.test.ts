@@ -13,7 +13,10 @@ import {
 import {
   assessHopTask,
   chooseInitialHopProbe,
+  getHopTaskSamples,
+  LADDER,
   loadSourceProbeProfile,
+  nextLadderProbe,
   planEntryProbeTask,
   planWorkingHopTask,
 } from '../../src/services/topology-probe.service'
@@ -274,6 +277,100 @@ describe('topology hop task planning', () => {
     }
   })
 
+  test('advances past a dead unbound initial TCP 443 instead of binding it for a wasted round', async () => {
+    const restore = mockKomari(
+      [
+        { id: 1, name: 'telecom', clients: [source.uuid], type: 'tcp', target: '198.51.100.2:443', interval: 30 },
+        { id: 9, name: 'Transit-Relay-JP-to-Exit-SG-tcp-443', clients: [source.uuid], type: 'tcp', target: `${landing.ipv4}:443`, interval: 30 },
+      ],
+      [
+        { task_id: '1', name: 'telecom', total: 100, valid: 100 },
+        { task_id: '9', total: 40, valid: 0 },
+      ],
+    )
+    try {
+      const planned = await planWorkingHopTask(source, landing)
+      expect(planned.probe).toEqual({ type: 'tcp', port: 80 })
+      expect(planned.needsCreation).toBe(true)
+      expect(planned.switchedFrom).toEqual({ type: 'tcp', port: 443 })
+    }
+    finally {
+      restore()
+    }
+  })
+
+  test('binds the healthy same-named hop instead of climbing the ladder or creating a third task', async () => {
+    const restore = mockKomari(
+      [
+        { id: 1, name: 'Transit-Relay-JP-to-Exit-SG', clients: [source.uuid], type: 'icmp', target: landing.ipv4, interval: 30 },
+        { id: 2, name: 'Transit-Relay-JP-to-Exit-SG', clients: [source.uuid], type: 'icmp', target: landing.ipv4, interval: 30 },
+      ],
+      [
+        { task_id: '1', total: 40, valid: 0 },
+        { task_id: '2', total: 40, valid: 40 },
+      ],
+    )
+    try {
+      const planned = await planWorkingHopTask(source, landing, 'Transit-Relay-JP-to-Exit-SG')
+      expect(planned.needsCreation).toBe(false)
+      expect(planned.verdict).toBe('healthy')
+      expect(planned.task.id).toBe(2)
+      expect(planned.probe).toEqual({ type: 'icmp' })
+      expect(planned.retiredTasks.map(task => task.id)).toEqual([1])
+    }
+    finally {
+      restore()
+    }
+  })
+
+  test('keeps a pending duplicate probe instead of escalating from an older dead task', async () => {
+    const restore = mockKomari(
+      [
+        { id: 1, weight: 1, name: 'Transit-Relay-JP-to-Exit-SG', clients: [source.uuid], type: 'icmp', target: landing.ipv4, interval: 30 },
+        { id: 2, weight: 2, name: 'Transit-Relay-JP-to-Exit-SG-2', clients: [source.uuid], type: 'icmp', target: landing.ipv4, interval: 30 },
+      ],
+      [
+        { task_id: '1', total: 40, valid: 0 },
+        { task_id: '2', total: 2, valid: 0 },
+      ],
+    )
+    try {
+      const planned = await planWorkingHopTask(source, landing)
+      expect(planned.task.id).toBe(2)
+      expect(planned.verdict).toBe('pending')
+      expect(planned.needsCreation).toBe(false)
+      expect(planned.switchedFrom).toBeNull()
+      expect(planned.retiredTasks.map(task => task.id)).toEqual([1])
+    }
+    finally {
+      restore()
+    }
+  })
+
+  test('drafts IPv6 when a dual-stack landing already has a dead IPv4 TCP 443 hop', async () => {
+    const dualLanding = { uuid: 'exit-uuid', name: 'Exit-SG', ipv4: '203.0.113.20', ipv6: '2001:db8::20' }
+    const restore = mockKomari(
+      [
+        { id: 1, name: 'telecom', clients: [source.uuid], type: 'tcp', target: '198.51.100.2:443', interval: 30 },
+        { id: 9, name: 'Transit-Relay-JP-to-Exit-SG-tcp-443', clients: [source.uuid], type: 'tcp', target: '203.0.113.20:443', interval: 30 },
+      ],
+      [
+        { task_id: '1', name: 'telecom', total: 100, valid: 100 },
+        { task_id: '9', total: 40, valid: 0 },
+      ],
+    )
+    try {
+      const planned = await planWorkingHopTask(source, dualLanding)
+      expect(planned.probe).toEqual({ type: 'tcp', port: 443 })
+      expect(planned.needsCreation).toBe(true)
+      expect(planned.targetAddress).toBe('2001:db8::20')
+      expect(planned.task.target).toContain('2001:db8::20')
+    }
+    finally {
+      restore()
+    }
+  })
+
   test('escalates to the next probe once the bound task is proven dead', async () => {
     const restore = mockKomari(
       [{ id: 7, name: 'Transit-Relay-JP-to-Exit-SG', clients: [source.uuid], type: 'icmp', target: landing.ipv4, interval: 30 }],
@@ -472,6 +569,71 @@ describe('topology hop task planning', () => {
     finally {
       restore()
     }
+  })
+
+  test('does not recreate ICMP just because another source can ping the landing', async () => {
+    const otherSource = 'other-relay-uuid'
+    const restore = mockKomari(
+      [
+        { id: 9, name: 'unrelated-tcp', clients: [source.uuid], type: 'tcp', target: '198.51.100.9:443', interval: 30 },
+        { id: 18, name: 'other-icmp', clients: [otherSource], type: 'icmp', target: landing.ipv4, interval: 30 },
+      ],
+      [
+        { entity_id: source.uuid, task_id: '9', total: 40, valid: 39 },
+        { entity_id: otherSource, task_id: '18', total: 40, valid: 39 },
+      ],
+    )
+    try {
+      const planned = await planWorkingHopTask(source, landing)
+      expect(planned.probe).toEqual({ type: 'tcp', port: 443 })
+      expect(planned.needsCreation).toBe(true)
+    }
+    finally {
+      restore()
+    }
+  })
+
+  test('does not judge a new same-named TCP entry from the dead ICMP sample bucket', () => {
+    const profile = {
+      sourceUuid: source.uuid,
+      tasks: [
+        { id: 55, name: '北京电信', clients: [source.uuid], type: 'icmp' as const, target: '219.141.140.10', interval: 30 },
+        { id: 56, name: '北京电信', clients: [source.uuid], type: 'tcp' as const, target: '219.141.136.10:53', interval: 30 },
+      ],
+      samplesByTaskId: new Map([['55', { total: 40, valid: 0 }]]),
+      samplesByTaskName: new Map([['北京电信', { total: 40, valid: 0 }]]),
+      observedSamplesByTaskId: new Map([['55', { total: 40, valid: 0 }]]),
+    }
+    expect(getHopTaskSamples(profile, { id: 55, name: '北京电信' })).toEqual({ total: 40, valid: 0 })
+    expect(getHopTaskSamples(profile, { id: 56, name: '北京电信' })).toBeNull()
+    expect(assessHopTask(profile, { id: 56, name: '北京电信' })).toBe('pending')
+  })
+
+  test('does not inherit retired ICMP name-bucket stats after the old task is deleted', () => {
+    const profile = {
+      sourceUuid: source.uuid,
+      tasks: [
+        { id: 56, name: '北京电信', clients: [source.uuid], type: 'tcp' as const, target: '219.141.136.10:53', interval: 30 },
+      ],
+      samplesByTaskId: new Map(),
+      samplesByTaskName: new Map([['北京电信', { total: 40, valid: 0 }]]),
+      observedSamplesByTaskId: new Map([['55', { total: 40, valid: 0 }]]),
+    }
+    expect(getHopTaskSamples(profile, { id: 56, name: '北京电信' })).toBeNull()
+    expect(assessHopTask(profile, { id: 56, name: '北京电信' })).toBe('pending')
+  })
+
+  test('does not restart an unknown TCP port at ICMP when this source cannot send ICMP', () => {
+    const profile = {
+      sourceUuid: source.uuid,
+      tasks: [
+        { id: 9, name: 'unrelated-tcp', clients: [source.uuid], type: 'tcp' as const, target: '198.51.100.9:443', interval: 30 },
+      ],
+      samplesByTaskId: new Map([['9', { total: 40, valid: 40 }]]),
+      samplesByTaskName: new Map(),
+      observedSamplesByTaskId: new Map(),
+    }
+    expect(nextLadderProbe(profile, { type: 'tcp', port: 20002 }, [], LADDER)).toEqual({ type: 'tcp', port: 443 })
   })
 
   test('never uses another source samples to mark the current source healthy', async () => {
@@ -746,6 +908,29 @@ describe('planEntryProbeTask', () => {
       expect(planned.task.name).toBe(topologyEntryTaskName(custom, { type: 'tcp', port: 22 }))
       expect(planned.task.target).toBe('111.197.38.247:22')
       expect(planned.retiredTasks.map(task => task.id)).toEqual([50, 47])
+    }
+    finally {
+      restore()
+    }
+  })
+
+  test('migrates a single leftover unsuffixed custom task at the last rung to a unique name', async () => {
+    const custom = createCustomTopologyProbe('北京联通家宽', '111.197.38.247')!
+    const restore = mockKomari(
+      [
+        { id: 50, name: custom.taskFilter, clients: [source.uuid], type: 'tcp', target: '111.197.38.247:22', interval: 30 },
+      ],
+      [
+        { task_id: '50', total: 40, valid: 0 },
+      ],
+    )
+    try {
+      const planned = await planEntryProbeTask(source, custom, { currentTaskName: custom.taskFilter })
+      expect(planned.needsCreation).toBe(true)
+      expect(planned.exhausted).toBe(false)
+      expect(planned.probe).toEqual({ type: 'tcp', port: 22 })
+      expect(planned.task.name).toBe(topologyEntryTaskName(custom, { type: 'tcp', port: 22 }))
+      expect(planned.retiredTasks.map(task => task.id)).toEqual([50])
     }
     finally {
       restore()

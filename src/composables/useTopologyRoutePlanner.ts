@@ -6,10 +6,11 @@ import type { NodeData } from '@/stores/nodes'
 import type { TopologyRouteConfig } from '@/utils/topologyModel'
 import type { TopologyProbeOption } from '@/utils/topologyPresets'
 import { ref, toValue } from 'vue'
-import { OPS_TOPOLOGY_ENTRY_PROBE_LADDER, OPS_TOPOLOGY_HOP_PROBE_LADDER } from '@/constants/ops'
+import { OPS_TOPOLOGY_CUSTOM_ENTRY_PROBE_LADDER, OPS_TOPOLOGY_ENTRY_PROBE_LADDER, OPS_TOPOLOGY_HOP_PROBE_LADDER } from '@/constants/ops'
 import { describeTopologyHopProbe, normalizeTopologyHopProbe } from '@/services/ping-task.service'
 import { planEntryProbeTask, planWorkingHopTask } from '@/services/topology-probe.service'
 import { applyTopologyProbeToRoute, getTopologyRouteEntryProbe, getTopologyRouteProbeKey, resolveTopologyNode, shouldAutoApplyTopologyProbe } from '@/utils/topologyHelper'
+import { getTopologyMetricProbeMode } from '@/utils/topologyModel'
 import { findTopologyProbeKey, getTopologyProbeTarget } from '@/utils/topologyPresets'
 
 export interface TopologyRouteProbeState {
@@ -26,10 +27,15 @@ export interface TopologyPendingRouteTask {
   targetUuid: string
   taskName: string
   probe: TopologyHopProbe
+  targetHost?: string
 }
 
 export function topologySegmentKey(routeId: number, segmentIndex: number): string {
   return `${routeId}:${segmentIndex}`
+}
+
+export function isTopologySegmentKeyForRoute(key: string, routeId: number): boolean {
+  return Number(key.split(':')[0]) === routeId
 }
 
 export function readTopologySegmentRecord<T>(
@@ -38,7 +44,6 @@ export function readTopologySegmentRecord<T>(
   segmentIndex: number,
 ): T | undefined {
   return record[topologySegmentKey(routeId, segmentIndex)]
-    // 兼容升级前同一路线只有一段 hop 时按 route id 存储的在途状态。
     ?? (segmentIndex === 1 ? record[String(routeId)] : undefined)
 }
 
@@ -56,8 +61,6 @@ export interface TopologyRetiredTaskCandidate {
   id: number
   name: string
 }
-
-/** 规划只需要读 `routes`，不依赖 `useTopologyManager()` 的其它状态。 */
 export interface TopologyRoutePlannerManager {
   routes: TopologyRouteConfig[]
 }
@@ -66,7 +69,6 @@ export interface TopologyRoutePlannerCatalog {
   loadTasks: (nodeName: string, nodeUuid?: string) => Promise<TopologyTaskLoadResult>
   rememberTask: (sourceUuid: string, taskName: string) => void
 }
-
 export function findUniquePresetEntryTask(taskNames: readonly string[], entryName: string): string {
   const entryProbeKey = findTopologyProbeKey(entryName)
   if (!entryProbeKey)
@@ -80,9 +82,8 @@ function ladderText(ladder: readonly TopologyHopProbe[]): string {
 }
 
 const HOP_PROBE_LADDER_TEXT = ladderText(OPS_TOPOLOGY_HOP_PROBE_LADDER)
-/** 入口阶梯比第 2 段短，提示里不能把 443/80/22 说成试过了。 */
 const ENTRY_PROBE_LADDER_TEXT = ladderText(OPS_TOPOLOGY_ENTRY_PROBE_LADDER)
-
+const CUSTOM_ENTRY_PROBE_LADDER_TEXT = ladderText(OPS_TOPOLOGY_CUSTOM_ENTRY_PROBE_LADDER)
 export interface TopologyRouteHintInput {
   planning: boolean
   taskError: string
@@ -92,7 +93,6 @@ export interface TopologyRouteHintInput {
   pending: boolean
 }
 
-/** 把当前探测状态翻成操作者能看懂的一句话；纯函数，独立可测。 */
 export function formatTopologyRouteHint(input: TopologyRouteHintInput): string {
   if (input.planning)
     return '正在自动挑选可用的探测方式…'
@@ -120,30 +120,16 @@ export function formatTopologyRouteHint(input: TopologyRouteHintInput): string {
 }
 
 export interface TopologyEntryHintInput {
-  /** 入口对应的预设探测名，例如「北京电信」；自定义入口为空。 */
   probeLabel: string
-  /** 预设入口期望匹配的 Ping 任务名。 */
   expectedTaskName: string
-  /** 入口在线路图上的显示名。 */
   entryLabel: string
   sourceName: string
-  /** 第 1 段是否已绑定实时任务。 */
   live: boolean
-  /** 已经乐观标记为实时，探测任务还在保存流程里排队创建/换挡，尚未确认落地。 */
   pending: boolean
-  /** 阶梯自愈状态；只有命中预设时才有。 */
   state: TopologyRouteProbeState | undefined
 }
 
-/**
- * 第 1 段（入口）的提示。
- *
- * 线路机上没有同名 Ping 任务时，Transit 会自动建一个指向该运营商落地测速点
- * 的探测任务并绑定，探测方式的初选和阶梯回退复用第 2 段同一套健康判定；这类
- * 任务测的是「线路机主动探测落地点」，方向和「该运营商用户访问线路机」正好
- * 相反，必须在提示里说清楚，不能让人误以为是正向体验。自定义入口（不对应
- * 任何预设）不掺这句话——那是操作者自己建的任务，方向由操作者自己判断。
- */
+/** 第 1 段入口提示。预设入口会写明探测方向与用户访问相反；自定义入口不掺这句话。 */
 export function formatTopologyEntryHint(input: TopologyEntryHintInput): string {
   if (!input.sourceName.trim())
     return ''
@@ -153,8 +139,10 @@ export function formatTopologyEntryHint(input: TopologyEntryHintInput): string {
       return `“${input.expectedTaskName}”按 ${describeTopologyHopProbe(switchedFrom)} 探测不通，正在自动改用 ${describeTopologyHopProbe(input.state.probe)} 重新创建。`
     return `正在为入口自动创建探测任务“${input.expectedTaskName}”…`
   }
-  if (input.state?.exhausted)
-    return `“${input.expectedTaskName}”按 ${ENTRY_PROBE_LADDER_TEXT} 都探测不通，需要手动处理（检查线路机是否能连到 ${input.state.targetAddress}，或换一个入口）。`
+  if (input.state?.exhausted) {
+    const ladder = input.probeLabel ? ENTRY_PROBE_LADDER_TEXT : CUSTOM_ENTRY_PROBE_LADDER_TEXT
+    return `“${input.expectedTaskName}”按 ${ladder} 都探测不通，需要手动处理（检查线路机是否能连到 ${input.state.targetAddress}，或换一个入口）。`
+  }
   if (input.live) {
     return input.probeLabel
       ? `入口探测：${input.probeLabel} · 实时（线路机主动探测运营商落地点，不代表该运营商用户访问这台线路机的真实体验）`
@@ -166,16 +154,10 @@ export function formatTopologyEntryHint(input: TopologyEntryHintInput): string {
   return `入口探测：自定义入口“${input.entryLabel}”未绑定实时任务，该段显示静态基线。`
 }
 
-/** 提示是否需要用醒目色：任务错误或阶梯穷尽都算需要操作者注意。 */
 export function isTopologyRouteHintDestructive(input: { taskError: string, exhausted: boolean }): boolean {
   return Boolean(input.taskError || input.exhausted)
 }
 
-/**
- * 第 2 段（线路机 → 落地机）探测规划：调用 `planWorkingHopTask` 挑选/自愈探测
- * 方式，并维护每条线路的规划中/错误/待创建任务状态。第 1 段（入口）的静态
- * 预设匹配也在这里做，因为两段共用同一次 `catalog.loadTasks` 结果。
- */
 export function useTopologyRoutePlanner(
   nodes: MaybeRefOrGetter<NodeData[]>,
   manager: TopologyRoutePlannerManager,
@@ -186,9 +168,7 @@ export function useTopologyRoutePlanner(
   const routeEntryProbeStates = ref<Record<number, TopologyRouteProbeState>>({})
   const pendingRouteTasks = ref<Record<string, TopologyPendingRouteTask>>({})
   const pendingEntryTasks = ref<Record<number, TopologyPendingEntryTask>>({})
-  /** 新任务绑定并保存成功后可以清理掉的旧任务候选，按线路记录。 */
   const routeRetiredTasks = ref<Record<string, TopologyRetiredTaskCandidate[]>>({})
-  /** 入口段的清理候选，独立于第 2 段的 `routeRetiredTasks`——两段各自记录，互不覆盖。 */
   const routeEntryRetiredTasks = ref<Record<number, TopologyRetiredTaskCandidate[]>>({})
   const routeTaskPlanning = ref<Record<number, boolean>>({})
   const routeTaskErrors = ref<Record<number, string>>({})
@@ -206,7 +186,6 @@ export function useTopologyRoutePlanner(
     routeTaskRuns.clear()
   }
 
-  /** 让该线路上一轮还没返回的 `planRouteTasks` 调用作废，不再写回状态。 */
   function bumpRouteRun(routeId: number): void {
     routeTaskRuns.set(routeId, (routeTaskRuns.get(routeId) ?? 0) + 1)
   }
@@ -230,7 +209,7 @@ export function useTopologyRoutePlanner(
     if (segmentIndex === undefined) {
       delete nextPending[String(routeId)]
       for (const key of Object.keys(nextPending)) {
-        if (key.startsWith(`${routeId}:`))
+        if (isTopologySegmentKeyForRoute(key, routeId))
           delete nextPending[key]
       }
     }
@@ -263,7 +242,7 @@ export function useTopologyRoutePlanner(
       if (segmentIndex === undefined) {
         delete record[String(routeId)]
         for (const key of Object.keys(record)) {
-          if (key.startsWith(`${routeId}:`))
+          if (isTopologySegmentKeyForRoute(key, routeId))
             delete record[key]
         }
       }
@@ -372,12 +351,14 @@ export function useTopologyRoutePlanner(
       return
     const taskName = plan.task.name.trim() || probe.taskFilter
     metric.live = true
+    metric.probeMode = 'live'
     metric.nodeName = sourceName
     metric.taskFilter = taskName
+    catalog.rememberTask(sourceUuid, taskName)
     if (plan.needsCreation) {
       pendingEntryTasks.value = {
         ...pendingEntryTasks.value,
-        [route.id]: { sourceUuid, probeKey, entryProbe: probe, taskName, probe: plan.probe, forceCreate: plan.switchedFrom !== null },
+        [route.id]: { sourceUuid, probeKey, entryProbe: probe, taskName, probe: plan.probe, forceCreate: plan.switchedFrom !== null || Boolean(route.nodes[0]?.probeTarget?.trim()) },
       }
     }
     else {
@@ -406,6 +387,12 @@ export function useTopologyRoutePlanner(
         configured.name = resolved.name
     }
 
+    const segmentCount = Math.max(1, route.nodes.filter(node => node.name.trim()).length - 1)
+    if (route.metrics.slice(0, segmentCount).every(metric => getTopologyMetricProbeMode(metric) === 'static')) {
+      clearRouteTaskPlanning(route.id)
+      return
+    }
+
     routeTaskPlanning.value = { ...routeTaskPlanning.value, [route.id]: true }
     try {
       const loaded = await catalog.loadTasks(source.name, source.uuid)
@@ -418,7 +405,7 @@ export function useTopologyRoutePlanner(
       const entryProbe = getTopologyRouteEntryProbe(route)
       const customEntry = Boolean(route.nodes[0]?.probeTarget?.trim())
       const firstMetric = route.metrics[0]
-      if (entryProbe && (customEntry || shouldAutoApplyTopologyProbe(route))) {
+      if (firstMetric && getTopologyMetricProbeMode(firstMetric) !== 'static' && entryProbe && (customEntry || shouldAutoApplyTopologyProbe(route))) {
         if (!customEntry && probeKey)
           applyTopologyProbeToRoute(route, probeKey, source.name, loaded.tasks, reservedEntryNames(route))
         // 离线线路机发不出样本，判死会走空整条阶梯，不给它规划入口任务。
@@ -435,28 +422,44 @@ export function useTopologyRoutePlanner(
           firstMetric.taskFilter = matchingEntryTask
       }
 
-      const segmentCount = Math.max(1, route.nodes.filter(node => node.name.trim()).length - 1)
       for (let segmentIndex = 1; segmentIndex < segmentCount; segmentIndex++) {
         const segmentSource = resolveTopologyNode(toValue(nodes), route.nodes[segmentIndex]?.name ?? '', route.nodes[segmentIndex]?.uuid ?? '')
         const segmentTarget = resolveTopologyNode(toValue(nodes), route.nodes[segmentIndex + 1]?.name ?? '', route.nodes[segmentIndex + 1]?.uuid ?? '')
         const metric = route.metrics[segmentIndex]
+        if (metric && getTopologyMetricProbeMode(metric) === 'static') {
+          clearRouteProbeState(route.id, segmentIndex)
+          clearPendingRouteTask(route.id, segmentIndex)
+          continue
+        }
         if (!segmentSource || !segmentTarget || !metric) {
           clearRouteProbeState(route.id, segmentIndex)
           clearPendingRouteTask(route.id, segmentIndex)
           if (metric) {
+            metric.probeMode = 'auto'
             metric.live = false
             metric.nodeName = ''
             metric.taskFilter = ''
           }
           continue
         }
-        // 离线节点给不出样本，走阶梯会把 ICMP/443/80/22 建一遍并自动写回。
-        if (segmentSource.online === false || segmentTarget.online === false)
+        if (segmentSource.uuid !== source.uuid) {
+          const hopLoaded = await catalog.loadTasks(segmentSource.name, segmentSource.uuid)
+          if (routeTaskRuns.get(route.id) !== runId || !isOpen() || !manager.routes.includes(route))
+            return
+          if (hopLoaded.error)
+            throw new Error(hopLoaded.error)
+        }
+        // 离线节点不走阶梯；已有绑定仍记进目录，避免保存按钮一直转圈。
+        if (segmentSource.online === false || segmentTarget.online === false) {
+          if (metric.live && metric.taskFilter.trim())
+            catalog.rememberTask(segmentSource.uuid, metric.taskFilter)
           continue
+        }
         const planned = await planWorkingHopTask(segmentSource, segmentTarget, metric.taskFilter)
         if (routeTaskRuns.get(route.id) !== runId || !isOpen() || !manager.routes.includes(route))
           return
         metric.live = true
+        metric.probeMode = 'live'
         metric.nodeName = segmentSource.name
         metric.taskFilter = planned.task.name
         const key = topologySegmentKey(route.id, segmentIndex)
@@ -480,12 +483,11 @@ export function useTopologyRoutePlanner(
               targetUuid: segmentTarget.uuid,
               taskName: planned.task.name,
               probe: planned.probe,
+              targetHost: planned.targetAddress,
             },
           }
         }
-        else {
-          catalog.rememberTask(segmentSource.uuid, planned.task.name)
-        }
+        catalog.rememberTask(segmentSource.uuid, planned.task.name)
       }
     }
     catch (error) {
@@ -537,8 +539,10 @@ export function useTopologyRoutePlanner(
       .filter(Boolean)
       .join('；')
   }
-
   function routeEntryHint(route: TopologyRouteConfig): string {
+    const metric = route.metrics[0]
+    if (metric && getTopologyMetricProbeMode(metric) === 'static')
+      return `入口探测：${route.nodes[0]?.name.trim() || '自定义入口'} · 静态基线（不会创建探测任务）`
     const probe = getTopologyRouteEntryProbe(route)
     const customEntry = Boolean(route.nodes[0]?.probeTarget?.trim())
     return formatTopologyEntryHint({
@@ -557,14 +561,12 @@ export function useTopologyRoutePlanner(
       return true
     return !routeEntryHint(route).includes('· 实时')
   }
-
   function routeHintTone(route: TopologyRouteConfig): boolean {
     return isTopologyRouteHintDestructive({
       taskError: routeTaskErrors.value[route.id] ?? '',
-      exhausted: Object.entries(routeProbeStates.value).some(([key, state]) => (key === String(route.id) || key.startsWith(`${route.id}:`)) && state.exhausted),
+      exhausted: Object.entries(routeProbeStates.value).some(([key, state]) => isTopologySegmentKeyForRoute(key, route.id) && state.exhausted),
     })
   }
-
   return {
     routeProbeStates,
     routeEntryProbeStates,

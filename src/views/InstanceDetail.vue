@@ -218,6 +218,7 @@ const formatBytes = (bytes: number) => formatBytesWithConfig(bytes, appStore.byt
 const formatBytesPerSecond = (bytes: number) => formatBytesPerSecondWithConfig(bytes, appStore.byteDecimals)
 const formatUptime = (seconds: number) => formatUptimeWithFormat(seconds, 'minute')
 const getRegionAltText = (region: string) => getRegionDisplayName(region) || getRegionCode(region)
+const hasRegion = (region: string | null | undefined) => Boolean(region?.trim())
 
 interface InfoItem {
   label: string
@@ -536,6 +537,7 @@ const metricCards = computed<MetricCard[]>(() => appStore.detailMetricCardOrder.
         </UiButton>
         <div class="min-w-0 text-lg font-bold flex gap-2 items-center">
           <img
+            v-if="hasRegion(data.region)"
             :src="`/images/flags/${getRegionCode(data.region)}.svg`"
             :alt="getRegionAltText(data.region)"
             class="size-6"

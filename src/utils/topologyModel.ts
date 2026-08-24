@@ -15,13 +15,27 @@ export interface TopologyNodeConfig {
   probeTarget?: string
 }
 
+export type TopologyProbeMode = 'static' | 'auto' | 'live'
+
 export interface TopologyMetricConfig {
+  /** `live: false` 的明确语义；旧配置缺失时按静态基线处理，避免打开管理器意外建任务。 */
+  probeMode?: TopologyProbeMode
   live: boolean
   nodeName: string
   taskFilter: string
   fallbackLatency: number | null
   fallbackLoss: number | null
   parseErrors?: string[]
+}
+
+export function getTopologyMetricProbeMode(metric: Pick<TopologyMetricConfig, 'probeMode' | 'live'>): TopologyProbeMode {
+  return metric.probeMode === 'static' || metric.probeMode === 'auto' || metric.probeMode === 'live'
+    ? metric.probeMode
+    : metric.live ? 'live' : 'static'
+}
+
+export function createAutoTopologyMetric(): TopologyMetricConfig {
+  return { probeMode: 'auto', live: false, nodeName: '', taskFilter: '', fallbackLatency: null, fallbackLoss: null }
 }
 
 export interface TopologyRouteConfig {

@@ -25,6 +25,7 @@ function updateValue(event: Event) {
   <label class="group relative flex min-w-0 flex-1 items-center gap-1.5">
     <span class="sr-only">切换入口探测点</span>
     <img
+      v-if="selected"
       src="/images/flags/CN.svg"
       alt="CN"
       class="h-3.5 w-5 shrink-0 rounded-[2px] object-cover"

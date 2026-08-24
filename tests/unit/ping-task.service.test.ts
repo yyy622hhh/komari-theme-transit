@@ -1,7 +1,7 @@
 import type { AdminPingTask } from '../../src/services/ping-task.service'
 import { afterEach, describe, expect, mock, test } from 'bun:test'
 import { isAuthenticated, setAuthSessionFromLogin } from '../../src/services/auth.service'
-import { buildTopologyHopTarget, createTopologyEntryProbeTask, deleteTopologyPingTasks, ensureTopologyEntryProbeTask, ensureTopologyPingTask, findTopologyPingTask, findTopologyPingTaskByName, invalidateAdminPingTasksCache, isPingTaskAssignedToSource, loadAdminPingTaskNamesForNode, loadAdminPingTasks, pingTaskTargetHost, pingTaskTargetPort, planTopologyPingTask, topologyHopTaskName, topologyPingTargets } from '../../src/services/ping-task.service'
+import { buildTopologyHopTarget, createTopologyEntryProbeTask, deleteTopologyPingTasks, ensureTopologyEntryProbeTask, ensureTopologyPingTask, findTopologyEntryProbeTask, findTopologyPingTask, findTopologyPingTaskByName, invalidateAdminPingTasksCache, isPingTaskAssignedToSource, loadAdminPingTaskNamesForNode, loadAdminPingTasks, pingTaskTargetHost, pingTaskTargetPort, planTopologyPingTask, restrictTopologyPingEndpoint, topologyHopTaskName, topologyPingTargets } from '../../src/services/ping-task.service'
 import { resetSharedRpc } from '../../src/utils/rpc'
 import { getTopologyProbe } from '../../src/utils/topologyPresets'
 
@@ -40,12 +40,44 @@ describe('topology Ping task management', () => {
     expect(findTopologyPingTask(tasks, source.uuid, target)).toBeUndefined()
   })
 
-  test('does not reuse a duplicate task name on the same source', () => {
+  test('reuses the matching-probe entry task when two tasks share the built-in name', () => {
+    const probe = getTopologyProbe('beijing-telecom')
+    const tasks: AdminPingTask[] = [
+      { id: 55, name: '北京电信', clients: [source.uuid], type: 'icmp', target: probe.landmarkAddress, interval: 30 },
+      { id: 56, name: '北京电信', clients: [source.uuid], type: 'tcp', target: `${probe.dnsAddress}:53`, interval: 30 },
+    ]
+    expect(findTopologyEntryProbeTask(tasks, source.uuid, probe, { type: 'tcp', port: 53 }, '北京电信')?.id).toBe(56)
+    expect(findTopologyEntryProbeTask(tasks, source.uuid, probe, { type: 'icmp' }, '北京电信')?.id).toBe(55)
+  })
+
+  test('reuses a same-named hop that uniquely targets the current landing', () => {
     const tasks: AdminPingTask[] = [
       { id: 1, name: 'duplicate', clients: [source.uuid], type: 'icmp', target: target.ipv4, interval: 30 },
       { id: 2, name: 'duplicate', clients: [source.uuid], type: 'icmp', target: '203.0.113.99', interval: 30 },
     ]
-    expect(findTopologyPingTask(tasks, source.uuid, target)).toBeUndefined()
+    expect(findTopologyPingTask(tasks, source.uuid, target)?.id).toBe(1)
+  })
+
+  test('restricts a dual-stack landing to the planned address family', () => {
+    expect(restrictTopologyPingEndpoint(target, '2001:db8::20')).toEqual({
+      uuid: target.uuid,
+      name: target.name,
+      ipv4: undefined,
+      ipv6: '2001:db8::20',
+    })
+    expect(restrictTopologyPingEndpoint(target, '203.0.113.20:443').ipv6).toBeUndefined()
+    expect(findTopologyPingTask([
+      { id: 1, name: 'v4', clients: [source.uuid], type: 'tcp', target: `${target.ipv4}:443`, interval: 30 },
+      { id: 2, name: 'v6', clients: [source.uuid], type: 'tcp', target: `[${target.ipv6}]:443`, interval: 30 },
+    ], source.uuid, restrictTopologyPingEndpoint(target, target.ipv6!), { type: 'tcp', port: 443 })?.id).toBe(2)
+  })
+
+  test('reuses the lowest-id hop when two same-named hops target the current landing with the same probe', () => {
+    const tasks: AdminPingTask[] = [
+      { id: 2, name: 'duplicate', clients: [source.uuid], type: 'icmp', target: target.ipv4, interval: 30 },
+      { id: 1, name: 'duplicate', clients: [source.uuid], type: 'icmp', target: target.ipv4, interval: 30 },
+    ]
+    expect(findTopologyPingTask(tasks, source.uuid, target)?.id).toBe(1)
   })
 
   test('requires explicit source assignment even when a task is default-on', () => {
@@ -65,7 +97,7 @@ describe('topology Ping task management', () => {
     expect(findTopologyPingTask([
       assignedTask,
       { ...assignedTask, id: 2, target: '203.0.113.99' },
-    ], source.uuid, target)).toBeUndefined()
+    ], source.uuid, target)?.id).toBe(1)
   })
 
   test('normalizes equivalent IPv6 forms and rejects invalid addresses and task types', () => {
@@ -298,6 +330,34 @@ describe('topology Ping task management', () => {
     }
   })
 
+  test('treats a committed hop add whose response is lost as created so the caller can compensate', async () => {
+    const originalFetch = globalThis.fetch
+    const tasks: AdminPingTask[] = []
+    globalThis.fetch = mock(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (!init?.body)
+        return new Response(JSON.stringify({ logged_in: true, username: 'admin' }))
+      const request = JSON.parse(String(init.body)) as { id: number, method: string, params?: AdminPingTask }
+      if (request.method === 'admin:getAllPingTasks') {
+        return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: tasks }), {
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      if (request.method === 'admin:addPingTask') {
+        tasks.push({ ...request.params!, id: 19 })
+        throw new Error('response lost after commit')
+      }
+      throw new Error(`Unexpected RPC method: ${request.method}`)
+    }) as typeof fetch
+
+    try {
+      const ensured = await ensureTopologyPingTask(source, target)
+      expect(ensured).toMatchObject({ created: true, task: { id: 19 } })
+    }
+    finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
   test('builds hop targets and names per probe type', () => {
     expect(buildTopologyHopTarget(target)).toBe(target.ipv4)
     expect(buildTopologyHopTarget(target, { type: 'tcp', port: 443 })).toBe(`${target.ipv4}:443`)
@@ -313,6 +373,10 @@ describe('topology Ping task management', () => {
     // ICMP 名字必须保持历史格式，否则已保存的线路会认不回任务。
     expect(topologyHopTaskName(source, target)).toBe('Transit-Relay-JP-to-Exit-SG')
     expect(topologyHopTaskName(source, target, { type: 'tcp', port: 80 })).toBe('Transit-Relay-JP-to-Exit-SG-tcp-80')
+    expect(topologyHopTaskName(source, target, { type: 'icmp' }, [
+      { name: 'Transit-Relay-JP-to-Exit-SG', type: 'icmp', target: target.ipv4!, clients: [source.uuid], interval: 30 },
+      { name: `Transit-Relay-JP-to-Exit-SG-${target.uuid.slice(0, 8)}`, type: 'icmp', target: target.ipv4!, clients: [source.uuid], interval: 30 },
+    ])).toBe(`Transit-Relay-JP-to-Exit-SG-${target.uuid.slice(0, 8)}-2`)
   })
 
   test('matches a TCP hop only on an exact port and resolves bindings by name', () => {
@@ -764,6 +828,84 @@ describe('ensureTopologyEntryProbeTask', () => {
     }
   })
 
+  test('does not reuse an assigned same-named ICMP task when the ladder asks for TCP', async () => {
+    const originalFetch = globalThis.fetch
+    const tasks: AdminPingTask[] = [{
+      id: 55,
+      name: '北京电信',
+      clients: [source.uuid],
+      type: 'icmp',
+      target: probe.landmarkAddress,
+      interval: 30,
+    }]
+    let added: AdminPingTask | undefined
+    globalThis.fetch = mock(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (!init?.body)
+        return new Response(JSON.stringify({ logged_in: true, username: 'admin' }))
+      const request = JSON.parse(String(init.body)) as { id: number, method: string, params?: AdminPingTask }
+      if (request.method === 'admin:getAllPingTasks') {
+        return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: tasks }), {
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      if (request.method === 'admin:addPingTask') {
+        added = request.params
+        tasks.push({ ...request.params!, id: 56 })
+        return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id }), { headers: { 'Content-Type': 'application/json' } })
+      }
+      throw new Error(`Unexpected RPC method: ${request.method}`)
+    }) as typeof fetch
+
+    try {
+      const ensured = await ensureTopologyEntryProbeTask(source, probe, {
+        hopProbe: { type: 'tcp', port: 53 },
+        taskName: '北京电信',
+      })
+      expect(added).toMatchObject({ name: '北京电信', type: 'tcp', target: `${probe.dnsAddress}:53` })
+      expect(ensured).toMatchObject({ created: true, task: { id: 56 } })
+    }
+    finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  test('reuses an already created same-probe entry task instead of adding a duplicate', async () => {
+    const originalFetch = globalThis.fetch
+    const tasks: AdminPingTask[] = [{
+      id: 56,
+      name: '北京电信',
+      clients: [source.uuid],
+      type: 'tcp',
+      target: `${probe.dnsAddress}:53`,
+      interval: 30,
+    }]
+    let addCalls = 0
+    globalThis.fetch = mock(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (!init?.body)
+        return new Response(JSON.stringify({ logged_in: true, username: 'admin' }))
+      const request = JSON.parse(String(init.body)) as { id: number, method: string }
+      if (request.method === 'admin:getAllPingTasks') {
+        return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: tasks }), {
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      if (request.method === 'admin:addPingTask') {
+        addCalls += 1
+        return new Response(JSON.stringify({ jsonrpc: '2.0', id: request.id }), { headers: { 'Content-Type': 'application/json' } })
+      }
+      throw new Error(`Unexpected RPC method: ${request.method}`)
+    }) as typeof fetch
+
+    try {
+      const created = await createTopologyEntryProbeTask(source, probe, { type: 'tcp', port: 53 }, { taskName: '北京电信' })
+      expect(created).toMatchObject({ created: false, task: { id: 56, name: '北京电信', type: 'tcp' } })
+      expect(addCalls).toBe(0)
+    }
+    finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
   test('creates a new ICMP task named after the taskFilter, targeting the landmark address', async () => {
     const originalFetch = globalThis.fetch
     const tasks: AdminPingTask[] = []
@@ -934,10 +1076,13 @@ describe('createTopologyEntryProbeTask', () => {
     try {
       const created = await createTopologyEntryProbeTask(source, probe, { type: 'tcp', port: 53 }, { taskName: '广州电信' })
       expect(created).toMatchObject({
-        name: '广州电信',
-        type: 'tcp',
-        target: `${probe.dnsAddress}:53`,
-        clients: [source.uuid],
+        created: true,
+        task: {
+          name: '广州电信',
+          type: 'tcp',
+          target: `${probe.dnsAddress}:53`,
+          clients: [source.uuid],
+        },
       })
     }
     finally {

@@ -14,6 +14,7 @@
 import type { NodeInfo } from '@/utils/api.types'
 import type { RouteTraceCity } from '@/utils/routeTrace'
 import { requirePermission, setAuthSessionFromLogin } from '@/services/auth.service'
+import { requestManager } from '@/services/request.service'
 import {
   enqueueCompanionRouteProbe,
   getCompanionRouteProbeBatch,
@@ -63,6 +64,36 @@ export function isRouteProbeOnlineNode<T extends { uuid?: string, online?: boole
   node: T,
 ): node is T & { uuid: string } {
   return Boolean(node.uuid) && node.online !== false
+}
+
+export function pickNodeAgentTokens(
+  clients: Record<string, { token?: string }>,
+  uuids: readonly string[],
+): Record<string, string> {
+  const tokens: Record<string, string> = {}
+  for (const uuid of new Set(uuids.map(id => id.trim()).filter(Boolean))) {
+    const token = clients[uuid]?.token?.trim()
+    if (token)
+      tokens[uuid] = token
+  }
+  return tokens
+}
+
+/** 只返回指定节点的 Agent token。Komari 没有按 UUID 取 token 的接口，整表拉取后在本地过滤。 */
+export async function loadRouteProbeNodeTokens(
+  uuids: readonly string[],
+  signal?: AbortSignal,
+): Promise<Record<string, string>> {
+  const wanted = [...new Set(uuids.map(id => id.trim()).filter(Boolean))]
+  if (!wanted.length)
+    return {}
+  const permission = await requirePermission('advancedTools', { force: false })
+  if (!permission.granted)
+    throw new Error('登录状态已过期，请重新登录后再试。')
+  const clients = await requestManager.run('route-probe:node-tokens', requestSignal => (
+    getSharedRpc().getNodesOverHttp(requestSignal)
+  ), { retryAttempts: 0, signal })
+  return pickNodeAgentTokens(clients, wanted)
 }
 
 /**

@@ -76,9 +76,9 @@ function countTopologyGroups(value: string): number {
   return count
 }
 
-export function getTopologyProbeStorageKey(routeGroup: string, metric: string): string {
+export function getTopologyProbeStorageKey(routeGroup: string, metric: string, disambiguator = ''): string {
   const configured = parseTopologyMetric(metric)
-  return [routeGroup.trim(), configured.nodeName, configured.taskFilter].join('::')
+  return [routeGroup.trim(), configured.nodeName, configured.taskFilter, disambiguator.trim()].filter(Boolean).join('::')
 }
 
 export function parseTopologyRoutes(routeValue: string, metricValue: string): TopologyRouteConfig[] {
@@ -250,6 +250,7 @@ export function parseTopologyMetric(value: string): TopologyMetricConfig {
     const [latency, loss] = parts
     const parseErrors = parts.length > 2 ? ['静态指标包含非法“,”分隔符'] : []
     return {
+      probeMode: 'static',
       live: false,
       nodeName: '',
       taskFilter: '',
@@ -276,5 +277,5 @@ export function parseTopologyMetric(value: string): TopologyMetricConfig {
   const fallbackLatency = parseNumber(legacyFormat ? parts[4] : parts[3])
   const fallbackLoss = parseNumber(legacyFormat ? parts[5] : parts[4])
 
-  return { live: true, nodeName, taskFilter, fallbackLatency, fallbackLoss, ...(parseErrors.length ? { parseErrors } : {}) }
+  return { probeMode: 'live', live: true, nodeName, taskFilter, fallbackLatency, fallbackLoss, ...(parseErrors.length ? { parseErrors } : {}) }
 }

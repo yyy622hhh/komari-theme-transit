@@ -5,6 +5,7 @@ import type { createTopologyPersistence } from '@/services/topology-persistence.
 import type { NodeData } from '@/stores/nodes'
 import type { TopologyQuickNode, TopologyRouteConfig } from '@/utils/topologyModel'
 import { computed, nextTick, watch } from 'vue'
+import { isTopologySegmentKeyForRoute } from '@/composables/useTopologyRoutePlanner'
 import { topologyPingTargets } from '@/services/ping-task.service'
 import { listUnusedQuickLandingUuids, nextQuickLandingUuid } from '@/utils/topologyHelper'
 import { normalizeTopologyProbeTarget, TOPOLOGY_PROBE_OPTIONS } from '@/utils/topologyPresets'
@@ -211,7 +212,7 @@ export function useTopologyQuickRoute(deps: TopologyQuickRouteDeps) {
         keepOpen: true,
         runId,
         successMessage: configured.created
-          ? (Object.keys(pendingRouteTasks.value).some(key => key.startsWith(`${configured.route.id}:`)) ? '已添加线路并自动创建探测任务。' : '已添加并保存。')
+          ? (Object.keys(pendingRouteTasks.value).some(key => isTopologySegmentKeyForRoute(key, configured.route.id)) ? '已添加线路并自动创建探测任务。' : '已添加并保存。')
           : '已更新现有线路并保存。',
       })
       if (runId !== deps.getQuickConfigurationRun() || !props.open || persistResult === 'invalid')

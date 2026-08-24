@@ -119,8 +119,15 @@ export function isCustomTopologyProbe(option: Pick<TopologyProbeOption, 'key'>):
   return option.key.startsWith('custom-')
 }
 
+export function findTopologyProbeOption(key?: string): TopologyProbeOption | undefined {
+  const normalized = key?.trim() ?? ''
+  if (!normalized)
+    return undefined
+  return TOPOLOGY_PROBE_OPTIONS.find(option => option.key === normalized)
+}
+
 export function getTopologyProbe(key?: string): TopologyProbeOption {
-  return TOPOLOGY_PROBE_OPTIONS.find(option => option.key === key) ?? TOPOLOGY_PROBE_OPTIONS[0]!
+  return findTopologyProbeOption(key) ?? TOPOLOGY_PROBE_OPTIONS[0]!
 }
 
 /**

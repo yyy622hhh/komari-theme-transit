@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { classifyRouteProbeOutputFailure, mergeRouteTag, ROUTE_PROBE_MAX_NODES, selectRouteProbeCandidates } from '../../src/services/route-probe.service'
+import { classifyRouteProbeOutputFailure, mergeRouteTag, pickNodeAgentTokens, ROUTE_PROBE_MAX_NODES, selectRouteProbeCandidates } from '../../src/services/route-probe.service'
 
 const NOW = Date.UTC(2026, 7, 21, 12, 0, 0)
 const DAY = 24 * 60 * 60 * 1000
@@ -123,5 +123,18 @@ describe('采集执行失败归因', () => {
 
   test('带有效分段标记的回执交给线路解析继续处理', () => {
     expect(classifyRouteProbeOutputFailure('__TRANSIT_ROUTE_CT__\n 1 59.43.1.1 1 ms')).toBeNull()
+  })
+})
+
+describe('节点 Agent token 过滤', () => {
+  test('只留下指定 UUID 的 token，忽略空白和缺 token 的节点', () => {
+    expect(pickNodeAgentTokens({
+      missing: { token: 'keep-me' },
+      online: { token: 'drop-me' },
+      empty: { token: '  ' },
+      none: {},
+    }, ['missing', 'empty', 'none', ' missing ', ''])).toEqual({
+      missing: 'keep-me',
+    })
   })
 })

@@ -121,9 +121,20 @@ export async function loadSourceProbeProfile(sourceUuid: string, options: { fres
 }
 
 export function getHopTaskSamples(profile: SourceProbeProfile, task: Pick<AdminPingTask, 'id' | 'name'>): HopTaskSamples | null {
-  return profile.samplesByTaskId.get(String(task.id ?? '').trim())
-    ?? profile.samplesByTaskName.get(task.name.trim())
-    ?? null
+  const taskId = String(task.id ?? '').trim()
+  if (taskId && profile.samplesByTaskId.has(taskId))
+    return profile.samplesByTaskId.get(taskId) ?? null
+  const name = task.name.trim()
+  if (!name)
+    return null
+  // 有 id 却没有按 id 的样本：不能用名字桶。入口换挡删掉旧 ICMP 后，lookback
+  // 里仍是「北京电信」的死统计，新 TCP 53 还没出数，按名回退会立刻判死。
+  if (taskId)
+    return null
+  const sameNamed = profile.tasks.filter(candidate => candidate.name.trim() === name)
+  if (sameNamed.length !== 1)
+    return null
+  return profile.samplesByTaskName.get(name) ?? null
 }
 
 /**
@@ -180,13 +191,16 @@ export function nextLadderProbe(
   ladder: readonly TopologyHopProbe[] = LADDER,
 ): TopologyHopProbe | null {
   const startIndex = ladderIndex(current, ladder)
-  for (let index = startIndex + 1; index < ladder.length; index++) {
+  let index = startIndex + 1
+  if (startIndex < 0 && current.type === 'tcp' && chooseInitialHopProbe(profile).type !== 'icmp')
+    index = Math.max(0, ladder.findIndex(rung => rung.type === 'tcp'))
+  for (; index < ladder.length; index++) {
     const rung = ladder[index]!
-    const existing = existingTasks.find((task) => {
+    const sameProbe = existingTasks.filter((task) => {
       const probe = topologyHopProbeFromTask(task)
       return probe !== null && isSameTopologyHopProbe(probe, rung)
     })
-    if (!existing || assessHopTask(profile, existing) !== 'dead')
+    if (!sameProbe.length || sameProbe.some(task => assessHopTask(profile, task) !== 'dead'))
       return rung
   }
   return null

@@ -1,8 +1,8 @@
-import type { TopologyNodeConfig, TopologyQuickNode, TopologyRouteConfig } from '@/utils/topologyModel'
+import type { TopologyMetricConfig, TopologyNodeConfig, TopologyQuickNode, TopologyRouteConfig } from '@/utils/topologyModel'
 import type { TopologyProbeOption } from '@/utils/topologyPresets'
 import { formatCityNameZh } from '@/utils/cityNameHelper'
-import { createTopologyRoute, TOPOLOGY_LIMITS, TOPOLOGY_METRIC_RESERVED_PATTERN, TOPOLOGY_NODE_RESERVED_PATTERN } from '@/utils/topologyModel'
-import { createCustomTopologyProbe, findQuickTopologyTaskProbe, findTopologyProbeKey, getTopologyProbe, normalizePingTaskName, normalizeQuickTopologyTaskNames, normalizeTopologyProbeTarget, pickQuickTopologyTaskName } from '@/utils/topologyPresets'
+import { createAutoTopologyMetric, createTopologyRoute, TOPOLOGY_LIMITS, TOPOLOGY_METRIC_RESERVED_PATTERN, TOPOLOGY_NODE_RESERVED_PATTERN } from '@/utils/topologyModel'
+import { createCustomTopologyProbe, findQuickTopologyTaskProbe, findTopologyProbeKey, findTopologyProbeOption, getTopologyProbe, normalizePingTaskName, normalizeQuickTopologyTaskNames, normalizeTopologyProbeTarget, pickQuickTopologyTaskName } from '@/utils/topologyPresets'
 
 // 拓扑模型的类型在这里再导出一次：调用方谈的是「拓扑」，不该被迫记住类型定义
 // 落在哪个内部文件。值和函数不转发，避免这里退化成一个什么都能拿到的桶。
@@ -72,8 +72,9 @@ export function resolveTopologyNode<T extends TopologyQuickNode>(
 }
 
 /**
- * 实时探测来源以指标里的节点名为准。线路机 UUID 只在名字对得上时用来消歧；
- * 入口段可以把探测放到另一台机器上（例如离线的外部来源），不能被线路机 UUID 盖掉。
+ * 实时探测来源优先按 UUID 认，节点改名后 hop 边仍能对上。
+ * 入口段可以把探测放到另一台机器上：当 nodeName 唯一指向另一台节点时，以名字为准，
+ * 不能被线路机 UUID 盖掉。
  */
 export function resolveTopologyMetricSource<T extends TopologyQuickNode>(
   nodes: readonly T[],
@@ -82,12 +83,16 @@ export function resolveTopologyMetricSource<T extends TopologyQuickNode>(
 ): T | undefined {
   const named = nodeName.trim()
   const id = uuid.trim()
+  const namedNode = findUniqueTopologyNode(nodes, named)
   if (id) {
     const matches = nodes.filter(node => node.uuid?.trim() === id)
-    if (matches.length === 1 && (!named || matches[0]!.name.trim() === named))
+    if (matches.length === 1) {
+      if (namedNode && namedNode.uuid?.trim() && namedNode.uuid.trim() !== id)
+        return namedNode
       return matches[0]
+    }
   }
-  return findUniqueTopologyNode(nodes, named)
+  return namedNode
 }
 
 /** 只给线路机/落地机补 UUID；入口是探测标签，不能误绑到同名节点。 */
@@ -135,7 +140,7 @@ function namesLooselyMatch(left: string, right: string): boolean {
   const longer = left.length <= right.length ? right : left
   if (CJK_UNIFIED_IDEOGRAPH_REGEX.test(shorter))
     return shorter.length >= 3 ? longer.includes(shorter) : shorter.length === 2 && longer.startsWith(shorter)
-  return shorter.length >= 4 && longer.includes(shorter)
+  return false
 }
 
 function hopMatchAliases(value: string): string[] {
@@ -162,9 +167,13 @@ export function pickQuickHopTaskName(
   const usable = normalizeQuickTopologyTaskNames(taskNames)
     .filter(task => normalizePingTaskName(task) !== excluded)
 
-  return usable.find(task => hopMatchAliases(task).some(alias => targetAliases.includes(alias)))
-    ?? usable.find(task => hopMatchAliases(task).some(alias => targetAliases.some(target => namesLooselyMatch(alias, target))))
-    ?? ''
+  const uniqueMatch = (predicate: (task: string) => boolean): string => {
+    const matches = usable.filter(predicate)
+    return matches.length === 1 ? matches[0]! : ''
+  }
+
+  return uniqueMatch(task => hopMatchAliases(task).some(alias => targetAliases.includes(alias)))
+    || uniqueMatch(task => hopMatchAliases(task).some(alias => targetAliases.some(target => namesLooselyMatch(alias, target))))
 }
 
 export interface QuickTopologyRouteOptions {
@@ -205,11 +214,11 @@ export function getTopologyRouteProbeKey(route: Pick<TopologyRouteConfig, 'nodes
 /** 自定义目标优先于同名内置预设，避免“北京电信 + 自定义 IP”被错误改回内置地址。 */
 export function getTopologyRouteEntryProbe(route: Pick<TopologyRouteConfig, 'nodes' | 'metrics'>): TopologyProbeOption | null {
   const entry = route.nodes[0]
-  const custom = createCustomTopologyProbe(entry?.name ?? '', entry?.probeTarget ?? '')
-  if (custom)
-    return custom
+  const entryTarget = entry?.probeTarget?.trim() ?? ''
+  if (entryTarget)
+    return createCustomTopologyProbe(entry?.name ?? '', entryTarget)
   const key = getTopologyRouteProbeKey(route)
-  return key ? getTopologyProbe(key) : null
+  return key ? findTopologyProbeOption(key) ?? null : null
 }
 
 export function shouldAutoApplyTopologyProbe(route: Pick<TopologyRouteConfig, 'nodes' | 'metrics'>): boolean {
@@ -239,13 +248,7 @@ export function applyTopologyProbeToRoute(
   entry.role = '入口'
   delete entry.probeTarget
   route.nodes[0] = entry
-  const first = route.metrics[0] ?? {
-    live: false,
-    nodeName: '',
-    taskFilter: '',
-    fallbackLatency: null,
-    fallbackLoss: null,
-  }
+  const first = route.metrics[0] ?? createAutoTopologyMetric()
   // 取不到唯一任务时不要擦掉一条已经指向同一个预设的实时绑定：调用方
   // (`rematchOpenRoutes`) 会立刻把结果写回服务端，擦掉即不可逆。只有当既有绑定
   // 属于别的预设时才让位——那是操作员主动换了预设，覆盖才是预期行为。
@@ -256,9 +259,10 @@ export function applyTopologyProbeToRoute(
       && findTopologyProbeKey(first.taskFilter) === probe.key
 
   route.metrics[0] = keepsExistingBinding
-    ? { ...first }
+    ? { ...first, probeMode: 'live' }
     : {
         ...first,
+        probeMode: entryTask ? 'live' : 'auto',
         live: Boolean(entryTask),
         nodeName: entryTask ? sourceName.trim() : '',
         taskFilter: entryTask,
@@ -294,14 +298,37 @@ function isSameTopologyEndpoint(
   if (!node)
     return !name.trim() && !uuid.trim()
   if (uuid.trim() && node.uuid?.trim())
-    return node.uuid === uuid.trim()
+    return node.uuid.trim() === uuid.trim()
   return node.name.trim().toLowerCase() === name.trim().toLowerCase()
 }
 
-export function getTopologyRouteEndpoints(route: Pick<TopologyRouteConfig, 'nodes'>): { source: string, landing: string } {
+export function resolveTopologyRoutePath(route: Pick<TopologyRouteConfig, 'nodes'>): {
+  source: Pick<TopologyNodeConfig, 'name' | 'uuid'> | undefined
+  jumper: Pick<TopologyNodeConfig, 'name' | 'uuid'> | undefined
+  landing: Pick<TopologyNodeConfig, 'name' | 'uuid'> | undefined
+  landingIndex: number
+} {
+  const nodes = route.nodes
+  // 落地机永远是这条线路的最后一个槽位（3 节点无跳板时是 nodes[2]，4 节点
+  // 有跳板时是 nodes[3]），与跳板槽位是否已经填是两回事：不能靠"往回找最后
+  // 一个非空节点"来猜落地机，否则用户刚选了跳板、还没选落地机的中间态会把
+  // 跳板误判成落地机，或者跳板槽位恰好留空时会漏掉后面已经填好的落地机。
+  const landingIndex = nodes.length >= 4 ? 3 : 2
+  const hasJumper = nodes.length >= 4 && Boolean(nodes[2]?.name.trim())
   return {
-    source: topologyEndpointKey(route.nodes[1]),
-    landing: topologyEndpointKey(route.nodes.at(-1)),
+    source: nodes[1],
+    jumper: hasJumper ? nodes[2] : undefined,
+    landing: nodes[landingIndex],
+    landingIndex,
+  }
+}
+
+export function getTopologyRouteEndpoints(route: Pick<TopologyRouteConfig, 'nodes'>): { source: string, jumper: string, landing: string } {
+  const path = resolveTopologyRoutePath(route)
+  return {
+    source: topologyEndpointKey(path.source),
+    jumper: topologyEndpointKey(path.jumper),
+    landing: topologyEndpointKey(path.landing),
   }
 }
 
@@ -317,12 +344,10 @@ export function findDuplicateTopologyRouteIndex(
   if (!sourceUuid.trim() && !sourceName.trim())
     return -1
   return routes.findIndex((route) => {
-    const hasJumper = route.nodes.length >= 4 && Boolean(route.nodes[2]?.name.trim())
-    const routeJumper = hasJumper ? route.nodes[2] : undefined
-    const routeLanding = hasJumper ? route.nodes[3] : route.nodes[2]
-    return isSameTopologyEndpoint(route.nodes[1], sourceName, sourceUuid)
-      && isSameTopologyEndpoint(routeJumper, jumperName, jumperUuid)
-      && isSameTopologyEndpoint(routeLanding, landingName, landingUuid)
+    const path = resolveTopologyRoutePath(route)
+    return isSameTopologyEndpoint(path.source, sourceName, sourceUuid)
+      && isSameTopologyEndpoint(path.jumper, jumperName, jumperUuid)
+      && isSameTopologyEndpoint(path.landing, landingName, landingUuid)
   })
 }
 
@@ -401,7 +426,7 @@ export function buildQuickTopologyRoute(
   const configuredNames = new Set(candidates.map(node => node.name.trim().toLowerCase()))
   const usableTaskNames = normalizeQuickTopologyTaskNames(options.sourceTasks ?? [])
   const entryTarget = normalizeTopologyProbeTarget(options.entryTarget ?? '')
-  const requestedProbe = options.probeKey ? getTopologyProbe(options.probeKey) : null
+  const requestedProbe = options.probeKey ? findTopologyProbeOption(options.probeKey) ?? null : null
   const autoProbe = entryTarget ? null : requestedProbe ?? findQuickTopologyTaskProbe(usableTaskNames)
   const explicitEntryTask = options.entryTask === undefined
     ? undefined
@@ -413,9 +438,13 @@ export function buildQuickTopologyRoute(
   const hopTask = firstHopTarget
     ? (options.hopTask === undefined
         ? pickQuickHopTaskName(usableTaskNames, firstHopTarget.name, entryTask)
-        : normalizeQuickTopologyTaskNames([options.hopTask]).find(task => task !== entryTask) ?? '')
+        : normalizeQuickTopologyTaskNames([options.hopTask]).find(task => usableTaskNames.includes(task) && task !== entryTask) ?? '')
     : ''
-  const finalTask = jumper && landing ? (options.finalTask?.trim() ?? '') : ''
+  const finalTask = jumper && landing
+    ? (options.finalTask === undefined
+        ? ''
+        : normalizeQuickTopologyTaskNames([options.finalTask]).find(task => usableTaskNames.includes(task) && task !== entryTask && task !== hopTask) ?? '')
+    : ''
   const entryLabel = options.entryLabel?.trim() || probe?.label || '自定义入口'
 
   const routeNodes: TopologyNodeConfig[] = [
@@ -431,9 +460,10 @@ export function buildQuickTopologyRoute(
     routeNodes.push({ name: jumper.name.trim(), region: jumper.region?.trim() ?? '', role: '跳板', uuid: jumper.uuid })
   routeNodes.push({ name: landing?.name.trim() ?? '', region: landing?.region?.trim() ?? '', role: '落地机', uuid: landing?.uuid })
 
-  const routeMetrics = [
-    { live: Boolean(entryTask), nodeName: entryTask ? source.name.trim() : '', taskFilter: entryTask, fallbackLatency: null, fallbackLoss: null },
+  const routeMetrics: TopologyMetricConfig[] = [
+    { probeMode: entryTask ? 'live' as const : 'auto' as const, live: Boolean(entryTask), nodeName: entryTask ? source.name.trim() : '', taskFilter: entryTask, fallbackLatency: null, fallbackLoss: null },
     {
+      probeMode: hopTask ? 'live' as const : 'auto' as const,
       live: Boolean(hopTask),
       nodeName: hopTask ? source.name.trim() : '',
       taskFilter: hopTask,
@@ -443,6 +473,7 @@ export function buildQuickTopologyRoute(
   ]
   if (jumper) {
     routeMetrics.push({
+      probeMode: finalTask ? 'live' : 'auto',
       live: Boolean(finalTask),
       nodeName: finalTask ? jumper.name.trim() : '',
       taskFilter: finalTask,
@@ -458,7 +489,6 @@ export function validateTopologyRoutes(routes: TopologyRouteConfig[]): string[] 
   if (!routes.length)
     return []
 
-  const seenEndpoints = new Map<string, number>()
   return routes.flatMap((route, routeIndex) => {
     const errors: string[] = []
     const routeLabel = `第 ${routeIndex + 1} 条线路`
@@ -486,14 +516,20 @@ export function validateTopologyRoutes(routes: TopologyRouteConfig[]): string[] 
     if (entryTarget && !normalizeTopologyProbeTarget(entryTarget))
       errors.push(`${routeLabel}的自定义入口探测目标不是有效的 IP 或域名`)
 
-    const endpoints = getTopologyRouteEndpoints(route)
-    if (route.enabled && endpoints.source) {
-      const endpointKey = `${endpoints.source}\u0000${endpoints.landing}`
-      const duplicateOf = seenEndpoints.get(endpointKey)
-      if (duplicateOf !== undefined)
+    const path = resolveTopologyRoutePath(route)
+    if (nodes[lastConfiguredIndex]?.role === '跳板')
+      errors.push(`${routeLabel}已选择跳板时必须选择落地机`)
+    if (route.enabled && topologyEndpointKey(path.source)) {
+      const duplicateOf = routes.findIndex((other, otherIndex) => {
+        if (otherIndex >= routeIndex || !other.enabled)
+          return false
+        const otherPath = resolveTopologyRoutePath(other)
+        return isSameTopologyEndpoint(path.source, otherPath.source?.name ?? '', otherPath.source?.uuid ?? '')
+          && isSameTopologyEndpoint(path.jumper, otherPath.jumper?.name ?? '', otherPath.jumper?.uuid ?? '')
+          && isSameTopologyEndpoint(path.landing, otherPath.landing?.name ?? '', otherPath.landing?.uuid ?? '')
+      })
+      if (duplicateOf >= 0)
         errors.push(`${routeLabel}与第 ${duplicateOf + 1} 条线路使用了相同的线路机和落地机`)
-      else
-        seenEndpoints.set(endpointKey, routeIndex)
     }
 
     const segmentCount = Math.max(1, lastConfiguredIndex)

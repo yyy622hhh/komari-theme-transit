@@ -1,6 +1,6 @@
-import type { TopologyMetricConfig, TopologyNodeConfig, TopologyRouteConfig } from '@/utils/topologyModel'
+import type { TopologyMetricConfig, TopologyNodeConfig, TopologyProbeMode, TopologyRouteConfig } from '@/utils/topologyModel'
 import { parseTopologyRoutes } from '@/utils/topologyLegacyFormat'
-import { createTopologyRoute, defaultTopologyNodeRole, TOPOLOGY_LIMITS } from '@/utils/topologyModel'
+import { createAutoTopologyMetric, createTopologyRoute, defaultTopologyNodeRole, getTopologyMetricProbeMode, TOPOLOGY_LIMITS } from '@/utils/topologyModel'
 
 /**
  * 拓扑配置的 JSON 存储格式。
@@ -24,6 +24,7 @@ interface SerializedNode {
 }
 
 interface SerializedMetric {
+  probeMode?: TopologyProbeMode
   live?: boolean
   source?: string
   task?: string
@@ -64,13 +65,16 @@ function serializeNode(node: TopologyNodeConfig): SerializedNode {
 }
 
 function serializeMetric(metric: TopologyMetricConfig): SerializedMetric {
+  const probeMode = metric.live ? 'live' : getTopologyMetricProbeMode(metric)
   if (!metric.live) {
     return {
+      probeMode,
       ...(metric.fallbackLatency === null ? {} : { fallbackLatency: metric.fallbackLatency }),
       ...(metric.fallbackLoss === null ? {} : { fallbackLoss: metric.fallbackLoss }),
     }
   }
   return {
+    probeMode: 'live',
     live: true,
     source: metric.nodeName.trim(),
     task: metric.taskFilter.trim(),
@@ -120,7 +124,14 @@ function parseNode(value: unknown, index: number, total: number): TopologyNodeCo
 function parseMetric(value: unknown): TopologyMetricConfig {
   const record = (value && typeof value === 'object' && !Array.isArray(value) ? value : {}) as Record<string, unknown>
   const live = record.live === true
+  const explicitMode = record.probeMode === 'static' || record.probeMode === 'auto' || record.probeMode === 'live'
+    ? record.probeMode
+    : undefined
+  const probeMode: TopologyProbeMode = live
+    ? 'live'
+    : explicitMode === 'live' ? 'static' : explicitMode ?? 'static'
   return {
+    probeMode,
     live,
     nodeName: live ? trimmed(record.source) : '',
     taskFilter: live ? trimmed(record.task) : '',
@@ -130,7 +141,7 @@ function parseMetric(value: unknown): TopologyMetricConfig {
 }
 
 function emptyMetric(): TopologyMetricConfig {
-  return { live: false, nodeName: '', taskFilter: '', fallbackLatency: null, fallbackLoss: null }
+  return createAutoTopologyMetric()
 }
 
 /**
@@ -166,8 +177,12 @@ export function parseTopologyConfig(raw: unknown): TopologyRouteConfig[] | null 
 
   return payload.routes.slice(0, TOPOLOGY_LIMITS.maxRoutes).map((entry) => {
     const record = (entry && typeof entry === 'object' && !Array.isArray(entry) ? entry : {}) as Record<string, unknown>
-    const rawNodes = Array.isArray(record.nodes) ? record.nodes.slice(0, TOPOLOGY_LIMITS.maxNodesPerRoute) : []
-    const rawMetrics = Array.isArray(record.metrics) ? record.metrics.slice(0, TOPOLOGY_LIMITS.maxNodesPerRoute - 1) : []
+    const allNodes = Array.isArray(record.nodes) ? record.nodes : []
+    const allMetrics = Array.isArray(record.metrics) ? record.metrics : []
+    const truncated = allNodes.length > TOPOLOGY_LIMITS.maxNodesPerRoute
+      || allMetrics.length > TOPOLOGY_LIMITS.maxNodesPerRoute - 1
+    const rawNodes = allNodes.slice(0, TOPOLOGY_LIMITS.maxNodesPerRoute)
+    const rawMetrics = allMetrics.slice(0, TOPOLOGY_LIMITS.maxNodesPerRoute - 1)
     const parsedTotal = Math.max(3, rawNodes.length)
     const nodes = rawNodes.map((node, index) => parseNode(node, index, parsedTotal))
     const metrics = rawMetrics.map(parseMetric)
@@ -176,7 +191,10 @@ export function parseTopologyConfig(raw: unknown): TopologyRouteConfig[] | null 
       nodes.push(parseNode({}, nodes.length, 3))
     while (metrics.length < Math.max(2, nodes.length - 1))
       metrics.push(emptyMetric())
-    return createTopologyRoute(nodes, metrics)
+    const route = createTopologyRoute(nodes, metrics)
+    if (truncated)
+      route.parseErrors = [`最多支持 ${TOPOLOGY_LIMITS.maxNodesPerRoute} 个节点`]
+    return route
   })
 }
 

@@ -5,18 +5,19 @@ import type { NodeData } from '@/stores/nodes'
 import type { MessageApi } from '@/utils/message'
 import type { TopologyQuickNode, TopologyRouteConfig } from '@/utils/topologyModel'
 import { ref } from 'vue'
-import { createTopologyEntryProbeTask, deleteTopologyPingTasks, ensureTopologyEntryProbeTask, ensureTopologyPingTask, loadAdminPingTasks } from '@/services/ping-task.service'
-import { listOwnedRetiredTaskIds, listOwnedUnboundTaskIds, liveTopologyTaskNames } from '@/services/topology-repair.service'
+import { createTopologyEntryProbeTask, deleteTopologyPingTasks, ensureTopologyEntryProbeTask, ensureTopologyPingTask, loadAdminPingTasks, restrictTopologyPingEndpoint } from '@/services/ping-task.service'
+import { listLiveEntryTaskIds, listOwnedRetiredTaskIds, listOwnedUnboundTaskIds, liveTopologyTaskNames } from '@/services/topology-repair.service'
+import { isTopologySaveCommittedError } from '@/services/topology.service'
 import { persistTopologyCreatedTaskIds } from '@/utils/topologyCreatedTasks'
 import { getTopologyRouteEntryProbe, resolveTopologyNode } from '@/utils/topologyHelper'
-import { getTopologyProbe } from '@/utils/topologyPresets'
+import { findTopologyProbeOption } from '@/utils/topologyPresets'
 import { recordTopologyWrite } from '@/utils/topologyWriteLog'
 
 interface TopologyPersistenceManager {
   routes: TopologyRouteConfig[]
   quickNodes: TopologyQuickNode[]
   preflightSave: () => Promise<void>
-  save: (options?: { lockHeld?: boolean }) => Promise<'invalid' | 'saved' | 'changed'>
+  save: (options?: { lockHeld?: boolean, signal?: AbortSignal }) => Promise<'invalid' | 'saved' | 'changed'>
   withSaveLock: <T>(save: () => Promise<T>) => Promise<T>
 }
 
@@ -91,6 +92,7 @@ export function createTopologyPersistence(deps: TopologyPersistenceDependencies)
   const loadTasks = operations?.loadTasks ?? loadAdminPingTasks
   let persistTail: Promise<unknown> = Promise.resolve()
   let saveTaskController: AbortController | null = null
+  let persistGeneration = 0
   const persisting = ref(false)
 
   const segmentKey = (routeId: number, segmentIndex: number) => `${routeId}:${segmentIndex}`
@@ -110,18 +112,20 @@ export function createTopologyPersistence(deps: TopologyPersistenceDependencies)
     const ids = new Set(listOwnedRetiredTaskIds(
       entries.flatMap(([, tasks]) => tasks),
       sessionCreatedTaskIds,
-      boundNames,
+      { boundTaskNames: boundNames },
     ))
 
     // 入口段换挡（ICMP 判死切 TCP）留下的旧任务：名字还是同一个预设名、还在
     // `boundNames` 里（只是换了个 id），所以不能用「名字不再被引用」判断，只能
-    // 靠 `planEntryProbeTask` 已经精确认出来的候选（见 `routeEntryRetiredTasks`）。
+    // 靠 `planEntryProbeTask` 已经精确认出来的候选（见 `routeEntryRetiredTasks`），
+    // 再按线路机 + 当前绑定名反查一遍真实任务列表，排除掉恰好被另一条共用同一
+    // 台线路机的线路继续绑着的 id（哪怕它跟被清理的旧任务同名）。
     const entryEntries = Object.entries(routeEntryRetiredTasks.value)
     routeEntryRetiredTasks.value = {}
-    for (const task of entryEntries.flatMap(([, tasks]) => tasks)) {
-      if (sessionCreatedTaskIds.has(task.id))
-        ids.add(task.id)
-    }
+    const entryCandidateIds = new Set(entryEntries
+      .flatMap(([, tasks]) => tasks)
+      .filter(task => sessionCreatedTaskIds.has(task.id))
+      .map(task => task.id))
 
     try {
       const tasks = await loadTasks({ fresh: true })
@@ -129,13 +133,18 @@ export function createTopologyPersistence(deps: TopologyPersistenceDependencies)
       // 线路引用，按所有权反查完整任务列表挑出来。
       for (const id of listOwnedUnboundTaskIds(sessionCreatedTaskIds, tasks, boundNames))
         ids.add(id)
+      const liveEntryTaskIds = listLiveEntryTaskIds(manager.routes, props.nodes, tasks, entryCandidateIds)
+      for (const id of entryCandidateIds) {
+        if (!liveEntryTaskIds.has(id))
+          ids.add(id)
+      }
       for (const id of [...sessionCreatedTaskIds]) {
         if (!tasks.some(task => task.id === id))
           sessionCreatedTaskIds.delete(id)
       }
     }
     catch {
-    // 任务列表读失败时仍按规划阶段记下的候选清理。
+      // 入口段 id 保护依赖任务列表。读失败时不要删入口候选，留给下次保存再清。
     }
     if (ids.size) {
       const removed = await deleteTasks([...ids])
@@ -194,8 +203,9 @@ export function createTopologyPersistence(deps: TopologyPersistenceDependencies)
     ignoreBusy?: boolean
     quiet?: boolean
   } = {}): Promise<'invalid' | 'saved' | 'changed' | 'cancelled'> {
+    const generation = persistGeneration
     return enqueuePersist(async () => {
-      if (!props.open)
+      if (generation !== persistGeneration || !props.open)
         return 'cancelled'
       if (taskValidationPending.value && options.runId === undefined && !options.ignoreBusy) {
         if (!options.quiet)
@@ -233,9 +243,12 @@ export function createTopologyPersistence(deps: TopologyPersistenceDependencies)
               if (!pending)
                 continue
               const source = findEndpoint(pending.sourceUuid)
-              const target = findEndpoint(pending.targetUuid)
-              if (!source || !target)
+              const rawTarget = findEndpoint(pending.targetUuid)
+              if (!source || !rawTarget)
                 throw new Error('待创建 Ping 任务的节点已变化，请重新选择线路。')
+              const target = pending.targetHost
+                ? restrictTopologyPingEndpoint(rawTarget, pending.targetHost)
+                : rawTarget
               const routeSource = resolveTopologyNode(props.nodes, route.nodes[segmentIndex]?.name ?? '', route.nodes[segmentIndex]?.uuid ?? '')
               const routeTarget = resolveTopologyNode(props.nodes, route.nodes[segmentIndex + 1]?.name ?? '', route.nodes[segmentIndex + 1]?.uuid ?? '')
               const plannedMetric = route.metrics[segmentIndex]
@@ -262,6 +275,7 @@ export function createTopologyPersistence(deps: TopologyPersistenceDependencies)
                 metric.nodeName = source.name
                 metric.taskFilter = ensured.task.name
                 metric.live = true
+                metric.probeMode = 'live'
                 rememberTask(source.uuid, ensured.task.name)
                 completedRouteTasks.push({ routeId: route.id, segmentIndex, pending })
                 clearRouteTaskError(route.id)
@@ -299,9 +313,11 @@ export function createTopologyPersistence(deps: TopologyPersistenceDependencies)
               || firstMetric.taskFilter !== pendingEntry.taskName) {
               throw new Error('待创建 Ping 任务对应的线路段已变化，请重新选择。')
             }
-            const entryProbe = pendingEntry.entryProbe ?? getTopologyProbe(pendingEntry.probeKey)
+            const entryProbe = pendingEntry.entryProbe ?? findTopologyProbeOption(pendingEntry.probeKey)
+            if (!entryProbe)
+              throw new Error('待创建入口探测任务的预设已失效，请重新选择。')
             const ensured = pendingEntry.forceCreate
-              ? { task: await createEntryTask(source, entryProbe, pendingEntry.probe, { signal: controller.signal, taskName: pendingEntry.taskName }), created: true }
+              ? await createEntryTask(source, entryProbe, pendingEntry.probe, { signal: controller.signal, taskName: pendingEntry.taskName })
               : await ensureEntryTask(source, entryProbe, { hopProbe: pendingEntry.probe, signal: controller.signal, taskName: pendingEntry.taskName })
             if (ensured.created && Number.isInteger(ensured.task.id)) {
               sessionCreatedTaskIds.add(ensured.task.id!)
@@ -317,6 +333,7 @@ export function createTopologyPersistence(deps: TopologyPersistenceDependencies)
             metric.nodeName = source.name
             metric.taskFilter = ensured.task.name
             metric.live = true
+            metric.probeMode = 'live'
             rememberTask(source.uuid, ensured.task.name)
             completedEntryTasks.push({ routeId: route.id, pending: pendingEntry })
           }
@@ -331,8 +348,33 @@ export function createTopologyPersistence(deps: TopologyPersistenceDependencies)
               return 'cancelled' as const
             }
           }
+          if (generation !== persistGeneration) {
+            await cleanupCreatedTasks(createdTaskIds, '保存过程中线路或对话框已变化')
+            return 'cancelled' as const
+          }
           saveAttempted = true
-          const saveResult = await manager.save({ lockHeld })
+          let saveResult: 'invalid' | 'saved' | 'changed'
+          try {
+            saveResult = await manager.save({ lockHeld, signal: controller.signal })
+          }
+          catch (error) {
+            if (isTopologySaveCommittedError(error)) {
+              createdTaskIds.clear()
+              throw error
+            }
+            if (isAbortError(error)) {
+              try {
+                await manager.preflightSave()
+                await cleanupCreatedTasks(createdTaskIds, '已撤回刚提交的拓扑配置')
+              }
+              catch {
+                // POST 可能已经落到服务器（超时取消了响应），绑定仍在，不能删任务。
+              }
+              createdTaskIds.clear()
+              return 'cancelled' as const
+            }
+            throw error
+          }
           if (saveResult === 'invalid') {
             saveAttempted = false
             await cleanupCreatedTasks(createdTaskIds, '配置校验未通过，未保存')
@@ -351,23 +393,25 @@ export function createTopologyPersistence(deps: TopologyPersistenceDependencies)
           createdTaskIds.clear()
           return saveResult
         }
-        const hasPendingTasks = manager.routes.some(route => Object.keys(pendingRouteTasks.value).some(key => key === String(route.id) || key.startsWith(`${route.id}:`)) || Boolean(pendingEntryTasks.value[route.id]))
+        const hasPendingTasks = manager.routes.some(route => Object.keys(pendingRouteTasks.value).some(key => Number(key.split(':')[0]) === route.id) || Boolean(pendingEntryTasks.value[route.id]))
         const result = hasPendingTasks
           ? await manager.withSaveLock(async () => {
               await manager.preflightSave()
               return persist(true)
             })
           : await persist()
-        if (result === 'cancelled' || session !== getDialogSession() || !props.open)
-          return 'cancelled'
-        if (result === 'saved') {
+        if (result === 'saved' || result === 'changed')
           await retireReplacedTasks()
+        if (result === 'cancelled' || session !== getDialogSession() || !props.open || generation !== persistGeneration)
+          return result === 'saved' || result === 'changed' ? result : 'cancelled'
+        if (result === 'saved') {
           refreshWriteLog()
           message?.success(options.successMessage ?? '拓扑配置已保存。')
           if (!options.keepOpen)
             onOpenChange(false)
         }
         else if (result === 'changed') {
+          refreshWriteLog()
           message?.warning('提交时的配置已保存，当前修改尚未保存。')
         }
         return result
@@ -400,6 +444,7 @@ export function createTopologyPersistence(deps: TopologyPersistenceDependencies)
   }
 
   function abort(): void {
+    persistGeneration += 1
     saveTaskController?.abort()
     saveTaskController = null
   }

@@ -166,6 +166,7 @@ describe('topology manager save snapshots', () => {
     manager.routes.value[0]!.metrics[0]!.fallbackLatency = 11
     saveTopologyConfiguration.mockClear()
     saveTopologyConfiguration.mockImplementation(async () => ({
+      topologyConfig: '{"version":1,"routes":[]}',
       topologyRoute: '入口|CN|入口;线路|JP|线路机',
       topologyMetrics: '11,0',
     }))
@@ -174,6 +175,50 @@ describe('topology manager save snapshots', () => {
     await expect(manager.save()).resolves.toBe('saved')
     expect(saveTopologyConfiguration.mock.calls[0]?.[0]).toMatchObject({
       expected: {
+        topologyRoute: '入口|CN|入口;线路|JP|线路机',
+        topologyMetrics: '10,0',
+      },
+    })
+    expect(saveTopologyConfiguration.mock.calls[0]?.[0]?.expected).not.toHaveProperty('topologyConfig')
+  })
+
+  test('keeps topologyConfig in the CAS snapshot after a payload that includes it', async () => {
+    const appStore = useAppStore()
+    appStore.publicSettings = publicSettings({ topologyRoute: '', topologyMetrics: '' })
+    const manager = useTopologyManager([])
+    manager.reset()
+    manager.routes.value[0] = {
+      id: 1,
+      enabled: true,
+      nodes: [
+        { name: '入口', region: 'CN', role: '入口' },
+        { name: '线路', region: 'JP', role: '线路机' },
+        { name: '', region: '', role: '落地机' },
+      ],
+      metrics: [
+        { live: false, nodeName: '', taskFilter: '', fallbackLatency: 10, fallbackLoss: 0 },
+        { live: false, nodeName: '', taskFilter: '', fallbackLatency: null, fallbackLoss: null },
+      ],
+    }
+    saveTopologyConfiguration.mockImplementation(async () => ({
+      topologyConfig: '{"version":1}',
+      topologyRoute: '入口|CN|入口;线路|JP|线路机',
+      topologyMetrics: '10,0',
+    }))
+
+    await expect(manager.save()).resolves.toBe('saved')
+    manager.routes.value[0]!.metrics[0]!.fallbackLatency = 11
+    saveTopologyConfiguration.mockClear()
+    saveTopologyConfiguration.mockImplementation(async () => ({
+      topologyConfig: '{"version":1}',
+      topologyRoute: '入口|CN|入口;线路|JP|线路机',
+      topologyMetrics: '11,0',
+    }))
+    await nextTick()
+    await expect(manager.save()).resolves.toBe('saved')
+    expect(saveTopologyConfiguration.mock.calls[0]?.[0]).toMatchObject({
+      expected: {
+        topologyConfig: '{"version":1}',
         topologyRoute: '入口|CN|入口;线路|JP|线路机',
         topologyMetrics: '10,0',
       },
@@ -240,5 +285,90 @@ describe('topology manager save snapshots', () => {
         topologyMetrics: '10,0',
       },
     })
+  })
+
+  test('writes the previous snapshot back when the caller aborts after the POST commits', async () => {
+    const appStore = useAppStore()
+    appStore.publicSettings = publicSettings({
+      topologyRoute: '入口|CN|入口;线路|JP|线路机',
+      topologyMetrics: '10,0',
+    })
+    const manager = useTopologyManager([
+      node({ uuid: 'relay', name: '线路', region: 'JP', online: true }),
+    ])
+    manager.reset()
+    const previous = JSON.parse(JSON.stringify(manager.routes.value)) as typeof manager.routes.value
+    manager.routes.value[0] = {
+      id: 1,
+      enabled: true,
+      nodes: [
+        { name: '入口', region: 'CN', role: '入口' },
+        { name: '线路', region: 'JP', role: '线路机' },
+        { name: '落地', region: 'US', role: '落地机' },
+      ],
+      metrics: [
+        { live: false, nodeName: '', taskFilter: '', fallbackLatency: 10, fallbackLoss: 0 },
+        { live: false, nodeName: '', taskFilter: '', fallbackLatency: 20, fallbackLoss: 0 },
+      ],
+    }
+
+    const controller = new AbortController()
+    saveTopologyConfiguration.mockImplementation(async (options) => {
+      controller.abort()
+      return {
+        topologyRoute: '入口|CN|入口;线路|JP|线路机;落地|US|落地机',
+        topologyMetrics: '10,0;20,0',
+        topologyConfig: options.routes,
+      }
+    })
+
+    await expect(manager.save({ signal: controller.signal })).rejects.toMatchObject({ name: 'AbortError' })
+    expect(saveTopologyConfiguration.mock.calls).toHaveLength(2)
+    expect(saveTopologyConfiguration.mock.calls[1]?.[0]?.routes).toEqual(previous)
+  })
+
+  test('keeps the committed snapshot and names the failure when the compensating write fails', async () => {
+    const appStore = useAppStore()
+    appStore.publicSettings = publicSettings({
+      topologyRoute: '入口|CN|入口;线路|JP|线路机',
+      topologyMetrics: '10,0',
+    })
+    const manager = useTopologyManager([
+      node({ uuid: 'relay', name: '线路', region: 'JP', online: true }),
+    ])
+    manager.reset()
+    manager.routes.value[0] = {
+      id: 1,
+      enabled: true,
+      nodes: [
+        { name: '入口', region: 'CN', role: '入口' },
+        { name: '线路', region: 'JP', role: '线路机' },
+        { name: '落地', region: 'US', role: '落地机' },
+      ],
+      metrics: [
+        { live: false, nodeName: '', taskFilter: '', fallbackLatency: 10, fallbackLoss: 0 },
+        { live: false, nodeName: '', taskFilter: '', fallbackLatency: 20, fallbackLoss: 0 },
+      ],
+    }
+
+    const controller = new AbortController()
+    let calls = 0
+    saveTopologyConfiguration.mockImplementation(async () => {
+      calls += 1
+      if (calls === 1) {
+        controller.abort()
+        return {
+          topologyRoute: '入口|CN|入口;线路|JP|线路机;落地|US|落地机',
+          topologyMetrics: '10,0;20,0',
+        }
+      }
+      throw new Error('compensating write failed')
+    })
+
+    await expect(manager.save({ signal: controller.signal })).rejects.toMatchObject({
+      name: 'TopologySaveCommittedError',
+      message: expect.stringContaining('撤回刚提交的拓扑配置失败，当前配置已保存'),
+    })
+    expect(calls).toBe(2)
   })
 })

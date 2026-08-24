@@ -72,6 +72,22 @@ export function topologyPingTargets(endpoint: Pick<TopologyPingEndpoint, 'ipv4' 
   return [...new Set([normalizeIp(endpoint.ipv4), normalizeIp(endpoint.ipv6)].filter(Boolean))]
 }
 
+/** 把落地机收成规划选定的那一个地址族，避免 ensure 绑到另一族已经判死的同端口任务。 */
+export function restrictTopologyPingEndpoint<T extends TopologyPingEndpoint>(endpoint: T, host: string): T {
+  const wanted = pingTaskTargetHost(host) || normalizeIp(host)
+  if (!wanted)
+    return endpoint
+  const v4 = normalizeIp(endpoint.ipv4)
+  const v6 = normalizeIp(endpoint.ipv6)
+  if (wanted === v4)
+    return { ...endpoint, ipv6: undefined }
+  if (wanted === v6)
+    return { ...endpoint, ipv4: undefined }
+  if (validIpv4(wanted))
+    return { ...endpoint, ipv4: wanted, ipv6: undefined }
+  return { ...endpoint, ipv4: undefined, ipv6: wanted }
+}
+
 export function pingTaskTargetHost(target: string): string {
   const value = target.trim()
   if (!value)
@@ -181,13 +197,13 @@ export function listTopologyPingTasks(
   if (!sourceUuid.trim() || !targetHosts.size)
     return []
   const assignedTasks = tasks.filter(task => isPingTaskAssignedToSource(task, sourceUuid))
-  return assignedTasks
-    .filter(task => TOPOLOGY_HOP_TASK_TYPES.has(task.type.toLowerCase())
-      && targetHosts.has(pingTaskTargetHost(task.target))
-      && topologyHopProbeFromTask(task) !== null)
-    .filter(candidate => assignedTasks.filter(task => task.name === candidate.name).length === 1)
-    .sort((left, right) => (left.weight ?? Number.MAX_SAFE_INTEGER) - (right.weight ?? Number.MAX_SAFE_INTEGER)
-      || (left.id ?? Number.MAX_SAFE_INTEGER) - (right.id ?? Number.MAX_SAFE_INTEGER))
+  const targeting = assignedTasks.filter(task => TOPOLOGY_HOP_TASK_TYPES.has(task.type.toLowerCase())
+    && targetHosts.has(pingTaskTargetHost(task.target))
+    && topologyHopProbeFromTask(task) !== null)
+  // 同名同探针也可能一个已死一个还活着。样本按 task id 取，全部交给规划
+  // 侧按健康度挑选，这里不再按名字折叠成一条。
+  return targeting.sort((left, right) => (left.weight ?? Number.MAX_SAFE_INTEGER) - (right.weight ?? Number.MAX_SAFE_INTEGER)
+    || (left.id ?? Number.MAX_SAFE_INTEGER) - (right.id ?? Number.MAX_SAFE_INTEGER))
 }
 
 export function findTopologyPingTask(
@@ -201,6 +217,28 @@ export function findTopologyPingTask(
     const taskProbe = topologyHopProbeFromTask(task)
     return taskProbe !== null && isSameTopologyHopProbe(taskProbe, normalized)
   })
+}
+
+export function listMatchingHopTaskIds(
+  tasks: readonly AdminPingTask[],
+  sourceUuid: string,
+  target: Pick<TopologyPingEndpoint, 'ipv4' | 'ipv6'>,
+  probe: TopologyHopProbe = DEFAULT_TOPOLOGY_HOP_PROBE,
+): Set<number> {
+  const normalized = normalizeTopologyHopProbe(probe)
+  const targetHosts = new Set(topologyPingTargets(target))
+  if (!sourceUuid.trim() || !targetHosts.size)
+    return new Set()
+  return new Set(tasks.flatMap((task) => {
+    if (!Number.isInteger(task.id) || !isPingTaskAssignedToSource(task, sourceUuid))
+      return []
+    if (!targetHosts.has(pingTaskTargetHost(task.target)))
+      return []
+    const taskProbe = topologyHopProbeFromTask(task)
+    if (!taskProbe || !isSameTopologyHopProbe(taskProbe, normalized))
+      return []
+    return [task.id!]
+  }))
 }
 
 export function findTopologyPingTaskByName(
@@ -258,7 +296,17 @@ export function topologyHopTaskName(
   if (!tasks.some(task => task.name === base))
     return base
   const suffix = `-${target.uuid.slice(0, 8)}`
-  return `${base.slice(0, 200 - suffix.length)}${suffix}`
+  const suffixed = `${base.slice(0, 200 - suffix.length)}${suffix}`
+  if (!tasks.some(task => task.name === suffixed))
+    return suffixed
+  let index = 2
+  while (true) {
+    const numbered = `-${index}`
+    const candidate = `${suffixed.slice(0, 200 - numbered.length)}${numbered}`
+    if (!tasks.some(task => task.name === candidate))
+      return candidate
+    index += 1
+  }
 }
 
 export function topologyHopTaskNameCandidates(
@@ -298,21 +346,30 @@ export function findTopologyEntryProbeTask(
   hopProbe: TopologyHopProbe,
   requestedName = '',
 ): AdminPingTask | undefined {
-  const uniqueByName = (taskName: string) => {
-    const matches = tasks.filter(task => isPingTaskAssignedToSource(task, sourceUuid) && task.name.trim() === taskName.trim())
-    return matches.length === 1 ? matches[0] : undefined
+  const assigned = tasks.filter(task => isPingTaskAssignedToSource(task, sourceUuid))
+  const uniqueMatchingProbe = (candidates: readonly AdminPingTask[]): AdminPingTask | undefined => {
+    const matching = candidates.filter((task) => {
+      const taskProbe = topologyHopProbeFromTask(task)
+      return taskProbe !== null && isSameTopologyHopProbe(taskProbe, hopProbe)
+    })
+    return matching.length === 1 ? matching[0] : undefined
   }
-  if (requestedName)
-    return uniqueByName(requestedName)
-  const generated = uniqueByName(topologyEntryTaskName(probe, hopProbe))
+  const byName = (taskName: string) => assigned.filter(task => task.name.trim() === taskName.trim())
+  if (requestedName) {
+    const named = uniqueMatchingProbe(byName(requestedName))
+    if (named)
+      return named
+    // 自定义入口已经换成带协议/端口的精确名时，不能再回落到旧的无后缀 taskFilter。
+    if (isCustomTopologyProbe(probe) && requestedName.trim() !== probe.taskFilter.trim())
+      return undefined
+  }
+  const generated = uniqueMatchingProbe(byName(topologyEntryTaskName(probe, hopProbe)))
   if (generated)
     return generated
   const canonicalNames = new Set(
     (isCustomTopologyProbe(probe) ? [probe.taskFilter] : [probe.taskFilter, probe.label]).map(normalizePingTaskName),
   )
-  const canonical = tasks.filter(task => isPingTaskAssignedToSource(task, sourceUuid)
-    && canonicalNames.has(normalizePingTaskName(task.name)))
-  return canonical.length === 1 ? canonical[0] : undefined
+  return uniqueMatchingProbe(assigned.filter(task => canonicalNames.has(normalizePingTaskName(task.name))))
 }
 
 export function buildTopologyEntryProbeDraft(

@@ -3,6 +3,7 @@ import type { NodeData } from '@/stores/nodes'
 import type { TelemetrySample } from '@/types/telemetry'
 import type { TopologyRouteHealth } from '@/utils/topologyHealth'
 import type { TopologyReliabilityWindow } from '@/utils/topologyIntelligence'
+import type { TopologyProbeMode } from '@/utils/topologyModel'
 import { computed } from 'vue'
 import TelemetrySampleStrip from '@/components/TelemetrySampleStrip.vue'
 import { useNodePingStats } from '@/composables/useNodePingStats'
@@ -19,9 +20,11 @@ const props = defineProps<{
   targetLabel: string
   hours: number
   sourceUuid?: string
+  probeMode?: TopologyProbeMode
 }>()
 
 const config = computed(() => parseTopologyMetric(props.metric))
+const probeMode = computed(() => props.probeMode ?? config.value.probeMode ?? (config.value.live ? 'live' : 'static'))
 const telemetryLabel = computed(() => formatTopologyTelemetryLabel(props.metric, props.sourceLabel, props.targetLabel))
 const sourceNode = computed(() => resolveTopologyMetricSource(props.nodes, config.value.nodeName, props.sourceUuid))
 const ping = useNodePingStats(
@@ -68,6 +71,7 @@ const maximumLatency = computed(() => Math.max(...history.value.map(point => poi
 const baselineLatency = computed(() => calculateTopologyLatencyBaseline(history.value.map(point => point.latency)))
 const health = computed<TopologyRouteHealth>(() => resolveTopologySegmentHealth({
   live: config.value.live,
+  probeMode: probeMode.value,
   sourceExists: Boolean(sourceNode.value),
   sourceOnline: sourceNode.value?.online,
   loading: ping.loading.value,
@@ -117,7 +121,7 @@ const status = computed(() => {
   if (config.value.live && ping.delayed.value)
     return { label: '数据可能不是最新', tone: 'text-amber-700 dark:text-amber-300', dot: 'bg-amber-400' }
   if (!hasLiveData.value)
-    return { label: config.value.live ? '等待任务数据' : '静态基线', tone: 'text-slate-500 dark:text-slate-400', dot: 'bg-slate-500' }
+    return { label: probeMode.value === 'auto' ? '等待自动探测' : config.value.live ? '等待任务数据' : '静态基线', tone: 'text-slate-500 dark:text-slate-400', dot: probeMode.value === 'auto' ? 'bg-amber-400' : 'bg-slate-500' }
   if ((loss.value ?? 0) > 3 || ping.avgVolatility.value > 1.8)
     return { label: '存在波动', tone: 'text-amber-700 dark:text-amber-300', dot: 'bg-amber-400' }
   return { label: '实时稳定', tone: 'text-emerald-700 dark:text-emerald-300', dot: 'bg-emerald-400' }

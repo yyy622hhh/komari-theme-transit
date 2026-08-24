@@ -4,6 +4,7 @@ import {
   createTopologyRepairRunner,
   formatTopologyRepairError,
   isAbortLikeError,
+  nextTopologyRepairLastError,
   shouldAnnounceTopologyRepairError,
   useTopologyProbeRepairTrigger,
 } from '../../src/composables/useTopologyProbeRepair'
@@ -20,6 +21,13 @@ describe('topology probe repair error signaling', () => {
   test('uses the original message when one exists', () => {
     expect(formatTopologyRepairError(new Error('登录状态已过期，请重新登录后保存。'))).toBe('登录状态已过期，请重新登录后保存。')
     expect(formatTopologyRepairError('nope')).toBe('拓扑探测自愈失败')
+  })
+
+  test('keeps a previous failure visible when the next round is skipped', () => {
+    expect(nextTopologyRepairLastError('拓扑探测自愈失败', 'skipped')).toBe('拓扑探测自愈失败')
+    expect(nextTopologyRepairLastError('拓扑探测自愈失败', 'no-op')).toBe('')
+    expect(nextTopologyRepairLastError('拓扑探测自愈失败', 'repaired')).toBe('')
+    expect(nextTopologyRepairLastError('', 'cleanup-failed')).toBe('已换挡的旧探测任务清理失败，将在下一轮重试')
   })
 
   test('rate-limits operator notices', () => {
@@ -160,15 +168,48 @@ describe('createTopologyRepairRunner', () => {
     expect(repairing.value).toBe(true)
 
     resolvers.shift()?.()
-    await Promise.all([first, second, third])
-    expect(runCalls).toBe(1)
-    expect(repairing.value).toBe(false)
-
-    // 上一轮结束后，新的触发可以正常再跑一轮。
-    const fourth = attempt()
+    await Promise.resolve()
+    await Promise.resolve()
     expect(runCalls).toBe(2)
     resolvers.shift()?.()
+    await Promise.all([first, second, third])
+    expect(runCalls).toBe(2)
+    expect(repairing.value).toBe(false)
+
+    // 排队补跑结束后，新的触发可以再跑一轮。
+    const fourth = attempt()
+    expect(runCalls).toBe(3)
+    resolvers.shift()?.()
     await fourth
+    expect(repairing.value).toBe(false)
+  })
+
+  test('a trigger during an in-flight run waits for that run instead of resolving as a skip', async () => {
+    const repairing = ref(false)
+    const resolvers: Array<() => void> = []
+    const attempt = createTopologyRepairRunner({
+      canRepair: () => true,
+      repairing,
+      run: () => new Promise<void>((resolve) => {
+        resolvers.push(resolve)
+      }),
+    })
+
+    const first = attempt()
+    const skipped = attempt()
+    let skippedSettled = false
+    void skipped.then(() => {
+      skippedSettled = true
+    })
+    await Promise.resolve()
+    expect(skippedSettled).toBe(false)
+
+    resolvers.shift()?.()
+    await Promise.resolve()
+    await Promise.resolve()
+    resolvers.shift()?.()
+    await Promise.all([first, skipped])
+    expect(skippedSettled).toBe(true)
     expect(repairing.value).toBe(false)
   })
 

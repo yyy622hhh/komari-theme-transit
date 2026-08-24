@@ -4,7 +4,8 @@ import type { TopologyRepairDeps, TopologyRepairManagerLike } from '../../src/se
 import type { NodeData } from '../../src/stores/nodes'
 import type { TopologyRouteConfig } from '../../src/utils/topologyModel'
 import { describe, expect, test } from 'bun:test'
-import { canRunTopologyProbeRepair, listOwnedRetiredTaskIds, listOwnedUnboundTaskIds, liveTopologyTaskNames, runTopologyProbeRepair } from '../../src/services/topology-repair.service'
+import { canRunTopologyProbeRepair, listLiveEntryTaskIds, listOwnedRetiredTaskIds, listOwnedUnboundTaskIds, liveTopologyTaskNames, runTopologyProbeRepair } from '../../src/services/topology-repair.service'
+import { TopologySaveCommittedError } from '../../src/services/topology.service'
 import { getTopologyProbe } from '../../src/utils/topologyPresets'
 
 const relay: NodeData = { uuid: 'relay-uuid', name: 'Relay-JP', ipv4: '192.0.2.10' } as NodeData
@@ -26,6 +27,7 @@ function route(overrides: Partial<{
   entryLabel: string
   entryTarget: string
   entryLive: boolean
+  entryProbeMode: 'static' | 'auto' | 'live'
   entryNodeName: string
   entryTaskFilter: string
 }> = {}): TopologyRouteConfig {
@@ -46,6 +48,7 @@ function route(overrides: Partial<{
     ],
     metrics: [
       {
+        probeMode: overrides.entryProbeMode ?? (overrides.entryLive ? 'live' : overrides.entryTarget || overrides.entryLabel ? 'auto' : 'static'),
         live: overrides.entryLive ?? false,
         nodeName: overrides.entryNodeName ?? '',
         taskFilter: overrides.entryTaskFilter ?? '',
@@ -53,6 +56,7 @@ function route(overrides: Partial<{
         fallbackLoss: null,
       },
       {
+        probeMode: overrides.live === false ? 'static' : 'live',
         live: overrides.live ?? true,
         nodeName: overrides.nodeName ?? sourceName,
         taskFilter: overrides.taskFilter ?? 'Transit-Relay-JP-to-Exit-SG',
@@ -131,6 +135,9 @@ function createDeps(overrides: Partial<TopologyRepairDeps> & { manager: Topology
     deleteTopologyPingTasks: async () => true,
     planEntryProbeTask: async () => entryPlan(),
     ensureTopologyEntryProbeTask: async () => ({ task: entryPlan().task, created: false }),
+    createTopologyEntryProbeTask: async () => {
+      throw new Error('createTopologyEntryProbeTask is not stubbed')
+    },
     ...overrides,
   }
 }
@@ -144,9 +151,37 @@ describe('owned retired task selection', () => {
         { id: 3, name: 'someone-else' },
       ],
       new Set([1, 2]),
-      new Set(['still-bound']),
+      { boundTaskNames: new Set(['still-bound']) },
     )
     expect(ids).toEqual([1])
+  })
+
+  test('excludes ids created earlier in the same round instead of by bound name', () => {
+    const ids = listOwnedRetiredTaskIds(
+      [
+        { id: 1, name: '北京电信' },
+        { id: 2, name: '北京电信' },
+      ],
+      new Set([1, 2]),
+      { excludeIds: new Set([2]) },
+    )
+    expect(ids).toEqual([1])
+  })
+
+  test('protects remaining same-named ids after subtracting this round’s retired set', () => {
+    const routes = [route({
+      entryLabel: '北京电信',
+      entryLive: true,
+      entryNodeName: relay.name,
+      entryTaskFilter: '北京电信',
+    })]
+    const tasks = [
+      { id: 55, name: '北京电信', clients: [relay.uuid], type: 'icmp', target: beijingTelecom.landmarkAddress, interval: 30 },
+      { id: 56, name: '北京电信', clients: [relay.uuid], type: 'tcp', target: `${beijingTelecom.dnsAddress}:53`, interval: 30 },
+    ]
+    expect([...listLiveEntryTaskIds(routes, nodes, tasks, new Set([55]))]).toEqual([56])
+    expect([...listLiveEntryTaskIds(routes, nodes, tasks, new Set())].sort()).toEqual([55, 56])
+    expect([...listLiveEntryTaskIds(routes, nodes, [{ id: 55, name: '北京电信', clients: [relay.uuid], type: 'icmp', target: beijingTelecom.landmarkAddress, interval: 30 }], new Set([55]))]).toEqual([55])
   })
 
   test('lists owned entry tasks that no route still binds', () => {
@@ -195,6 +230,10 @@ describe('canRunTopologyProbeRepair', () => {
   test('blocks when no topology has been configured yet', () => {
     expect(canRunTopologyProbeRepair({ ...healthy, topologyRoute: '' })).toBe(false)
     expect(canRunTopologyProbeRepair({ ...healthy, topologyRoute: '   ' })).toBe(false)
+  })
+
+  test('allows JSON-only topology that no longer writes the legacy route string', () => {
+    expect(canRunTopologyProbeRepair({ ...healthy, topologyRoute: '', topologyConfigured: true })).toBe(true)
   })
 
   test('blocks while the page is hidden in the background', () => {
@@ -253,6 +292,23 @@ describe('runTopologyProbeRepair gating', () => {
     expect(log.withSaveLockCalls).toBe(0)
   })
 
+  test('still repairs other routes when only one route has a validation error', async () => {
+    const broken = route({ id: 1, taskFilter: 'stale-broken' })
+    const ok = route({ id: 2, taskFilter: 'stale-ok' })
+    const { manager, log } = createManager([broken, ok], { validationErrors: ['第 1 条线路的自定义入口探测目标不是有效的 IP 或域名'] })
+    const outcome = await runTopologyProbeRepair(createDeps({
+      manager,
+      planWorkingHopTask: async (_source, _landing, current) => hopPlan({
+        needsCreation: false,
+        task: { ...hopPlan().task, name: current === 'stale-ok' ? 'fixed-ok' : current ?? '' },
+      }),
+    }))
+    expect(outcome).toBe('repaired')
+    expect(log.saveCalls).toEqual([{ lockHeld: true }])
+    expect(broken.metrics[1]?.taskFilter).toBe('stale-broken')
+    expect(ok.metrics[1]?.taskFilter).toBe('fixed-ok')
+  })
+
   test('is a no-op when the binding is already correct and no task needs creating', async () => {
     const { manager, log } = createManager([route({ taskFilter: 'Transit-Relay-JP-to-Exit-SG' })])
     const outcome = await runTopologyProbeRepair(createDeps({
@@ -277,7 +333,7 @@ describe('runTopologyProbeRepair gating', () => {
     expect(planCalls).toBe(0)
   })
 
-  test('skips a route whose second segment is not live', async () => {
+  test('skips a route whose second segment is explicitly static', async () => {
     const { manager } = createManager([route({ live: false })])
     let planCalls = 0
     const outcome = await runTopologyProbeRepair(createDeps({
@@ -289,6 +345,20 @@ describe('runTopologyProbeRepair gating', () => {
     }))
     expect(outcome).toBe('no-op')
     expect(planCalls).toBe(0)
+  })
+
+  test('promotes an automatic segment to live after creating its task', async () => {
+    const automaticRoute = route({ live: false })
+    automaticRoute.metrics[1]!.probeMode = 'auto'
+    const { manager, log } = createManager([automaticRoute])
+    const outcome = await runTopologyProbeRepair(createDeps({
+      manager,
+      planWorkingHopTask: async () => hopPlan({ needsCreation: true }),
+      ensureTopologyPingTask: async () => ({ task: { ...hopPlan().task, id: 45 }, created: true }),
+    }))
+    expect(outcome).toBe('repaired')
+    expect(log.saveCalls).toEqual([{ lockHeld: true }])
+    expect(automaticRoute.metrics[1]).toMatchObject({ probeMode: 'live', live: true, taskFilter: 'Transit-Relay-JP-to-Exit-SG' })
   })
 })
 
@@ -485,6 +555,27 @@ describe('runTopologyProbeRepair persistence', () => {
         return true
       },
     }))).rejects.toThrow('写入后校验失败')
+    expect(deleted).toEqual([])
+  })
+
+  test('keeps newly created tasks when compensate-fail reports the topology write already committed', async () => {
+    const staleRoute = route({ taskFilter: 'stale-name' })
+    const { manager, log } = createManager([staleRoute])
+    manager.save = async (options) => {
+      log.saveCalls.push(options)
+      throw new TopologySaveCommittedError('撤回刚提交的拓扑配置失败，当前配置已保存。请核对后再改。')
+    }
+    const deleted: number[][] = []
+    const outcome = await runTopologyProbeRepair(createDeps({
+      manager,
+      planWorkingHopTask: async () => hopPlan({ needsCreation: true, task: { ...hopPlan().task, name: 'created-task' } }),
+      ensureTopologyPingTask: async () => ({ task: { ...hopPlan().task, id: 46, name: 'created-task' }, created: true }),
+      deleteTopologyPingTasks: async (ids) => {
+        deleted.push([...ids])
+        return true
+      },
+    }))
+    expect(outcome).toBe('repaired')
     expect(deleted).toEqual([])
   })
 
@@ -774,6 +865,10 @@ describe('runTopologyProbeRepair entry segment', () => {
           task: { name: probe.taskFilter, type: 'icmp', target: 'new.example.com', clients: [relay.uuid], interval: 30 },
         })
       },
+      createTopologyEntryProbeTask: async (_source, probe) => ({
+        task: { id: 60, name: probe.taskFilter, type: 'icmp', target: 'new.example.com', clients: [relay.uuid], interval: 30 },
+        created: true,
+      }),
     }))
     expect(outcome).toBe('repaired')
     expect(currentTaskNames).toEqual(['Transit-entry-custom-old', 'Transit-entry-custom-old'])
@@ -838,7 +933,7 @@ describe('runTopologyProbeRepair entry segment', () => {
     ]
     const { manager, log } = createManager([staleRoute])
     const deleted: number[][] = []
-    let ensureCalls = 0
+    let createCalls = 0
     const outcome = await runTopologyProbeRepair(createDeps({
       manager,
       sessionCreatedTaskIds: new Set(),
@@ -851,9 +946,10 @@ describe('runTopologyProbeRepair entry segment', () => {
         switchedFrom: null,
         retiredTasks: oldTasks,
       }),
-      ensureTopologyEntryProbeTask: async (_source, _probe, options) => {
-        ensureCalls += 1
-        expect(options).toMatchObject({ hopProbe: { type: 'tcp', port: 22 }, taskName: exactName })
+      createTopologyEntryProbeTask: async (_source, _probe, hopProbe, options) => {
+        createCalls += 1
+        expect(hopProbe).toEqual({ type: 'tcp', port: 22 })
+        expect(options).toMatchObject({ taskName: exactName })
         return { task: { id: 51, name: exactName, type: 'tcp', target: '111.197.38.247:22', clients: [relay.uuid], interval: 30 }, created: true }
       },
       deleteTopologyPingTasks: async (ids) => {
@@ -862,7 +958,7 @@ describe('runTopologyProbeRepair entry segment', () => {
       },
     }))
     expect(outcome).toBe('repaired')
-    expect(ensureCalls).toBe(1)
+    expect(createCalls).toBe(1)
     expect(log.saveCalls).toEqual([{ lockHeld: true }])
     expect(staleRoute.metrics[0]).toMatchObject({ live: true, nodeName: relay.name, taskFilter: exactName })
     // 两个旧任务都不是本会话创建的，迁移只改绑定，不按名称误删用户任务。
@@ -887,7 +983,7 @@ describe('runTopologyProbeRepair entry segment', () => {
       sessionCreatedTaskIds: new Set([55]),
       planEntryProbeTask: async () => entryPlan({
         needsCreation: true,
-        probe: { type: 'tcp', port: 443 },
+        probe: { type: 'tcp', port: 53 },
         switchedFrom: { type: 'icmp' },
         retiredTasks: [oldTask],
       }),
@@ -901,13 +997,13 @@ describe('runTopologyProbeRepair entry segment', () => {
       },
       createTopologyEntryProbeTask: async (_source, _probe, hopProbe) => {
         createCalls += 1
-        expect(hopProbe).toEqual({ type: 'tcp', port: 443 })
-        return { id: 56, name: '北京电信', type: 'tcp', target: `${beijingTelecom.landmarkAddress}:443`, clients: [relay.uuid], interval: 30 }
+        expect(hopProbe).toEqual({ type: 'tcp', port: 53 })
+        return { task: { id: 56, name: '北京电信', type: 'tcp', target: `${beijingTelecom.dnsAddress}:53`, clients: [relay.uuid], interval: 30 }, created: true }
       },
     }))
     // 换挡前后 metrics[0] 的 nodeName/taskFilter 都是「北京电信」不变——探测方式
     // 本来就不写进持久化的 topologyMetrics，只是背后指向的 Ping 任务从 ICMP 换
-    // 成了 TCP 443——所以 `manager.dirty` 判不出变化，不需要保存，复用了和第 2
+    // 成了 TCP 53——所以 `manager.dirty` 判不出变化，不需要保存，复用了和第 2
     // 段一样的既有约定（见 `else if (!deps.manager.dirty)` 分支的注释）：只创建
     // /清理了 Ping 任务、没有触发保存的修复，`outcome` 仍报告为 'no-op'。真正的
     // 修复效果由下面对 createCalls/deleted/metrics 的断言验证。
@@ -918,6 +1014,149 @@ describe('runTopologyProbeRepair entry segment', () => {
     // 新任务先建成功，旧任务的清理是后一步、独立于创建结果。
     expect(deleted).toEqual([[55]])
     expect(staleRoute.metrics[0]).toMatchObject({ live: true, taskFilter: '北京电信' })
+  })
+
+  test('does not delete a retired entry task id that the live ping task list shows is still bound', async () => {
+    const staleRoute = route({
+      taskFilter: 'Transit-Relay-JP-to-Exit-SG',
+      entryLabel: '北京电信',
+      entryLive: true,
+      entryNodeName: relay.name,
+      entryTaskFilter: '北京电信',
+    })
+    const { manager } = createManager([staleRoute])
+    const deleted: number[][] = []
+    const oldTask = { id: 55, name: '北京电信', type: 'icmp', target: beijingTelecom.landmarkAddress, clients: [relay.uuid], interval: 30 }
+    const outcome = await runTopologyProbeRepair(createDeps({
+      manager,
+      sessionCreatedTaskIds: new Set([55]),
+      planEntryProbeTask: async () => entryPlan({
+        needsCreation: true,
+        probe: { type: 'tcp', port: 53 },
+        switchedFrom: { type: 'icmp' },
+        retiredTasks: [oldTask],
+      }),
+      deleteTopologyPingTasks: async (ids) => {
+        deleted.push([...ids])
+        return true
+      },
+      createTopologyEntryProbeTask: async () => ({ task: { id: 56, name: '北京电信', type: 'tcp', target: `${beijingTelecom.dnsAddress}:53`, clients: [relay.uuid], interval: 30 }, created: true }),
+      // 规划阶段判断 55 已经换掉，但真实任务列表里它其实还是 relay 当前绑定的
+      // 「北京电信」任务（比如判断有误，或者被另一条共用同一台线路机的线路继续
+      // 用着）——按名字不可靠，必须靠这份任务列表按 id 兜底保护，不能被清掉。
+      loadAdminPingTasks: async () => [oldTask],
+    }))
+    expect(outcome).toBe('no-op')
+    expect(deleted).toEqual([])
+  })
+
+  test('deletes the retired same-named entry task after a successful switch', async () => {
+    const staleRoute = route({
+      taskFilter: 'Transit-Relay-JP-to-Exit-SG',
+      entryLabel: '北京电信',
+      entryLive: true,
+      entryNodeName: relay.name,
+      entryTaskFilter: '北京电信',
+    })
+    const { manager } = createManager([staleRoute])
+    const deleted: number[][] = []
+    const oldTask = { id: 55, name: '北京电信', type: 'icmp', target: beijingTelecom.landmarkAddress, clients: [relay.uuid], interval: 30 }
+    const newTask = { id: 56, name: '北京电信', type: 'tcp', target: `${beijingTelecom.dnsAddress}:53`, clients: [relay.uuid], interval: 30 }
+    const outcome = await runTopologyProbeRepair(createDeps({
+      manager,
+      sessionCreatedTaskIds: new Set([55]),
+      planEntryProbeTask: async () => entryPlan({
+        needsCreation: true,
+        probe: { type: 'tcp', port: 53 },
+        switchedFrom: { type: 'icmp' },
+        retiredTasks: [oldTask],
+      }),
+      deleteTopologyPingTasks: async (ids) => {
+        deleted.push([...ids])
+        return true
+      },
+      createTopologyEntryProbeTask: async () => ({ task: newTask, created: true }),
+      loadAdminPingTasks: async () => [oldTask, newTask],
+    }))
+    expect(outcome).toBe('no-op')
+    expect(deleted).toEqual([[55]])
+  })
+
+  test('skips entry-task cleanup when the live ping task list cannot be loaded', async () => {
+    const staleRoute = route({
+      taskFilter: 'Transit-Relay-JP-to-Exit-SG',
+      entryLabel: '北京电信',
+      entryLive: true,
+      entryNodeName: relay.name,
+      entryTaskFilter: '北京电信',
+    })
+    const { manager } = createManager([staleRoute])
+    const deleted: number[][] = []
+    const oldTask = { id: 55, name: '北京电信', type: 'icmp', target: beijingTelecom.landmarkAddress, clients: [relay.uuid], interval: 30 }
+    const outcome = await runTopologyProbeRepair(createDeps({
+      manager,
+      sessionCreatedTaskIds: new Set([55]),
+      planEntryProbeTask: async () => entryPlan({
+        needsCreation: true,
+        probe: { type: 'tcp', port: 53 },
+        switchedFrom: { type: 'icmp' },
+        retiredTasks: [oldTask],
+      }),
+      deleteTopologyPingTasks: async (ids) => {
+        deleted.push([...ids])
+        return true
+      },
+      createTopologyEntryProbeTask: async () => ({ task: { id: 56, name: '北京电信', type: 'tcp', target: `${beijingTelecom.dnsAddress}:53`, clients: [relay.uuid], interval: 30 }, created: true }),
+      loadAdminPingTasks: async () => {
+        throw new Error('admin:getAllPingTasks failed')
+      },
+    }))
+    expect(outcome).toBe('no-op')
+    expect(deleted).toEqual([])
+  })
+
+  test('rethrows when every route plan fails instead of reporting a quiet no-op', async () => {
+    const { manager } = createManager([route({ taskFilter: 'stale-icmp' })])
+    await expect(runTopologyProbeRepair(createDeps({
+      manager,
+      planWorkingHopTask: async () => {
+        throw new Error('admin:getAllPingTasks failed')
+      },
+    }))).rejects.toThrow('admin:getAllPingTasks failed')
+  })
+
+  test('skips the live ping task list fetch when this round has no entry tasks to retire', async () => {
+    const target = route({ taskFilter: 'stale-icmp' })
+    const { manager } = createManager([target])
+    const sessionCreatedTaskIds = new Set<number>([7])
+    const deleted: number[][] = []
+    let loadAdminPingTasksCalls = 0
+    const outcome = await runTopologyProbeRepair(createDeps({
+      manager,
+      sessionCreatedTaskIds,
+      planWorkingHopTask: async () => hopPlan({
+        needsCreation: true,
+        task: { ...hopPlan().task, name: 'Transit-Relay-JP-to-Exit-SG-tcp-443' },
+        retiredTasks: [{ id: 7, name: 'stale-icmp', type: 'icmp', target: landing.ipv4!, clients: [relay.uuid], interval: 30 }],
+      }),
+      ensureTopologyPingTask: async () => ({
+        task: { ...hopPlan().task, id: 8, name: 'Transit-Relay-JP-to-Exit-SG-tcp-443' },
+        created: true,
+      }),
+      deleteTopologyPingTasks: async (ids) => {
+        deleted.push([...ids])
+        return true
+      },
+      loadAdminPingTasks: async () => {
+        loadAdminPingTasksCalls += 1
+        return []
+      },
+    }))
+    expect(outcome).toBe('repaired')
+    expect(deleted).toEqual([[7]])
+    // 这一轮没有任何入口段被换挡，appliedEntryRetiredTasks 是空的——没有东西
+    // 需要靠任务列表保护，不该为了拿到一个用不上的结果去发一次 RPC。
+    expect(loadAdminPingTasksCalls).toBe(0)
   })
 
   test('does not clean up a duplicate entry task that was not created by this session', async () => {
@@ -961,7 +1200,7 @@ describe('runTopologyProbeRepair entry segment', () => {
       sessionCreatedTaskIds: new Set([55]),
       planEntryProbeTask: async () => entryPlan({
         needsCreation: true,
-        probe: { type: 'tcp', port: 443 },
+        probe: { type: 'tcp', port: 53 },
         switchedFrom: { type: 'icmp' },
         retiredTasks: [{ id: 55, name: '北京电信', type: 'icmp', target: beijingTelecom.landmarkAddress, clients: [relay.uuid], interval: 30 }],
       }),
@@ -969,10 +1208,10 @@ describe('runTopologyProbeRepair entry segment', () => {
       deleteTopologyPingTasks: async () => false,
       createTopologyEntryProbeTask: async () => {
         createCalls += 1
-        return { id: 56, name: '北京电信', type: 'tcp', target: `${beijingTelecom.landmarkAddress}:443`, clients: [relay.uuid], interval: 30 }
+        return { task: { id: 56, name: '北京电信', type: 'tcp', target: `${beijingTelecom.dnsAddress}:53`, clients: [relay.uuid], interval: 30 }, created: true }
       },
     }))
-    expect(outcome).toBe('no-op')
+    expect(outcome).toBe('cleanup-failed')
     expect(createCalls).toBe(1)
     expect(staleRoute.metrics[0]).toMatchObject({ live: true, taskFilter: '北京电信' })
   })
@@ -1010,6 +1249,97 @@ describe('runTopologyProbeRepair entry segment', () => {
     expect(log.saveCalls).toEqual([{ lockHeld: true }])
     expect(staleRoute.metrics[0]).toMatchObject({ live: true, taskFilter: '北京电信' })
     expect(staleRoute.metrics[1]).toMatchObject({ taskFilter: 'Transit-Relay-JP-to-Exit-SG' })
+  })
+
+  test('an entry ensure failure does not roll back hop tasks created in the same pass', async () => {
+    const hopRoute = route({ id: 1, taskFilter: 'stale-hop' })
+    const entryRoute = route({
+      id: 2,
+      taskFilter: 'Transit-Relay-JP-to-Exit-SG',
+      entryLabel: '北京电信',
+    })
+    const { manager, log } = createManager([hopRoute, entryRoute])
+    const deleted: number[][] = []
+    const outcome = await runTopologyProbeRepair(createDeps({
+      manager,
+      planWorkingHopTask: async () => hopPlan({ needsCreation: true, task: { ...hopPlan().task, name: 'fixed-hop' } }),
+      ensureTopologyPingTask: async () => ({ task: { ...hopPlan().task, id: 42, name: 'fixed-hop' }, created: true }),
+      planEntryProbeTask: async () => entryPlan({ needsCreation: true }),
+      ensureTopologyEntryProbeTask: async () => {
+        throw new Error('admin:addPingTask 502')
+      },
+      deleteTopologyPingTasks: async (ids) => {
+        deleted.push([...ids])
+        return true
+      },
+    }))
+    expect(outcome).toBe('repaired')
+    expect(log.saveCalls).toEqual([{ lockHeld: true }])
+    expect(hopRoute.metrics[1]?.taskFilter).toBe('fixed-hop')
+    expect(entryRoute.metrics[0]?.taskFilter).toBe('')
+    expect(deleted).toEqual([])
+  })
+
+  test('an entry re-plan that throws inside the lock does not roll back hop tasks', async () => {
+    const hopRoute = route({ id: 1, taskFilter: 'stale-hop' })
+    const entryRoute = route({
+      id: 2,
+      taskFilter: 'Transit-Relay-JP-to-Exit-SG',
+      entryLabel: '北京电信',
+    })
+    const { manager, log } = createManager([hopRoute, entryRoute])
+    const deleted: number[][] = []
+    let entryPlanCalls = 0
+    const outcome = await runTopologyProbeRepair(createDeps({
+      manager,
+      planWorkingHopTask: async () => hopPlan({ needsCreation: true, task: { ...hopPlan().task, name: 'fixed-hop' } }),
+      ensureTopologyPingTask: async () => ({ task: { ...hopPlan().task, id: 42, name: 'fixed-hop' }, created: true }),
+      planEntryProbeTask: async (_source, _probe, options) => {
+        entryPlanCalls += 1
+        if (options?.fresh)
+          throw new Error('admin:getAllPingTasks 502')
+        return entryPlan({ needsCreation: true })
+      },
+      ensureTopologyEntryProbeTask: async () => ({ task: { id: 61, name: '北京电信', type: 'icmp', target: beijingTelecom.landmarkAddress, clients: [relay.uuid], interval: 30 }, created: true }),
+      deleteTopologyPingTasks: async (ids) => {
+        deleted.push([...ids])
+        return true
+      },
+    }))
+    expect(entryPlanCalls).toBeGreaterThan(1)
+    expect(outcome).toBe('repaired')
+    expect(log.saveCalls).toEqual([{ lockHeld: true }])
+    expect(hopRoute.metrics[1]?.taskFilter).toBe('fixed-hop')
+    expect(deleted).toEqual([])
+  })
+
+  test('does not delete a session-created entry task when save fails', async () => {
+    const staleRoute = route({
+      taskFilter: 'Transit-Relay-JP-to-Exit-SG',
+      entryLabel: '北京电信',
+    })
+    const { manager } = createManager([staleRoute])
+    manager.save = async () => {
+      throw new Error('保存失败（HTTP 500）')
+    }
+    const sessionCreatedTaskIds = new Set<number>([55])
+    const deleted: number[][] = []
+    await expect(runTopologyProbeRepair(createDeps({
+      manager,
+      sessionCreatedTaskIds,
+      planEntryProbeTask: async () => entryPlan({
+        needsCreation: true,
+        retiredTasks: [{ id: 55, name: 'Transit-entry-old', type: 'icmp', target: beijingTelecom.landmarkAddress, clients: [relay.uuid], interval: 30 }],
+      }),
+      ensureTopologyEntryProbeTask: async () => ({ task: { id: 56, name: '北京电信', type: 'icmp', target: beijingTelecom.landmarkAddress, clients: [relay.uuid], interval: 30 }, created: true }),
+      deleteTopologyPingTasks: async (ids) => {
+        deleted.push([...ids])
+        return true
+      },
+    }))).rejects.toThrow('保存失败')
+    expect(deleted).toEqual([[56]])
+    expect(sessionCreatedTaskIds.has(55)).toBe(true)
+    expect(staleRoute.metrics[0]?.taskFilter).toBe('北京电信')
   })
 
   test('removes a newly created entry task if the save is cancelled mid-flight', async () => {

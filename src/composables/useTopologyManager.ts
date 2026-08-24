@@ -3,7 +3,7 @@ import type { NodeData } from '@/stores/nodes'
 import type { TopologyMetricConfig, TopologyNodeConfig, TopologyRouteConfig } from '@/utils/topologyModel'
 import { computed, ref, toValue } from 'vue'
 import { assertManagedThemeSettingsCurrent, createThemeSettingsSnapshot, withManagedThemeSettingsLock } from '@/services/theme-settings.service'
-import { saveTopologyConfiguration } from '@/services/topology.service'
+import { saveTopologyConfiguration, topologyExpectedFromPayload, TopologySaveCommittedError } from '@/services/topology.service'
 import { useAppStore } from '@/stores/app'
 import { normalizeThemeSettings } from '@/utils/themeSettings'
 import { readTopologyRoutes } from '@/utils/topologyConfig'
@@ -161,7 +161,8 @@ export function useTopologyManager(nodes: MaybeRefOrGetter<NodeData[]>) {
   }
 
   function setMetricMode(metric: TopologyMetricConfig, live: boolean): void {
-    metric.live = live
+    metric.probeMode = live ? (metric.live ? 'live' : 'auto') : 'static'
+    metric.live = live && metric.live
     if (!live) {
       metric.nodeName = ''
       metric.taskFilter = ''
@@ -187,7 +188,21 @@ export function useTopologyManager(nodes: MaybeRefOrGetter<NodeData[]>) {
     return withManagedThemeSettingsLock(theme, save)
   }
 
-  async function save(options: { lockHeld?: boolean } = {}): Promise<'invalid' | 'saved' | 'changed'> {
+  function applyPersistedPayload(payload: Record<string, unknown>, snapshot: string): void {
+    expectedTopologySettings.value = topologyExpectedFromPayload(payload)
+    savedSnapshot.value = snapshot
+  }
+
+  function throwIfSaveAborted(signal?: AbortSignal): void {
+    if (!signal?.aborted)
+      return
+    const error = new Error('Aborted')
+    error.name = 'AbortError'
+    throw error
+  }
+
+  async function save(options: { lockHeld?: boolean, signal?: AbortSignal } = {}): Promise<'invalid' | 'saved' | 'changed'> {
+    throwIfSaveAborted(options.signal)
     if (validationErrors.value.length)
       return 'invalid'
 
@@ -195,10 +210,15 @@ export function useTopologyManager(nodes: MaybeRefOrGetter<NodeData[]>) {
     if (!publicSettings)
       throw new Error('站点配置尚未加载完成。')
 
+    const previousSnapshot = savedSnapshot.value
+    const previousRoutes = previousSnapshot
+      ? JSON.parse(previousSnapshot) as TopologyRouteConfig[]
+      : []
     const submittedSnapshot = JSON.stringify(routes.value)
     const submittedRoutes = JSON.parse(submittedSnapshot) as TopologyRouteConfig[]
     saving.value = true
     try {
+      throwIfSaveAborted(options.signal)
       const payload = await saveTopologyConfiguration({
         theme: publicSettings.theme,
         routes: submittedRoutes,
@@ -206,14 +226,26 @@ export function useTopologyManager(nodes: MaybeRefOrGetter<NodeData[]>) {
         lockHeld: options.lockHeld,
         onPublicSettings: appStore.applyPublicSettings,
       })
-      expectedTopologySettings.value = {
-        topologyRoute: payload.topologyRoute,
-        topologyMetrics: payload.topologyMetrics,
-        ...(Object.hasOwn(payload, 'topologyOwnedPingTaskIds')
-          ? { topologyOwnedPingTaskIds: payload.topologyOwnedPingTaskIds }
-          : {}),
+      if (options.signal?.aborted) {
+        // POST 已经落到服务器。重置/关闭对话框必须把配置写回保存前的快照，
+        // 否则 waitForIdle 之后的 reset 会把这次写入当成最终结果。
+        try {
+          const reverted = await saveTopologyConfiguration({
+            theme: publicSettings.theme,
+            routes: previousRoutes,
+            expected: topologyExpectedFromPayload(payload),
+            lockHeld: options.lockHeld,
+            onPublicSettings: appStore.applyPublicSettings,
+          })
+          applyPersistedPayload(reverted, previousSnapshot)
+        }
+        catch (error) {
+          applyPersistedPayload(payload, submittedSnapshot)
+          throw new TopologySaveCommittedError('撤回刚提交的拓扑配置失败，当前配置已保存。请核对后再改。', { cause: error })
+        }
+        throwIfSaveAborted(options.signal)
       }
-      savedSnapshot.value = submittedSnapshot
+      applyPersistedPayload(payload, submittedSnapshot)
       return JSON.stringify(routes.value) === submittedSnapshot ? 'saved' : 'changed'
     }
     finally {
@@ -221,7 +253,7 @@ export function useTopologyManager(nodes: MaybeRefOrGetter<NodeData[]>) {
     }
   }
 
-  return {
+  const api = {
     saving,
     routes,
     availableNodes,
@@ -243,4 +275,7 @@ export function useTopologyManager(nodes: MaybeRefOrGetter<NodeData[]>) {
     withSaveLock,
     save,
   }
+  return api
 }
+
+export type TopologyManager = ReturnType<typeof useTopologyManager>

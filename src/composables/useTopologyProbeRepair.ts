@@ -1,15 +1,18 @@
 import type { MaybeRefOrGetter, Ref } from 'vue'
+import type { TopologyManager } from '@/composables/useTopologyManager'
+import type { TopologyRepairOutcome } from '@/services/topology-repair.service'
 import type { NodeData } from '@/stores/nodes'
 import { useDocumentVisibility } from '@vueuse/core'
 import { onScopeDispose, ref, toValue, watch } from 'vue'
 import { useTopologyManager } from '@/composables/useTopologyManager'
 import { OPS_TOPOLOGY_HOP_PROBE } from '@/constants/ops'
 import { TIME_MS } from '@/constants/time'
-import { createTopologyEntryProbeTask, deleteTopologyPingTasks, ensureTopologyEntryProbeTask, ensureTopologyPingTask } from '@/services/ping-task.service'
+import { createTopologyEntryProbeTask, deleteTopologyPingTasks, ensureTopologyEntryProbeTask, ensureTopologyPingTask, loadAdminPingTasks } from '@/services/ping-task.service'
 import { planEntryProbeTask, planWorkingHopTask } from '@/services/topology-probe.service'
 import { canRunTopologyProbeRepair, runTopologyProbeRepair } from '@/services/topology-repair.service'
 import { useAppStore } from '@/stores/app'
 import { logAppWarning } from '@/utils/safeError'
+import { parseTopologyConfig } from '@/utils/topologyConfig'
 import { getTopologyCreatedTaskIds, persistTopologyCreatedTaskIds } from '@/utils/topologyCreatedTasks'
 
 const REPAIR_ERROR_NOTICE_COOLDOWN_MS = 5 * TIME_MS.minute
@@ -20,6 +23,14 @@ export function isAbortLikeError(error: unknown): boolean {
 
 export function formatTopologyRepairError(error: unknown): string {
   return error instanceof Error && error.message.trim() ? error.message : '拓扑探测自愈失败'
+}
+
+export function nextTopologyRepairLastError(previous: string, outcome: TopologyRepairOutcome): string {
+  if (outcome === 'skipped')
+    return previous
+  if (outcome === 'cleanup-failed')
+    return '已换挡的旧探测任务清理失败，将在下一轮重试'
+  return ''
 }
 
 export function shouldAnnounceTopologyRepairError(lastAnnouncedAt: number, now: number): boolean {
@@ -38,16 +49,29 @@ export interface TopologyRepairRunnerDeps {
  * 保证同一时刻只有一轮真正在跑，其余尝试直接跳过而不是排队。
  */
 export function createTopologyRepairRunner(deps: TopologyRepairRunnerDeps): () => Promise<void> {
-  return async function attemptTopologyRepair(): Promise<void> {
-    if (deps.repairing.value || !deps.canRepair())
-      return
+  let queued = false
+  let inFlight: Promise<void> = Promise.resolve()
+  return function attemptTopologyRepair(): Promise<void> {
+    if (deps.repairing.value) {
+      queued = true
+      return inFlight
+    }
+    if (!deps.canRepair())
+      return Promise.resolve()
     deps.repairing.value = true
-    try {
-      await deps.run()
-    }
-    finally {
-      deps.repairing.value = false
-    }
+    inFlight = (async () => {
+      try {
+        await deps.run()
+      }
+      finally {
+        deps.repairing.value = false
+      }
+      if (queued) {
+        queued = false
+        await attemptTopologyRepair()
+      }
+    })()
+    return inFlight
   }
 }
 
@@ -96,9 +120,10 @@ export function useTopologyProbeRepairTrigger(deps: TopologyProbeRepairTriggerDe
 export function useTopologyProbeRepair(
   nodes: MaybeRefOrGetter<NodeData[]>,
   managerOpen: MaybeRefOrGetter<boolean>,
+  sharedManager?: TopologyManager,
 ) {
   const appStore = useAppStore()
-  const manager = useTopologyManager(nodes)
+  const manager = sharedManager ?? useTopologyManager(nodes)
   const repairing = ref(false)
   const lastError = ref('')
   const sessionCreatedTaskIds = getTopologyCreatedTaskIds()
@@ -106,6 +131,7 @@ export function useTopologyProbeRepair(
   let disposed = false
   let activeController: AbortController | null = null
   let lastErrorAnnouncedAt = 0
+  let runTail: Promise<void> = Promise.resolve()
 
   function canRepair(): boolean {
     return canRunTopologyProbeRepair({
@@ -114,6 +140,7 @@ export function useTopologyProbeRepair(
       managerOpen: toValue(managerOpen),
       privateFeaturesAllowed: appStore.privateFeaturesAllowed,
       topologyRoute: appStore.topologyRoute,
+      topologyConfigured: (parseTopologyConfig(appStore.topologyConfig)?.length ?? 0) > 0,
       pageVisible: documentVisibility.value === 'visible',
     })
   }
@@ -122,7 +149,7 @@ export function useTopologyProbeRepair(
     const controller = new AbortController()
     activeController = controller
     try {
-      await runTopologyProbeRepair({
+      const outcome = await runTopologyProbeRepair({
         nodes: () => toValue(nodes),
         canRepair,
         requireLoginPermission: () => appStore.requireLoginPermission('nodeTopology', { force: false }),
@@ -142,9 +169,17 @@ export function useTopologyProbeRepair(
         planEntryProbeTask,
         ensureTopologyEntryProbeTask,
         createTopologyEntryProbeTask,
+        loadAdminPingTasks,
         signal: controller.signal,
       })
-      lastError.value = ''
+      lastError.value = nextTopologyRepairLastError(lastError.value, outcome)
+      if (outcome === 'cleanup-failed' && lastError.value) {
+        const now = Date.now()
+        if (shouldAnnounceTopologyRepairError(lastErrorAnnouncedAt, now)) {
+          lastErrorAnnouncedAt = now
+          window.$message?.warning(`拓扑探测自愈失败：${lastError.value}`)
+        }
+      }
     }
     catch (error) {
       if (isAbortLikeError(error) || controller.signal.aborted)
@@ -169,10 +204,20 @@ export function useTopologyProbeRepair(
 
   const stopTrigger = useTopologyProbeRepairTrigger({
     canRepair,
-    repairNow: () => { void repairNow() },
+    repairNow: () => {
+      const run = repairNow()
+      runTail = run.then(() => undefined, () => undefined)
+      void run
+    },
     abortActive: () => activeController?.abort(),
     intervalMs: OPS_TOPOLOGY_HOP_PROBE.recheckIntervalMs,
   })
+
+  async function waitForIdle(): Promise<void> {
+    await runTail
+    while (repairing.value)
+      await runTail
+  }
 
   onScopeDispose(() => {
     disposed = true
@@ -180,5 +225,5 @@ export function useTopologyProbeRepair(
     stopTrigger()
   })
 
-  return { repairing, lastError, repairNow }
+  return { repairing, lastError, repairNow, waitForIdle }
 }

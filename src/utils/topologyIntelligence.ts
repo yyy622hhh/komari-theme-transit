@@ -1,5 +1,6 @@
 import type { TopologyRouteHealth, TopologySegmentTelemetry } from '@/utils/topologyHealth'
 import type { TopologyBaselineShift, TopologyDiagnosis, TopologyHourlyBucket, TopologyInsightCoverage, TopologyInsightEvidence, TopologyPeakInsight } from '@/utils/topologyInsights'
+import type { TopologyProbeMode } from '@/utils/topologyModel'
 
 export interface TopologyReliabilityWindow {
   hours: 24 | 168
@@ -28,6 +29,7 @@ export interface TopologySegmentReliabilitySnapshot {
   adaptive: TopologyAdaptiveBaseline
   insights?: {
     live: boolean
+    probeMode?: TopologyProbeMode
     sourceUuid: string
     taskId: number | null
     taskName: string

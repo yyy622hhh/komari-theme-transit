@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { applyTopologyProbeToRoute, buildQuickTopologyRoute, calculateTopologyLatencyBaseline, findDuplicateTopologyRouteIndex, findUniqueTopologyNode, formatTopologyLatency, getQuickTopologySourceNode, getTopologyRouteProbeKey, hydrateTopologyRouteNodes, listUnusedQuickLandingUuids, nextQuickLandingUuid, pickQuickHopTaskName, resolveTopologyMetricSource, resolveTopologyNode, resolveTopologySampleTone, shouldAutoApplyTopologyProbe, validateTopologyRoutes } from '@/utils/topologyHelper'
+import { applyTopologyProbeToRoute, buildQuickTopologyRoute, calculateTopologyLatencyBaseline, findDuplicateTopologyRouteIndex, findUniqueTopologyNode, formatTopologyLatency, getQuickTopologySourceNode, getTopologyRouteEntryProbe, getTopologyRouteProbeKey, hydrateTopologyRouteNodes, listUnusedQuickLandingUuids, nextQuickLandingUuid, pickQuickHopTaskName, resolveTopologyMetricSource, resolveTopologyNode, resolveTopologySampleTone, shouldAutoApplyTopologyProbe, validateTopologyRoutes } from '@/utils/topologyHelper'
 import { formatTopologyMetricForProbe, formatTopologyTelemetryLabel, getTopologyProbeStorageKey, parseTopologyMetric, parseTopologyRoutes, serializeTopologyRoutes, splitTopologyGroups } from '@/utils/topologyLegacyFormat'
 import { createTopologyRoute, TOPOLOGY_LIMITS } from '@/utils/topologyModel'
 import { findTopologyProbeKey, getTopologyProbe, getTopologyProbeTarget, listTopologyProbeTaskNamesForSource, pickQuickTopologyTaskName, TOPOLOGY_PROBE_OPTIONS } from '@/utils/topologyPresets'
@@ -50,6 +50,13 @@ describe('topology node identity', () => {
     ]
     expect(resolveTopologyMetricSource(nodes, '伦敦-离线归档', 'relay')?.name).toBe('伦敦-离线归档')
     expect(resolveTopologyMetricSource(nodes, '主控-洛杉矶', 'relay')?.uuid).toBe('relay')
+  })
+
+  test('resolves a renamed node by uuid when the stored metric name is stale', () => {
+    const nodes = [
+      { uuid: 'relay', name: '主控-东京', region: 'JP', online: true },
+    ]
+    expect(resolveTopologyMetricSource(nodes, '主控-洛杉矶', 'relay')?.name).toBe('主控-东京')
   })
 })
 
@@ -223,6 +230,15 @@ describe('topology probe overrides', () => {
       'live@Relay@北京联通@-@-',
     )
     expect(telecom).not.toBe(unicom)
+    expect(getTopologyProbeStorageKey(
+      '北京电信|CN|入口;Relay|JP|线路机;Exit|US|落地机',
+      'live@Relay@北京电信@-@-',
+      'jumper-a',
+    )).not.toBe(getTopologyProbeStorageKey(
+      '北京电信|CN|入口;Relay|JP|线路机;Exit|US|落地机',
+      'live@Relay@北京电信@-@-',
+      'jumper-b',
+    ))
   })
 })
 
@@ -547,9 +563,46 @@ describe('quick topology configuration', () => {
 
     expect(route?.metrics[1]).toMatchObject({ live: false, taskFilter: '' })
     expect(pickQuickHopTaskName(['北京电信', '节点'], '香港边缘节点-超长名称布局测试', '北京电信')).toBe('')
+    expect(pickQuickHopTaskName(['北京电信', 'test'], 'test-sg', '北京电信')).toBe('')
     expect(buildQuickTopologyRoute([
       { uuid: 'relay', name: '线路机-东京', online: true },
     ], { sourceUuid: 'relay', landingUuid: 'missing' })).toBeNull()
+  })
+
+  test('ignores an explicit hop task that is not assigned to the source', () => {
+    const route = buildQuickTopologyRoute([
+      { uuid: 'relay', name: '线路机-东京', region: 'JP', online: true },
+      { uuid: 'exit', name: '落地机-洛杉矶', region: 'US', online: true },
+    ], {
+      sourceUuid: 'relay',
+      landingUuid: 'exit',
+      sourceTasks: ['北京电信'],
+      hopTask: 'missing-task',
+    })
+    expect(route?.metrics[1]).toMatchObject({ live: false, taskFilter: '' })
+  })
+
+  test('does not treat an unknown probe key as 北京电信', () => {
+    const route = buildQuickTopologyRoute([
+      { uuid: 'relay', name: '线路机-东京', region: 'JP', online: true },
+      { uuid: 'exit', name: '落地机-洛杉矶', region: 'US', online: true },
+    ], {
+      sourceUuid: 'relay',
+      landingUuid: 'exit',
+      probeKey: 'custom-not-a-preset',
+    })
+    expect(route?.nodes[0]?.name).toBe('自定义入口')
+    expect(getTopologyRouteEntryProbe(route!)).toBeNull()
+  })
+
+  test('does not fall back to a preset when the custom probe target is invalid', () => {
+    expect(getTopologyRouteEntryProbe({
+      nodes: [
+        { name: '北京电信', region: 'CN', role: '入口', probeTarget: 'http://probe.example.com' },
+        { name: '线路机-东京', region: 'JP', role: '线路机' },
+      ],
+      metrics: [{ live: true, nodeName: '线路机-东京', taskFilter: '北京电信', fallbackLatency: null, fallbackLoss: null }],
+    })).toBeNull()
   })
 })
 
@@ -633,6 +686,114 @@ describe('topology configuration validation', () => {
     )
 
     expect(validateTopologyRoutes(routes)).toContain('第 2 条线路与第 1 条线路使用了相同的线路机和落地机')
+  })
+
+  test('treats the jumper as part of route identity on save and while adding', () => {
+    const viaTokyo = createTopologyRoute(
+      [
+        { name: '入口', region: 'CN', role: '入口' },
+        { name: 'AWS-JP', region: 'JP', role: '线路机', uuid: 'aws-jp' },
+        { name: 'CSL-JP', region: 'JP', role: '跳板', uuid: 'csl-jp' },
+        { name: 'CSL-US', region: 'US', role: '落地机', uuid: 'csl-us' },
+      ],
+      [
+        { live: false, nodeName: '', taskFilter: '', fallbackLatency: null, fallbackLoss: null },
+        { live: false, nodeName: '', taskFilter: '', fallbackLatency: null, fallbackLoss: null },
+        { live: false, nodeName: '', taskFilter: '', fallbackLatency: null, fallbackLoss: null },
+      ],
+    )
+    const viaHongKong = createTopologyRoute(
+      [
+        { name: '入口', region: 'CN', role: '入口' },
+        { name: 'AWS-JP', region: 'JP', role: '线路机', uuid: 'aws-jp' },
+        { name: 'CSL-HK', region: 'HK', role: '跳板', uuid: 'csl-hk' },
+        { name: 'CSL-US', region: 'US', role: '落地机', uuid: 'csl-us' },
+      ],
+      [
+        { live: false, nodeName: '', taskFilter: '', fallbackLatency: null, fallbackLoss: null },
+        { live: false, nodeName: '', taskFilter: '', fallbackLatency: null, fallbackLoss: null },
+        { live: false, nodeName: '', taskFilter: '', fallbackLatency: null, fallbackLoss: null },
+      ],
+    )
+    const direct = createTopologyRoute(
+      [
+        { name: '入口', region: 'CN', role: '入口' },
+        { name: 'AWS-JP', region: 'JP', role: '线路机', uuid: 'aws-jp' },
+        { name: 'CSL-US', region: 'US', role: '落地机', uuid: 'csl-us' },
+      ],
+      [
+        { live: false, nodeName: '', taskFilter: '', fallbackLatency: null, fallbackLoss: null },
+        { live: false, nodeName: '', taskFilter: '', fallbackLatency: null, fallbackLoss: null },
+      ],
+    )
+
+    expect(validateTopologyRoutes([viaTokyo, viaHongKong, direct])).toEqual([])
+    expect(findDuplicateTopologyRouteIndex([viaTokyo], 'AWS-JP', 'CSL-US', 'aws-jp', 'csl-us', 'CSL-HK', 'csl-hk')).toBe(-1)
+    expect(findDuplicateTopologyRouteIndex([viaTokyo], 'AWS-JP', 'CSL-US', 'aws-jp', 'csl-us', 'CSL-JP', 'csl-jp')).toBe(0)
+    expect(validateTopologyRoutes([viaTokyo, {
+      ...viaHongKong,
+      nodes: viaTokyo.nodes.map(node => ({ ...node })),
+    }])).toContain('第 2 条线路与第 1 条线路使用了相同的线路机和落地机')
+  })
+
+  test('resolves the real landing node even when the jumper slot is a gap', () => {
+    const viaGapToUS = createTopologyRoute([
+      { name: '入口', region: 'CN', role: '入口' },
+      { name: 'AWS-JP', region: 'JP', role: '线路机', uuid: 'aws-jp' },
+      { name: '', region: '', role: '跳板' },
+      { name: 'CSL-US', region: 'US', role: '落地机', uuid: 'csl-us' },
+    ])
+    const viaGapToHK = createTopologyRoute([
+      { name: '入口', region: 'CN', role: '入口' },
+      { name: 'AWS-JP', region: 'JP', role: '线路机', uuid: 'aws-jp' },
+      { name: '', region: '', role: '跳板' },
+      { name: 'CSL-HK', region: 'HK', role: '落地机', uuid: 'csl-hk' },
+    ])
+
+    expect(findDuplicateTopologyRouteIndex([viaGapToUS], 'AWS-JP', 'CSL-US', 'aws-jp', 'csl-us')).toBe(0)
+    expect(findDuplicateTopologyRouteIndex([viaGapToUS], 'AWS-JP', 'CSL-HK', 'aws-jp', 'csl-hk')).toBe(-1)
+
+    const errors = validateTopologyRoutes([viaGapToUS, viaGapToHK])
+    expect(errors).toContain('第 1 条线路节点顺序存在空位')
+    expect(errors).toContain('第 2 条线路节点顺序存在空位')
+    expect(errors).not.toContain('第 2 条线路与第 1 条线路使用了相同的线路机和落地机')
+  })
+
+  test('does not mistake an in-progress jumper for the landing while the landing is still unset', () => {
+    const savedDirect = createTopologyRoute([
+      { name: '入口', region: 'CN', role: '入口' },
+      { name: 'AWS-JP', region: 'JP', role: '线路机', uuid: 'aws-jp' },
+      { name: 'CSL-JP', region: 'JP', role: '落地机', uuid: 'csl-jp' },
+    ])
+    const midEditWithJumper = createTopologyRoute([
+      { name: '入口', region: 'CN', role: '入口' },
+      { name: 'AWS-JP', region: 'JP', role: '线路机', uuid: 'aws-jp' },
+      { name: 'CSL-JP', region: 'JP', role: '跳板', uuid: 'csl-jp' },
+      { name: '', region: '', role: '落地机' },
+    ])
+
+    expect(validateTopologyRoutes([savedDirect, midEditWithJumper])).not.toContain('第 2 条线路与第 1 条线路使用了相同的线路机和落地机')
+    expect(validateTopologyRoutes([midEditWithJumper])).toContain('第 1 条线路已选择跳板时必须选择落地机')
+  })
+
+  test('rejects a jumper-tailed three-node route that would serialize as a 跳板 landing', () => {
+    const route = createTopologyRoute([
+      { name: '入口', region: 'CN', role: '入口' },
+      { name: 'AWS-JP', region: 'JP', role: '线路机', uuid: 'aws-jp' },
+      { name: 'CSL-JP', region: 'JP', role: '跳板', uuid: 'csl-jp' },
+    ])
+    expect(validateTopologyRoutes([route])).toContain('第 1 条线路已选择跳板时必须选择落地机')
+  })
+
+  test('matches route endpoints after trimming stored uuids', () => {
+    const saved = createTopologyRoute([
+      { name: '入口', region: 'CN', role: '入口' },
+      { name: '同名', region: 'JP', role: '线路机', uuid: ' abc ' },
+      { name: '同名', region: 'US', role: '落地机', uuid: ' def ' },
+    ])
+
+    expect(findDuplicateTopologyRouteIndex([saved], '同名', '同名', 'abc', 'def')).toBe(0)
+    expect(findDuplicateTopologyRouteIndex([saved], '同名', '同名', 'abc', 'other')).toBe(-1)
   })
 
   test('keeps explicit legacy live metrics only when the numeric fallback boundary is unambiguous', () => {

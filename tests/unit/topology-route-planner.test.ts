@@ -1,6 +1,15 @@
 import type { TopologyRouteProbeState } from '../../src/composables/useTopologyRoutePlanner'
 import { describe, expect, test } from 'bun:test'
-import { findUniquePresetEntryTask, formatTopologyEntryHint, formatTopologyRouteHint, isTopologyRouteHintDestructive } from '../../src/composables/useTopologyRoutePlanner'
+import { findUniquePresetEntryTask, formatTopologyEntryHint, formatTopologyRouteHint, isTopologyRouteHintDestructive, isTopologySegmentKeyForRoute } from '../../src/composables/useTopologyRoutePlanner'
+
+describe('isTopologySegmentKeyForRoute', () => {
+  test('does not treat route 10 as a hop of route 1', () => {
+    expect(isTopologySegmentKeyForRoute('1', 1)).toBe(true)
+    expect(isTopologySegmentKeyForRoute('1:2', 1)).toBe(true)
+    expect(isTopologySegmentKeyForRoute('10:1', 1)).toBe(false)
+    expect(isTopologySegmentKeyForRoute('10:1', 10)).toBe(true)
+  })
+})
 
 describe('findUniquePresetEntryTask', () => {
   test('does not treat two unrelated unknown values as the same preset', () => {
@@ -169,6 +178,20 @@ describe('formatTopologyEntryHint', () => {
     expect(hint).toContain('北京电信')
     expect(hint).toContain('都探测不通')
     expect(hint).toContain('219.141.140.10')
+  })
+
+  test('quotes the custom ladder, not TCP 53, when a custom entry is exhausted', () => {
+    const hint = formatTopologyEntryHint({
+      probeLabel: '',
+      expectedTaskName: 'Transit-entry-custom-tcp-22',
+      entryLabel: '自建入口',
+      sourceName: 'Relay-JP',
+      live: true,
+      pending: false,
+      state: state({ exhausted: true, targetAddress: '203.0.113.10' }),
+    })
+    expect(hint).toContain('TCP 443')
+    expect(hint).not.toContain('TCP 53')
   })
 
   test('explains a custom entry that carries no live task', () => {
