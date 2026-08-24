@@ -12,7 +12,7 @@
 
 Transit 是一个面向多节点、多线路和跨境链路监控的 Komari 社区主题。它把“入口 → 线路机 → 可选跳板 → 落地机”的链路拓扑、北京/上海/广州三网 Ping、实时资源、异常告警和资产信息放进同一套紧凑界面，并提供可视化拓扑管理器。
 
-- 当前稳定版：[v1.3.6](https://github.com/yyy622hhh/komari-theme-transit/releases/tag/v1.3.6)
+- 当前稳定版：[v1.3.8](https://github.com/yyy622hhh/komari-theme-transit/releases/tag/v1.3.8)
 - 安装包：只从 [GitHub Releases](https://github.com/yyy622hhh/komari-theme-transit/releases) 下载 `komari-theme-Transit-build-*.zip`
 - 项目定位：主题安装包本身不修改 Komari 数据库、Agent 或系统账户；可选的回程伴生组件仅在管理员明确安装并启用后，才增加受控路由或安装节点助手
 
@@ -45,7 +45,7 @@ Transit 是一个面向多节点、多线路和跨境链路监控的 Komari 社�
 
 | 区域     | 能力                                                                                  |
 | -------- | ------------------------------------------------------------------------------------- |
-| 线路状态 | 多线路拓扑、逐段实时/静态指标、历史详情、健康评分、24 小时曲线与基线变化洞察          |
+| 线路状态 | 多线路拓扑、逐段实时/静态/待探测状态、历史详情、健康评分、24 小时曲线与基线变化洞察   |
 | 拓扑管理 | 内置/自定义入口、线路机、可选跳板与落地机，立即保存并自动创建或复用每段 ICMP/TCP 任务 |
 | 回程线路 | 自动检测三网回程走哪条骨干网（CN2GIA/163/9929/CMIN2 等），固定能力助手无需开放远控    |
 | 节点卡片 | CPU、内存、硬盘、上下行、累计流量、到期、价格和按节点配置的智能观测面板               |
@@ -179,9 +179,9 @@ Transit 使用独立短名称 `Transit`，不会覆盖已有的 PandaOps、Glass
         { "name": "Exit-US", "region": "US", "role": "落地机", "uuid": "落地机的 Komari UUID" }
       ],
       "metrics": [
-        { "live": true, "source": "Relay-JP", "task": "Transit-entry-custom-xxx" },
-        { "live": true, "source": "Relay-JP", "task": "Transit-Relay-JP-to-Jumper-JP" },
-        { "live": true, "source": "Jumper-JP", "task": "Transit-Jumper-JP-to-Exit-US", "fallbackLatency": 84, "fallbackLoss": 0 }
+        { "probeMode": "live", "live": true, "source": "Relay-JP", "task": "Transit-entry-custom-xxx" },
+        { "probeMode": "live", "live": true, "source": "Relay-JP", "task": "Transit-Relay-JP-to-Jumper-JP" },
+        { "probeMode": "live", "live": true, "source": "Jumper-JP", "task": "Transit-Jumper-JP-to-Exit-US", "fallbackLatency": 84, "fallbackLoss": 0 }
       ]
     }
   ]
@@ -190,7 +190,9 @@ Transit 使用独立短名称 `Transit`，不会覆盖已有的 PandaOps、Glass
 
 - `nodes` 最多四个，第一个是入口标签（没有 `uuid`，自定义入口可带 `probeTarget`）；线路机、可选跳板和落地机带 `uuid`，节点改名后仍能认回来。只有入口和线路机时写两个节点即可。
 - `metrics` 与 `nodes` 的段一一对应：四节点三段、三节点两段、两节点一段。
-- 静态基线写 `fallbackLatency` / `fallbackLoss`，不写 `live`；实时绑定写 `"live": true` 加 `source`（探测来源节点名）和 `task`（Ping 任务名）。省略某个字段表示没有该值。
+- `probeMode` 明确区分三种状态：`static` 只展示静态基线，永远不会创建或修复任务；`auto` 表示等待主题自动规划任务；`live` 表示已经绑定实时任务。这样打开拓扑管理器时，明确设置成静态的段不会被误改成实时探测。
+- 静态基线写 `{"probeMode":"static","fallbackLatency":51,"fallbackLoss":0}`；待自动规划写 `{"probeMode":"auto"}`；实时绑定写 `"probeMode":"live"`、`"live":true`、`source`（探测来源节点名）和 `task`（Ping 任务名）。省略备用值表示没有该值。
+- 老版本没有 `probeMode` 的配置继续兼容：`live:true` 按实时绑定读取，`live:false` 或省略 `live` 按静态基线读取，避免升级后仅仅打开管理器就意外创建任务。
 - 虽然 JSON 自身没有转义问题，但当前版本仍会双写旧格式以便降级安装；节点名称、地区和角色不能包含 `|` 或 `;`，实时指标的来源和任务名不能包含 `@`、`;` 或 `||`。停止写入旧格式后才会放宽这些限制。
 
 > **`topologyRoute` 和 `topologyMetrics` 是兼容字段，不要手工编辑。** 它们是旧的分隔符格式，主题仍会写入同一份内容，好让降级安装不会看到空拓扑；但读取时以 `topologyConfig` 优先，改了旧字段会在下次保存时被覆盖。旧字段会在确认无人回滚后的某个版本停写。
@@ -236,7 +238,7 @@ bun run build:route-probe
 
 插件要求 Komari `>=1.4.0`，声明 `node`、`allowRoutes` 以及请求体大小、超时限制；不会申请系统 RPC、子进程执行、端口监听、HTML 注入、全盘文件或请求钩子权限。
 
-然后在每台节点下载**同一 GitHub Release** 的两个脚本并安装。安装器会交互式读取该节点现有的 Komari Agent token，输入不会进入 shell 历史；下面的 `<版本>` 应替换为正在使用的发布标签（例如 `v1.3.6`），不要长期跟随会变化的 `main`：
+然后在每台节点下载**同一 GitHub Release** 的两个脚本并安装。安装器会交互式读取该节点现有的 Komari Agent token，输入不会进入 shell 历史；下面的 `<版本>` 应替换为正在使用的发布标签（例如 `v1.3.8`），不要长期跟随会变化的 `main`：
 
 ```bash
 curl -fsSLO https://github.com/yyy622hhh/komari-theme-transit/releases/download/<版本>/transit-route-probe-helper.sh
