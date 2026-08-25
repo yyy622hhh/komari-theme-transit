@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+## [1.3.10] - 2026-08-25
+
+### Testing
+
+- 补齐 `stores/nodes.ts`、`useTopologyRoutePlanner`、`route-probe.service.ts`、`useNodePingStats` 这几个核心状态/编排逻辑文件的单元测试，此前覆盖率接近于零。
+- 补齐 `ipGeoHelper`、`nodeSearch`、`groupHelper`、`regionHelper` 工具函数的单元测试。
+- 在 `src/AGENTS.md` 明确记录组件/视图层由 Playwright 视觉与功能测试覆盖，不要求单元测试，避免被误判为覆盖率缺口。
+- 无行为变化；完整单元、浏览器功能、视觉、构建、发布结构和依赖安全门禁通过。
+
 ## [1.3.9] - 2026-08-25
 
 ### Fixed
