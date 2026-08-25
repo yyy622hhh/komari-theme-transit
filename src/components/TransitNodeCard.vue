@@ -125,14 +125,14 @@ const statusEdgeStyle = computed(() => ({ '--node-status-tone': statusEdgeTone.v
           >
             {{ node.name }}
           </h3>
-          <span v-if="role" data-node-role class="shrink-0 text-[10px] leading-[1.25] text-slate-500">· {{ role }}</span>
+          <span v-if="role" data-node-role class="shrink-0 text-[10px] leading-[1.25] text-slate-500 dark:text-slate-400">· {{ role }}</span>
         </div>
         <div class="flex shrink-0 items-center gap-2">
           <button
             v-if="appStore.privateFeaturesAllowed"
             type="button"
             data-node-control-button
-            class="pointer-events-auto grid size-6 place-items-center rounded-md text-slate-500 transition-colors hover:bg-slate-500/10 hover:text-slate-800 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500/60 dark:hover:text-slate-200"
+            class="pointer-events-auto grid size-6 place-items-center rounded-md text-slate-500 transition-colors hover:bg-slate-500/10 hover:text-slate-800 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500/60 dark:text-slate-400 dark:hover:text-slate-200"
             :class="(isMaintenance || isSilenced) && 'text-amber-700 dark:text-amber-300'"
             :aria-label="`管理节点 ${node.name}`"
             :title="isMaintenance ? '维护中' : isSilenced ? '告警已静默' : '节点运维'"
@@ -149,7 +149,7 @@ const statusEdgeStyle = computed(() => ({ '--node-status-tone': statusEdgeTone.v
           >
         </div>
       </div>
-      <div data-node-status-row class="mt-1.5 flex min-w-0 flex-wrap items-start justify-between gap-x-3 gap-y-1 text-[10px] text-slate-500">
+      <div data-node-status-row class="mt-1.5 flex min-w-0 flex-wrap items-start justify-between gap-x-3 gap-y-1 text-[10px] text-slate-500 dark:text-slate-400">
         <div class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
           <span data-node-uptime class="break-words" :class="isMaintenance && 'font-medium text-amber-700 dark:text-amber-300'">
             {{ isMaintenance ? '维护中' : node.online ? `在线 ${getUptimeDays(node.uptime)} 天` : '离线' }}
@@ -181,31 +181,31 @@ const statusEdgeStyle = computed(() => ({ '--node-status-tone': statusEdgeTone.v
     <div data-node-resource-grid class="transit-divider pointer-events-none relative z-1 mt-3 grid grid-cols-3 gap-3 border-y py-2.5">
       <div>
         <div class="flex items-center justify-between gap-2 text-[10px]">
-          <span class="text-slate-500">CPU</span>
+          <span class="text-slate-500 dark:text-slate-400">CPU</span>
           <strong class="font-medium tabular-nums text-slate-700 dark:text-slate-200">{{ (node.cpu ?? 0).toFixed(1) }}%</strong>
         </div>
         <ProgressThin class="mt-1.5" :percentage="node.cpu" :status="resourceStatus(node.cpu)" :height="3" />
-        <div data-node-resource-value class="mt-1 break-words text-[9px] leading-tight tabular-nums text-slate-500 dark:text-slate-600">
+        <div data-node-resource-value class="mt-1 break-words text-[9px] leading-tight tabular-nums text-slate-500 dark:text-slate-400">
           {{ (node.load ?? 0).toFixed(2) }}, {{ (node.load5 ?? 0).toFixed(2) }}, {{ (node.load15 ?? 0).toFixed(2) }}
         </div>
       </div>
       <div>
         <div class="flex items-center justify-between gap-2 text-[10px]">
-          <span class="text-slate-500">内存</span>
+          <span class="text-slate-500 dark:text-slate-400">内存</span>
           <strong class="font-medium tabular-nums text-slate-700 dark:text-slate-200">{{ memoryPercentage.toFixed(1) }}%</strong>
         </div>
         <ProgressThin class="mt-1.5" :percentage="memoryPercentage" :status="resourceStatus(memoryPercentage)" :height="3" />
-        <div data-node-resource-value class="mt-1 break-words text-[9px] leading-tight tabular-nums text-slate-500 dark:text-slate-600">
+        <div data-node-resource-value class="mt-1 break-words text-[9px] leading-tight tabular-nums text-slate-500 dark:text-slate-400">
           {{ formatBytes(node.ram) }} / {{ formatBytes(node.mem_total) }}
         </div>
       </div>
       <div>
         <div class="flex items-center justify-between gap-2 text-[10px]">
-          <span class="text-slate-500">硬盘</span>
+          <span class="text-slate-500 dark:text-slate-400">硬盘</span>
           <strong class="font-medium tabular-nums text-slate-700 dark:text-slate-200">{{ diskPercentage.toFixed(1) }}%</strong>
         </div>
         <ProgressThin class="mt-1.5" :percentage="diskPercentage" :status="resourceStatus(diskPercentage)" :height="3" />
-        <div data-node-resource-value class="mt-1 break-words text-[9px] leading-tight tabular-nums text-slate-500 dark:text-slate-600">
+        <div data-node-resource-value class="mt-1 break-words text-[9px] leading-tight tabular-nums text-slate-500 dark:text-slate-400">
           {{ formatBytes(node.disk) }} / {{ formatBytes(node.disk_total) }}
         </div>
       </div>
@@ -221,7 +221,7 @@ const statusEdgeStyle = computed(() => ({ '--node-status-tone': statusEdgeTone.v
         class="node-card-cell min-w-0 overflow-hidden p-0 text-[9px]"
         :class="!hasReturnRoute && 'node-card-cell--full'"
       >
-        <div class="flex items-center justify-between gap-2 px-2.5 py-2 text-slate-500">
+        <div class="flex items-center justify-between gap-2 px-2.5 py-2 text-slate-500 dark:text-slate-400">
           <span>网络概览</span>
           <span v-if="hasTrafficLimit(node)" class="shrink-0 tabular-nums">{{ trafficPercentage.toFixed(1) }}%</span>
         </div>
@@ -229,7 +229,7 @@ const statusEdgeStyle = computed(() => ({ '--node-status-tone': statusEdgeTone.v
         <!-- 四项一组：半宽时排成 2×2，整行时摊成一排，不留大片空白 -->
         <div data-node-network-grid class="node-card-network-grid grid">
           <div data-node-speed-cell class="min-w-0 px-2.5 py-1.5">
-            <div class="text-slate-500">
+            <div class="text-slate-500 dark:text-slate-400">
               上行
             </div>
             <div class="mt-0.5 break-words text-[10px] tabular-nums text-emerald-600 dark:text-emerald-400">
@@ -237,7 +237,7 @@ const statusEdgeStyle = computed(() => ({ '--node-status-tone': statusEdgeTone.v
             </div>
           </div>
           <div class="min-w-0 px-2.5 py-1.5">
-            <div class="text-slate-500">
+            <div class="text-slate-500 dark:text-slate-400">
               下行
             </div>
             <div class="mt-0.5 break-words text-[10px] tabular-nums text-slate-700 dark:text-slate-300">
@@ -245,7 +245,7 @@ const statusEdgeStyle = computed(() => ({ '--node-status-tone': statusEdgeTone.v
             </div>
           </div>
           <div class="min-w-0 px-2.5 py-1.5">
-            <div class="text-slate-500">
+            <div class="text-slate-500 dark:text-slate-400">
               累计
             </div>
             <div data-node-traffic-value class="mt-0.5 break-words text-[10px] font-medium leading-tight tabular-nums text-slate-700 dark:text-slate-200">
@@ -255,10 +255,10 @@ const statusEdgeStyle = computed(() => ({ '--node-status-tone': statusEdgeTone.v
             </div>
           </div>
           <div class="min-w-0 px-2.5 py-1.5">
-            <div class="text-slate-500">
+            <div class="text-slate-500 dark:text-slate-400">
               到期
             </div>
-            <div data-node-expiry-row class="mt-0.5 flex h-[1.65rem] min-w-0 flex-col items-start gap-y-0.5 text-slate-500">
+            <div data-node-expiry-row class="mt-0.5 flex h-[1.65rem] min-w-0 flex-col items-start gap-y-0.5 text-slate-500 dark:text-slate-400">
               <span data-node-expiry-text class="max-w-full whitespace-nowrap">{{ expiryText }}</span>
               <span v-if="expiryDate" data-node-expiry-date class="max-w-full whitespace-nowrap text-[8px] tabular-nums">{{ expiryDate }}</span>
             </div>
@@ -272,7 +272,7 @@ const statusEdgeStyle = computed(() => ({ '--node-status-tone': statusEdgeTone.v
     </div>
 
     <footer v-if="tags.length" data-node-tag-row class="pointer-events-none relative z-1 mt-2.5 flex min-w-0 items-center gap-1 overflow-hidden">
-      <span v-for="tag in tags" :key="tag" class="transit-divider shrink-0 rounded-full border px-2 py-0.5 text-[9px] text-slate-500">
+      <span v-for="tag in tags" :key="tag" class="transit-divider shrink-0 rounded-full border px-2 py-0.5 text-[9px] text-slate-500 dark:text-slate-400">
         {{ tag }}
       </span>
     </footer>
@@ -282,7 +282,7 @@ const statusEdgeStyle = computed(() => ({ '--node-status-tone': statusEdgeTone.v
         <div class="text-xs font-semibold text-rose-600 dark:text-rose-400">
           离线
         </div>
-        <div class="mt-1 text-[9px] text-slate-500">
+        <div class="mt-1 text-[9px] text-slate-500 dark:text-slate-400">
           {{ formatDateTime(node.time) }}
         </div>
       </div>

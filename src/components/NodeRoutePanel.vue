@@ -94,7 +94,7 @@ function routeDetails(entry: NodeRouteEntry): string {
 
 <template>
   <div v-if="report" data-node-route-panel class="node-card-cell node-route-panel min-w-0 overflow-hidden p-0">
-    <div class="node-route-panel__header flex items-center justify-between gap-2 px-2.5 py-2 text-[9px] text-slate-500">
+    <div class="node-route-panel__header flex items-center justify-between gap-2 px-2.5 py-2 text-[9px] text-slate-500 dark:text-slate-400">
       <span>三网回程</span>
       <span
         v-if="measuredAgo || report.freshness === 'unknown'"
@@ -124,7 +124,7 @@ function routeDetails(entry: NodeRouteEntry): string {
                 <span class="size-1.5 rounded-full bg-current" />
               </span>
 
-              <span class="whitespace-nowrap text-[9px] text-slate-500">{{ entry.carrierLabel }}</span>
+              <span class="whitespace-nowrap text-[9px] text-slate-500 dark:text-slate-400">{{ entry.carrierLabel }}</span>
 
               <!-- 运营商是行标签，轨道把视线导向右侧的线路判定；真实探测方向见悬浮依据。 -->
               <span
