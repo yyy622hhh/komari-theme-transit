@@ -112,6 +112,11 @@ Cache/request keys must include every dimension that changes the result, especia
 
 Do not rename/move these files without updating helper mappings and checking all references.
 
+## Testing strategy
+
+- `composables/`, `services/`, `stores/`, and `utils/` carry real logic and are expected to have `tests/unit` coverage.
+- `components/` and `views/` are intentionally thin (see the architecture chain at the top of this file): business logic belongs in the layers below them, so they are not required to carry unit tests. Their correctness is covered by `tests/visual` (pixel regression) and `tests/functional` (real-browser interaction) instead. Do not treat a component with no `.test.ts` file as a coverage gap — check whether the logic it renders is already tested one layer down before adding one.
+
 ## Validation
 
 For source changes, run from repo root:
