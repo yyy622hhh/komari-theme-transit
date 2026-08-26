@@ -3,7 +3,7 @@ import { CACHE_CONFIG } from '@/constants/cache'
 import { OPS_PING_FRESHNESS } from '@/constants/ops'
 import { normalizeExactPingTaskName, normalizePingTaskFilter } from '@/utils/pingStats'
 
-export type PingTaskNameMatch = 'contains' | 'exact'
+export type PingTaskNameMatch = 'contains' | 'exact' | 'normalized-exact'
 
 const CACHE_VERSION = 15
 const CACHE_KEY_PREFIX = 'komari-theme-emerald:node-ping-stats'

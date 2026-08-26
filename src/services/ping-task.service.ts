@@ -149,6 +149,7 @@ export async function deleteTopologyPingTasks(taskIds: readonly number[], signal
   if (!ids.length)
     return false
   try {
+    await assertPingTaskPermission()
     await requestManager.run(
       `admin:ping:delete:${ids.join(',')}`,
       requestSignal => getSharedRpc().deletePingTasks(ids, requestSignal),
@@ -163,6 +164,49 @@ export async function deleteTopologyPingTasks(taskIds: readonly number[], signal
       setAuthSessionFromLogin(false)
     return false
   }
+}
+
+/**
+ * 为需要“新 ID 隔离旧历史”的流程创建任务，并通过前后快照确认服务端分配的 ID。
+ * Komari 的 addPingTask 不返回实体，因此调用方不能靠本地猜测 ID。
+ */
+export async function createAdminPingTask(
+  mutation: PingTaskMutation,
+  options: { signal?: AbortSignal, requestKey?: string } = {},
+): Promise<AdminPingTask> {
+  const { signal } = options
+  await assertPingTaskPermission()
+  throwIfAborted(signal)
+  const before = await fetchAdminPingTasks(signal, `${options.requestKey ?? 'admin:ping:create'}:before`)
+  const previousIds = new Set(before.map(task => task.id).filter((id): id is number => Number.isInteger(id)))
+  const findCreated = (tasks: readonly AdminPingTask[]): AdminPingTask | undefined => tasks
+    .filter(task => task.name.trim() === mutation.name.trim())
+    .filter(task => task.type === mutation.type && task.target === mutation.target)
+    .filter(task => Number.isInteger(task.id) && !previousIds.has(task.id!))
+    .sort((left, right) => (right.id ?? 0) - (left.id ?? 0))[0]
+  try {
+    await requestManager.run(
+      `${options.requestKey ?? 'admin:ping:create'}:add`,
+      requestSignal => getSharedRpc().addPingTask(mutation, requestSignal),
+      { retryAttempts: 0, signal },
+    )
+  }
+  catch (error) {
+    if (isRpcPermissionError(error))
+      handlePingPermissionError(error)
+    // 响应丢失不等于写入没发生；先找回本次新 ID，迁移流程才能继续验证或补偿。
+    const reconciled = findCreated(await fetchAdminPingTasks(undefined, `${options.requestKey ?? 'admin:ping:create'}:reconcile`))
+    if (reconciled)
+      return reconciled
+    throw error
+  }
+  invalidatePublicPingTasksCache()
+  invalidateAdminPingTasksCache()
+  const after = await fetchAdminPingTasks(undefined, `${options.requestKey ?? 'admin:ping:create'}:after`)
+  const created = findCreated(after)
+  if (!created)
+    throw new Error('Ping 任务已提交，但服务器未返回新任务 ID。')
+  return created
 }
 
 async function createTopologyPingTask(

@@ -29,4 +29,24 @@ describe('Transit Route Probe node helper security contract', () => {
     expect(helper).toContain('CapabilityBoundingSet=CAP_NET_RAW')
     expect(helper).toContain('RestrictAddressFamilies=AF_INET AF_INET6')
   })
+
+  test('正常轮询使用 12–18 秒抖动，错误使用封顶五分钟的指数退避', () => {
+    expect(helper).toContain('NORMAL_POLL_MIN=12')
+    expect(helper).toContain('NORMAL_POLL_MAX=18')
+    expect(helper).toContain('local -a retry_steps=(15 30 60 120 300)')
+    expect(helper).toContain('spread=$((base / 5))')
+  })
+
+  test('401/403/404 固定五分钟、支持数字 Retry-After 并在成功后重置', () => {
+    expect(helper).toMatch(/401\|403\)[\s\S]*POLL_OUTCOME=fixed/)
+    expect(helper).toMatch(/404\)[\s\S]*POLL_OUTCOME=fixed/)
+    expect(helper).toContain('MAX_RETRY_AFTER=3600')
+    expect(helper).toContain('retry_index=0')
+    expect(helper).toContain('LAST_POLL_ERROR=""')
+  })
+
+  test('结果可提交 duration_ms 且重复错误日志受抑制', () => {
+    expect(helper).toContain('result_fields+=(--data-urlencode "duration_ms=$duration_ms")')
+    expect(helper).toContain('if [ "$LAST_POLL_ERROR" != "$key" ]')
+  })
 })

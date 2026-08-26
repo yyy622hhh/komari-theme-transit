@@ -3,6 +3,11 @@
 // Komari's goja module registry exposes the compatibility name, not `node:crypto`.
 // eslint-disable-next-line unicorn/prefer-node-protocol
 const crypto = require('crypto')
+// Komari's goja module registry exposes the compatibility names.
+// eslint-disable-next-line unicorn/prefer-node-protocol
+const fs = require('fs')
+// eslint-disable-next-line unicorn/prefer-node-protocol
+const path = require('path')
 const server = require('server')
 const { RouteProbeCoordinator } = require('./protocol.cjs')
 
@@ -11,12 +16,69 @@ const API_ROOT = '/api/transit-route-probe/v1'
 // helper.sh's own VERSION constant) rather than `require('./komari-plugin.json')` —
 // Komari's goja module loader has never been exercised against a JSON require
 // anywhere in this plugin, and a load-time failure there would take down every route.
-const PLUGIN_VERSION = '1.3.12'
+const PLUGIN_VERSION = '1.4.0'
+const STATE_FILENAME = 'state-v1.json'
+const HEARTBEAT_CHECKPOINT_MS = 60 * 1000
 const coordinator = new RouteProbeCoordinator({
   // Hex is supported by every Buffer implementation bundled with Komari's
   // goja runtime; unlike base64url it also needs no punctuation filtering.
   randomId: () => crypto.randomBytes(18).toString('hex'),
 })
+const storageDirectory = typeof globalThis.__storageDir__ === 'string' ? globalThis.__storageDir__ : ''
+const statePath = storageDirectory ? path.join(storageDirectory, STATE_FILENAME) : ''
+let lastPersistedAt = 0
+
+function persistState() {
+  if (!statePath)
+    return
+  const temporaryPath = `${statePath}.tmp`
+  try {
+    fs.mkdirSync(storageDirectory, { recursive: true })
+    fs.writeFileSync(temporaryPath, JSON.stringify(coordinator.exportState()), { encoding: 'utf8', mode: 0o600 })
+    fs.renameSync(temporaryPath, statePath)
+    coordinator.markStatePersisted()
+    lastPersistedAt = Date.now()
+  }
+  catch (error) {
+    try {
+      fs.unlinkSync(temporaryPath)
+    }
+    catch {}
+    console.warn(`[route-probe] unable to persist state: ${error && error.message ? error.message : 'unknown error'}`)
+  }
+}
+
+function checkpointHeartbeat() {
+  if (coordinator.hasTaskStateChanges() || Date.now() - lastPersistedAt >= HEARTBEAT_CHECKPOINT_MS)
+    persistState()
+}
+
+function restoreState() {
+  if (!statePath || !fs.existsSync(statePath))
+    return
+  try {
+    coordinator.importState(JSON.parse(fs.readFileSync(statePath, 'utf8')))
+    persistState()
+  }
+  catch (error) {
+    const corruptedPath = path.join(storageDirectory, `state-v1.corrupt-${Date.now()}.json`)
+    try {
+      fs.renameSync(statePath, corruptedPath)
+    }
+    catch {}
+    console.warn(`[route-probe] ignored corrupt state and preserved it as ${path.basename(corruptedPath)}: ${error && error.message ? error.message : 'unknown error'}`)
+  }
+}
+
+function helperVersion(req) {
+  const explicit = String(req.headers['x-transit-route-probe-version'] || '').trim()
+  if (explicit)
+    return explicit
+  const match = /Transit-Route-Probe\/(\S+)/i.exec(String(req.headers['user-agent'] || ''))
+  return match ? match[1] : ''
+}
+
+restoreState()
 
 function json(res, status, payload) {
   res.statusCode = status
@@ -105,6 +167,7 @@ function load() {
     try {
       const body = parseJsonBody(req)
       const batch = coordinator.enqueue(body.clients, body.city)
+      persistState()
       console.warn(`[route-probe] queued ${batch.jobs.length} client(s) in ${batch.batch_id}`)
       return json(res, 202, batch)
     }
@@ -117,7 +180,9 @@ function load() {
     if (!isAdmin(req) || !hasBrowserGuard(req))
       return json(res, 403, { error: 'admin authentication required' })
     try {
-      return json(res, 200, coordinator.status(req.query.batch_id))
+      const status = coordinator.status(req.query.batch_id)
+      checkpointHeartbeat()
+      return json(res, 200, status)
     }
     catch (error) {
       return handleError(res, error)
@@ -131,7 +196,9 @@ function load() {
       return json(res, 403, { error: 'admin authentication required' })
     try {
       const clients = String(req.query.clients || '').split(',').map(value => value.trim()).filter(Boolean)
-      return json(res, 200, coordinator.roster(clients))
+      const roster = coordinator.roster(clients)
+      checkpointHeartbeat()
+      return json(res, 200, roster)
     }
     catch (error) {
       return handleError(res, error)
@@ -140,12 +207,17 @@ function load() {
 
   server.route('GET', `${API_ROOT}/poll`, (req, res) => {
     const client = agentClient(req)
-    if (!client)
+    if (!client) {
+      res.setHeader('Retry-After', '300')
       return text(res, 401, 'agent token required\n')
+    }
     try {
-      const job = coordinator.poll(client)
-      if (!job)
+      const job = coordinator.poll(client, { version: helperVersion(req) })
+      if (!job) {
+        checkpointHeartbeat()
         return text(res, 204)
+      }
+      persistState()
       console.warn(`[route-probe] leased ${job.id} to ${client}`)
       return text(res, 200, `${job.id}\t${job.city}\n`)
     }
@@ -160,6 +232,7 @@ function load() {
       return text(res, 401, 'agent token required\n')
     try {
       const result = coordinator.submit(client, parseFormBody(req))
+      persistState()
       console.warn(`[route-probe] accepted result for ${client}: ${result.status}`)
       return json(res, 200, result)
     }
@@ -170,3 +243,4 @@ function load() {
 }
 
 globalThis.load = load
+globalThis.unload = persistState

@@ -3138,6 +3138,74 @@ test('route probe stays hidden for logged-out visitors', async ({ page }) => {
   expect(readRouteProbeExecCalls()).toHaveLength(0)
 })
 
+test('carrier target health center is admin-only and never changes targets on open', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, { authenticated: true, opsDashboard: true, topologyAutoRepairEnabled: false })
+  await openStablePage(page, '/')
+
+  await page.getByRole('button', { name: '打开监测目标健康中心' }).click()
+  const dialog = page.getByRole('dialog')
+  await expect(dialog).toContainText('监测目标健康')
+  await expect(dialog.getByText('北京移动', { exact: true })).toBeVisible()
+  await expect(dialog.getByText('上海移动', { exact: true })).toBeVisible()
+  await expect(dialog.getByText('广州移动', { exact: true })).toBeVisible()
+  await expect(dialog).toContainText('不会自动修改现有任务')
+  await dialog.getByRole('button', { name: /北京移动.*证据不足/ }).click()
+  await expect(dialog.getByRole('button', { name: '验证备用目标' })).toBeVisible()
+
+  // 打开与读取本身不创建任务；只有管理员明确点击验证后才允许 mutation。
+  await expect(dialog.getByText(/证据不足/)).toHaveCount(9)
+})
+
+test('carrier target health center is unavailable to logged-out visitors', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await installKomariFixture(page, { opsDashboard: true })
+  await openStablePage(page, '/')
+  await expect(page.getByRole('button', { name: '打开监测目标健康中心' })).toHaveCount(0)
+})
+
+test('carrier target migration validates a canary and switches to a fresh task id', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, {
+    authenticated: true,
+    opsDashboard: true,
+    topologyAutoRepairEnabled: false,
+    topologyProbeStats: [11, 12, 13, 101, 102].map(taskId => ({ task_id: taskId, total: 5, valid: 5 })),
+  })
+  await openStablePage(page, '/')
+  await page.getByRole('button', { name: '打开监测目标健康中心' }).click()
+  const dialog = page.getByRole('dialog')
+  await dialog.getByRole('button', { name: /北京移动/ }).click()
+  await dialog.getByRole('button', { name: '验证备用目标' }).click()
+  await expect(dialog).toContainText('候选目标已达到迁移门槛')
+  const migrate = dialog.getByRole('button', { name: '迁移到此目标' })
+  await migrate.click()
+  await dialog.getByRole('button', { name: '再次点击确认迁移' }).click()
+  await expect(dialog).toContainText('目标迁移成功，旧历史已隔离')
+  await expect(dialog.getByText('TCP · 221.130.33.52:53', { exact: true }).first()).toBeVisible()
+})
+
+test('carrier target migration compensates a failed switch and reports the old task retained', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, {
+    authenticated: true,
+    opsDashboard: true,
+    topologyAutoRepairEnabled: false,
+    carrierMigrationDeleteFailure: true,
+    topologyProbeStats: [11, 12, 13, 101, 102].map(taskId => ({ task_id: taskId, total: 5, valid: 5 })),
+  })
+  await openStablePage(page, '/')
+  await page.getByRole('button', { name: '打开监测目标健康中心' }).click()
+  const dialog = page.getByRole('dialog')
+  await dialog.getByRole('button', { name: /北京移动/ }).click()
+  await dialog.getByRole('button', { name: '验证备用目标' }).click()
+  await expect(dialog).toContainText('候选目标已达到迁移门槛')
+  await dialog.getByRole('button', { name: '迁移到此目标' }).click()
+  await dialog.getByRole('button', { name: '再次点击确认迁移' }).click()
+  await expect(dialog).toContainText('迁移失败，旧任务已保留')
+  await expect(dialog.getByText('TCP · 198.51.100.13:80', { exact: true }).first()).toBeVisible()
+})
+
 test('route probe setup wizard checks the environment without probing and enables detection', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.addInitScript(() => {
@@ -3168,6 +3236,9 @@ test('route probe setup wizard checks the environment without probing and enable
   // 所以在线助手数是 12 - 1（离线）- 1（缺助手）= 10。
   await expect(dialog).toContainText('10 台在线')
   await expect(dialog).toContainText('还有 1 台境外节点未安装助手')
+  await expect(dialog).toContainText('v1.3.12')
+  await expect(dialog).toContainText('版本提示不阻止探测')
+  await expect(dialog).toContainText('耗时 1234 ms')
 
   // 环境检查阶段只读了花名册，不应该触发任何一次真实的探测入队。
   expect(readRouteProbeCompanionCalls()).toHaveLength(0)

@@ -111,9 +111,11 @@ function stopPingRefreshScheduler(): void {
   }
 }
 
-export type PingTaskNameMatch = 'contains' | 'exact'
+export type PingTaskNameMatch = 'contains' | 'exact' | 'normalized-exact'
 
 export function matchesTaskName(name: string, normalizedFilter: string, match: PingTaskNameMatch): boolean {
+  if (match === 'normalized-exact')
+    return normalizePingTaskFilter(name) === normalizedFilter
   return matchesPingTaskName(name, normalizedFilter, match === 'exact')
 }
 
@@ -179,9 +181,7 @@ export function pickPreferredExactPingTaskId(
 
   const rank = (taskId: number): number => {
     const sample = samples.get(taskId)
-    if (!sample || sample.total <= 0)
-      return 1
-    return sample.valid > 0 ? 2 : 0
+    return sample && sample.valid > 0 ? 1 : 0
   }
   return [...matchingTaskIds].sort((left, right) => rank(right) - rank(left) || right - left)[0]
 }
@@ -192,7 +192,7 @@ export function resolveExactMatchingTaskIds(
   metricStats?: readonly PingMetricTaskStats[],
   records: readonly PingRecord[] = [],
 ): Set<number> | null {
-  if (!matchingTaskIds || match !== 'exact' || matchingTaskIds.size <= 1)
+  if (!matchingTaskIds || (match !== 'exact' && match !== 'normalized-exact') || matchingTaskIds.size <= 1)
     return matchingTaskIds
   const preferred = pickPreferredExactPingTaskId(matchingTaskIds, { metricStats, records })
   return preferred === undefined ? matchingTaskIds : new Set([preferred])

@@ -50,7 +50,10 @@ export function useNodePingStats(
     const hours = Math.max(1, Math.floor(toValue(options?.hours) ?? 24))
     const maxCount = normalizeMaxCount(toValue(options?.maxCount) ?? PING_RECORD_MAX_COUNT)
     const taskNameFilter = toValue(options?.taskNameFilter)?.trim() ?? ''
-    const taskNameMatch: PingTaskNameMatch = toValue(options?.taskNameMatch) === 'exact' ? 'exact' : 'contains'
+    const requestedMatch = toValue(options?.taskNameMatch)
+    const taskNameMatch: PingTaskNameMatch = requestedMatch === 'exact' || requestedMatch === 'normalized-exact'
+      ? requestedMatch
+      : 'contains'
     return {
       uuid: toValue(uuid),
       hours,
@@ -295,37 +298,94 @@ const CHINA_CARRIERS = [
   { key: 'telecom', labelZh: '电信', labelEn: 'Telecom' },
   { key: 'mobile', labelZh: '移动', labelEn: 'Mobile' },
 ] as const
+const CHINA_CARRIER_REGIONS = ['北京', '上海', '广东'] as const
+
+function averageAvailable(values: Array<number | null>): number | null {
+  const available = values.filter((value): value is number => value !== null && Number.isFinite(value))
+  return available.length ? available.reduce((sum, value) => sum + value, 0) / available.length : null
+}
+
+/** “全部地区”先分别精确选出三个地区的新任务，再汇总，避免迁移期混入旧 ID。 */
+export function mergeCarrierPingStats(states: readonly NodePingStatsState[]): NodePingStatsState {
+  const usable = states.filter(state => state.hasData)
+  if (!usable.length)
+    return createEmptyNodePingStats()
+  const sampleCount = usable.reduce((sum, state) => sum + state.sampleCount, 0)
+  const weighted = (read: (state: NodePingStatsState) => number): number => sampleCount > 0
+    ? usable.reduce((sum, state) => sum + read(state) * state.sampleCount, 0) / sampleCount
+    : 0
+  const historyLength = Math.max(...usable.map(state => state.history.length), 0)
+  const history = Array.from({ length: historyLength }, (_, index) => {
+    const points = usable.flatMap((state) => {
+      const point = state.history[state.history.length - historyLength + index]
+      return point ? [point] : []
+    })
+    const timestamps = points.map(point => Date.parse(point.time)).filter(Number.isFinite)
+    return {
+      time: timestamps.length ? new Date(Math.max(...timestamps)).toISOString() : points[0]?.time ?? new Date(0).toISOString(),
+      latency: averageAvailable(points.map(point => point.latency)),
+      loss: averageAvailable(points.map(point => point.loss)),
+    }
+  })
+  return {
+    avgLatency: weighted(state => state.avgLatency),
+    avgLoss: weighted(state => state.avgLoss),
+    lineLoss: weighted(state => state.lineLoss),
+    commonModeLossEvents: usable.reduce((sum, state) => sum + state.commonModeLossEvents, 0),
+    avgVolatility: weighted(state => state.avgVolatility),
+    p50Latency: averageAvailable(usable.map(state => state.p50Latency)),
+    p95Latency: averageAvailable(usable.map(state => state.p95Latency)),
+    availability: averageAvailable(usable.map(state => state.availability)),
+    sampleCount,
+    history,
+    hasData: true,
+    hasLatencyData: usable.some(state => state.hasLatencyData),
+  }
+}
 
 export function useNodeCarrierPingStats(uuid: MaybeRefOrGetter<string>, options?: NodeCarrierPingOptions) {
   const carrierPings = CHINA_CARRIERS.map((carrier) => {
-    const taskNameFilter = computed(() => `${toValue(options?.taskNameFilter)?.trim() ?? ''}${carrier.labelZh}`)
+    const regionalPings = CHINA_CARRIER_REGIONS.map((region) => {
+      const selectedRegion = computed(() => toValue(options?.taskNameFilter)?.trim() ?? '')
+      const enabled = computed(() => (toValue(options?.enabled) ?? true) && (!selectedRegion.value || selectedRegion.value === region))
+      return useNodePingStats(uuid, {
+        hours: options?.hours,
+        enabled,
+        maxCount: options?.maxCount,
+        taskNameFilter: `${region}${carrier.labelZh}`,
+        taskNameMatch: 'normalized-exact',
+      })
+    })
     return {
       ...carrier,
-      ping: useNodePingStats(uuid, {
-        hours: options?.hours,
-        enabled: options?.enabled,
-        maxCount: options?.maxCount,
-        taskNameFilter,
-      }),
+      regionalPings,
     }
   })
 
   return {
-    carriers: computed(() => carrierPings.map(carrier => ({
-      key: carrier.key,
-      labelZh: carrier.labelZh,
-      labelEn: carrier.labelEn,
-      taskNames: carrier.ping.taskNames.value,
-      stats: carrier.ping.stats.value,
-      hasLatency: carrier.ping.hasLatencyData.value,
-      delayed: carrier.ping.delayed.value,
-      stale: carrier.ping.stale.value,
-    }))),
-    loading: computed(() => carrierPings.some(carrier => carrier.ping.loading.value)),
-    error: computed(() => carrierPings.map(carrier => carrier.ping.error.value).find(Boolean) ?? null),
-    lastFetchedAt: computed(() => Math.max(...carrierPings.map(carrier => carrier.ping.lastFetchedAt.value), 0)),
-    freshnessAgeMs: computed(() => Math.max(...carrierPings.map(carrier => carrier.ping.freshnessAgeMs.value), 0)),
-    delayed: computed(() => carrierPings.some(carrier => carrier.ping.delayed.value)),
-    stale: computed(() => carrierPings.some(carrier => carrier.ping.stale.value)),
+    carriers: computed(() => carrierPings.map((carrier) => {
+      const active = carrier.regionalPings.filter(ping => ping.hasData.value || ping.loading.value || ping.error.value || ping.taskNames.value.length)
+      const stats = mergeCarrierPingStats(active.map(ping => ping.stats.value))
+      return {
+        key: carrier.key,
+        labelZh: carrier.labelZh,
+        labelEn: carrier.labelEn,
+        taskNames: [...new Set(active.flatMap(ping => ping.taskNames.value))],
+        stats,
+        hasLatency: stats.hasLatencyData,
+        delayed: active.some(ping => ping.delayed.value),
+        stale: active.length > 0 && active.every(ping => ping.stale.value),
+      }
+    })),
+    loading: computed(() => carrierPings.some(carrier => carrier.regionalPings.some(ping => ping.loading.value))),
+    error: computed(() => carrierPings.flatMap(carrier => carrier.regionalPings.map(ping => ping.error.value)).find(Boolean) ?? null),
+    lastFetchedAt: computed(() => Math.max(...carrierPings.flatMap(carrier => carrier.regionalPings.map(ping => ping.lastFetchedAt.value)), 0)),
+    freshnessAgeMs: computed(() => Math.max(...carrierPings.flatMap(carrier => carrier.regionalPings.map(ping => ping.freshnessAgeMs.value)), 0)),
+    delayed: computed(() => carrierPings.some(carrier => carrier.regionalPings.some(ping => ping.delayed.value))),
+    stale: computed(() => {
+      const active = carrierPings.flatMap(carrier => carrier.regionalPings)
+        .filter(ping => ping.hasData.value || ping.loading.value || ping.error.value || ping.taskNames.value.length)
+      return active.length > 0 && active.every(ping => ping.stale.value)
+    }),
   }
 }

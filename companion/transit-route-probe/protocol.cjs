@@ -15,6 +15,7 @@ const ROUTE_TAG_PATTERN = /^transit-route:ct=([0-9.]*),cu=([0-9.]*),cm=([0-9.]*)
 const JOB_TTL_MS = 10 * 60 * 1000
 const JOB_LEASE_MS = 180 * 1000
 const BATCH_TTL_MS = 20 * 60 * 1000
+const HELPER_TTL_MS = 30 * 24 * 60 * 60 * 1000
 const MAX_CLIENTS = 20
 // 花名册只读取已经上报过的 lastSeenByClient，不创建任何任务，所以可以覆盖比一次
 // 探测批次大得多的机群规模。
@@ -71,6 +72,8 @@ class RouteProbeCoordinator {
     this.batches = new Map()
     this.activeByClientCity = new Map()
     this.lastSeenByClient = new Map()
+    this.helperStateByClient = new Map()
+    this.taskStateDirty = false
   }
 
   enqueue(clients, city) {
@@ -104,15 +107,21 @@ class RouteProbeCoordinator {
     }
 
     this.batches.set(batchId, { id: batchId, createdAt: now, jobIds })
+    this.taskStateDirty = true
     return this.status(batchId)
   }
 
-  poll(client) {
+  poll(client, metadata = {}) {
     this.cleanup()
     if (typeof client !== 'string' || !CLIENT_PATTERN.test(client))
       throw new TypeError('invalid client identifier')
     const now = this.now()
     this.lastSeenByClient.set(client, now)
+    const helper = this.helperStateByClient.get(client) ?? {}
+    helper.helperSeenAt = now
+    if (typeof metadata.version === 'string' && /^\d+\.\d+\.\d+(?:[-+][\w.-]+)?$/.test(metadata.version))
+      helper.helperVersion = metadata.version
+    this.helperStateByClient.set(client, helper)
 
     const candidates = [...this.jobs.values()]
       .filter(job => job.client === client && (
@@ -128,6 +137,8 @@ class RouteProbeCoordinator {
     job.leaseUntil = now + JOB_LEASE_MS
     job.updatedAt = now
     job.attempts += 1
+    helper.lastJobAt = now
+    this.taskStateDirty = true
     return { id: job.id, city: job.city }
   }
 
@@ -146,12 +157,20 @@ class RouteProbeCoordinator {
       throw new Error('job was not leased')
 
     const now = this.now()
+    const helper = this.helperStateByClient.get(client) ?? { helperSeenAt: now }
+    const durationMs = Number(payload.duration_ms)
+    if (payload.duration_ms !== undefined && (!Number.isInteger(durationMs) || durationMs < 0 || durationMs > JOB_LEASE_MS))
+      throw new TypeError('invalid probe duration')
+    if (Number.isInteger(durationMs))
+      helper.lastDurationMs = durationMs
     if (typeof payload.tag === 'string' && payload.tag) {
       if (!validateRouteTag(payload.tag, now))
         throw new TypeError('invalid route tag')
       job.status = 'completed'
       job.tag = payload.tag
       job.error = null
+      helper.lastSuccessAt = now
+      helper.lastError = null
     }
     else {
       if (!VALID_ERRORS.has(payload.error))
@@ -159,10 +178,13 @@ class RouteProbeCoordinator {
       job.status = 'failed'
       job.tag = null
       job.error = payload.error
+      helper.lastError = payload.error
     }
     job.updatedAt = now
     job.leaseUntil = 0
     this.activeByClientCity.delete(`${job.client}\n${job.city}`)
+    this.helperStateByClient.set(client, helper)
+    this.taskStateDirty = true
     return { status: job.status }
   }
 
@@ -207,8 +229,93 @@ class RouteProbeCoordinator {
       clients: normalizedClients.map(client => ({
         client,
         helper_seen_at: this.lastSeenByClient.get(client) ?? null,
+        helper_version: this.helperStateByClient.get(client)?.helperVersion ?? null,
+        last_job_at: this.helperStateByClient.get(client)?.lastJobAt ?? null,
+        last_success_at: this.helperStateByClient.get(client)?.lastSuccessAt ?? null,
+        last_error: this.helperStateByClient.get(client)?.lastError ?? null,
+        last_duration_ms: this.helperStateByClient.get(client)?.lastDurationMs ?? null,
       })),
     }
+  }
+
+  exportState() {
+    this.cleanup()
+    return {
+      version: 1,
+      saved_at: this.now(),
+      jobs: [...this.jobs.values()].map(job => ({ ...job })),
+      batches: [...this.batches.values()].map(batch => ({ ...batch, jobIds: [...batch.jobIds] })),
+      helpers: [...this.helperStateByClient.entries()].map(([client, state]) => ({ client, ...state })),
+    }
+  }
+
+  importState(state) {
+    if (!state || state.version !== 1 || !Array.isArray(state.jobs) || !Array.isArray(state.batches) || !Array.isArray(state.helpers))
+      throw new TypeError('invalid persisted state')
+
+    this.jobs.clear()
+    this.batches.clear()
+    this.activeByClientCity.clear()
+    this.lastSeenByClient.clear()
+    this.helperStateByClient.clear()
+    this.taskStateDirty = false
+
+    for (const raw of state.jobs) {
+      if (!raw || !ID_PATTERN.test(String(raw.id || '')) || !CLIENT_PATTERN.test(String(raw.client || '')) || !VALID_CITIES.has(raw.city))
+        continue
+      if (!['queued', 'running', 'completed', 'failed'].includes(raw.status))
+        continue
+      const job = {
+        id: String(raw.id),
+        client: String(raw.client),
+        city: raw.city,
+        createdAt: Number(raw.createdAt) || 0,
+        updatedAt: Number(raw.updatedAt) || 0,
+        status: raw.status,
+        leaseUntil: Number(raw.leaseUntil) || 0,
+        attempts: Math.max(0, Number(raw.attempts) || 0),
+        tag: typeof raw.tag === 'string' ? raw.tag : null,
+        error: VALID_ERRORS.has(raw.error) ? raw.error : null,
+      }
+      this.jobs.set(job.id, job)
+      if (job.status === 'queued' || job.status === 'running')
+        this.activeByClientCity.set(`${job.client}\n${job.city}`, job.id)
+    }
+
+    for (const raw of state.batches) {
+      if (!raw || !ID_PATTERN.test(String(raw.id || '')) || !Array.isArray(raw.jobIds))
+        continue
+      const jobIds = raw.jobIds.map(String).filter(id => this.jobs.has(id))
+      if (jobIds.length)
+        this.batches.set(String(raw.id), { id: String(raw.id), createdAt: Number(raw.createdAt) || 0, jobIds })
+    }
+
+    for (const raw of state.helpers) {
+      if (!raw || !CLIENT_PATTERN.test(String(raw.client || '')))
+        continue
+      const helperSeenAt = Number(raw.helperSeenAt) || 0
+      if (!helperSeenAt)
+        continue
+      const helper = {
+        helperSeenAt,
+        helperVersion: typeof raw.helperVersion === 'string' ? raw.helperVersion : undefined,
+        lastJobAt: Number(raw.lastJobAt) || undefined,
+        lastSuccessAt: Number(raw.lastSuccessAt) || undefined,
+        lastError: VALID_ERRORS.has(raw.lastError) ? raw.lastError : null,
+        lastDurationMs: Number.isInteger(raw.lastDurationMs) ? raw.lastDurationMs : undefined,
+      }
+      this.helperStateByClient.set(String(raw.client), helper)
+      this.lastSeenByClient.set(String(raw.client), helperSeenAt)
+    }
+    this.cleanup()
+  }
+
+  hasTaskStateChanges() {
+    return this.taskStateDirty
+  }
+
+  markStatePersisted() {
+    this.taskStateDirty = false
   }
 
   cleanup() {
@@ -220,12 +327,15 @@ class RouteProbeCoordinator {
         job.updatedAt = now
         job.leaseUntil = 0
         this.activeByClientCity.delete(`${job.client}\n${job.city}`)
+        this.taskStateDirty = true
       }
     }
 
     for (const [batchId, batch] of this.batches) {
-      if (now - batch.createdAt > BATCH_TTL_MS)
+      if (now - batch.createdAt > BATCH_TTL_MS) {
         this.batches.delete(batchId)
+        this.taskStateDirty = true
+      }
     }
 
     const referenced = new Set()
@@ -234,8 +344,17 @@ class RouteProbeCoordinator {
         referenced.add(jobId)
     }
     for (const [jobId, job] of this.jobs) {
-      if (!referenced.has(jobId) && job.status !== 'queued' && job.status !== 'running')
+      if (!referenced.has(jobId) && job.status !== 'queued' && job.status !== 'running') {
         this.jobs.delete(jobId)
+        this.taskStateDirty = true
+      }
+    }
+    for (const [client, seenAt] of this.lastSeenByClient) {
+      if (now - seenAt <= HELPER_TTL_MS)
+        continue
+      this.lastSeenByClient.delete(client)
+      this.helperStateByClient.delete(client)
+      this.taskStateDirty = true
     }
   }
 
@@ -250,6 +369,7 @@ class RouteProbeCoordinator {
 
 module.exports = {
   BATCH_TTL_MS,
+  HELPER_TTL_MS,
   JOB_LEASE_MS,
   JOB_TTL_MS,
   MAX_CLIENTS,

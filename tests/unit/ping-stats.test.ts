@@ -1,7 +1,8 @@
 import type { MetricLossPoint } from '../../src/utils/pingStats'
 import type { MetricQueryResponse, MetricSeries, PingMetricStatsResponse, PingMetricTaskStats, PingRecord } from '../../src/utils/rpc'
 import { describe, expect, test } from 'bun:test'
-import { buildPingMetricState, collectNodePingTaskIds, pickPreferredExactPingTaskId } from '../../src/composables/useNodePingStats'
+import { buildPingMetricState, collectNodePingTaskIds, mergeCarrierPingStats, pickPreferredExactPingTaskId } from '../../src/composables/useNodePingStats'
+import { matchesTaskName, normalizeTaskNameFilter, resolveExactMatchingTaskIds } from '../../src/services/nodePingRecords.shared'
 import { detectPingCommonModeLossKeys, getPingCommonModeLossKey } from '../../src/utils/pingCommonMode'
 import { formatPingFreshnessAge, resolvePingFreshness } from '../../src/utils/pingFreshness'
 import { buildNodePingStats, createEmptyNodePingStats, matchesPingTaskName, normalizePingTaskFilter } from '../../src/utils/pingStats'
@@ -336,6 +337,28 @@ describe('buildPingMetricState (Metric Store vs. legacy fallback gate)', () => {
 })
 
 describe('pickPreferredExactPingTaskId', () => {
+  test('全部地区在三个精确任务选定后按样本量汇总', () => {
+    const first = { ...createEmptyNodePingStats(), hasData: true, hasLatencyData: true, sampleCount: 10, avgLatency: 50, avgLoss: 0, lineLoss: 0, availability: 100 }
+    const second = { ...createEmptyNodePingStats(), hasData: true, hasLatencyData: true, sampleCount: 30, avgLatency: 150, avgLoss: 10, lineLoss: 5, availability: 90 }
+    expect(mergeCarrierPingStats([first, second])).toMatchObject({
+      sampleCount: 40,
+      avgLatency: 125,
+      avgLoss: 7.5,
+      lineLoss: 3.75,
+      availability: 95,
+    })
+  })
+
+  test('normalized-exact 只忽略分隔符，不把相似任务做包含匹配', () => {
+    const filter = normalizeTaskNameFilter('北京-移动', 'normalized-exact')
+    expect(matchesTaskName('北京 移动', filter, 'normalized-exact')).toBeTrue()
+    expect(matchesTaskName('Transit 北京移动备用', filter, 'normalized-exact')).toBeFalse()
+    expect(resolveExactMatchingTaskIds(new Set([10, 11]), 'normalized-exact', [
+      pingStat({ task_id: '10', total: 3, valid: 0 }),
+      pingStat({ task_id: '11', total: 3, valid: 3 }),
+    ])).toEqual(new Set([11]))
+  })
+
   test('prefers the healthy duplicate over a dead same-named task', () => {
     expect(pickPreferredExactPingTaskId(new Set([10, 11]), {
       metricStats: [
@@ -348,6 +371,12 @@ describe('pickPreferredExactPingTaskId', () => {
   test('prefers a pending replacement over a dead original when stats only cover the original', () => {
     expect(pickPreferredExactPingTaskId(new Set([10, 11]), {
       metricStats: [pingStat({ task_id: '10', total: 40, valid: 0 })],
+    })).toBe(11)
+  })
+
+  test('uses the newer id when neither duplicate has a successful sample', () => {
+    expect(pickPreferredExactPingTaskId(new Set([10, 11]), {
+      metricStats: [pingStat({ task_id: '11', total: 40, valid: 0 })],
     })).toBe(11)
   })
 

@@ -184,11 +184,22 @@ export function getCompanionRouteProbeHealth(signal?: AbortSignal): Promise<Comp
 export interface CompanionRosterEntry {
   client: string
   helper_seen_at: number | null
+  helper_version: string | null
+  last_job_at: number | null
+  last_success_at: number | null
+  last_error: CompanionProbeJob['error']
+  last_duration_ms: number | null
 }
 
 function isRosterEntry(value: unknown): value is CompanionRosterEntry {
   return isRecord(value) && typeof value.client === 'string'
     && (value.helper_seen_at === null || typeof value.helper_seen_at === 'number')
+    && (value.helper_version === undefined || value.helper_version === null || typeof value.helper_version === 'string')
+    && (value.last_job_at === undefined || value.last_job_at === null || typeof value.last_job_at === 'number')
+    && (value.last_success_at === undefined || value.last_success_at === null || typeof value.last_success_at === 'number')
+    && (value.last_error === undefined || value.last_error === null || value.last_error === 'no-traceroute'
+      || value.last_error === 'probe-failed' || value.last_error === 'invalid-city' || value.last_error === 'internal-error')
+    && (value.last_duration_ms === undefined || value.last_duration_ms === null || typeof value.last_duration_ms === 'number')
 }
 
 /**
@@ -205,6 +216,14 @@ export function getCompanionRouteProbeRoster(
   return requestCompanion(`${COMPANION_ROOT}/roster?${query}`, { method: 'GET', signal }, (payload) => {
     if (!isRecord(payload) || !Array.isArray(payload.clients) || !payload.clients.every(isRosterEntry))
       throw new RouteProbeCompanionError(502, '伴生插件返回了无效的花名册数据')
-    return payload.clients
+    return payload.clients.map(entry => ({
+      client: entry.client,
+      helper_seen_at: entry.helper_seen_at,
+      helper_version: typeof entry.helper_version === 'string' ? entry.helper_version : null,
+      last_job_at: typeof entry.last_job_at === 'number' ? entry.last_job_at : null,
+      last_success_at: typeof entry.last_success_at === 'number' ? entry.last_success_at : null,
+      last_error: entry.last_error ?? null,
+      last_duration_ms: typeof entry.last_duration_ms === 'number' ? entry.last_duration_ms : null,
+    }))
   })
 }

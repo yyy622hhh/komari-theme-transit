@@ -5,6 +5,7 @@ import { computed, ref, watch } from 'vue'
 import { AppDialog } from '@/components/ui/app-dialog'
 import { Button } from '@/components/ui/button'
 import { useRouteProbeSetupWizard } from '@/composables/useRouteProbeSetupWizard'
+import { formatDateTime } from '@/utils/helper'
 
 const props = defineProps<{ nodes: NodeData[], open: boolean }>()
 const emit = defineEmits<{ 'update:open': [open: boolean] }>()
@@ -164,6 +165,51 @@ async function handleEnable(): Promise<void> {
             <span class="shrink-0 rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground">
               {{ wizard.onlineHelperCount.value }} 台在线
             </span>
+          </div>
+
+          <div
+            v-if="wizard.pluginInstalled.value && !wizard.checking.value && wizard.onlineHelperNodes.value.length"
+            class="py-2.5"
+          >
+            <div class="mb-2 flex items-center justify-between gap-2">
+              <p class="text-sm">
+                助手运行状态
+              </p>
+              <span
+                v-if="wizard.mismatchedHelperNodes.value.length || wizard.legacyHelperNodes.value.length"
+                class="text-[10px] text-amber-700 dark:text-amber-300"
+              >
+                版本提示不阻止探测
+              </span>
+            </div>
+            <div class="space-y-1.5">
+              <div
+                v-for="node in wizard.onlineHelperNodes.value"
+                :key="node.uuid"
+                class="grid gap-1 rounded-md bg-muted/25 px-2 py-1.5 text-[11px] sm:grid-cols-[minmax(0,1fr)_auto]"
+              >
+                <div class="min-w-0">
+                  <p class="truncate text-foreground/85">
+                    {{ node.name }}
+                    <span
+                      class="ml-1"
+                      :class="node.helperVersionMatches === false || node.helperVersionMatches === null ? 'text-amber-700 dark:text-amber-300' : 'text-emerald-700 dark:text-emerald-300'"
+                    >
+                      {{ node.helperVersion ? `v${node.helperVersion}` : '旧版助手' }}
+                    </span>
+                  </p>
+                  <p v-if="node.lastError" class="truncate text-destructive">
+                    最近错误：{{ node.lastError }}
+                  </p>
+                  <p v-else class="truncate text-muted-foreground">
+                    最后成功：{{ node.lastSuccessAt ? formatDateTime(new Date(node.lastSuccessAt)) : '暂无记录' }}
+                  </p>
+                </div>
+                <p class="self-center tabular-nums text-muted-foreground">
+                  {{ node.lastDurationMs === null ? '耗时 —' : `耗时 ${node.lastDurationMs} ms` }}
+                </p>
+              </div>
+            </div>
           </div>
 
           <div v-if="wizard.mainlandCount.value" class="flex items-start justify-between gap-3 py-2.5">

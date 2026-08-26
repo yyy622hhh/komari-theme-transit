@@ -48,6 +48,7 @@ defineOptions({
     AlertDescription,
     AlertTitle,
     AuditLogPanel: defineAsyncComponent(() => import('@/components/AuditLogPanel.vue')),
+    CarrierProbeHealthDialog: defineAsyncComponent(() => import('@/components/CarrierProbeHealthDialog.vue')),
     UiButton: Button,
     ConfigBackupPanel: defineAsyncComponent(() => import('@/components/ConfigBackupPanel.vue')),
     DeferredRender,
@@ -112,6 +113,7 @@ const activeQuickControl = ref<HomeQuickControlKey | null>(null)
 const pingDialogNode = ref<NodeData | null>(null)
 const nodeControlDialogNode = ref<NodeData | null>(null)
 const routeProbeSetupOpen = ref(false)
+const carrierProbeHealthOpen = ref(false)
 const setupWizardOpen = ref(false)
 const homeOrderContainer = ref<HTMLElement | null>(null)
 const homeOrderViewBeforeEdit = ref<{
@@ -227,6 +229,7 @@ watch(
     if (!allowed) {
       setupWizardOpen.value = false
       routeProbeSetupOpen.value = false
+      carrierProbeHealthOpen.value = false
       nodeControlDialogNode.value = null
       pingDialogNode.value = null
       if (homeOrder.editingOrder.value)
@@ -625,6 +628,17 @@ const nodeCardGridClass = computed(() => {
               >
                 <Icon icon="tabler:wand" :width="14" :height="14" />
               </UiButton>
+              <UiButton
+                v-if="appStore.privateFeaturesAllowed"
+                variant="outline"
+                size="icon"
+                class="size-8 shrink-0 border-none bg-background/50 backdrop-blur-xs shadow-none hover:bg-background/60"
+                aria-label="打开监测目标健康中心"
+                title="检查三网监测目标并安全验证备用目标"
+                @click="carrierProbeHealthOpen = true"
+              >
+                <Icon icon="tabler:heart-rate-monitor" :width="14" :height="14" />
+              </UiButton>
               <NodeRouteProbeButton
                 v-if="appStore.routeProbeEnabled"
                 :nodes="nodesStore.visibleNodes"
@@ -895,6 +909,12 @@ const nodeCardGridClass = computed(() => {
       :open="routeProbeSetupOpen"
       :nodes="nodesStore.visibleNodes"
       @update:open="routeProbeSetupOpen = $event"
+    />
+    <CarrierProbeHealthDialog
+      v-if="carrierProbeHealthOpen"
+      :open="carrierProbeHealthOpen"
+      :nodes="nodesStore.visibleNodes"
+      @update:open="carrierProbeHealthOpen = $event"
     />
     <SetupWizardDialog
       v-if="setupWizardOpen"

@@ -388,8 +388,14 @@ const collections = [
       "grip-vertical": {
         "body": "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M8 5a1 1 0 1 0 2 0a1 1 0 1 0-2 0m0 7a1 1 0 1 0 2 0a1 1 0 1 0-2 0m0 7a1 1 0 1 0 2 0a1 1 0 1 0-2 0m6-14a1 1 0 1 0 2 0a1 1 0 1 0-2 0m0 7a1 1 0 1 0 2 0a1 1 0 1 0-2 0m0 7a1 1 0 1 0 2 0a1 1 0 1 0-2 0\"/>"
       },
+      "heart-rate-monitor": {
+        "body": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><path d=\"M3 5a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1zm4 15h10m-8-4v4m6-4v4\"/><path d=\"M7 10h2l2 3l2-6l1 3h3\"/></g>"
+      },
       "heartbeat": {
         "body": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><path d=\"M19.5 13.572L12 21l-2.896-2.868m-6.117-8.104A5 5 0 0 1 12 7.006a5 5 0 1 1 7.5 6.572\"/><path d=\"M3 13h2l2 3l2-6l1 3h3\"/></g>"
+      },
+      "help-circle": {
+        "body": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><path d=\"M3 12a9 9 0 1 0 18 0a9 9 0 0 0-18 0m9 4v.01\"/><path d=\"M12 13a2 2 0 0 0 .914-3.782a1.98 1.98 0 0 0-2.414.483\"/></g>"
       },
       "history": {
         "body": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><path d=\"M12 8v4l2 2\"/><path d=\"M3.05 11a9 9 0 1 1 .5 4m-.5 5v-5h5\"/></g>"
@@ -568,6 +574,9 @@ const collections = [
       "world-share": {
         "body": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><path d=\"M20.94 13.045A9 9 0 1 0 11.987 21M3.6 9h16.8M3.6 15H13\"/><path d=\"M11.5 3a17 17 0 0 0 0 18m1-18a17 17 0 0 1 2.529 10.294M16 22l5-5m0 4.5V17h-4.5\"/></g>"
       },
+      "world-x": {
+        "body": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><path d=\"M20.929 13.131A9 9 0 1 0 11.998 21M3.6 9h16.8M3.6 15h9.9\"/><path d=\"M11.5 3a17 17 0 0 0 0 18m1-18a17 17 0 0 1 2.505 10.573M22 22l-5-5m0 5l5-5\"/></g>"
+      },
       "x": {
         "body": "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M18 6L6 18M6 6l12 12\"/>"
       }
@@ -692,7 +701,9 @@ export const bundledIconNames = [
   "tabler:folder",
   "tabler:gauge",
   "tabler:grip-vertical",
+  "tabler:heart-rate-monitor",
   "tabler:heartbeat",
+  "tabler:help-circle",
   "tabler:history",
   "tabler:info-circle",
   "tabler:key",
@@ -752,6 +763,7 @@ export const bundledIconNames = [
   "tabler:wave-sine",
   "tabler:world",
   "tabler:world-share",
+  "tabler:world-x",
   "tabler:x"
 ] as const
 

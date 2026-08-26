@@ -43,6 +43,12 @@ export interface RouteProbeSetupNode {
   uuid: string
   name: string
   helperOnline: boolean
+  helperVersion: string | null
+  helperVersionMatches: boolean | null
+  lastJobAt: number | null
+  lastSuccessAt: number | null
+  lastError: string | null
+  lastDurationMs: number | null
 }
 
 function chunk<T>(items: readonly T[], size: number): T[][] {
@@ -83,6 +89,9 @@ export function useRouteProbeSetupWizard(nodes: MaybeRefOrGetter<NodeData[]>) {
   onScopeDispose(() => controller.abort())
 
   const missingHelperNodes = computed(() => eligibleNodes.value.filter(node => !node.helperOnline))
+  const onlineHelperNodes = computed(() => eligibleNodes.value.filter(node => node.helperOnline))
+  const mismatchedHelperNodes = computed(() => onlineHelperNodes.value.filter(node => node.helperVersionMatches === false))
+  const legacyHelperNodes = computed(() => onlineHelperNodes.value.filter(node => node.helperVersionMatches === null))
   const onlineHelperCount = computed(() => eligibleNodes.value.length - missingHelperNodes.value.length)
   // 检查出错时不能让运营者带着一次不完整的结果直接启用——哪怕插件确认已装。
   const canEnable = computed(() => pluginInstalled.value === true && !checkError.value)
@@ -111,20 +120,28 @@ export function useRouteProbeSetupWizard(nodes: MaybeRefOrGetter<NodeData[]>) {
 
   /** 查花名册并按在线窗口分类；runCheck 和后台自动刷新共用同一套判定。 */
   async function classifyHelperStatus(candidates: readonly { uuid: string, name: string }[]): Promise<RouteProbeSetupNode[]> {
-    const seenAt = new Map<string, number | null>()
+    const roster = new Map<string, Awaited<ReturnType<typeof getCompanionRouteProbeRoster>>[number]>()
     const groups = await Promise.all(
       chunk(candidates.map(node => node.uuid), ROSTER_CHUNK_SIZE).map(group => getCompanionRouteProbeRoster(group, controller.signal)),
     )
     for (const entries of groups) {
       for (const entry of entries)
-        seenAt.set(entry.client, entry.helper_seen_at)
+        roster.set(entry.client, entry)
     }
     const now = Date.now()
     return candidates.map((node) => {
-      const lastSeen = seenAt.get(node.uuid) ?? null
+      const state = roster.get(node.uuid)
+      const lastSeen = state?.helper_seen_at ?? null
+      const version = state?.helper_version ?? null
       return {
         ...node,
         helperOnline: lastSeen !== null && now - lastSeen <= HELPER_ONLINE_WINDOW_MS,
+        helperVersion: version,
+        helperVersionMatches: version ? version === __BUILD_VERSION__ : null,
+        lastJobAt: state?.last_job_at ?? null,
+        lastSuccessAt: state?.last_success_at ?? null,
+        lastError: state?.last_error ?? null,
+        lastDurationMs: state?.last_duration_ms ?? null,
       }
     })
   }
@@ -154,7 +171,16 @@ export function useRouteProbeSetupWizard(nodes: MaybeRefOrGetter<NodeData[]>) {
         pluginVersion.value = null
         if (generation !== rosterGeneration)
           return
-        eligibleNodes.value = eligible.map(node => ({ ...node, helperOnline: false }))
+        eligibleNodes.value = eligible.map(node => ({
+          ...node,
+          helperOnline: false,
+          helperVersion: null,
+          helperVersionMatches: null,
+          lastJobAt: null,
+          lastSuccessAt: null,
+          lastError: null,
+          lastDurationMs: null,
+        }))
         await loadMissingHelperTokens()
         return
       }
@@ -296,6 +322,9 @@ export function useRouteProbeSetupWizard(nodes: MaybeRefOrGetter<NodeData[]>) {
     eligibleNodes,
     mainlandCount,
     missingHelperNodes,
+    onlineHelperNodes,
+    mismatchedHelperNodes,
+    legacyHelperNodes,
     onlineHelperCount,
     canEnable,
     saving,

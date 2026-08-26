@@ -94,6 +94,8 @@ export interface VisualFixtureOptions {
   quickTopologyTaskFailure?: boolean
   quickTopologyTaskDelayMs?: number
   quickTopologyMutationDelayMs?: number
+  /** 让健康中心迁移时删除旧任务失败，验证补偿会保留旧任务。 */
+  carrierMigrationDeleteFailure?: boolean
   quickTopologyNoTasks?: boolean
   quickTopologyNoAddress?: boolean
   /**
@@ -678,6 +680,13 @@ async function handleRpc(
       break
     case 'admin:deletePingTask': {
       const removedIds = new Set((payload.params?.id as number[] | undefined ?? []).map(Number))
+      if (options.carrierMigrationDeleteFailure && removedIds.has(13) && removedIds.has(101)) {
+        await route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify(jsonRpcError(payload.id, -32000, 'visual migration cleanup failed')),
+        })
+        return
+      }
       for (let index = adminPingTasks.length - 1; index >= 0; index--) {
         if (removedIds.has(Number(adminPingTasks[index]?.id)))
           adminPingTasks.splice(index, 1)
@@ -1060,6 +1069,11 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
           clients: clients.map(client => ({
             client,
             helper_seen_at: missing.has(client) ? null : Date.parse(FIXED_NOW),
+            helper_version: missing.has(client) ? null : client.endsWith('000000000001') ? '1.3.12' : '1.4.0',
+            last_job_at: missing.has(client) ? null : Date.parse(FIXED_NOW) - 60_000,
+            last_success_at: missing.has(client) ? null : Date.parse(FIXED_NOW) - 30_000,
+            last_error: null,
+            last_duration_ms: missing.has(client) ? null : 1234,
           })),
         }),
       })
