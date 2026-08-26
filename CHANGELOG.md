@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+## [1.3.12] - 2026-08-26
+
+### Fixed
+
+- GitHub Release 将主题 ZIP 固定为旧版 Komari 远程导入器可见的首个附件，并在发布后自动核验；回程采集脚本的 Release 附件改名为 `transit-collect-return-route.sh`，安装命令仍将它保存为节点侧契约文件 `collect-return-route.sh`。真实 Komari 兼容矩阵同时下探到 `1.2.5-fix2`，覆盖安装、升级、回滚、浏览器执行、RPC 和重启持久化。
+
 ## [1.3.11] - 2026-08-25
 
 ### Changed

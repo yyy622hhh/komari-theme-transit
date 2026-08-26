@@ -2,14 +2,14 @@
 
 Transit 的兼容性工作流会为每个版本启动全新的 Komari 进程和临时 SQLite 数据库，测试结束后由系统临时目录回收，不连接生产实例。
 
-当前矩阵覆盖 Komari `1.2.6`、`1.4.2` 和 `1.4.3`。官方 Linux amd64 二进制的 SHA-256 固定在 `scripts/komari-lab.ts`，下载内容不匹配时立即失败。
+当前矩阵覆盖 Komari `1.2.5-fix2`、`1.2.6`、`1.4.2` 和 `1.4.3`。官方 Linux amd64 二进制的 SHA-256 固定在 `scripts/komari-lab.ts`，下载内容不匹配时立即失败。
 
 每个版本验证：
 
 - 使用真实管理 API 安装当前提交的 Release zip，并核对返回的主题 manifest 与 `dist/index.html`；
 - 在初装、覆盖升级和回滚重启后分别启动 Chromium 执行真实 Komari 提供的主题，阻止页面运行时异常和同源 HTTP 错误；
 - Komari `1.4.3` 走 `/api/admin/upload/init`、`chunk`、`merge` 分片上传，覆盖服务端合并和 `extractAndValidateTheme`；
-- Komari `1.2.6` 和 `1.4.2` 尚无统一主题分片上传接口，明确走各自原生的 `PUT /api/admin/theme/upload` 旧接口，不使用文件系统解压兜底；
+- Komari `1.2.5-fix2`、`1.2.6` 和 `1.4.2` 尚无统一主题分片上传接口，明确走各自原生的 `PUT /api/admin/theme/upload` 旧接口，不使用文件系统解压兜底；
 - 初始化管理员并验证匿名请求不能调用管理员 RPC；
 - 激活 Transit、保存随机 canary 配置并通过公共配置接口读回；
 - 创建两个隔离节点，调用 `admin:orderClients` 后通过 `admin:listClients` 读回权重；

@@ -38,6 +38,12 @@ interface ClientRecord {
 }
 
 const RELEASES: Record<string, ReleaseSpec> = {
+  '1.2.5-fix2': {
+    sha256: 'ead4866f4cb542024bbffece20dabd29cd544133f695b1aba2d582e7a6fe2f25',
+    themeUpload: 'legacy',
+    url: 'https://github.com/komari-monitor/komari/releases/download/1.2.5-fix2/komari-linux-amd64',
+    usesInstallGuide: false,
+  },
   '1.2.6': {
     sha256: '3e6283e2b84b0f084c8176591ecd03840e74fd63be78aae78b1cedd78567ca3c',
     themeUpload: 'legacy',

@@ -238,11 +238,11 @@ bun run build:route-probe
 
 插件要求 Komari `>=1.4.0`，声明 `node`、`allowRoutes` 以及请求体大小、超时限制；不会申请系统 RPC、子进程执行、端口监听、HTML 注入、全盘文件或请求钩子权限。
 
-然后在每台节点下载**同一 GitHub Release** 的两个脚本并安装。安装器会交互式读取该节点现有的 Komari Agent token，输入不会进入 shell 历史；下面的 `<版本>` 应替换为正在使用的发布标签（例如 `v1.3.11`），不要长期跟随会变化的 `main`：
+然后在每台节点下载**同一 GitHub Release** 的两个脚本并安装。安装器会交互式读取该节点现有的 Komari Agent token，输入不会进入 shell 历史；下面的 `<版本>` 应替换为正在使用的发布标签（例如 `v1.3.12`），不要长期跟随会变化的 `main`：
 
 ```bash
 curl -fsSLO https://github.com/yyy622hhh/komari-theme-transit/releases/download/<版本>/transit-route-probe-helper.sh
-curl -fsSLO https://github.com/yyy622hhh/komari-theme-transit/releases/download/<版本>/collect-return-route.sh
+curl -fsSL https://github.com/yyy622hhh/komari-theme-transit/releases/download/<版本>/transit-collect-return-route.sh -o collect-return-route.sh
 sudo bash transit-route-probe-helper.sh install --endpoint https://status.example.com
 ```
 
@@ -422,7 +422,7 @@ Transit 不再内嵌或再分发 `komari-web` 构建物。登录后的服务器�
 
 | 项目     | 支持范围                                                               |
 | -------- | ---------------------------------------------------------------------- |
-| Komari   | 隔离实验覆盖 1.2.6、1.4.2、1.4.3；维护者生产环境运行 1.4.2             |
+| Komari   | 隔离实验覆盖 1.2.5-fix2、1.2.6、1.4.2、1.4.3；维护者生产环境运行 1.4.3 |
 | 浏览器   | Playwright 自动验证 Chromium、Firefox、WebKit 和移动 WebKit            |
 | 设备     | 桌面与移动端响应式布局；节点卡最坏情况覆盖 320、390、768、1280、1700px |
 | 主题设置 | 同一 `Transit` 短名称升级时保留托管设置                                |
@@ -488,6 +488,10 @@ Transit 不执行数据库迁移。主题设置格式发生变化时会保留旧
 ### 上传主题失败
 
 确认上传的是 Release 附件中的 `komari-theme-Transit-build-*.zip`，并检查反向代理上传大小限制；不要上传 GitHub 自动生成的源码压缩包。
+
+### 远程导入提示 ZIP 无效
+
+Komari 1.2.5-fix2 到 1.4.3 的 GitHub 仓库导入逻辑会直接下载最新 Release 的第一个附件。Transit 的新 Release 会把主题 ZIP 保持为首个附件并在发布后自动验证；此前已经发布且首个附件不是主题 ZIP 的版本，请下载 `komari-theme-Transit-build-*.zip` 后使用“上传主题”，不要把 GitHub 下载链接再次粘进“导入远程主题”。
 
 ### 更新后仍显示旧页面
 

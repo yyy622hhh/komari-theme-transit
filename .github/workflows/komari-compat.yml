@@ -23,6 +23,7 @@ jobs:
       fail-fast: false
       matrix:
         komari-version:
+          - 1.2.5-fix2
           - 1.2.6
           - 1.4.2
           - 1.4.3

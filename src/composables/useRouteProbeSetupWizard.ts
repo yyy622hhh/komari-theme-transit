@@ -60,7 +60,7 @@ export function buildRouteProbeInstallCommand(endpoint: string, release: string)
   const insecure = endpoint.startsWith('http://') ? ' --allow-insecure-http' : ''
   return [
     `curl -fsSLO https://github.com/yyy622hhh/komari-theme-transit/releases/download/${release}/transit-route-probe-helper.sh`,
-    `curl -fsSLO https://github.com/yyy622hhh/komari-theme-transit/releases/download/${release}/collect-return-route.sh`,
+    `curl -fsSL https://github.com/yyy622hhh/komari-theme-transit/releases/download/${release}/transit-collect-return-route.sh -o collect-return-route.sh`,
     `sudo bash transit-route-probe-helper.sh install --endpoint ${shellSingleQuote(endpoint)}${insecure}`,
   ].join('\n')
 }

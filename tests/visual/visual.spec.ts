@@ -3177,7 +3177,8 @@ test('route probe setup wizard checks the environment without probing and enable
   await dialog.getByRole('button', { name: '复制安装命令' }).click()
   const copiedCommand = await page.evaluate(() => (window as typeof window & { __copiedInstallCommand?: string }).__copiedInstallCommand ?? '')
   expect(copiedCommand).toContain(`releases/download/v${THEME_VERSION}/transit-route-probe-helper.sh`)
-  expect(copiedCommand).toContain(`releases/download/v${THEME_VERSION}/collect-return-route.sh`)
+  expect(copiedCommand).toContain(`releases/download/v${THEME_VERSION}/transit-collect-return-route.sh`)
+  expect(copiedCommand).toContain('-o collect-return-route.sh')
   expect(copiedCommand).not.toContain('--token')
   expect(copiedCommand).not.toContain('agent-token')
 
