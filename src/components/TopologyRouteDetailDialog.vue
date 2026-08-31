@@ -44,7 +44,7 @@ export interface TopologyRouteDetail {
 }
 
 const props = defineProps<{ open: boolean, route: TopologyRouteDetail | null, nodes: NodeData[] }>()
-const emit = defineEmits<{ 'update:open': [open: boolean], 'openTimeline': [] }>()
+const emit = defineEmits<{ 'update:open': [open: boolean] }>()
 const hours = ref(24)
 
 const isOpen = computed({
@@ -214,10 +214,7 @@ async function copyDiagnosticReport(): Promise<void> {
     content-class="max-w-4xl"
   >
     <div v-if="route" class="space-y-4">
-      <div class="flex flex-wrap justify-end gap-2">
-        <button type="button" data-transit-incident-timeline-button class="rounded-md border border-border/70 px-2.5 py-1.5 text-[11px] text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-emerald-500" aria-label="查看异常时间线" @click="emit('openTimeline')">
-          事件记录
-        </button>
+      <div class="flex justify-end">
         <button
           type="button"
           data-copy-topology-diagnostic

@@ -2,7 +2,6 @@
 import type { NodeData } from '@/stores/nodes'
 import { computed, ref, useId } from 'vue'
 import CarrierPingSamples from '@/components/CarrierPingSamples.vue'
-import NodeRoutePanel from '@/components/NodeRoutePanel.vue'
 import { useNodeCarrierPingDisplay } from '@/composables/useNodeCarrierPingDisplay'
 import { useNodePingStats } from '@/composables/useNodePingStats'
 import { PING_SUMMARY_MAX_COUNT } from '@/constants/load'
@@ -128,40 +127,37 @@ function lossTone(loss: string, commonMode = false): string {
   <section
     data-node-insight-panel
     :data-node-insight-mode="effectiveMode"
-    class="node-card-insight min-w-0"
-    :class="effectiveMode === 'carrier' ? 'py-1' : 'min-h-24 py-2'"
+    class="node-card-insight min-w-0 px-2.5"
+    :class="effectiveMode === 'carrier' ? 'py-2.5' : 'h-24 overflow-hidden py-1.5'"
     :aria-label="`${node.name} ${panelLabel}`"
   >
     <template v-if="effectiveMode === 'carrier'">
-      <div class="mb-1 flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-xs">
-        <span class="font-semibold text-foreground">三网质量</span>
-        <span class="text-muted-foreground" :title="carrierFreshnessTitle" :class="(carrierStatsDelayed || carrierStatsStale) && 'text-amber-700 dark:text-amber-300'">{{ carrierScopeLabel }} · {{ carrierProtocolLabel }}</span>
+      <div class="mb-2 flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-[11px] text-slate-600 dark:text-slate-300">
+        <span class="font-medium text-slate-800 dark:text-slate-200">三网质量</span>
+        <span :title="carrierFreshnessTitle" :class="(carrierStatsDelayed || carrierStatsStale) && 'text-amber-700 dark:text-amber-300'">{{ carrierScopeLabel }} / {{ carrierProtocolLabel }}</span>
       </div>
-      <div data-carrier-table-head class="mb-4 text-[11px] leading-4 text-muted-foreground">
-        <span>近 1 小时均值</span>
-        <span class="sr-only">与历史失败率；当前状态独立判断</span>
+      <div data-carrier-table-head class="carrier-summary-grid mb-2 text-[11px] leading-4 text-slate-600 dark:text-slate-300">
+        <span class="col-start-2 row-span-2 self-center">当前</span>
+        <span class="col-span-2 col-start-3 row-start-1 text-right">近 1 小时</span>
+        <span class="col-start-3 row-start-2 text-right">均值</span>
+        <span class="col-start-4 row-start-2 text-right" title="ICMP 为丢包率；TCP 为探测失败率，不代表业务流量丢包。">失败率</span>
       </div>
-      <div data-carrier-columns class="grid grid-cols-3 gap-3">
-        <div v-for="carrier in carrierDisplays" :key="carrier.key" data-node-carrier-row class="min-w-0">
+      <div class="space-y-1.5">
+        <div v-for="carrier in carrierDisplays" :key="carrier.key" data-node-carrier-row class="min-w-0 text-[11px] leading-4">
           <div class="carrier-summary-grid">
-            <span class="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground"><i class="size-1.5 shrink-0 rounded-full" :class="carrier.dotClass" /><span>{{ carrier.label }}</span></span>
-            <div class="carrier-latency mt-2 flex min-w-0 items-baseline gap-1" :title="carrier.latencyTooltip">
-              <strong class="min-w-0 break-words font-semibold tabular-nums tracking-tight text-foreground" :class="/^\d/.test(carrier.latencyDisplay) ? 'carrier-latency__number' : 'text-base'">{{ carrier.latencyDisplay.replace(/ ms$/, '') }}</strong>
-              <span v-if="/^\d/.test(carrier.latencyDisplay)" class="text-[10px] text-muted-foreground">ms</span>
-            </div>
-            <div class="mt-1 flex min-w-0 flex-wrap items-baseline gap-x-1 text-[11px] leading-4 text-muted-foreground" :title="carrier.lossTooltip">
-              <span>{{ carrier.probeType === 'icmp' ? '丢包率' : '失败率' }}</span>
-              <strong class="min-w-0 break-words font-medium tabular-nums" :class="lossTone(carrier.lossDisplay, carrier.commonModeLossEvents > 0 || carrier.currentStatus === 'healthy')" :data-carrier-target-incident="carrier.commonModeLossEvents > 0 ? '' : undefined" :title="carrier.lossTooltip">{{ carrier.lossDisplay }}</strong>
-            </div>
-            <div class="mt-2 flex min-h-5 min-w-0 items-start gap-1.5 text-[11px] leading-4" :class="probeCurrentTone(carrier.currentStatus)" :title="carrier.currentLabel">
-              <span aria-hidden="true" class="mt-1.5 size-1.5 shrink-0 rounded-full bg-current" />
-              <span class="min-w-0 break-words font-medium" :data-probe-current="carrier.currentStatus" :title="carrier.lossTooltip">{{ carrier.currentCompactLabel }}</span>
-            </div>
+            <span class="flex min-w-0 items-center gap-1 text-slate-600 dark:text-slate-300"><i class="size-1 shrink-0 rounded-full" :class="carrier.dotClass" /><span class="break-words">{{ carrier.label }}</span></span>
+            <span class="min-w-0 break-words font-medium" :data-probe-current="carrier.currentStatus" :class="probeCurrentTone(carrier.currentStatus)" :title="carrier.lossTooltip">{{ carrier.currentCompactLabel }}</span>
+            <strong class="min-w-0 break-words text-right font-medium tabular-nums text-slate-700 dark:text-slate-200">{{ carrier.latencyDisplay }}</strong>
+            <strong
+              class="min-w-0 break-words text-right font-medium tabular-nums"
+              :class="lossTone(carrier.lossDisplay, carrier.commonModeLossEvents > 0 || carrier.currentStatus === 'healthy')"
+              :data-carrier-target-incident="carrier.commonModeLossEvents > 0 ? '' : undefined"
+              :title="carrier.lossTooltip"
+            >{{ carrier.lossDisplay }}</strong>
           </div>
-          <CarrierPingSamples class="mt-2 w-full" :bars="carrier.latencyBars.slice(-12)" :label="`${carrier.label}近一小时延迟`" />
+          <CarrierPingSamples class="mt-0.5 w-full" :bars="carrier.latencyBars.slice(-12)" :label="`${carrier.label}近一小时延迟`" />
         </div>
       </div>
-      <NodeRoutePanel class="mt-3" :tags="node.tags" compact />
       <div class="transit-divider mt-2 flex flex-wrap items-center justify-between gap-x-2 gap-y-1 border-t pt-1.5 text-[11px] leading-4 text-slate-600 dark:text-slate-300">
         <span :title="`${carrierFreshnessLabel}；${carrierFreshnessTitle}`">{{ carrierSummaryLabel }}</span>
         <button type="button" class="pointer-events-auto min-h-6 rounded-sm underline underline-offset-4 hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-500" :aria-expanded="carrierDetailsOpen" :aria-controls="carrierDetailsId" @click.stop="carrierDetailsOpen = !carrierDetailsOpen">
@@ -266,27 +262,20 @@ function lossTone(loss: string, commonMode = false): string {
         </div>
       </div>
     </template>
-    <NodeRoutePanel v-if="effectiveMode !== 'carrier'" class="mt-4" :tags="node.tags" compact />
   </section>
 </template>
 
 <style scoped>
 .node-card-insight {
-  color: var(--transit-text-secondary);
+  border: 1px solid var(--transit-divider);
+  border-radius: 0.65rem;
+  background: var(--transit-cell-bg);
 }
 
 .carrier-summary-grid {
-  min-width: 0;
-}
-
-.carrier-latency__number {
-  font-size: clamp(1.25rem, 7.5cqi, 2rem);
-  line-height: 1.2;
-}
-
-@container (max-width: 19rem) {
-  [data-carrier-columns] {
-    gap: 0.5rem;
-  }
+  display: grid;
+  grid-template-columns: 2rem minmax(0, 1fr) 3rem 3rem;
+  align-items: center;
+  column-gap: 0.375rem;
 }
 </style>

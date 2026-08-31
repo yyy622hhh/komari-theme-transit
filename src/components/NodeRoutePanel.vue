@@ -18,8 +18,6 @@ import { parseNodeRouteTag } from '@/utils/routeTag'
 const props = defineProps<{
   /** 节点的原始 `tags` 字段；没有回程标签时整个面板不渲染。 */
   tags?: string | null
-  /** 总览的三列布局与三网质量保持相同运营商顺序。 */
-  compact?: boolean
 }>()
 
 const appStore = useAppStore()
@@ -33,9 +31,6 @@ const appStore = useAppStore()
  */
 const now = computed(() => appStore.minuteTick.getTime())
 const report = computed(() => parseNodeRouteTag(props.tags, now.value))
-const displayedEntries = computed(() => props.compact
-  ? ['CU', 'CT', 'CM'].flatMap(carrier => report.value?.entries.filter(entry => entry.carrier === carrier) ?? [])
-  : report.value?.entries ?? [])
 
 /** 过期或采集时间未知的判定不再着色，避免把历史结果暗示成当前状态。 */
 const untrusted = computed(() => report.value?.freshness === 'stale' || report.value?.freshness === 'unknown')
@@ -98,9 +93,9 @@ function routeDetails(entry: NodeRouteEntry): string {
 </script>
 
 <template>
-  <div v-if="report" data-node-route-panel :data-route-layout="compact ? 'columns' : 'rows'" class="node-card-cell node-route-panel min-w-0 p-0" :class="compact && 'node-route-panel--compact'">
+  <div v-if="report" data-node-route-panel class="node-card-cell node-route-panel min-w-0 overflow-hidden p-0">
     <div class="node-route-panel__header flex items-center justify-between gap-2 px-2.5 py-2 text-[9px] text-slate-500 dark:text-slate-400">
-      <span>{{ compact ? '回程识别' : '三网回程' }}</span>
+      <span>三网回程</span>
       <span
         v-if="measuredAgo || report.freshness === 'unknown'"
         class="shrink-0 tabular-nums"
@@ -111,8 +106,8 @@ function routeDetails(entry: NodeRouteEntry): string {
     </div>
 
     <TooltipProvider :delay-duration="160">
-      <div class="node-route-entries flex flex-col gap-1 px-2.5 pb-2 pt-1.5">
-        <Tooltip v-for="entry in displayedEntries" :key="entry.carrier">
+      <div class="flex flex-col gap-1 px-2.5 pb-2 pt-1.5">
+        <Tooltip v-for="entry in report.entries" :key="entry.carrier">
           <TooltipTrigger as-child>
             <button
               type="button"
@@ -123,18 +118,16 @@ function routeDetails(entry: NodeRouteEntry): string {
               @click.stop
             >
               <span
-                v-if="!compact"
                 aria-hidden="true"
                 class="node-route-beacon grid size-3.5 shrink-0 place-items-center rounded-full border"
               >
                 <span class="size-1.5 rounded-full bg-current" />
               </span>
 
-              <span :class="compact ? 'sr-only' : 'whitespace-nowrap text-[9px] text-slate-500 dark:text-slate-400'">{{ entry.carrierLabel }}</span>
+              <span class="whitespace-nowrap text-[9px] text-slate-500 dark:text-slate-400">{{ entry.carrierLabel }}</span>
 
               <!-- 运营商是行标签，轨道把视线导向右侧的线路判定；真实探测方向见悬浮依据。 -->
               <span
-                v-if="!compact"
                 data-route-lane
                 aria-hidden="true"
                 class="node-route-lane flex min-w-0 items-center"
@@ -151,8 +144,8 @@ function routeDetails(entry: NodeRouteEntry): string {
                 class="node-route-badge flex min-w-[5.5rem] shrink-0 items-baseline justify-between gap-1 rounded-md border px-1.5 py-0.5 text-[9px] leading-tight"
                 :data-grade="untrusted ? '' : entry.classification.grade || ''"
               >
-                <span class="node-route-label font-medium text-slate-700 dark:text-slate-200">{{ lineText(entry.classification.label, entry.classification.grade) }}</span>
-                <span v-if="!compact && gradeText(entry.classification.grade)" class="node-route-badge__grade shrink-0 whitespace-nowrap font-medium">{{ gradeText(entry.classification.grade) }}</span>
+                <span class="whitespace-nowrap font-medium text-slate-700 dark:text-slate-200">{{ lineText(entry.classification.label, entry.classification.grade) }}</span>
+                <span v-if="gradeText(entry.classification.grade)" class="node-route-badge__grade shrink-0 whitespace-nowrap font-medium">{{ gradeText(entry.classification.grade) }}</span>
               </span>
             </button>
           </TooltipTrigger>
@@ -171,64 +164,6 @@ function routeDetails(entry: NodeRouteEntry): string {
 </template>
 
 <style scoped>
-.node-route-panel--compact .node-route-panel__header {
-  border: 0;
-  padding: 0 0 0.5rem;
-  font-size: 0.6875rem;
-}
-
-.node-route-panel--compact .node-route-entries {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.75rem;
-  padding: 0;
-}
-
-.node-route-panel--compact .node-route-row {
-  display: flex;
-  grid-row: 1;
-  padding: 0;
-}
-
-.node-route-panel--compact [data-carrier='CU'] {
-  grid-column: 1;
-}
-.node-route-panel--compact [data-carrier='CT'] {
-  grid-column: 2;
-}
-.node-route-panel--compact [data-carrier='CM'] {
-  grid-column: 3;
-}
-
-.node-route-panel--compact .node-route-badge {
-  width: 100%;
-  min-width: 0;
-  min-height: 1.75rem;
-  justify-content: center;
-  border: 0;
-  border-radius: 0.4375rem;
-  padding: 0.375rem;
-  background: var(--transit-cell-bg);
-  box-shadow: none;
-  font-size: 0.6875rem;
-  line-height: 1.4;
-  text-align: center;
-}
-
-.node-route-panel--compact .node-route-label {
-  overflow-wrap: anywhere;
-}
-
-@container (max-width: 19rem) {
-  .node-route-panel--compact .node-route-entries {
-    gap: 0.5rem;
-  }
-}
-
-.node-route-panel:not(.node-route-panel--compact) .node-route-label {
-  white-space: nowrap;
-}
-
 .node-route-panel__header {
   border-bottom: 1px solid var(--transit-divider);
 }

@@ -2,6 +2,7 @@
 import type { NodeData } from '@/stores/nodes'
 import type { CurrencyCode } from '@/utils/financeHelper'
 import { computed, onMounted, ref } from 'vue'
+import NetworkTopology from '@/components/NetworkTopology.vue'
 import TransitAlertStrip from '@/components/TransitAlertStrip.vue'
 import { useDailyExchangeRates } from '@/composables/useDailyExchangeRates'
 import { useAppStore } from '@/stores/app'
@@ -56,54 +57,43 @@ onMounted(() => {
 </script>
 
 <template>
-  <section id="asset-summary" class="relative z-1 scroll-mt-20 px-4 pb-5 pt-6 sm:pt-8">
+  <section id="asset-summary" class="relative z-1 scroll-mt-20 px-4 pb-3 pt-3">
     <div class="mx-auto max-w-[1560px] space-y-3">
-      <div class="flex flex-wrap items-center justify-between gap-3 pb-2">
-        <div class="flex flex-wrap items-center gap-3">
-          <h1 class="text-2xl font-semibold tracking-tight text-foreground sm:text-3xl">
-            网络总览
-          </h1>
-          <span class="inline-flex items-center gap-1.5 text-xs text-muted-foreground"><span aria-hidden="true" class="size-1.5 rounded-full bg-emerald-500" />{{ onlineNodes.length }} 台在线<span v-if="maintenanceNodes.length"> · {{ maintenanceNodes.length }} 台维护</span></span>
-        </div>
-      </div>
-      <details class="group" data-asset-summary-details>
-        <summary class="w-fit cursor-pointer rounded text-xs text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-emerald-500">
-          资源汇总
-        </summary>
-        <div class="transit-panel telemetry-scroll mt-3 rounded-2xl">
-          <div class="transit-telemetry-grid grid min-w-[840px] grid-cols-[0.82fr_1.28fr_1.28fr_1fr_1.18fr_1.5fr] divide-x">
-            <div class="telemetry-item">
-              <span>在线</span>
-              <strong>{{ onlineNodes.length }} / {{ serviceNodes.length }} <em v-if="maintenanceNodes.length">维护 {{ maintenanceNodes.length }}</em></strong>
-            </div>
-            <div class="telemetry-item">
-              <span>内存</span>
-              <strong>{{ formatBytes(totals.memoryUsed) }} <em>/ {{ formatBytes(totals.memoryTotal) }}</em></strong>
-            </div>
-            <div class="telemetry-item">
-              <span>硬盘</span>
-              <strong>{{ formatBytes(totals.diskUsed) }} <em>/ {{ formatBytes(totals.diskTotal) }}</em></strong>
-            </div>
-            <div class="telemetry-item">
-              <span>流量</span>
-              <strong>{{ formatBytes(totals.traffic) }}</strong>
-            </div>
-            <div class="telemetry-item">
-              <span>剩余价值</span>
-              <strong>{{ formatMoney(totals.remainingValue) }}</strong>
-            </div>
-            <div class="telemetry-item">
-              <span>实时</span>
-              <strong class="flex items-center gap-3">
-                <span class="text-emerald-600 dark:text-emerald-400">↑ {{ formatSpeed(totals.upload) }}</span>
-                <span class="text-slate-700 dark:text-slate-300">↓ {{ formatSpeed(totals.download) }}</span>
-              </strong>
-            </div>
+      <div class="transit-panel telemetry-scroll rounded-2xl">
+        <div class="transit-telemetry-grid grid min-w-[840px] grid-cols-[0.82fr_1.28fr_1.28fr_1fr_1.18fr_1.5fr] divide-x">
+          <div class="telemetry-item">
+            <span>在线</span>
+            <strong>{{ onlineNodes.length }} / {{ serviceNodes.length }} <em v-if="maintenanceNodes.length">维护 {{ maintenanceNodes.length }}</em></strong>
+          </div>
+          <div class="telemetry-item">
+            <span>内存</span>
+            <strong>{{ formatBytes(totals.memoryUsed) }} <em>/ {{ formatBytes(totals.memoryTotal) }}</em></strong>
+          </div>
+          <div class="telemetry-item">
+            <span>硬盘</span>
+            <strong>{{ formatBytes(totals.diskUsed) }} <em>/ {{ formatBytes(totals.diskTotal) }}</em></strong>
+          </div>
+          <div class="telemetry-item">
+            <span>流量</span>
+            <strong>{{ formatBytes(totals.traffic) }}</strong>
+          </div>
+          <div class="telemetry-item">
+            <span>剩余价值</span>
+            <strong>{{ formatMoney(totals.remainingValue) }}</strong>
+          </div>
+          <div class="telemetry-item">
+            <span>实时</span>
+            <strong class="flex items-center gap-3">
+              <span class="text-emerald-600 dark:text-emerald-400">↑ {{ formatSpeed(totals.upload) }}</span>
+              <span class="text-slate-700 dark:text-slate-300">↓ {{ formatSpeed(totals.download) }}</span>
+            </strong>
           </div>
         </div>
-      </details>
+      </div>
 
       <TransitAlertStrip :nodes="nodes" />
+
+      <NetworkTopology v-if="appStore.topologyEnabled" embedded :nodes="nodes" />
     </div>
   </section>
 </template>

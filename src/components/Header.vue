@@ -4,7 +4,6 @@ import { computed, defineAsyncComponent, inject, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
-import { useDashboardSection } from '@/composables/useDashboardSection'
 import { useVisitorAudit } from '@/composables/useVisitorAudit'
 import { KOMARI_ADMIN_SERVERS_PATH } from '@/constants'
 import { useAppStore } from '@/stores/app'
@@ -20,15 +19,6 @@ const isScrolled = inject<ReturnType<typeof ref<boolean>>>('isScrolled', ref(fal
 
 const siteFavicon = ref('/favicon.ico')
 const wallpaperDialogOpen = ref(false)
-const activeSection = useDashboardSection(() => appStore.opsDashboardEnabled && router.currentRoute.value.name === 'home')
-
-function showSection(id: string) {
-  const section = document.getElementById(id)
-  if (!section)
-    return
-  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-  section.scrollIntoView({ behavior: appStore.disablePageAnimation || reducedMotion ? 'auto' : 'smooth', block: 'start' })
-}
 
 const actionButtons = computed(() => {
   const themeTitleMap = {
@@ -118,8 +108,8 @@ const sitename = computed(() => appStore.publicSettings?.sitename || 'Komari Mon
     class="site-header transition-all duration-200 top-0 sticky z-10 border-b border-transparent"
     :class="isScrolled ? '!border-slate-500/10 backdrop-blur-lg' : 'bg-transparent'"
   >
-    <div class="px-4 flex-between mx-auto" :class="appStore.opsDashboardEnabled && router.currentRoute.value.name === 'home' ? 'max-w-[1560px] min-h-16 gap-x-3 max-sm:flex-wrap' : 'max-w-[1280px] h-14'">
-      <RouterLink to="/" class="flex min-w-0 flex-1 items-center gap-3" :class="appStore.opsDashboardEnabled && router.currentRoute.value.name === 'home' && 'sm:flex-initial sm:max-w-[45%] sm:mr-5'" aria-label="返回首页">
+    <div class="px-4 flex-between h-14 max-w-[1280px] mx-auto">
+      <RouterLink to="/" class="flex min-w-0 flex-1 items-center gap-3" aria-label="返回首页">
         <Avatar class="size-8 shrink-0">
           <AvatarImage :src="siteFavicon" :alt="sitename" />
           <AvatarFallback>{{ sitename.slice(0, 1) }}</AvatarFallback>
@@ -128,14 +118,6 @@ const sitename = computed(() => appStore.publicSettings?.sitename || 'Komari Mon
           {{ sitename }}
         </h3>
       </RouterLink>
-      <nav v-if="appStore.opsDashboardEnabled && router.currentRoute.value.name === 'home'" aria-label="监控视图" class="mr-auto flex shrink-0 items-center gap-6 self-stretch text-sm max-sm:order-3 max-sm:h-10 max-sm:w-full">
-        <button type="button" class="border-b-2 border-transparent px-1 font-medium text-muted-foreground focus-visible:outline-2 focus-visible:outline-emerald-500" :class="activeSection === 'network-overview' && '!border-emerald-500 !text-foreground'" :aria-current="activeSection === 'network-overview' ? 'location' : undefined" @click="showSection('network-overview')">
-          总览
-        </button>
-        <button v-if="appStore.topologyEnabled" type="button" class="border-b-2 border-transparent px-1 font-medium text-muted-foreground focus-visible:outline-2 focus-visible:outline-emerald-500" :class="activeSection === 'network-topology' && '!border-emerald-500 !text-foreground'" :aria-current="activeSection === 'network-topology' ? 'location' : undefined" @click="showSection('network-topology')">
-          拓扑
-        </button>
-      </nav>
       <div class="ml-2 flex shrink-0 items-center gap-1 sm:gap-2">
         <Button
           v-for="button in actionButtons"

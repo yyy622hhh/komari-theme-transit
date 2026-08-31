@@ -33,6 +33,8 @@
   border: 1px solid var(--transit-border);
   background: var(--transit-card-bg);
   box-shadow: var(--transit-card-shadow);
+  backdrop-filter: blur(16px) saturate(112%);
+  -webkit-backdrop-filter: blur(16px) saturate(112%);
 }
 
 .transit-divider {
@@ -104,7 +106,7 @@
   --transit-divider: rgb(100 116 139 / 0.16);
   --transit-panel-bg: rgb(248 250 252 / 0.78);
   --transit-control-bg: rgb(248 250 252 / 0.72);
-  --transit-card-bg: rgb(248 250 252);
+  --transit-card-bg: rgb(248 250 252 / 0.9);
   --transit-cell-bg: rgb(241 245 249 / 0.74);
   --transit-hover-bg: rgb(15 23 42 / 0.025);
   --transit-dot-ring: rgb(241 245 249 / 0.96);
@@ -153,18 +155,18 @@
   --chart-3: oklch(0.769 0.188 70.08);
   --chart-4: oklch(0.627 0.265 303.9);
   --chart-5: oklch(0.645 0.246 16.439);
-  --transit-border: rgb(148 163 184 / 0.18);
-  --transit-divider: rgb(255 255 255 / 0.09);
+  --transit-border: rgb(71 85 105 / 0.46);
+  --transit-divider: rgb(255 255 255 / 0.055);
   --transit-panel-bg: rgb(14 19 25 / 0.84);
   --transit-control-bg: rgb(14 19 25 / 0.8);
-  --transit-card-bg: rgb(26 31 35);
-  --transit-cell-bg: rgb(255 255 255 / 0.04);
+  --transit-card-bg: rgb(14 19 25 / 0.84);
+  --transit-cell-bg: rgb(255 255 255 / 0.018);
   --transit-hover-bg: rgb(255 255 255 / 0.018);
   --transit-dot-ring: rgb(16 24 32 / 0.98);
   --transit-rail: rgb(71 85 105 / 0.65);
   --transit-text-primary: rgb(226 232 240);
-  --transit-text-secondary: rgb(171 182 192);
-  --transit-text-tertiary: rgb(152 164 175);
+  --transit-text-secondary: rgb(148 163 184);
+  --transit-text-tertiary: rgb(125 142 166);
   --transit-panel-shadow: inset 0 1px 0 rgb(255 255 255 / 0.025), 0 18px 50px -42px rgb(0 0 0 / 0.72);
   --transit-card-shadow: inset 0 1px 0 rgb(255 255 255 / 0.025), 0 18px 50px -42px rgb(0 0 0 / 0.95);
 }
@@ -358,8 +360,7 @@ html.color-vision-friendly.dark {
   }
 
   [aria-pressed='true'],
-  [aria-current='page'],
-  [aria-current='location'] {
+  [aria-current='page'] {
     outline: 2px solid Highlight !important;
     outline-offset: -2px !important;
   }

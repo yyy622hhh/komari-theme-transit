@@ -56,7 +56,6 @@ const REGION_FIXTURES = [
 
 export interface VisualFixtureOptions {
   dark?: boolean
-  pageAnimation?: boolean
   earthRenderer?: 'cobe' | 'realistic' | 'tiled'
   colorVisionFriendly?: boolean
   viewMode?: 'card' | 'list'
@@ -107,7 +106,7 @@ export interface VisualFixtureOptions {
    * 给 1 号节点写一条回程判定标签。传 `stale` 时把采集时间挪到 30 天前，用来
    * 验证过期判定不再着色。
    */
-  returnRouteTag?: 'unknown' | 'fresh' | 'stale' | 'inconclusive' | 'partial'
+  returnRouteTag?: 'unknown' | 'fresh' | 'stale' | 'inconclusive'
   /** 记录并模拟三网回程的远程执行（admin:exec / 结果轮询 / 写回）。 */
   routeProbeExec?: boolean
   /** 模拟优先的固定能力节点助手伴生插件路径。 */
@@ -850,9 +849,7 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
     const stamp = options.returnRouteTag === 'unknown' ? '' : `@${measuredAt}`
     const routes = options.returnRouteTag === 'inconclusive'
       ? 'ct=4134,cu=4837,cm=58453'
-      : options.returnRouteTag === 'partial'
-        ? 'ct=4809.4809.4134,cm=58807.9808'
-        : 'ct=4809.4809.4134,cu=4837.4837,cm=58807.9808'
+      : 'ct=4809.4809.4134,cu=4837.4837,cm=58807.9808'
     node.tags = `${node.tags || ''};transit-route:${routes}${stamp}`
   }
   const statusFixtures = options.nodeCount || options.nodeCardWorstCase
@@ -953,7 +950,7 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
     colorVisionMode: options.colorVisionFriendly ? '色觉友好' : '标准',
     hideAdminEntryWhenLoggedOut: false,
     hidePriceWhenLoggedOut: options.hidePriceWhenLoggedOut ?? false,
-    disablePageAnimation: !options.pageAnimation,
+    disablePageAnimation: true,
     homeQuickControlsEnabled: true,
     homeQuickControlPreset: '完整',
     homeToolsEnabled: true,

@@ -127,7 +127,7 @@ onUnmounted(() => {
               </AlertAction>
             </Alert>
           </div>
-          <div class="mx-auto" :class="appStore.opsDashboardEnabled && $route.name === 'home' ? 'max-w-[1560px]' : 'max-w-[1280px]'">
+          <div class="max-w-[1280px] mx-auto">
             <RouterView v-slot="{ Component }">
               <Transition
                 :css="!appStore.disablePageAnimation"
