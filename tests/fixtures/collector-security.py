@@ -81,6 +81,9 @@ class ResponseSocket:
 
 
 class FakeHTTPSConnection:
+    # Python 3.12+ reads the connection class default when building HTTPSHandler.
+    debuglevel = 0
+
     def __init__(self, host, **kwargs):
         context = kwargs["context"]
         observed["verified_tls"] = context.check_hostname and context.verify_mode == ssl.CERT_REQUIRED
