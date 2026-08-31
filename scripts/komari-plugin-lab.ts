@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { setTimeout as delay } from 'node:timers/promises'
 import { buildRouteTraceCommand } from '../src/utils/routeTrace'
 
 interface Lab {
@@ -21,27 +22,48 @@ export async function verifyRouteProbeLab(lab: Lab): Promise<void> {
   async function rpc<T>(method: string, params: object = {}, authenticated = true): Promise<T> {
     const response = await fetch(`${lab.baseUrl}/api/rpc2`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(authenticated ? headers() : {}) }, body: JSON.stringify({ jsonrpc: '2.0', id: ++sequence, method, params }) })
     assert(response.ok, `${method}: HTTP ${response.status}`)
-    const payload = await response.json() as { error?: { code: number }, result?: T }
-    assert(!payload.error, `${method}: RPC ${payload.error?.code}`)
+    const payload = await response.json() as { error?: { code: number, message?: string }, result?: T }
+    assert(!payload.error, `${method}: RPC ${payload.error?.code} ${payload.error?.message ?? ''}`)
     return payload.result as T
   }
   if (lab.version.startsWith('1.2.')) {
-    // Legacy admin:exec correctly rejects clients that have never reported online.
-    // A disposable POST reporter establishes presence without executing the queued command.
+    // Released legacy binaries require an active Agent connection, not just a stored report.
+    // This lab socket receives and inspects the fixed command; it never executes it.
     const { token } = await rpc<{ token: string }>('admin:getClientToken', { uuid: lab.client })
-    const report = await fetch(`${lab.baseUrl}/api/clients/report?token=${encodeURIComponent(token)}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ uuid: lab.client, cpu: { usage: 1 } }),
-    })
-    assert.equal(report.status, 200, 'legacy lab client must report online before dispatch')
-    const command = buildRouteTraceCommand('beijing')
-    const result = await rpc<{ task_id: string, queued_clients: string[] }>('admin:exec', { clients: [lab.client], command })
-    assert(result.task_id, 'fixed admin:exec fallback must create a real lab task')
-    assert(result.queued_clients.includes(lab.client), 'the online POST client must receive queued work')
-    const stored = await rpc<{ command: string, clients: string[] }>('admin:getTaskById', { task_id: result.task_id })
-    assert.equal(stored.command, command)
-    assert(stored.clients.includes(lab.client))
+    const socket = new WebSocket(`${lab.baseUrl.replace(/^http/, 'ws')}/api/clients/report?token=${encodeURIComponent(token)}`)
+    const frames: Array<{ message?: string, command?: string, task_id?: string }> = []
+    socket.addEventListener('message', event => frames.push(JSON.parse(String(event.data))))
+    const sendReport = () => socket.send(JSON.stringify({ uuid: lab.client, cpu: { usage: 1 } }))
+    let heartbeat: ReturnType<typeof setInterval> | undefined
+    async function waitFor(predicate: () => Promise<boolean>, message: string) {
+      const deadline = Date.now() + 5000
+      while (Date.now() < deadline) {
+        if (await predicate())
+          return
+        await delay(50)
+      }
+      assert.fail(message)
+    }
+    try {
+      await waitFor(async () => socket.readyState === WebSocket.OPEN, 'legacy Agent socket must open')
+      sendReport()
+      heartbeat = setInterval(sendReport, 1000)
+      await waitFor(async () => Boolean((await rpc<Record<string, unknown>>('common:getNodesLatestStatus'))[lab.client]), 'legacy client must report before dispatch')
+      const command = buildRouteTraceCommand('beijing')
+      const result = await rpc<{ task_id: string }>('admin:exec', { clients: [lab.client], command })
+      assert(result.task_id, 'fixed admin:exec fallback must create a real lab task')
+      await waitFor(async () => frames.some(frame => frame.task_id === result.task_id), 'legacy Agent must receive the task')
+      const frame = frames.find(frame => frame.task_id === result.task_id)!
+      assert.equal(frame.message, 'exec')
+      assert.equal(frame.command, command)
+      const stored = await rpc<{ command: string, clients: string[] }>('admin:getTaskById', { task_id: result.task_id })
+      assert.equal(stored.command, command)
+      assert(stored.clients.includes(lab.client))
+    }
+    finally {
+      clearInterval(heartbeat)
+      socket.close()
+    }
     return
   }
 
