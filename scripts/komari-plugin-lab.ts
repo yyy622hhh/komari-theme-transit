@@ -26,9 +26,19 @@ export async function verifyRouteProbeLab(lab: Lab): Promise<void> {
     return payload.result as T
   }
   if (lab.version.startsWith('1.2.')) {
+    // Legacy admin:exec correctly rejects clients that have never reported online.
+    // A disposable POST reporter establishes presence without executing the queued command.
+    const { token } = await rpc<{ token: string }>('admin:getClientToken', { uuid: lab.client })
+    const report = await fetch(`${lab.baseUrl}/api/clients/report?token=${encodeURIComponent(token)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ uuid: lab.client, cpu: { usage: 1 } }),
+    })
+    assert.equal(report.status, 200, 'legacy lab client must report online before dispatch')
     const command = buildRouteTraceCommand('beijing')
-    const result = await rpc<{ task_id: string }>('admin:exec', { clients: [lab.client], command })
+    const result = await rpc<{ task_id: string, queued_clients: string[] }>('admin:exec', { clients: [lab.client], command })
     assert(result.task_id, 'fixed admin:exec fallback must create a real lab task')
+    assert(result.queued_clients.includes(lab.client), 'the online POST client must receive queued work')
     const stored = await rpc<{ command: string, clients: string[] }>('admin:getTaskById', { task_id: result.task_id })
     assert.equal(stored.command, command)
     assert(stored.clients.includes(lab.client))
