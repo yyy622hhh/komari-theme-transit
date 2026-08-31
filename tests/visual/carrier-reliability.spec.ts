@@ -58,7 +58,8 @@ for (const initial of ['missing', 'stale'] as const) {
       await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
       await expect(edge).toHaveAttribute('data-topology-history-source', 'history')
       await expect(edge).toContainText('近 1 小时')
-      await expect(edge).toContainText('均值 222ms')
+      await expect(edge.locator('strong')).toHaveText('222ms')
+      await expect(edge).toContainText('近 1 小时均值')
       await expect(edge).not.toContainText('备用基线')
       await expect(edge).toHaveAttribute('aria-label', /近 1 小时平均 222ms/)
       await expect(container.locator('[data-topology-current]')).toHaveText('正常')
@@ -107,7 +108,7 @@ for (const width of [320, 390, 768, 1440]) {
       const checkLayout = async () => {
         expect(await panel.evaluate((element) => {
           const outer = element.getBoundingClientRect()
-          return [...element.querySelectorAll<HTMLElement>('[data-carrier-table-head] span, [data-node-carrier-row] .carrier-summary-grid > *, [data-carrier-details] p')].flatMap((cell) => {
+          return [...element.querySelectorAll<HTMLElement>('[data-carrier-table-head] > span, [data-node-carrier-row] > div, [data-carrier-details] p')].filter(cell => !cell.classList.contains('sr-only')).flatMap((cell) => {
             const range = document.createRange()
             range.selectNodeContents(cell)
             const box = cell.getBoundingClientRect()
@@ -139,6 +140,8 @@ for (const width of [320, 390, 768, 1440]) {
       if (width === 1440) {
         await card.screenshot({ path: `test-results/design-review/carrier-${dark ? 'dark' : 'light'}.png` })
         await page.locator('[data-topology-route]').first().screenshot({ path: `test-results/design-review/topology-${dark ? 'dark' : 'light'}.png` })
+        await page.getByRole('navigation', { name: '监控视图' }).getByRole('button', { name: '总览', exact: true }).click()
+        await page.screenshot({ path: `test-results/design-review/overview-${dark ? 'dark' : 'light'}.png` })
       }
       if (width === 390)
         await card.screenshot({ path: `test-results/design-review/carrier-mobile-${dark ? 'dark' : 'light'}.png` })

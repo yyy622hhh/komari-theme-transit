@@ -159,7 +159,7 @@ onUnmounted(() => {
     :data-wallpaper-effect="usesPersonalWallpaper ? personalWallpaper.effect.value : undefined"
   >
     <Transition name="fade">
-      <div v-if="showDefaultBackground" class="default-background" />
+      <div v-if="showDefaultBackground" class="default-background" :class="appStore.opsDashboardEnabled && 'default-background--transit'" />
     </Transition>
     <Transition name="fade">
       <div v-if="showLoadingBackground" class="background-loading" />
@@ -217,6 +217,16 @@ onUnmounted(() => {
 
 .dark .default-background {
   filter: brightness(0.38) saturate(0.82) contrast(1.08);
+}
+
+.default-background.default-background--transit {
+  background: #eef1f4;
+  filter: none;
+  transform: none;
+}
+
+.dark .default-background.default-background--transit {
+  background: #101416;
 }
 
 @media (max-width: 768px) {

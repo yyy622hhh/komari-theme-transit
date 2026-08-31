@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { expect, test } from '@playwright/test'
 import { installKomariFixture, readRouteProbeCompanionCalls, readRouteProbeEdits, readRouteProbeExecCalls } from './fixtures/komari'
 
-const LIGHT_NODE_SURFACE = /^(?:rgba\(248, 250, 252, 0\.9\)|oklch\(0\.965 0\.008 252\))$/
+const LIGHT_NODE_SURFACE = /^(?:rgb\(248, 250, 252\)|oklch\(0\.965 0\.008 252\))$/
 const WALLPAPER_FIXTURE = fileURLToPath(new URL('../../docs/preview.png', import.meta.url))
 const THEME_VERSION = (JSON.parse(readFileSync(fileURLToPath(new URL('../../komari-theme.json', import.meta.url)), 'utf8')) as { version: string }).version
 
@@ -366,10 +366,11 @@ test('Transit light desktop uses light surfaces and readable telemetry', async (
   await openStablePage(page)
 
   const assetValue = page.locator('#asset-summary .telemetry-item strong').first()
+  await page.locator('[data-asset-summary-details] summary').click()
   await expect(assetValue).toHaveCSS('color', 'rgb(30, 41, 59)')
   const nodeCard = page.getByRole('button', { name: '查看节点 主控-洛杉矶 详情' }).locator('xpath=..')
   await expect(nodeCard).toHaveCSS('background-color', LIGHT_NODE_SURFACE)
-  await expect(nodeCard.getByRole('heading', { name: '主控-洛杉矶' })).toHaveCSS('color', /oklch\(0\.208/)
+  await expect(nodeCard.getByRole('heading', { name: '主控-洛杉矶' })).toHaveCSS('color', /oklch\(0\.11 /)
   await expect(page.getByLabel(/当前入口/).first()).toHaveCSS('color', /oklch\(0\.279/)
 
   const sample = nodeCard.locator('[data-carrier-sample][aria-label*="ms"]').first()
@@ -403,9 +404,10 @@ test('Transit dark asset summary keeps a readable text hierarchy', async ({ page
   await openStablePage(page)
 
   const telemetry = page.locator('#asset-summary .telemetry-item')
-  await expect(telemetry.first()).toHaveCSS('color', 'rgb(148, 163, 184)')
+  await page.locator('[data-asset-summary-details] summary').click()
+  await expect(telemetry.first()).toHaveCSS('color', 'rgb(171, 182, 192)')
   await expect(telemetry.first().locator('strong')).toHaveCSS('color', 'rgb(226, 232, 240)')
-  await expect(telemetry.nth(1).locator('em')).toHaveCSS('color', 'rgb(125, 142, 166)')
+  await expect(telemetry.nth(1).locator('em')).toHaveCSS('color', 'rgb(152, 164, 175)')
   await expect(page).toHaveScreenshot('transit-dark-desktop.png', { fullPage: false })
 })
 
@@ -426,16 +428,16 @@ test('Transit desktop topology and cards remain contained', async ({ page }) => 
   expect(reliabilityRequests.every(request => Array.isArray(request.params?.entity_ids) && request.params.entity_ids.length === 2)).toBe(true)
   expect(reliabilityRequests.some(request => request.params?.entity_id !== undefined)).toBe(false)
 
-  await expect(page.getByRole('heading', { name: '线路状态' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '线路拓扑' })).toBeVisible()
   await expect(page.locator('[data-transit-alert-strip]')).toBeVisible()
   const alertStrip = page.locator('[data-transit-alert-strip]')
   await expect(alertStrip.getByRole('heading', { name: '11 个异常需要关注' })).toBeVisible()
   await expect(alertStrip.getByRole('button', { name: '另有 7 个' })).toBeVisible()
-  const topologySection = page.getByRole('heading', { name: '线路状态' }).locator('xpath=ancestor::section[1]')
+  const topologySection = page.getByRole('heading', { name: '线路拓扑' }).locator('xpath=ancestor::section[1]')
   await expect.poll(async () => {
-    const [alertBox, topologyBox] = await Promise.all([alertStrip.boundingBox(), topologySection.boundingBox()])
-    return alertBox && topologyBox ? Math.round(topologyBox.y - alertBox.y - alertBox.height) : 0
-  }).toBe(12)
+    const [cardsBox, topologyBox] = await Promise.all([page.locator('[data-node-card-grid]').boundingBox(), topologySection.boundingBox()])
+    return cardsBox && topologyBox ? topologyBox.y - cardsBox.y - cardsBox.height : -1
+  }).toBeGreaterThanOrEqual(24)
   await expect(page.locator('[data-topology-direction]')).toHaveCount(3)
   const topologyScroll = topologySection.locator('.topology-scroll')
   const firstDesktopRoute = topologySection.locator('[data-topology-route]').first()
@@ -445,7 +447,8 @@ test('Transit desktop topology and cards remain contained', async ({ page }) => 
   }).toBeLessThanOrEqual(40)
   const routeScores = page.locator('[data-topology-route-score]')
   await expect(routeScores).toHaveCount(2)
-  await expect(routeScores.first()).toContainText(/\d+ 分/)
+  await expect(routeScores.first()).toContainText('查看详情')
+  await expect(routeScores.first()).not.toContainText(/\d+ 分/)
   const historyButtons = page.getByRole('button', { name: /查看线路历史/ })
   await expect(historyButtons).toHaveCount(4)
   await expect(historyButtons.first()).toHaveAttribute('aria-label', /探测来源：[^，]+，当前：证据不足，近 1 小时平均 [^，]+，探测失败率 [^，]+，查看线路历史/)
@@ -469,7 +472,7 @@ test('Transit desktop topology and cards remain contained', async ({ page }) => 
   const staticLabel = page.locator('[data-topology-probe-mode-label][data-probe-mode="static"]')
   await expect(staticLabel).toHaveCount(1)
   await expect(staticLabel).toHaveText('静态')
-  await expect(staticLabel.locator('xpath=ancestor::*[@title][1]')).toHaveAttribute('title', '静态基线')
+  await expect(staticLabel.locator('xpath=ancestor::*[@title][1]')).toHaveAttribute('title', /配置值，不代表近期采样/)
   const averageRenderedHeight = async (groupIndex: number) => {
     const heights = await segmentGroups.nth(groupIndex).locator('[data-topology-sample]').evaluateAll(elements => elements.map(element => Number(element.getAttribute('data-topology-sample-height'))))
     return heights.reduce((sum, height) => sum + height, 0) / heights.length
@@ -507,12 +510,12 @@ test('Transit desktop topology and cards remain contained', async ({ page }) => 
   await expect(page.getByRole('dialog')).toContainText('当前连通性与历史统计分开显示；TCP 探测失败率不代表业务流量丢包。')
   await expect(page.getByRole('dialog')).toContainText('健康评分')
   await expect(page.getByRole('dialog').locator('[data-topology-score-detail]')).toContainText('1/2 段有数据')
-  await page.getByRole('dialog').getByRole('button', { name: '关闭' }).click()
   await page.getByRole('button', { name: '查看异常时间线' }).click()
   const timelineDialog = page.getByRole('dialog', { name: '异常时间线' })
   await expect(timelineDialog).toBeVisible()
   await expect(timelineDialog.locator('[data-transit-incident-event]').first()).toBeVisible()
   await timelineDialog.getByRole('button', { name: '关闭' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: '关闭' }).click()
   const nodeCard = page.getByRole('button', { name: '查看节点 主控-洛杉矶 详情' })
   await expect(nodeCard).toBeVisible()
   const nodeCardSurface = nodeCard.locator('xpath=..')
@@ -521,10 +524,9 @@ test('Transit desktop topology and cards remain contained', async ({ page }) => 
   const healthyCard = page.getByRole('button', { name: '查看节点 香港边缘节点-超长名称布局测试 详情' }).locator('xpath=..')
   await expect(healthyCard).toHaveAttribute('data-node-status-edge', '')
   await expect(healthyCard).not.toHaveAttribute('data-node-alert-edge', '')
-  const healthyStatusRail = healthyCard.locator('[data-node-status-rail]')
-  await expect(healthyStatusRail).toHaveCSS('width', '7px')
-  await expect(healthyStatusRail).toHaveCSS('inset-inline-start', '0px')
-  await expect(healthyStatusRail).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
+  await expect(healthyCard.locator('[data-node-status-rail]')).toHaveCount(0)
+  await expect(healthyCard.locator('[data-node-status-dot]')).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
+  await expect(healthyCard.locator('[data-node-uptime]')).toContainText('在线')
   await expect.poll(() => healthyCard.evaluate((card) => {
     const name = card.querySelector<HTMLElement>('[data-node-name]')
     if (!name)
@@ -534,7 +536,7 @@ test('Transit desktop topology and cards remain contained', async ({ page }) => 
     return name.getBoundingClientRect().left - cardBox.left - borderWidth
   })).toBeGreaterThanOrEqual(22)
   await expect.poll(() => healthyCard.evaluate((card) => {
-    const name = card.querySelector<HTMLElement>('[data-node-name]')
+    const name = card.querySelector<HTMLElement>('.transit-node-card__header img')
     const content = card.querySelector<HTMLElement>('[data-node-resource-grid]')
     if (!name || !content)
       return Number.POSITIVE_INFINITY
@@ -547,7 +549,7 @@ test('Transit desktop topology and cards remain contained', async ({ page }) => 
   await expect(carrierTooltip).toContainText(/ms/)
   await expect(carrierTooltip).toContainText('探测失败率')
   await expect(carrierTooltip).toHaveAttribute('data-sample-kind', 'carrier')
-  await page.getByRole('heading', { name: '线路状态' }).hover()
+  await page.getByRole('heading', { name: '线路拓扑' }).hover()
   await expect(carrierTooltip).toBeHidden()
   await carrierSample.click()
   await expect(carrierTooltip).toBeVisible()
@@ -559,7 +561,7 @@ test('Transit desktop topology and cards remain contained', async ({ page }) => 
   await carrierStrip.press('Escape')
   await expect(carrierTooltip).toBeHidden()
   await carrierSample.click()
-  await page.getByRole('heading', { name: '线路状态' }).click()
+  await page.getByRole('heading', { name: '线路拓扑' }).click()
   await expect(carrierTooltip).toBeHidden()
   const topologySamples = page.locator('[data-topology-sample]')
   await expect(topologySamples.first()).toHaveAttribute('aria-label', /探测来源：主控-洛杉矶 · Ping 任务：北京电信/)
@@ -571,29 +573,23 @@ test('Transit desktop topology and cards remain contained', async ({ page }) => 
   await expect(alertReason).toBeVisible()
   await expect(alertReason).toHaveCSS('border-top-width', '0px')
   await expect(alertCard).toHaveAttribute('data-node-alert-edge', '')
-  await expect(alertCard.locator('[data-node-status-rail]')).toHaveCSS('width', '7px')
+  await expect(alertCard.locator('[data-node-status-dot]')).not.toHaveCSS('background-color', 'rgba(0, 0, 0, 0)')
   await expect(plainCard).not.toHaveAttribute('data-node-status-edge', '')
-  await expect(plainCard.locator('[data-node-status-rail]')).toHaveCSS('width', '7px')
+  await expect(plainCard.locator('[data-node-offline-note]')).toContainText('节点离线')
   await expect(plainCard.locator('[data-node-alert-reason]')).toHaveCount(0)
   await alertReason.hover()
   await expect(page.locator('[data-node-alert-tooltip]')).toContainText('CPU 96.4%')
-  await page.getByRole('heading', { name: '线路状态' }).hover()
+  await page.getByRole('heading', { name: '线路拓扑' }).hover()
   await expect(page.locator('[data-node-alert-tooltip]')).toBeHidden()
   await expect.poll(async () => {
     const [alertBox, plainBox] = await Promise.all([alertCard.boundingBox(), plainCard.boundingBox()])
     return alertBox && plainBox ? Math.abs(alertBox.height - plainBox.height) : Number.POSITIVE_INFINITY
   }).toBeLessThan(1)
-  await expect.poll(async () => {
-    const [alertBox, alertResourceBox, plainBox, plainResourceBox] = await Promise.all([
-      alertCard.boundingBox(),
-      alertCard.locator('[data-node-resource-grid]').boundingBox(),
-      plainCard.boundingBox(),
-      plainCard.locator('[data-node-resource-grid]').boundingBox(),
-    ])
-    if (!alertBox || !alertResourceBox || !plainBox || !plainResourceBox)
-      return Number.POSITIVE_INFINITY
-    return Math.abs((alertResourceBox.y - alertBox.y) - (plainResourceBox.y - plainBox.y))
-  }).toBeLessThan(1)
+  for (const surface of [alertCard, plainCard]) {
+    const insight = await surface.locator('[data-node-insight-panel]').boundingBox()
+    const resources = await surface.locator('[data-node-resource-grid]').boundingBox()
+    expect(resources!.y).toBeGreaterThan(insight!.y + insight!.height)
+  }
   const expiryDate = page.getByRole('button', { name: '查看节点 台北-流量预警 详情' }).locator('xpath=..').locator('[data-node-expiry-date]')
   await expect(expiryDate).toHaveText('2026-08-02')
   await expect.poll(() => expiryDate.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
@@ -641,15 +637,9 @@ test('Transit exposes topology insights without changing public route health', a
   await installKomariFixture(page, { opsDashboard: true, dark: true, opsTopologyInsights: true })
   await openStablePage(page)
 
-  const baselineLabels = page.locator('[data-topology-baseline-shift]')
-  const peakLabels = page.locator('[data-topology-peak-insight-home]')
-  await expect(baselineLabels).toHaveCount(1)
-  await expect(baselineLabels.first()).toContainText(/基线升高 \+70ms/)
-  await expect(peakLabels).toHaveCount(1)
-  await expect(peakLabels.first()).toContainText(/晚高峰 \+60ms/)
-  await expect(page.locator('[data-topology-route-status][data-status="healthy"]')).toHaveCount(2)
-
-  await baselineLabels.first().click()
+  await expect(page.locator('[data-topology-baseline-shift]')).toHaveCount(0)
+  await expect(page.locator('[data-topology-peak-insight-home]')).toHaveCount(0)
+  await page.locator('[data-topology-route-score]').first().click()
   const dialog = page.getByRole('dialog')
   await expect(dialog.locator('[data-topology-direction-pair]')).toBeVisible()
   await expect(dialog.locator('[data-topology-direction-pair]')).toContainText('PandaOps-Local-Hop')
@@ -696,10 +686,11 @@ test('Transit exposes topology insights without changing public route health', a
 
   await page.setViewportSize({ width: 390, height: 844 })
   await expect(page.locator('[data-topology-mobile-route]')).toHaveCount(2)
-  await expect(page.locator('[data-topology-mobile-route]').first().locator('[data-topology-baseline-shift]')).toBeVisible()
-  await expect(page.locator('[data-topology-mobile-route]').first().locator('[data-topology-peak-insight-home]')).toBeVisible()
-  await page.locator('[data-topology-mobile-route]').first().locator('[data-topology-baseline-shift]').click()
+  await expect(page.locator('[data-topology-mobile-route]').first().locator('[data-topology-baseline-shift]')).toHaveCount(0)
+  await page.locator('[data-topology-mobile-route]').first().locator('[data-topology-route-score]').click()
   const mobileDialog = page.getByRole('dialog')
+  await expect(mobileDialog.locator('[data-topology-baseline-shift-detail]').first()).toBeVisible()
+  await expect(mobileDialog.locator('[data-topology-peak-insight]').first()).toBeVisible()
   await expect(mobileDialog.locator('[data-topology-direction-pair]')).toBeVisible()
   await expect.poll(() => mobileDialog.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true)
 })
@@ -709,7 +700,7 @@ test('Transit mobile keeps document width contained', async ({ page }) => {
   await installKomariFixture(page, { opsDashboard: true, dark: true })
   await openStablePage(page)
 
-  await expect(page.getByRole('heading', { name: '线路状态' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: '线路拓扑' })).toBeVisible()
   const mobileTelemetry = page.locator('#asset-summary .transit-telemetry-grid')
   await expect.poll(() => mobileTelemetry.evaluate((element) => {
     const style = getComputedStyle(element)
@@ -786,8 +777,7 @@ test('Transit topology reports an unresolved configured node as an error', async
   await installKomariFixture(page, { opsDashboard: true, dark: true, opsMissingNode: true })
   await openStablePage(page)
 
-  await expect(page.getByText(/1 异常/)).toBeVisible()
-  await expect(page.locator('[data-topology-route-status][data-status="error"]')).toHaveCount(1)
+  await expect(page.locator('#network-topology').getByText(/未找到节点/)).toHaveCount(1)
   await expect(page.getByText('异常', { exact: true })).toHaveCount(0)
 })
 
@@ -867,9 +857,9 @@ test('Transit marks an external offline Ping source as offline', async ({ page }
   await openStablePage(page)
 
   const firstRoute = page.locator('.topology-scroll article').first()
-  await expect(firstRoute.locator('[data-topology-route-status]')).toHaveAttribute('data-status', 'offline')
+  await expect(firstRoute.locator('[data-topology-current]').first()).toContainText('来源离线')
   await expect(firstRoute.locator('[data-topology-current-metric]').first().locator('xpath=..')).toHaveAttribute('title', /探测来源节点已离线/)
-  await expect(page.getByText(/1 失联/)).toBeVisible()
+  await expect(firstRoute.locator('[data-topology-probe-direction]')).toHaveCount(0)
 })
 
 test('Transit treats complete Ping loss as an error', async ({ page }) => {
@@ -878,10 +868,9 @@ test('Transit treats complete Ping loss as an error', async ({ page }) => {
   await openStablePage(page)
 
   const firstRoute = page.locator('.topology-scroll article').first()
-  await expect(firstRoute.locator('[data-topology-route-status]')).toHaveAttribute('data-status', 'error')
   const metric = firstRoute.locator('[data-topology-current-metric]').first()
   await expect(metric).toContainText('无响应')
-  await expect(metric).toContainText('100.0%')
+  await expect(metric).toHaveAttribute('aria-label', /探测失败率 100.0%/)
   await expect(metric).not.toContainText('0ms')
 })
 
@@ -891,7 +880,7 @@ test('Transit keeps extreme latency status consistent between the route and segm
   await openStablePage(page)
 
   const firstRoute = page.locator('.topology-scroll article').first()
-  await expect(firstRoute.locator('[data-topology-route-status]')).toHaveAttribute('data-status', 'error')
+  await expect(firstRoute.locator('[data-topology-current-metric]').first()).toContainText('5000ms')
   await firstRoute.locator('[data-topology-route-score]').click()
   const dialog = page.getByRole('dialog')
   await expect(dialog).toContainText('延迟异常')
@@ -947,13 +936,13 @@ test('Transit renders topology from the JSON config alone, with the legacy field
   await openStablePage(page)
 
   // 两条线路都从 JSON 解析出来
-  await expect(page.locator('[data-topology-route-status]')).toHaveCount(2)
+  await expect(page.locator('[data-topology-route]')).toHaveCount(2)
   // 节点名来自 JSON 的 nodes 数组
   const firstRoute = page.locator('[data-topology-route]').first()
   await expect(firstRoute).toContainText('北京电信')
   await expect(firstRoute).toContainText('主控-洛杉矶')
   await expect(firstRoute).toContainText('香港边缘节点-超长名称布局测试')
-  await expect(firstRoute.locator('[data-topology-line-node]')).toHaveCSS('justify-content', 'center')
+  await expect(firstRoute.locator('[data-topology-line-node]')).toHaveCSS('text-align', 'left')
   // 实时绑定也要跟着 JSON 走，而不是退回静态基线。
   await expect(page.locator('[data-topology-sample]').first()).toHaveAttribute('aria-label', /Ping 任务：北京电信/)
 })
@@ -967,8 +956,8 @@ test('Transit renders and edits a two-node topology with a trailing empty slot w
   await expect(desktopRoutes.first().locator('[data-topology-current-metric]')).toHaveCount(1)
   await expect.poll(async () => {
     const route = desktopRoutes.first()
-    const entry = route.locator(':scope > div').first()
-    const landing = route.locator(':scope > button').last()
+    const entry = route.locator('label').first()
+    const landing = route.locator('[data-topology-line-node]')
     const [routeBox, entryBox, landingBox] = await Promise.all([route.boundingBox(), entry.boundingBox(), landing.boundingBox()])
     return Boolean(routeBox && entryBox && landingBox
       && landingBox.x > routeBox.x + routeBox.width * 0.7
@@ -2606,7 +2595,7 @@ test('logged-out public routes do not call private HTTP or RPC endpoints', async
   await page.clock.install()
   await openStablePage(page)
   await page.clock.fastForward(60_000)
-  await page.getByRole('button', { name: '查看节点 主控-洛杉矶 详情' }).click()
+  await page.getByRole('button', { name: '打开 主控-洛杉矶 的详细信息' }).click()
   await expect(page).toHaveURL('/instance/00000000-0000-4000-8000-000000000001')
   await expect(page.getByText('硬件信息')).toBeVisible()
   await page.waitForTimeout(250)
@@ -2629,7 +2618,7 @@ test('hidden public prices do not trigger exchange-rate providers', async ({ pag
   await page.waitForTimeout(250)
   expect(requests).toEqual([])
 
-  await page.getByRole('button', { name: '查看节点 主控-洛杉矶 详情' }).click()
+  await page.getByRole('button', { name: '打开 主控-洛杉矶 的详细信息' }).click()
   await expect(page).toHaveURL('/instance/00000000-0000-4000-8000-000000000001')
   await expect(page.getByText('硬件信息')).toBeVisible()
   await page.waitForTimeout(250)
@@ -2730,14 +2719,13 @@ test('Transit cards reserve the same expiry height when no date is configured', 
 })
 
 test('Transit worst-case node cards remain complete and responsive across densities', async ({ page }) => {
-  // 详情栅格最多两列：网络概览 | 三网回程，三网质量始终占满整行——一整排采样格
-  // 挤进半列就读不出来了。窄卡退回单列。
+  // 三家运营商在所有密度下保持三列；完整长名称可换行，不能用裁切隐藏溢出。
   const cases = [
-    { width: 320, height: 900, size: 'mini', columns: 1 },
-    { width: 390, height: 900, size: 'compact', columns: 1 },
-    { width: 768, height: 1000, size: 'comfortable', columns: 2 },
-    { width: 1280, height: 900, size: 'compact', columns: 2 },
-    { width: 1700, height: 1000, size: 'large', columns: 2 },
+    { width: 320, height: 900, size: 'mini' },
+    { width: 390, height: 900, size: 'compact' },
+    { width: 768, height: 1000, size: 'comfortable' },
+    { width: 1280, height: 900, size: 'compact' },
+    { width: 1700, height: 1000, size: 'large' },
   ] as const
 
   for (const testCase of cases) {
@@ -2752,14 +2740,15 @@ test('Transit worst-case node cards remain complete and responsive across densit
     await openStablePage(page)
 
     const card = page.getByRole('button', { name: /查看节点 北京联通精品线路/ }).locator('xpath=..')
-    const detailGrid = card.locator('[data-node-card-detail-grid]')
+    const detailGrid = card.locator('[data-carrier-columns]')
     const expiryText = card.locator('[data-node-expiry-text]')
     const expiryDate = card.locator('[data-node-expiry-date]')
     const name = card.locator('[data-node-name]')
 
     await expect(card).toHaveAttribute('data-transit-node-card-size', testCase.size)
     await expect(name).toHaveAttribute('title', '北京联通精品线路-日本东京-A100-超长节点名称完整展示压力测试')
-    await expect.poll(() => name.evaluate(element => element.getBoundingClientRect().height <= Number.parseFloat(getComputedStyle(element).lineHeight) * 2 + 1)).toBe(true)
+    await expect.poll(() => name.evaluate(element => element.scrollHeight <= element.clientHeight + 1 && element.scrollWidth <= element.clientWidth + 1)).toBe(true)
+    await expect(name).toHaveCSS('-webkit-line-clamp', 'none')
     await expect.poll(() => card.evaluate((element) => {
       const nodeName = element.querySelector<HTMLElement>('[data-node-name]')
       if (!nodeName)
@@ -2770,7 +2759,7 @@ test('Transit worst-case node cards remain complete and responsive across densit
     })).toBeGreaterThanOrEqual(20)
     await expect(expiryText).toHaveText(/剩余 \d+ 天/)
     await expect(expiryDate).toHaveText('2037-01-01')
-    await expect.poll(() => detailGrid.evaluate(element => getComputedStyle(element).gridTemplateColumns.split(' ').length)).toBe(testCase.columns)
+    await expect.poll(() => detailGrid.evaluate(element => getComputedStyle(element).gridTemplateColumns.split(' ').length)).toBe(3)
     await expect.poll(async () => {
       const [textBox, dateBox] = await Promise.all([expiryText.boundingBox(), expiryDate.boundingBox()])
       return textBox && dateBox ? Math.abs(textBox.x - dateBox.x) : Number.POSITIVE_INFINITY
@@ -2779,22 +2768,22 @@ test('Transit worst-case node cards remain complete and responsive across densit
     const completeTextSelectors = [
       '[data-node-uptime]',
       '[data-node-price]',
-      '[data-node-resource-value]',
-      // 上下行改成了「标签 + 数值」两行，选择器跟着走；留 span 的话匹配为空、
-      // every() 对空数组恒真，这条断言会静默失效。
-      '[data-node-speed-cell] > div',
+      '[data-node-resource-grid] .resource-label',
+      '[data-node-speed-cell]',
       '[data-node-traffic-value]',
       '[data-node-expiry-text]',
       '[data-node-expiry-date]',
-      '[data-node-carrier-row] > span',
-      '[data-node-carrier-row] > strong',
+      '[data-node-carrier-row] .carrier-latency',
+      '[data-probe-current]',
     ]
     for (const selector of completeTextSelectors) {
       const elements = card.locator(selector)
+      expect(await elements.count(), selector).toBeGreaterThan(0)
       await expect.poll(() => elements.evaluateAll(items => items.every(item => item.scrollWidth <= item.clientWidth + 1))).toBe(true)
     }
 
-    await expect.poll(() => card.locator('[data-node-card-detail-grid] > .node-card-cell').evaluateAll((cells) => {
+    await expect(card.locator('[data-node-carrier-row]')).toHaveCount(3)
+    await expect.poll(() => card.locator('[data-node-carrier-row]').evaluateAll((cells) => {
       const boxes = cells.map(cell => cell.getBoundingClientRect())
       return boxes.every((box, index) => boxes.every((other, otherIndex) => index === otherIndex
         || box.right <= other.left + 0.5
@@ -2908,7 +2897,7 @@ for (const nodeCardSize of ['mini', 'compact', 'comfortable', 'large'] as const)
   })
 }
 
-// 运维卡改用独立的「三网回程」面板，和「网络概览」并排；三网质量占满整行。
+// 回程识别必须与三网列对齐，并排在资源和流量之前。
 for (const nodeCardSize of ['mini', 'compact', 'comfortable', 'large'] as const) {
   test(`return route panel fits the TransitNodeCard at ${nodeCardSize} density`, async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 900 })
@@ -2917,32 +2906,32 @@ for (const nodeCardSize of ['mini', 'compact', 'comfortable', 'large'] as const)
 
     const panel = page.locator('[data-node-route-panel]').first()
     await expect(panel).toBeVisible()
-    await expect(panel).toContainText('三网回程')
+    await expect(panel).toContainText('回程识别')
     await expect(panel).toContainText('CN2GIA')
 
     const layout = await panel.evaluate((el) => {
-      const grid = el.closest('[data-node-card-detail-grid]')!
-      const network = grid.querySelector('[data-node-network-cell]')!
-      const insight = grid.querySelector('[data-node-insight-panel]')
+      const card = el.closest('article')!
+      const network = card.querySelector('[data-node-network-cell]')!
+      const carriers = [...card.querySelectorAll('[data-node-carrier-row]')]
+      const lanes = [...el.querySelectorAll('button[data-carrier]')]
       return {
         panelOverflow: el.scrollWidth - el.clientWidth,
-        // 网络概览和三网回程必须并排（同一行顶部对齐），三网质量必须换行到下面。
-        sameRowAsNetwork: Math.abs(el.getBoundingClientRect().top - network.getBoundingClientRect().top) < 2,
-        insightBelow: insight ? insight.getBoundingClientRect().top > el.getBoundingClientRect().top : false,
-        rows: el.querySelectorAll('[data-route-lane]').length,
+        beforeNetwork: el.getBoundingClientRect().bottom < network.getBoundingClientRect().top,
+        afterCarriers: carriers.every(carrier => carrier.getBoundingClientRect().bottom <= el.getBoundingClientRect().top),
+        columnAlignment: lanes.every((lane, index) => Math.abs(lane.getBoundingClientRect().x - carriers[index]!.getBoundingClientRect().x) < 1),
+        rows: lanes.length,
       }
     })
 
     expect(layout.panelOverflow, `TransitNodeCard @ ${nodeCardSize} 回程面板横向溢出`).toBeLessThanOrEqual(0)
-    expect(layout.sameRowAsNetwork, `TransitNodeCard @ ${nodeCardSize} 回程面板未与网络概览并排`).toBe(true)
-    expect(layout.insightBelow, `TransitNodeCard @ ${nodeCardSize} 三网质量未换行到下方`).toBe(true)
+    expect(layout.beforeNetwork).toBe(true)
+    expect(layout.afterCarriers).toBe(true)
+    expect(layout.columnAlignment, `${nodeCardSize} 回程与对应运营商列必须对齐`).toBe(true)
     expect(layout.rows, `TransitNodeCard @ ${nodeCardSize} 回程面板应有三家运营商`).toBe(3)
   })
 }
 
-test('full-width network panel only spreads to four columns when the card is wide', async ({ page }) => {
-  // `--full` 只说明这个节点没有回程数据，不代表容器很宽。窄卡上摊成四列会得到
-  // 四个五十几像素的窄列，比同样宽度、有回程数据时的 2×2 还挤。
+test('narrow network panel puts traffic totals on a separate row', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 900 })
   await installKomariFixture(page, { opsDashboard: true, nodeCardSize: 'mini', nodeCardWorstCase: true })
   await openStablePage(page, '/')
@@ -2955,20 +2944,23 @@ test('full-width network panel only spreads to four columns when the card is wid
 })
 
 test('transit card without route data lets the network panel span the full row', async ({ page }) => {
-  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.setViewportSize({ width: 1700, height: 900 })
   await installKomariFixture(page, { opsDashboard: true, authenticated: true })
   await openStablePage(page, '/')
 
   await expect(page.locator('[data-node-route-panel]')).toHaveCount(0)
   const network = page.locator('[data-node-network-cell]').first()
-  await expect(network).toHaveClass(/node-card-cell--full/)
+  const card = network.locator('xpath=..')
+  const networkBox = await network.boundingBox()
+  const resourcesBox = await card.locator('[data-node-resource-grid]').boundingBox()
+  expect(networkBox!.width).toBeCloseTo(resourcesBox!.width, 0)
 
-  // 卡片够宽时才把四项摊成一排，窄卡的对照见上一个用例。
+  // 卡片够宽时才把上下行与累计流量摊成一排，窄卡的对照见上一个用例。
   const columns = await network.evaluate((el) => {
     const grid = el.querySelector<HTMLElement>('[data-node-network-grid]')!
     return getComputedStyle(grid).gridTemplateColumns.split(' ').length
   })
-  expect(columns, '宽卡上网络概览应摊成四列').toBe(4)
+  expect(columns, '宽卡上上下行和累计流量应摊成三列').toBe(3)
 })
 
 test('return route lanes expose unclipped evidence and lead from carrier labels to route verdicts', async ({ page }) => {
@@ -2979,18 +2971,11 @@ test('return route lanes expose unclipped evidence and lead from carrier labels 
   const panel = page.locator('[data-node-route-panel]').first()
   const telecomLane = panel.getByRole('button', { name: /电信回程/ })
   await expect(telecomLane).toBeVisible()
-  await expect(telecomLane.getByText('电信', { exact: true })).toHaveCSS('white-space', 'nowrap')
-
-  const positions = await telecomLane.evaluate((lane) => {
-    const labels = [...lane.querySelectorAll('span')]
-    const route = labels.find(node => node.textContent?.trim() === 'CN2GIA')!
-    const carrier = labels.find(node => node.textContent?.trim() === '电信')!
-    return {
-      routeX: route.getBoundingClientRect().x,
-      carrierX: carrier.getBoundingClientRect().x,
-    }
-  })
-  expect(positions.carrierX, '参考设计要求运营商在左、线路判定在右').toBeLessThan(positions.routeX)
+  await expect(panel).toHaveAttribute('data-route-layout', 'columns')
+  const lanes = panel.locator('button[data-carrier]')
+  await expect(lanes.nth(0)).toHaveAttribute('aria-label', /^联通回程/)
+  await expect(lanes.nth(1)).toHaveAttribute('aria-label', /^电信回程/)
+  await expect(lanes.nth(2)).toHaveAttribute('aria-label', /^移动回程/)
   await expect(telecomLane.locator('[data-grade="精品线路"]')).toBeVisible()
 
   await expect(telecomLane).toHaveAttribute('aria-label', /AS4809/)
@@ -3348,7 +3333,7 @@ test('detail return restores the previous route and direct entry falls back home
   const nodeUuid = '00000000-0000-4000-8000-000000000001'
   await installKomariFixture(page, { opsDashboard: true })
   await openStablePage(page)
-  await page.getByRole('button', { name: '查看节点 主控-洛杉矶 详情' }).click()
+  await page.getByRole('button', { name: '打开 主控-洛杉矶 的详细信息' }).click()
   await expect(page).toHaveURL(`/instance/${nodeUuid}`)
   await page.getByRole('button', { name: '返回上一页' }).click()
   await expect(page).toHaveURL('/')

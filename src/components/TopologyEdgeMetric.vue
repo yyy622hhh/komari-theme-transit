@@ -11,6 +11,7 @@ import { formatProbeCurrentLabel, probeCurrentTone, probeFailureRateLabel } from
 import { resolveTopologySegmentHealth } from '@/utils/topologyHealth'
 import { calculateTopologyLatencyBaseline, formatTopologyLatency, formatTopologyLoss, resolveTopologyMetricSource, resolveTopologySampleTone } from '@/utils/topologyHelper'
 import { formatTopologyTelemetryLabel, parseTopologyMetric } from '@/utils/topologyLegacyFormat'
+import { topologyProbeDirection } from '@/utils/topologyProbeDirection'
 
 const props = defineProps<{
   metric: string
@@ -32,6 +33,7 @@ const config = computed(() => parseTopologyMetric(props.metric))
 const probeMode = computed(() => props.probeMode ?? config.value.probeMode ?? (config.value.live ? 'live' : 'static'))
 const telemetryLabel = computed(() => formatTopologyTelemetryLabel(props.metric, props.sourceLabel, props.targetLabel))
 const sourceNode = computed(() => resolveTopologyMetricSource(props.nodes, config.value.nodeName, props.sourceUuid))
+const direction = computed(() => topologyProbeDirection(props.segmentIndex, config.value.live, sourceNode.value?.uuid, props.sourceUuid))
 const ping = useNodePingStats(
   () => sourceNode.value?.uuid ?? '',
   {
@@ -81,14 +83,6 @@ const sourceState = computed(() => {
     return { label: '近 1 小时没有成功响应', line: 'bg-rose-400/55' }
   return { label: '实时 Ping 数据', line: 'bg-slate-400/70 dark:bg-slate-600/70' }
 })
-const lossTone = computed(() => {
-  if (loss.value === null || loss.value <= 1)
-    return 'text-slate-600 dark:text-slate-300'
-  if (loss.value <= 3 || currentStatus.value === 'healthy')
-    return 'text-amber-700 dark:text-amber-300'
-  return 'text-rose-600 dark:text-rose-400'
-})
-
 const health = computed<TopologyRouteHealth>(() => {
   return resolveTopologySegmentHealth({
     live: config.value.live,
@@ -152,15 +146,15 @@ const sampleBars = computed<TelemetrySample[]>(() => {
 <template>
   <div
     v-if="!observeOnly"
-    class="relative flex flex-1 flex-col gap-1 py-2 text-center"
-    :class="mobile ? 'min-w-0' : 'min-w-[150px]'"
+    class="topology-edge relative flex min-w-0 flex-1 flex-col gap-2 py-2 text-center"
+    :class="mobile ? 'min-w-0' : 'min-w-[120px]'"
     :data-topology-edge-samples="sampleBars.length ? '' : undefined"
     :title="`${sourceState.label}${config.live ? ` · ${config.taskFilter || '未指定任务'}` : ''}`"
     :aria-label="`${sourceState.label}，当前：${currentLabel}，${metricSourceLabel}：${latencyText}，${failureLabel} ${formatTopologyLoss(loss)}`"
   >
     <span
       :data-topology-current="config.live ? currentStatus : 'static'"
-      class="min-w-0 break-words text-[11px] font-medium leading-4"
+      class="min-w-0 break-words text-xs font-medium leading-4"
       :class="config.live ? probeCurrentTone(currentStatus) : 'text-slate-600 dark:text-slate-300'"
       :title="`当前：${currentLabel}；样本更新：${ping.current.value.latestAt ? formatDateTime(new Date(ping.current.value.latestAt)) : '未知'}；最近成功：${ping.current.value.lastSuccessAt ? formatDateTime(new Date(ping.current.value.lastSuccessAt)) : '窗口内无成功'}`"
     >{{ currentLabel }}</span>
@@ -168,23 +162,24 @@ const sampleBars = computed<TelemetrySample[]>(() => {
       :bars="sampleBars"
       :line-class="sourceState.line"
       :label="telemetryLabel"
+      :direction="direction"
+      :vertical="mobile"
     />
-    <span data-topology-sample-updated class="min-w-0 break-words text-[10px] leading-4 text-slate-600 dark:text-slate-300">{{ sampleUpdateLabel }}</span>
     <button
       type="button"
       data-topology-current-metric
       :data-topology-history-source="hasLiveData ? 'history' : config.live ? 'fallback' : 'configured'"
-      class="transit-divider flex min-w-0 flex-wrap items-center justify-center gap-x-2 gap-y-0.5 rounded border-t px-1 pt-1 text-[11px] leading-4 tabular-nums text-slate-600 transition-colors hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-500 dark:text-slate-300 dark:hover:text-slate-100"
+      class="flex min-w-0 flex-col items-center justify-center gap-1 rounded px-1 text-xs leading-4 tabular-nums text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-500"
+      :title="`${sampleUpdateLabel}；${failureLabel} ${formatTopologyLoss(loss)}`"
       :aria-label="`${telemetryLabel}，当前：${currentLabel}，${metricSourceLabel} ${latencyText}，${failureLabel} ${formatTopologyLoss(loss)}，查看线路历史`"
       @click="emit('openDetail')"
     >
-      <span class="w-full text-[10px]">
-        <span v-if="hasLiveData">近 1 小时</span>
+      <span class="order-2 text-[11px]">
+        <span v-if="hasLiveData">近 1 小时均值</span>
         <span v-else-if="config.live">备用基线</span>
         <span v-else data-topology-probe-mode-label :data-probe-mode="probeMode">{{ probeMode === 'auto' ? '待探测' : '静态' }}</span>
       </span>
-      <span class="min-w-0 break-words">{{ hasLiveData ? '均值' : '基线' }} <strong class="font-medium text-slate-800 dark:text-slate-200">{{ latencyText }}</strong></span>
-      <span class="min-w-0 break-words">{{ failureLabel }} <strong class="font-medium" :class="lossTone">{{ formatTopologyLoss(loss) }}</strong></span>
+      <span class="min-w-0 break-words"><strong class="text-lg font-semibold text-foreground">{{ latencyText }}</strong><span v-if="hasLiveData && ping.probeType.value" class="ml-2 text-[10px]">{{ ping.probeType.value.toUpperCase() }}</span></span>
     </button>
   </div>
   <span v-else data-topology-telemetry-observer class="hidden" aria-hidden="true" />

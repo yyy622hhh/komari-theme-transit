@@ -217,8 +217,14 @@ const collections = [
       "arrow-left": {
         "body": "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M5 12h14M5 12l6 6m-6-6l6-6\"/>"
       },
+      "arrow-right": {
+        "body": "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M5 12h14m-6 6l6-6m-6-6l6 6\"/>"
+      },
       "arrow-up": {
         "body": "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 5v14m6-8l-6-6m-6 6l6-6\"/>"
+      },
+      "arrow-up-right": {
+        "body": "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M17 7L7 17M8 7h9v9\"/>"
       },
       "arrows-move-vertical": {
         "body": "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"m9 18l3 3l3-3m-3-3v6m3-15l-3-3l-3 3m3-3v6\"/>"
@@ -644,7 +650,9 @@ export const bundledIconNames = [
   "tabler:arrow-big-up-lines",
   "tabler:arrow-down",
   "tabler:arrow-left",
+  "tabler:arrow-right",
   "tabler:arrow-up",
+  "tabler:arrow-up-right",
   "tabler:arrows-move-vertical",
   "tabler:arrows-sort",
   "tabler:arrows-transfer-up-down",

@@ -63,6 +63,7 @@ defineOptions({
     NodeControlDialog: defineAsyncComponent(() => import('@/components/NodeControlDialog.vue')),
     NodeGeneralCards: defineAsyncComponent(() => import('@/components/NodeGeneralCards.vue')),
     NodeList: defineAsyncComponent(() => import('@/components/NodeList.vue')),
+    NetworkTopology: defineAsyncComponent(() => import('@/components/NetworkTopology.vue')),
     NodeRouteProbeButton: defineAsyncComponent(() => import('@/components/NodeRouteProbeButton.vue')),
     NodeTopologyPanel: defineAsyncComponent(() => import('@/components/NodeTopologyPanel.vue')),
     PingMonitorDialog: defineAsyncComponent(() => import('@/components/PingMonitorDialog.vue')),
@@ -539,7 +540,7 @@ const nodeCardGridClass = computed(() => {
 </script>
 
 <template>
-  <div class="home-view" :class="!appStore.disablePageAnimation && 'home-view--motion'">
+  <div id="network-overview" tabindex="-1" class="home-view scroll-mt-16 outline-none" :class="[!appStore.disablePageAnimation && 'home-view--motion', appStore.opsDashboardEnabled && 'home-view--transit']">
     <div v-if="appStore.alertEnabled && appStore.alertContent" class="alert px-4">
       <Alert class="border-none bg-background/60 backdrop-blur-xs rounded-md">
         <AlertTitle v-if="appStore.alertTitle">
@@ -567,7 +568,7 @@ const nodeCardGridClass = computed(() => {
     >
       <div class="nodes min-w-0">
         <Tabs v-model="appStore.nodeSelectedGroup" class="w-full flex-col gap-4">
-          <div class="flex flex-col gap-2 xl:flex-row xl:items-center">
+          <div class="home-node-toolbar flex flex-col gap-2 xl:flex-row xl:items-center">
             <div
               class="home-controls-scroll min-w-0 overflow-x-auto overscroll-x-contain rounded-sm pointer-events-auto touch-pan-x"
             >
@@ -890,6 +891,9 @@ const nodeCardGridClass = computed(() => {
           </TabsContent>
         </Tabs>
       </div>
+    </div>
+    <div v-if="appStore.opsDashboardEnabled && isViewActive && appStore.topologyEnabled" class="px-4 pb-8 pt-8">
+      <NetworkTopology embedded :nodes="nodesStore.visibleNodes" />
     </div>
     <PingMonitorDialog
       v-if="pingDialogNode"
