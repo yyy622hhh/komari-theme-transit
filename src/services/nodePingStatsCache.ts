@@ -2,10 +2,11 @@ import type { NodePingHistoryPoint, NodePingStatsState } from '@/utils/pingStats
 import { CACHE_CONFIG } from '@/constants/cache'
 import { OPS_PING_FRESHNESS } from '@/constants/ops'
 import { normalizeExactPingTaskName, normalizePingTaskFilter } from '@/utils/pingStats'
+import { normalizeCarrierPingTaskName } from '@/utils/topologyPresets'
 
 export type PingTaskNameMatch = 'contains' | 'exact' | 'normalized-exact'
 
-const CACHE_VERSION = 15
+const CACHE_VERSION = 16
 const CACHE_KEY_PREFIX = 'komari-theme-emerald:node-ping-stats'
 const CACHE_INDEX_KEY = `${CACHE_KEY_PREFIX}:index`
 const pendingStatsCacheTouches = new Map<string, number>()
@@ -14,7 +15,7 @@ let statsCacheIndexFlushQueued = false
 function getCacheKey(uuid: string, hours: number, maxCount?: number, taskNameFilter = '', taskNameMatch: PingTaskNameMatch = 'contains'): string {
   const normalizedFilter = taskNameMatch === 'exact'
     ? normalizeExactPingTaskName(taskNameFilter)
-    : normalizePingTaskFilter(taskNameFilter)
+    : taskNameMatch === 'normalized-exact' ? normalizeCarrierPingTaskName(taskNameFilter) : normalizePingTaskFilter(taskNameFilter)
   return `${CACHE_KEY_PREFIX}:${uuid}:${hours}:${maxCount ?? 'all'}:${taskNameMatch}:${normalizedFilter || 'all'}`
 }
 
@@ -45,6 +46,8 @@ function isValidStatsState(value: unknown): value is NodePingStatsState {
     && (state.p95Latency === null || typeof state.p95Latency === 'number')
     && (state.availability === null || typeof state.availability === 'number')
     && typeof state.sampleCount === 'number'
+    && typeof state.latencySampleCount === 'number' && Number.isFinite(state.latencySampleCount)
+    && state.latencySampleCount >= 0 && state.latencySampleCount <= state.sampleCount
     && typeof state.hasData === 'boolean'
     && typeof state.hasLatencyData === 'boolean'
     && Array.isArray(state.history)
@@ -106,11 +109,19 @@ function flushStatsCacheTouches(): void {
   if (!pendingStatsCacheTouches.size)
     return
 
-  const entriesByKey = new Map(readStatsCacheIndex().map(entry => [entry.key, entry]))
-  for (const [key, updatedAt] of pendingStatsCacheTouches)
-    entriesByKey.set(key, { key, updatedAt })
-  pendingStatsCacheTouches.clear()
-  writeStatsCacheIndex([...entriesByKey.values()])
+  try {
+    const entriesByKey = new Map(readStatsCacheIndex().map(entry => [entry.key, entry]))
+    for (const [key, updatedAt] of pendingStatsCacheTouches)
+      entriesByKey.set(key, { key, updatedAt })
+    writeStatsCacheIndex([...entriesByKey.values()])
+  }
+  catch {
+    // This runs after writeStatsCache returns; its caller's try/catch cannot
+    // handle a quota or privacy-mode error in this microtask. Cache is optional.
+  }
+  finally {
+    pendingStatsCacheTouches.clear()
+  }
 }
 
 function touchStatsCacheKey(key: string, updatedAt: number): void {

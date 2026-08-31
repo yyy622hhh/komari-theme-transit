@@ -5,10 +5,12 @@ import { CACHE_CONFIG } from '@/constants/cache'
 import { OPS_PING_FRESHNESS } from '@/constants/ops'
 import { SharedCache } from '@/services/cache.service'
 import { loadPingRecordsWithTasks } from '@/services/history.service'
-import { loadPingMetricStats, loadPublicPingTasks, partitionMetricEntityIds, queryMetrics } from '@/services/metrics.service'
-import { isPingMetric, normalizeMetricSeriesList, PING_LATENCY_METRIC, PING_LOSS_METRIC, pingTaskId } from '@/utils/metricSeries'
+import { loadPublicPingTasks } from '@/services/metrics.service'
+import { loadPingMetricBatch } from '@/services/ping-metric-batch.service'
+import { isPingMetric, normalizeMetricSeriesList, PING_LOSS_METRIC, pingTaskId } from '@/utils/metricSeries'
 import { detectPingCommonModeLossKeys, getPingCommonModeLossKey } from '@/utils/pingCommonMode'
 import { matchesPingTaskName, normalizeExactPingTaskName, normalizePingTaskFilter } from '@/utils/pingStats'
+import { normalizeCarrierPingTaskName } from '@/utils/topologyPresets'
 
 export function normalizeMaxCount(maxCount: number | null | undefined): number | undefined {
   if (typeof maxCount !== 'number' || !Number.isFinite(maxCount) || maxCount <= 0)
@@ -28,6 +30,9 @@ export interface SharedPingRecordsState {
   sampleUpdatedAtByTaskId: Map<number, number>
   taskNamesById: Map<number, string>
   taskClientsById: Map<number, Set<string>>
+  rawRecordsByClient?: Map<string, PingRecord[]>
+  taskIntervalsById?: Map<number, number>
+  taskTypesById?: Map<number, string>
 }
 
 interface SharedPingRecordsEntry {
@@ -46,13 +51,6 @@ interface PingRefreshGroup {
   entries: Map<string, { entry: SharedPingRecordsEntry, uuid?: string }>
 }
 
-interface PendingMetricBatch {
-  hours: number
-  maxCount?: number
-  uuids: Map<string, Array<(state: SharedPingRecordsState | null) => void>>
-  scheduled: boolean
-}
-
 export const PING_RECORD_REFRESH_INTERVAL_MS = 60_000
 const sharedPingRecordsCache = new SharedCache<SharedPingRecordsEntry>({
   maxSize: CACHE_CONFIG.pingRecords.maxSize,
@@ -61,7 +59,6 @@ const sharedPingRecordsCache = new SharedCache<SharedPingRecordsEntry>({
   canEvict: entry => entry.subscribers === 0 && entry.promise === null,
 })
 const pingRefreshGroups = new Map<string, PingRefreshGroup>()
-const pendingMetricBatches = new Map<string, PendingMetricBatch>()
 export const pingFreshnessTick = ref(Date.now())
 export const pingFreshnessGraceUntil = ref(0)
 let pingRefreshTimer: ReturnType<typeof setInterval> | null = null
@@ -115,11 +112,13 @@ export type PingTaskNameMatch = 'contains' | 'exact' | 'normalized-exact'
 
 export function matchesTaskName(name: string, normalizedFilter: string, match: PingTaskNameMatch): boolean {
   if (match === 'normalized-exact')
-    return normalizePingTaskFilter(name) === normalizedFilter
+    return normalizeCarrierPingTaskName(name) === normalizeCarrierPingTaskName(normalizedFilter)
   return matchesPingTaskName(name, normalizedFilter, match === 'exact')
 }
 
 export function normalizeTaskNameFilter(value: string, match: PingTaskNameMatch): string {
+  if (match === 'normalized-exact')
+    return normalizeCarrierPingTaskName(value)
   return match === 'exact' ? normalizeExactPingTaskName(value) : normalizePingTaskFilter(value)
 }
 
@@ -160,29 +159,22 @@ export function pickPreferredExactPingTaskId(
   if (matchingTaskIds.size === 1)
     return [...matchingTaskIds][0]
 
-  const samples = new Map<number, { total: number, valid: number }>()
-  const add = (taskId: number, total: number, valid: number) => {
-    const previous = samples.get(taskId) ?? { total: 0, valid: 0 }
-    samples.set(taskId, { total: previous.total + total, valid: previous.valid + valid })
-  }
+  // Stats and series are separate reads, not one atomic backend snapshot.
+  // Use success evidence from either, without adding their overlapping counts.
+  const successful = new Set<number>()
   for (const stat of options.metricStats ?? []) {
     const taskId = normalizeTaskId(String(stat.task_id))
     if (!matchingTaskIds.has(taskId))
       continue
-    add(taskId, Number.isFinite(stat.total) ? stat.total : 0, Number.isFinite(stat.valid) ? stat.valid : 0)
+    if (Number.isFinite(stat.valid) && stat.valid > 0)
+      successful.add(taskId)
   }
-  if (![...matchingTaskIds].some(taskId => samples.has(taskId))) {
-    for (const record of options.records ?? []) {
-      if (!matchingTaskIds.has(record.task_id))
-        continue
-      add(record.task_id, 1, Number.isFinite(record.value) && record.value >= 0 ? 1 : 0)
-    }
+  for (const record of options.records ?? []) {
+    if (matchingTaskIds.has(record.task_id) && Number.isFinite(record.value) && record.value >= 0)
+      successful.add(record.task_id)
   }
 
-  const rank = (taskId: number): number => {
-    const sample = samples.get(taskId)
-    return sample && sample.valid > 0 ? 1 : 0
-  }
+  const rank = (taskId: number): number => successful.has(taskId) ? 1 : 0
   return [...matchingTaskIds].sort((left, right) => rank(right) - rank(left) || right - left)[0]
 }
 
@@ -305,13 +297,13 @@ export function buildPingMetricState(
   nodeUuid: string,
   statsResponse: PingMetricStatsResponse | null,
   metricsResponse: MetricQueryResponse | null,
+  commonModeLossKeys: ReadonlySet<string> = detectPingCommonModeLossKeys(metricsResponse?.series ?? []),
 ): SharedPingRecordsState | null {
   const stats = (statsResponse?.stats ?? []).filter(stat => stat.entity_id === nodeUuid)
   const metricRecords: PingRecord[] = []
   const metricLossPoints: MetricLossPoint[] = []
   const metricLossTaskIds = new Set<number>()
   const sampleUpdatedAtByTaskId = new Map<number, number>()
-  const commonModeLossKeys = detectPingCommonModeLossKeys(metricsResponse?.series ?? [])
 
   if (metricsResponse) {
     const seriesList = normalizeMetricSeriesList(metricsResponse.series)
@@ -386,55 +378,14 @@ function getPingMetricBatchKey(hours: number, maxCount?: number): string {
   return `${hours}:${maxCount ?? 'all'}`
 }
 
-async function flushPingMetricBatch(key: string, batch: PendingMetricBatch): Promise<void> {
-  pendingMetricBatches.delete(key)
-  batch.scheduled = false
-  const entityBatches = partitionMetricEntityIds([...batch.uuids.keys()])
-
-  await Promise.all(entityBatches.map(async (entityIds) => {
-    const [statsResult, metricsResult] = await Promise.allSettled([
-      loadPingMetricStats({ entity_ids: entityIds, hours: batch.hours, max_points: batch.maxCount }),
-      queryMetrics({
-        metric_keys: [PING_LATENCY_METRIC, PING_LOSS_METRIC],
-        entity_ids: entityIds,
-        hours: batch.hours,
-        downsample: true,
-        fill_empty: true,
-        max_points: batch.maxCount,
-        aggregation: 'avg',
-      }),
-    ])
-    const statsResponse = statsResult.status === 'fulfilled' ? statsResult.value : null
-    const metricsResponse = metricsResult.status === 'fulfilled' ? metricsResult.value : null
-
-    for (const uuid of entityIds) {
-      const resolvers = batch.uuids.get(uuid) ?? []
-      const state = buildPingMetricState(uuid, statsResponse, metricsResponse)
-      for (const resolve of resolvers)
-        resolve(state)
-    }
-  }))
-}
-
-function loadPingMetricRecords(nodeUuid: string, hours: number, maxCount?: number): Promise<SharedPingRecordsState | null> {
-  const key = getPingMetricBatchKey(hours, maxCount)
-  let batch = pendingMetricBatches.get(key)
-  if (!batch) {
-    batch = { hours, maxCount, uuids: new Map(), scheduled: false }
-    pendingMetricBatches.set(key, batch)
-  }
-
-  return new Promise((resolve) => {
-    const resolvers = batch!.uuids.get(nodeUuid) ?? []
-    resolvers.push(resolve)
-    batch!.uuids.set(nodeUuid, resolvers)
-    if (batch!.scheduled)
-      return
-    batch!.scheduled = true
-    queueMicrotask(() => {
-      void flushPingMetricBatch(key, batch!)
-    })
-  })
+async function loadPingMetricRecords(nodeUuid: string, hours: number, maxCount?: number): Promise<SharedPingRecordsState | null> {
+  const batch = await loadPingMetricBatch(nodeUuid, hours, maxCount)
+  if (!batch)
+    return null
+  const state = buildPingMetricState(nodeUuid, batch.stats, batch.metrics, batch.commonModeKeys)
+  if (state)
+    state.rawRecordsByClient = buildRecordsByClient(batch.raw.filter(record => record.client === nodeUuid))
+  return state
 }
 
 export async function loadSharedPingRecords(entry: SharedPingRecordsEntry, hours: number, maxCount?: number, nodeUuid?: string): Promise<void> {
@@ -457,6 +408,8 @@ export async function loadSharedPingRecords(entry: SharedPingRecordsEntry, hours
         loadPublicPingTasks().catch(() => []),
       ])
       const taskNamesById = new Map(pingTasks.map(task => [normalizeTaskId(String(task.id)), task.name]))
+      const taskIntervalsById = new Map(pingTasks.map(task => [normalizeTaskId(String(task.id)), task.interval]))
+      const taskTypesById = new Map(pingTasks.map(task => [normalizeTaskId(String(task.id)), task.type ?? '']))
       const taskClientsById = new Map(pingTasks.map(task => [
         normalizeTaskId(String(task.id)),
         new Set(Array.isArray(task.clients) ? task.clients : []),
@@ -465,11 +418,11 @@ export async function loadSharedPingRecords(entry: SharedPingRecordsEntry, hours
         if (stat.name?.trim())
           taskNamesById.set(normalizeTaskId(stat.task_id), stat.name.trim())
       }
-      if (entry.subscribers === 0)
+      if (entry.subscribers === 0 || controller.signal.aborted)
         return
 
       if (metricState) {
-        entry.data.value = { ...metricState, taskNamesById, taskClientsById }
+        entry.data.value = { ...metricState, taskNamesById, taskClientsById, taskIntervalsById, taskTypesById }
       }
       else {
         const { records, tasks } = await loadPingRecordsWithTasks(hours, maxCount, nodeUuid, controller.signal)
@@ -481,10 +434,14 @@ export async function loadSharedPingRecords(entry: SharedPingRecordsEntry, hours
           if (!taskClientsById.has(taskId))
             taskClientsById.set(taskId, new Set(Array.isArray(task.clients) ? task.clients : []))
         }
-        if (entry.subscribers === 0)
+        if (entry.subscribers === 0 || controller.signal.aborted)
           return
         entry.data.value = {
           recordsByClient: buildRecordsByClient(records),
+          // Legacy records may be rollups. They remain useful history, never current proof.
+          rawRecordsByClient: new Map(),
+          taskIntervalsById,
+          taskTypesById,
           source: 'legacy',
           sampleUpdatedAtByTaskId: buildSampleUpdatedAtByTaskId(records),
           taskNamesById,

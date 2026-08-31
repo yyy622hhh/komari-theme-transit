@@ -4,6 +4,7 @@ import type { WsConnectionState } from '@/stores/nodes'
 import type { VersionInfo } from '@/utils/api'
 import type { EarthRenderModeState } from '@/utils/renderModeState'
 import type { TopologyWriteEntry } from '@/utils/topologyWriteLog'
+import { companionStorageLabel } from '@/utils/companionStorage'
 import { formatBeijingTime, redactDiagnosticReport } from '@/utils/topologyReport'
 
 export interface DiagnosticReportInput {
@@ -74,6 +75,8 @@ export function buildDiagnosticReport(input: DiagnosticReportInput): string {
       '回程插件：',
       `  状态：${input.companionHealth ? (input.companionHealth.ok ? '正常' : '异常') : '不可用'}`,
       `  版本：${input.companionHealth?.version ? `v${input.companionHealth.version}` : '未知'}`,
+      `  ${companionStorageLabel(input.companionHealth?.storage)}`,
+      `  最后成功保存：${formatBeijingTime(input.companionHealth?.storage?.last_success_at ?? null)}`,
     )
   }
 

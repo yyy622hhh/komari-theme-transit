@@ -18,7 +18,7 @@ describe('Transit Route Probe node helper security contract', () => {
   })
 
   test('默认要求 HTTPS 且 token 不出现在 systemd 命令行', () => {
-    expect(helper).toContain('https://*')
+    expect(helper).toContain('scheme="$')
     expect(helper).toContain('endpoint 必须是无空白字符的 HTTPS 地址')
     expect(helper).not.toMatch(/ExecStart=.*(?:--token|\$TOKEN)/)
   })
@@ -39,14 +39,14 @@ describe('Transit Route Probe node helper security contract', () => {
 
   test('401/403/404 固定五分钟、支持数字 Retry-After 并在成功后重置', () => {
     expect(helper).toMatch(/401\|403\)[\s\S]*POLL_OUTCOME=fixed/)
-    expect(helper).toMatch(/404\)[\s\S]*POLL_OUTCOME=fixed/)
+    expect(helper).toMatch(/404\|405\)[\s\S]*POLL_OUTCOME=fixed/)
     expect(helper).toContain('MAX_RETRY_AFTER=3600')
     expect(helper).toContain('retry_index=0')
     expect(helper).toContain('LAST_POLL_ERROR=""')
   })
 
   test('结果可提交 duration_ms 且重复错误日志受抑制', () => {
-    expect(helper).toContain('result_fields+=(--data-urlencode "duration_ms=$duration_ms")')
+    expect(helper).toContain('write_request_json "$runtime_dir/result.json" "$job_id" "$field" "$value" "$duration_ms"')
     expect(helper).toContain('if [ "$LAST_POLL_ERROR" != "$key" ]')
   })
 })

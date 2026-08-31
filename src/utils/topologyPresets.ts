@@ -67,6 +67,14 @@ export function normalizePingTaskName(value: string): string {
   return value.toLowerCase().replace(TOPOLOGY_PROBE_SEPARATOR_PATTERN, '')
 }
 
+/** Only the nine built-in carrier names share aliases; arbitrary task names stay exact. */
+export function normalizeCarrierPingTaskName(value: string): string {
+  const normalized = normalizePingTaskName(value)
+  const option = TOPOLOGY_PROBE_OPTIONS.find(option => normalizePingTaskName(option.label) === normalized
+    || normalizePingTaskName(option.taskFilter) === normalized)
+  return option ? normalizePingTaskName(option.taskFilter) : normalized
+}
+
 /** 只接受裸 IP/主机名，拒绝 URL、端口、路径和空白，避免把不透明字符串写进任务。 */
 export function normalizeTopologyProbeTarget(value: string): string {
   const target = value.trim()

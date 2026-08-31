@@ -95,7 +95,7 @@ function directionLatencyDelta(comparison: TopologyDirectionComparison): string 
 function directionFreshnessLabel(reading: TopologyDirectionReading): string {
   if (!reading.telemetry?.hasLiveData)
     return '待数据'
-  return reading.telemetry.stale ? '数据已过期' : '实时'
+  return reading.telemetry.stale ? '数据已过期' : '近 1 小时均值'
 }
 
 function hourlySamples(snapshot: TopologySegmentReliabilitySnapshot, segmentIndex: number): TelemetrySample[] {
@@ -106,7 +106,7 @@ function hourlySamples(snapshot: TopologySegmentReliabilitySnapshot, segmentInde
     const evening = bucket.hour >= 20 && bucket.hour <= 23
     const hasData = bucket.latencyMedian !== null || bucket.lossMedian !== null
     const latencyText = bucket.latencyMedian === null ? '无延迟数据' : `${Math.round(bucket.latencyMedian)} ms`
-    const lossText = bucket.lossMedian === null ? '无丢包数据' : `${bucket.lossMedian.toFixed(bucket.lossMedian >= 10 ? 0 : 1)}% 丢包`
+    const lossText = bucket.lossMedian === null ? '无失败率数据' : `${bucket.lossMedian.toFixed(bucket.lossMedian >= 10 ? 0 : 1)}% 探测失败率`
     return {
       key: `segment-${segmentIndex}-hour-${bucket.hour}`,
       tone: hasData ? (evening ? 'warning' : 'healthy') : 'muted',
@@ -210,7 +210,7 @@ async function copyDiagnosticReport(): Promise<void> {
   <AppDialog
     v-model:open="isOpen"
     :title="title"
-    description="查看每一段链路的实时延迟、丢包与历史波动。"
+    description="当前连通性与历史统计分开显示；TCP 探测失败率不代表业务流量丢包。"
     content-class="max-w-4xl"
   >
     <div v-if="route" class="space-y-4">
@@ -230,7 +230,7 @@ async function copyDiagnosticReport(): Promise<void> {
           <strong class="text-3xl font-semibold tabular-nums" :class="scoreTone(route.score)">{{ route.score.score }}</strong>
           <span data-topology-detail-score-label class="text-xs font-medium" :class="scoreTone(route.score)">{{ route.score.label }}</span>
           <div class="mt-1 hidden text-[10px] text-muted-foreground sm:block">
-            线路健康评分
+            近 1 小时线路健康评分
           </div>
         </div>
         <div class="min-w-0">
@@ -248,7 +248,7 @@ async function copyDiagnosticReport(): Promise<void> {
             </div>
           </div>
           <div v-else class="mt-1.5 text-[11px] text-emerald-700 dark:text-emerald-300">
-            当前没有明显扣分项
+            近 1 小时没有明显扣分项
           </div>
           <div v-if="route.ranking?.recommended" class="mt-1.5 truncate text-[10px] text-muted-foreground" :title="route.ranking.reason">
             推荐依据：{{ route.ranking.reason }}
@@ -340,7 +340,7 @@ async function copyDiagnosticReport(): Promise<void> {
             </div>
             <div class="mt-2 flex gap-4 text-[11px] tabular-nums">
               <span>延迟 <strong>{{ formatLatency(reading.telemetry?.latency ?? null) }}</strong></span>
-              <span>丢包 <strong>{{ formatLoss(reading.telemetry?.loss) }}</strong></span>
+              <span>探测失败率 <strong>{{ formatLoss(reading.telemetry?.loss) }}</strong></span>
             </div>
             <dl class="mt-2 grid gap-1 text-[9px] text-muted-foreground">
               <div class="flex min-w-0 gap-2">
@@ -393,7 +393,7 @@ async function copyDiagnosticReport(): Promise<void> {
           <dl class="mt-3 grid gap-2 text-[10px] sm:grid-cols-2 lg:grid-cols-4">
             <div class="rounded-lg border border-border/45 bg-background/35 p-2.5">
               <dt class="text-muted-foreground">
-                当前 1h
+                近 1h 均值 / 失败率
               </dt>
               <dd class="mt-1 font-semibold tabular-nums">
                 {{ formatLatency(snapshot.insights.evidence.currentLatency) }} / {{ formatLoss(snapshot.insights.evidence.currentLoss) }}
@@ -409,7 +409,7 @@ async function copyDiagnosticReport(): Promise<void> {
             </div>
             <div class="rounded-lg border border-border/45 bg-background/35 p-2.5">
               <dt class="text-muted-foreground">
-                24h 丢包基线
+                24h 探测失败率基线
               </dt>
               <dd class="mt-1 font-semibold tabular-nums">
                 {{ formatLoss(snapshot.insights.evidence.baselineLossMedian) }} · {{ snapshot.insights.evidence.baselineSampleCount }} 个样本

@@ -247,6 +247,8 @@ test('personal wallpaper upload persists with glass, blur and HD effects', async
   await expect(page.locator('.background-media')).toHaveCSS('filter', 'blur(16px)')
 
   await dialog.getByRole('button', { name: /^玻璃化 / }).click()
+  // Toast lifetime must not decide whether the transient overlay is in the baseline.
+  await expect(page.getByText('本机壁纸已保存。')).toBeHidden()
   await expect(dialog).toHaveScreenshot('wallpaper-manager-desktop.png')
   await dialog.getByRole('button', { name: '关闭' }).click()
 
@@ -375,6 +377,11 @@ test('Transit light desktop uses light surfaces and readable telemetry', async (
   const tooltip = page.locator('[data-carrier-sample-tooltip]')
   await expect(tooltip).toBeVisible()
   await expect(tooltip).toHaveCSS('background-color', /oklab\(.+\/ 0\.96\)/)
+  // Hover may scroll the taller telemetry cards into view; capture the dashboard from its top.
+  await page.mouse.move(0, 0)
+  await expect(tooltip).toBeHidden()
+  await page.evaluate(() => window.scrollTo(0, 0))
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0)
   await expect(page).toHaveScreenshot('transit-light-desktop.png', { fullPage: false })
 })
 
@@ -441,7 +448,7 @@ test('Transit desktop topology and cards remain contained', async ({ page }) => 
   await expect(routeScores.first()).toContainText(/\d+ 分/)
   const historyButtons = page.getByRole('button', { name: /查看线路历史/ })
   await expect(historyButtons).toHaveCount(4)
-  await expect(historyButtons.first()).toHaveAttribute('aria-label', /线路状态：[^，]+，[^，]+，丢包 [^，]+，查看线路历史/)
+  await expect(historyButtons.first()).toHaveAttribute('aria-label', /探测来源：[^，]+，当前：证据不足，近 1 小时平均 [^，]+，探测失败率 [^，]+，查看线路历史/)
   await expect(page.locator('[data-topology-status]')).toHaveCount(0)
   for (const line of await page.locator('[data-topology-edge-line]').all()) {
     await expect.poll(() => line.evaluate(element => element.getBoundingClientRect().width)).toBeGreaterThan(150)
@@ -455,7 +462,7 @@ test('Transit desktop topology and cards remain contained', async ({ page }) => 
   await expect(segmentGroups).toHaveCount(3)
   for (const segment of await segmentGroups.all())
     await expect(segment.locator('[data-topology-sample]')).toHaveCount(10)
-  const healthySubMillisecondSamples = segmentGroups.nth(2).locator('[data-topology-sample][aria-label*="<1ms"][aria-label*="丢包 0.0%"]')
+  const healthySubMillisecondSamples = segmentGroups.nth(2).locator('[data-topology-sample][aria-label*="<1ms"][aria-label*="探测失败率 0.0%"]')
   await expect.poll(() => healthySubMillisecondSamples.count()).toBeGreaterThan(0)
   await expect.poll(() => healthySubMillisecondSamples.evaluateAll(samples => samples.every(sample => sample.firstElementChild?.classList.contains('bg-emerald-400')))).toBe(true)
   await expect(page.locator('[data-topology-static-samples]')).toHaveCount(0)
@@ -475,9 +482,9 @@ test('Transit desktop topology and cards remain contained', async ({ page }) => 
   const sampleDetail = page.locator('[data-topology-sample-detail]')
   await expect(sampleDetail).toBeVisible()
   await expect(sampleDetail).toContainText(/(?:<1|\d+)ms/)
-  await expect(sampleDetail).toContainText('丢包')
+  await expect(sampleDetail).toContainText('探测失败率')
   await expect(sampleDetail).toContainText(/\d{2}:\d{2}:\d{2}/)
-  await expect(firstSample).toHaveAttribute('aria-label', /ms，丢包/)
+  await expect(firstSample).toHaveAttribute('aria-label', /ms，探测失败率/)
   await expect(firstSample).toHaveAttribute('data-sample-trigger', '')
   await expect(firstSample.locator('xpath=..')).toHaveAttribute('data-sample-kind', 'topology')
   const firstSampleGroup = firstSample.locator('xpath=..')
@@ -492,12 +499,12 @@ test('Transit desktop topology and cards remain contained', async ({ page }) => 
   const firstBaseline = page.locator('[data-topology-edge-baseline]').first()
   await expect.poll(async () => {
     const [metricBox, baselineBox] = await Promise.all([firstMetric.boundingBox(), firstBaseline.boundingBox()])
-    return Boolean(metricBox && baselineBox && metricBox.y + metricBox.height < baselineBox.y)
+    return Boolean(metricBox && baselineBox && metricBox.y > baselineBox.y + baselineBox.height)
   }).toBe(true)
   await firstSampleGroup.press('Escape')
   await expect(sampleDetail).toBeHidden()
   await historyButtons.first().click()
-  await expect(page.getByRole('dialog')).toContainText('查看每一段链路的实时延迟、丢包与历史波动。')
+  await expect(page.getByRole('dialog')).toContainText('当前连通性与历史统计分开显示；TCP 探测失败率不代表业务流量丢包。')
   await expect(page.getByRole('dialog')).toContainText('健康评分')
   await expect(page.getByRole('dialog').locator('[data-topology-score-detail]')).toContainText('1/2 段有数据')
   await page.getByRole('dialog').getByRole('button', { name: '关闭' }).click()
@@ -538,7 +545,7 @@ test('Transit desktop topology and cards remain contained', async ({ page }) => 
   const carrierTooltip = page.locator('[data-carrier-sample-tooltip]')
   await expect(carrierTooltip).toBeVisible()
   await expect(carrierTooltip).toContainText(/ms/)
-  await expect(carrierTooltip).toContainText('丢包')
+  await expect(carrierTooltip).toContainText('探测失败率')
   await expect(carrierTooltip).toHaveAttribute('data-sample-kind', 'carrier')
   await page.getByRole('heading', { name: '线路状态' }).hover()
   await expect(carrierTooltip).toBeHidden()
@@ -2026,7 +2033,7 @@ test('Transit separates synchronized target failures from per-node carrier alert
   const incident = nodeCard.locator('[data-carrier-target-incident]')
   await expect(incident).toHaveText('4.2%')
   await expect(incident).toHaveAttribute('title', /2 次为多节点同步目标异常，未计入节点告警/)
-  await expect(nodeCard.locator('[data-node-insight-mode="carrier"]')).toContainText('目标异常')
+  await expect(nodeCard.locator('[data-node-insight-mode="carrier"]')).toContainText('近 1 小时曾异常')
   await expect(nodeCard.locator('[data-node-alert-reason]')).toHaveCount(0)
   await expect(nodeCard).not.toHaveAttribute('data-node-alert-edge', '')
 })
@@ -3154,7 +3161,7 @@ test('carrier target health center is admin-only and never changes targets on op
   await expect(dialog.getByRole('button', { name: '验证备用目标' })).toBeVisible()
 
   // 打开与读取本身不创建任务；只有管理员明确点击验证后才允许 mutation。
-  await expect(dialog.getByText(/证据不足/)).toHaveCount(9)
+  await expect(dialog.getByRole('button', { name: /证据不足/ })).toHaveCount(9)
 })
 
 test('carrier target health center is unavailable to logged-out visitors', async ({ page }) => {
@@ -3170,6 +3177,7 @@ test('carrier target migration validates a canary and switches to a fresh task i
     authenticated: true,
     opsDashboard: true,
     topologyAutoRepairEnabled: false,
+    carrierRawSamples: true,
     topologyProbeStats: [11, 12, 13, 101, 102].map(taskId => ({ task_id: taskId, total: 5, valid: 5 })),
   })
   await openStablePage(page, '/')
@@ -3192,6 +3200,7 @@ test('carrier target migration compensates a failed switch and reports the old t
     opsDashboard: true,
     topologyAutoRepairEnabled: false,
     carrierMigrationDeleteFailure: true,
+    carrierRawSamples: true,
     topologyProbeStats: [11, 12, 13, 101, 102].map(taskId => ({ task_id: taskId, total: 5, valid: 5 })),
   })
   await openStablePage(page, '/')
@@ -3202,7 +3211,8 @@ test('carrier target migration compensates a failed switch and reports the old t
   await expect(dialog).toContainText('候选目标已达到迁移门槛')
   await dialog.getByRole('button', { name: '迁移到此目标' }).click()
   await dialog.getByRole('button', { name: '再次点击确认迁移' }).click()
-  await expect(dialog).toContainText('迁移失败，旧任务已保留')
+  await expect(dialog).toContainText('旧任务已保留')
+  await expect(dialog).toContainText('旧任务清理失败')
   await expect(dialog.getByText('TCP · 198.51.100.13:80', { exact: true }).first()).toBeVisible()
 })
 
@@ -3235,7 +3245,7 @@ test('route probe setup wizard checks the environment without probing and enable
   // 12 台默认虚构节点里有 1 台离线（伦敦-离线归档），离线节点不计入候选，
   // 所以在线助手数是 12 - 1（离线）- 1（缺助手）= 10。
   await expect(dialog).toContainText('10 台在线')
-  await expect(dialog).toContainText('还有 1 台境外节点未安装助手')
+  await expect(dialog).toContainText('还有 1 台境外节点助手未连接，请检查安装或服务状态')
   await expect(dialog).toContainText('v1.3.12')
   await expect(dialog).toContainText('版本提示不阻止探测')
   await expect(dialog).toContainText('耗时 1234 ms')
@@ -3243,15 +3253,11 @@ test('route probe setup wizard checks the environment without probing and enable
   // 环境检查阶段只读了花名册，不应该触发任何一次真实的探测入队。
   expect(readRouteProbeCompanionCalls()).toHaveLength(0)
 
-  // 安装命令所有节点共用同一段，不含 token——token 单独复制，运行到交互式
-  // 提示时再粘贴，避免和命令一起进 shell 历史。
-  await dialog.getByRole('button', { name: '复制安装命令' }).click()
+  // HTTP 页面不得生成自动降级凭据传输的命令；HTTPS 命令另有浏览器回归。
+  await expect(dialog.getByRole('button', { name: '复制安装命令' })).toBeDisabled()
+  await expect(dialog).toContainText('请通过 HTTPS 地址打开面板后生成安装命令')
   const copiedCommand = await page.evaluate(() => (window as typeof window & { __copiedInstallCommand?: string }).__copiedInstallCommand ?? '')
-  expect(copiedCommand).toContain(`releases/download/v${THEME_VERSION}/transit-route-probe-helper.sh`)
-  expect(copiedCommand).toContain(`releases/download/v${THEME_VERSION}/transit-collect-return-route.sh`)
-  expect(copiedCommand).toContain('-o collect-return-route.sh')
-  expect(copiedCommand).not.toContain('--token')
-  expect(copiedCommand).not.toContain('agent-token')
+  expect(copiedCommand).toBe('')
 
   await dialog.getByRole('button', { name: '香港边缘节点-超长名称布局测试' }).click()
   const copiedToken = await page.evaluate(() => (window as typeof window & { __copiedInstallCommand?: string }).__copiedInstallCommand ?? '')
@@ -3393,9 +3399,17 @@ test('detail ping requests stay scoped to the current node', async ({ page }) =>
   await openStablePage(page)
 
   await expect.poll(() => metricCalls.filter(isPingMetricCall).length).toBeGreaterThan(0)
-  const homeSummaryCalls = metricCalls.filter(call => call.method === 'public:queryMetrics' && isPingMetricCall(call))
+  const homeSummaryCalls = metricCalls.filter(call => call.method === 'public:queryMetrics' && isPingMetricCall(call) && call.params.downsample !== false)
   expect(homeSummaryCalls.length).toBeGreaterThan(0)
   expect(homeSummaryCalls.every(call => call.params.max_points === 150)).toBe(true)
+  const rawCalls = metricCalls.filter(call => call.method === 'public:queryMetrics' && call.params.downsample === false)
+  expect(rawCalls.length).toBeGreaterThan(0)
+  for (const call of rawCalls) {
+    expect(call.params.max_points).toBe(1000)
+    expect(call.params.fill_empty).toBe(false)
+    expect(Array.isArray(call.params.entity_ids)).toBe(true)
+    expect(Date.parse('2026-07-25T12:00:00.000Z') - Date.parse(String(call.params.start))).toBeLessThan(600_000)
+  }
 
   metricCalls.length = 0
   await page.getByRole('button', { name: '查看节点 主控-洛杉矶 详情' }).click()

@@ -631,10 +631,10 @@ function desktopRouteGridTemplate(route: RouteRow): string {
               :data-topology-route-ranking="routeRankingLabel(route) || undefined"
               class="ml-4 mt-0.5 whitespace-nowrap text-[9px] font-medium tabular-nums transition-colors hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500/60"
               :class="routeScoreClass(route)"
-              :aria-label="`线路状态：${routeStatusLabel(route)}，线路健康评分 ${getRouteScore(route).score} 分，${getRouteScore(route).label}${routeRankingLabel(route) ? `，${routeRankingLabel(route)}` : ''}，查看详情`"
+              :aria-label="`线路状态：${routeStatusLabel(route)}，近 1 小时线路健康评分 ${getRouteScore(route).score} 分，${getRouteScore(route).label}${routeRankingLabel(route) ? `，${routeRankingLabel(route)}` : ''}，查看详情`"
               @click="openRouteDetail(route)"
             >
-              {{ getRouteScore(route).score }} 分 {{ getRouteScore(route).label }}
+              近1h {{ getRouteScore(route).score }} 分 {{ getRouteScore(route).label }}
               <span
                 v-if="routeRankingLabel(route)"
                 class="ml-1 rounded border border-current/20 px-1 py-px text-[8px] no-underline"
@@ -740,10 +740,10 @@ function desktopRouteGridTemplate(route: RouteRow): string {
               :data-topology-route-ranking="routeRankingLabel(route) || undefined"
               class="whitespace-nowrap text-[9px] font-medium tabular-nums focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500/60"
               :class="routeScoreClass(route)"
-              :aria-label="`线路状态：${routeStatusLabel(route)}，线路健康评分 ${getRouteScore(route).score} 分，${getRouteScore(route).label}${routeRankingLabel(route) ? `，${routeRankingLabel(route)}` : ''}，查看详情`"
+              :aria-label="`线路状态：${routeStatusLabel(route)}，近 1 小时线路健康评分 ${getRouteScore(route).score} 分，${getRouteScore(route).label}${routeRankingLabel(route) ? `，${routeRankingLabel(route)}` : ''}，查看详情`"
               @click="openRouteDetail(route)"
             >
-              {{ getRouteScore(route).score }} 分 {{ getRouteScore(route).label }}
+              近1h {{ getRouteScore(route).score }} 分 {{ getRouteScore(route).label }}
               <span v-if="routeRankingLabel(route)" class="ml-1 rounded border border-current/20 px-1 py-px text-[8px]">
                 {{ routeRankingLabel(route) }}
               </span>

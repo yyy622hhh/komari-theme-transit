@@ -5,12 +5,14 @@ import type { NodeData } from '@/stores/nodes'
 import type { MessageApi } from '@/utils/message'
 import type { TopologyQuickNode, TopologyRouteConfig } from '@/utils/topologyModel'
 import { ref } from 'vue'
-import { createTopologyEntryProbeTask, deleteTopologyPingTasks, ensureTopologyEntryProbeTask, ensureTopologyPingTask, loadAdminPingTasks, restrictTopologyPingEndpoint } from '@/services/ping-task.service'
+import { createTopologyEntryProbeTask, ensureTopologyEntryProbeTask, ensureTopologyPingTask, loadAdminPingTasks, restrictTopologyPingEndpoint } from '@/services/ping-task.service'
 import { listLiveEntryTaskIds, listOwnedRetiredTaskIds, listOwnedUnboundTaskIds, liveTopologyTaskNames } from '@/services/topology-repair.service'
+import { deleteOwnedTopologyPingTasks } from '@/services/topology-task-cleanup.service'
 import { isTopologySaveCommittedError } from '@/services/topology.service'
 import { persistTopologyCreatedTaskIds } from '@/utils/topologyCreatedTasks'
 import { getTopologyRouteEntryProbe, resolveTopologyNode } from '@/utils/topologyHelper'
 import { findTopologyProbeOption } from '@/utils/topologyPresets'
+import { rememberCreatedTopologyTask } from '@/utils/topologyTaskSnapshot'
 import { recordTopologyWrite } from '@/utils/topologyWriteLog'
 
 interface TopologyPersistenceManager {
@@ -55,7 +57,7 @@ interface TopologyPersistenceDependencies {
     ensureRouteTask: typeof ensureTopologyPingTask
     ensureEntryTask: typeof ensureTopologyEntryProbeTask
     createEntryTask: typeof createTopologyEntryProbeTask
-    deleteTasks: typeof deleteTopologyPingTasks
+    deleteTasks: (ids: readonly number[]) => Promise<boolean>
     loadTasks: typeof loadAdminPingTasks
   }>
 }
@@ -88,7 +90,7 @@ export function createTopologyPersistence(deps: TopologyPersistenceDependencies)
   const ensureRouteTask = operations?.ensureRouteTask ?? ensureTopologyPingTask
   const ensureEntryTask = operations?.ensureEntryTask ?? ensureTopologyEntryProbeTask
   const createEntryTask = operations?.createEntryTask ?? createTopologyEntryProbeTask
-  const deleteTasks = operations?.deleteTasks ?? deleteTopologyPingTasks
+  const deleteTasks = operations?.deleteTasks ?? deleteOwnedTopologyPingTasks
   const loadTasks = operations?.loadTasks ?? loadAdminPingTasks
   let persistTail: Promise<unknown> = Promise.resolve()
   let saveTaskController: AbortController | null = null
@@ -156,7 +158,7 @@ export function createTopologyPersistence(deps: TopologyPersistenceDependencies)
         trigger: 'manual',
         action: `清理不再使用的探测任务（${ids.size} 个）`,
         outcome: removed ? 'ok' : 'failed',
-        detail: removed ? undefined : '删除请求未成功，绑定不受影响',
+        detail: removed ? undefined : `任务 ${[...ids].join('、')} 清理未确认或缺少一致快照；绑定不受影响，请在后台核对`,
       })
     }
     persistTopologyCreatedTaskIds(sessionCreatedTaskIds)
@@ -263,6 +265,7 @@ export function createTopologyPersistence(deps: TopologyPersistenceDependencies)
                 const ensured = await ensureRouteTask(source, target, { probe: pending.probe, signal: controller.signal })
                 if (ensured.created && Number.isInteger(ensured.task.id)) {
                   sessionCreatedTaskIds.add(ensured.task.id!)
+                  rememberCreatedTopologyTask(ensured.task)
                   persistTopologyCreatedTaskIds()
                   createdTaskIds.add(ensured.task.id!)
                   recordTopologyWrite({ trigger: 'manual', action: `创建第 ${segmentIndex + 1} 段探测任务 ${ensured.task.name}`, outcome: 'ok' })
@@ -321,6 +324,7 @@ export function createTopologyPersistence(deps: TopologyPersistenceDependencies)
               : await ensureEntryTask(source, entryProbe, { hopProbe: pendingEntry.probe, signal: controller.signal, taskName: pendingEntry.taskName })
             if (ensured.created && Number.isInteger(ensured.task.id)) {
               sessionCreatedTaskIds.add(ensured.task.id!)
+              rememberCreatedTopologyTask(ensured.task)
               persistTopologyCreatedTaskIds()
               createdTaskIds.add(ensured.task.id!)
               recordTopologyWrite({ trigger: 'manual', action: `创建入口探测任务 ${ensured.task.name}`, outcome: 'ok' })

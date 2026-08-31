@@ -1,7 +1,7 @@
 import type { ThemeSettings } from '@/utils/themeSettings'
 import type { ThemeSettingsDiffEntry } from '@/utils/themeSettingsBackup'
 import type { ThemeSettingsVersionEntry } from '@/utils/themeSettingsHistory'
-import { computed, ref } from 'vue'
+import { computed, onScopeDispose, ref } from 'vue'
 import { downloadText } from '@/services/snapshot.service'
 import { saveManagedThemeSettings } from '@/services/theme-settings.service'
 import { useAppStore } from '@/stores/app'
@@ -23,12 +23,20 @@ function exportFilenameStamp(at: number): string {
 export function useThemeSettingsBackup() {
   const appStore = useAppStore()
   const importing = ref(false)
+  const readingImport = ref(false)
   const exporting = ref(false)
   const rollingBackAt = ref<number | null>(null)
   const history = ref<ThemeSettingsVersionEntry[]>(readThemeSettingsHistory())
   const importPreview = ref<{ settings: ThemeSettings, diff: ThemeSettingsDiffEntry[], themeVersion: string | null } | null>(null)
   const importError = ref<string | null>(null)
   const rollbackPreview = ref<{ entry: ThemeSettingsVersionEntry, diff: ThemeSettingsDiffEntry[] } | null>(null)
+  const writing = computed(() => importing.value || rollingBackAt.value !== null)
+  let importGeneration = 0
+  let disposed = false
+  onScopeDispose(() => {
+    disposed = true
+    cancelImport()
+  })
 
   function refreshHistory(): void {
     history.value = readThemeSettingsHistory()
@@ -62,29 +70,40 @@ export function useThemeSettingsBackup() {
   }
 
   async function stageImportFile(file: File): Promise<void> {
+    if (disposed || writing.value)
+      return
     cancelRollback()
-    importError.value = null
-    let raw: unknown
+    cancelImport()
+    const generation = importGeneration
+    readingImport.value = true
     try {
-      raw = JSON.parse(await file.text())
+      const text = await file.text()
+      if (generation !== importGeneration)
+        return
+      const result = parseThemeSettingsImport(JSON.parse(text))
+      if (!result.ok) {
+        importError.value = result.error
+        return
+      }
+      importPreview.value = {
+        settings: result.settings,
+        diff: diffThemeSettings(currentSettings(), result.settings),
+        themeVersion: result.themeVersion,
+      }
     }
     catch {
-      importError.value = '文件不是合法的 JSON。'
-      return
+      if (generation === importGeneration)
+        importError.value = '文件读取失败或不是合法的 JSON。'
     }
-    const result = parseThemeSettingsImport(raw)
-    if (!result.ok) {
-      importError.value = result.error
-      return
-    }
-    importPreview.value = {
-      settings: result.settings,
-      diff: diffThemeSettings(currentSettings(), result.settings),
-      themeVersion: result.themeVersion,
+    finally {
+      if (generation === importGeneration)
+        readingImport.value = false
     }
   }
 
   function cancelImport(): void {
+    importGeneration++
+    readingImport.value = false
     importPreview.value = null
     importError.value = null
   }
@@ -92,7 +111,7 @@ export function useThemeSettingsBackup() {
   async function confirmImport(): Promise<void> {
     const preview = importPreview.value
     const publicSettings = appStore.publicSettings
-    if (!preview || !publicSettings)
+    if (disposed || writing.value || readingImport.value || importError.value || !preview || !publicSettings)
       return
     importing.value = true
     try {
@@ -119,6 +138,8 @@ export function useThemeSettingsBackup() {
   }
 
   function stageRollback(entry: ThemeSettingsVersionEntry): void {
+    if (disposed || writing.value)
+      return
     cancelImport()
     rollbackPreview.value = { entry, diff: diffThemeSettings(currentSettings(), entry.settings) }
   }
@@ -130,7 +151,7 @@ export function useThemeSettingsBackup() {
   async function confirmRollback(): Promise<void> {
     const preview = rollbackPreview.value
     const publicSettings = appStore.publicSettings
-    if (!preview || !publicSettings)
+    if (disposed || writing.value || !preview || !publicSettings)
       return
     rollingBackAt.value = preview.entry.at
     try {
@@ -165,6 +186,8 @@ export function useThemeSettingsBackup() {
     history,
     isCurrentEntry,
     importing,
+    readingImport,
+    writing,
     exporting,
     rollingBackAt,
     importPreview,

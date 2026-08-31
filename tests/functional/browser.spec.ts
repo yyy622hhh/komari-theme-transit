@@ -222,6 +222,53 @@ test('config backup panel exports the current settings and records an initial hi
   await expect(page.getByText('当前', { exact: true })).toBeVisible()
 })
 
+test('config backup rejects a second invalid file without retaining an importable old preview', async ({ page }) => {
+  const writes: string[] = []
+  page.on('request', (request) => {
+    if (request.url().includes('/api/admin/theme/settings'))
+      writes.push(request.postData() ?? '')
+  })
+  await installKomariFixture(page, { authenticated: true, opsDashboard: true, emptyTopology: true })
+  await openHome(page)
+  await page.getByRole('button', { name: '显示首页工具' }).click()
+  await page.getByRole('button', { name: /配置：/ }).click()
+  const input = page.locator('input[type="file"]')
+  await input.setInputFiles({ name: 'first.json', mimeType: 'application/json', buffer: Buffer.from('{"alertTitle":"old-choice"}') })
+  await expect(page.getByRole('button', { name: '确认导入', exact: true })).toBeVisible()
+  await input.setInputFiles({ name: 'invalid.json', mimeType: 'application/json', buffer: Buffer.from('broken JSON') })
+  await expect(page.getByText('文件读取失败或不是合法的 JSON。', { exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: '确认导入', exact: true })).toHaveCount(0)
+  await expect(page.getByText('old-choice', { exact: true })).toHaveCount(0)
+  expect(writes).toEqual([])
+})
+
+test('config backup ignores an older file read after selecting a newer file', async ({ page }) => {
+  await page.addInitScript(() => {
+    const read = File.prototype.text
+    File.prototype.text = function () {
+      const text = read.call(this)
+      if (this.name !== 'slow.json')
+        return text
+      return text.then(content => new Promise<string>((resolve) => {
+        Object.assign(window, { finishConfigRead: () => resolve(content) })
+      }))
+    }
+  })
+  await installKomariFixture(page, { authenticated: true, opsDashboard: true, emptyTopology: true })
+  await openHome(page)
+  await page.getByRole('button', { name: '显示首页工具' }).click()
+  await page.getByRole('button', { name: /配置：/ }).click()
+  const input = page.locator('input[type="file"]')
+  await input.setInputFiles({ name: 'slow.json', mimeType: 'application/json', buffer: Buffer.from('{"alertTitle":"obsolete-choice"}') })
+  await expect(page.getByText('正在读取配置文件…')).toBeVisible()
+  await expect(page.getByRole('button', { name: '确认导入', exact: true })).toHaveCount(0)
+  await input.setInputFiles({ name: 'latest.json', mimeType: 'application/json', buffer: Buffer.from('{"alertTitle":"latest-choice"}') })
+  await expect(page.getByText('latest-choice', { exact: true })).toBeVisible()
+  await page.evaluate(() => (window as Window & { finishConfigRead: () => void }).finishConfigRead())
+  await expect(page.getByText('latest-choice', { exact: true })).toBeVisible()
+  await expect(page.getByText('obsolete-choice', { exact: true })).toHaveCount(0)
+})
+
 test('config backup import replaces the live snapshot including removed keys', async ({ page }) => {
   const posted: Array<Record<string, unknown>> = []
   page.on('request', (request) => {

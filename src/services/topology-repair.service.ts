@@ -8,6 +8,7 @@ import { isStaleManagedThemeSettingsError } from '@/services/theme-settings.serv
 import { isTopologySaveCommittedError } from '@/services/topology.service'
 import { getTopologyRouteEntryProbe, resolveTopologyNode, shouldAutoApplyTopologyProbe } from '@/utils/topologyHelper'
 import { getTopologyMetricProbeMode } from '@/utils/topologyModel'
+import { rememberCreatedTopologyTask } from '@/utils/topologyTaskSnapshot'
 import { recordTopologyWrite, summarizeTaskNames } from '@/utils/topologyWriteLog'
 
 /** 自愈流程使用的 `useTopologyManager()` 最小切面。 */
@@ -39,10 +40,7 @@ export interface TopologyRepairDeps {
     options: { probe: TopologyHopProbe, signal?: AbortSignal },
   ) => Promise<{ task: AdminPingTask, created: boolean }>
   deleteTopologyPingTasks: (taskIds: readonly number[]) => Promise<boolean>
-  /**
-   * 本页会话里 `ensure` 明确 created=true 的任务 ID。跨自愈轮次保留，用来证明
-   * 所有权；不能只凭 Transit 命名去删站长自己建的任务。
-   */
+  /** Created IDs are only candidates; the deletion boundary also requires the creation snapshot. */
   sessionCreatedTaskIds?: Set<number>
   planEntryProbeTask: (
     source: TopologyPingEndpoint,
@@ -346,6 +344,7 @@ export async function runTopologyProbeRepair(deps: TopologyRepairDeps): Promise<
     createdTaskIds.add(ensured.task.id!)
     createdTaskNames.push(ensured.task.name)
     sessionCreatedTaskIds.add(ensured.task.id!)
+    rememberCreatedTopologyTask(ensured.task)
   }
   const appliedRetiredTasks: TopologyRetiredTask[] = []
   /**
@@ -514,12 +513,12 @@ export async function runTopologyProbeRepair(deps: TopologyRepairDeps): Promise<
   }
   finally {
     if (!saveAttempted && createdTaskIds.size) {
-      await deps.deleteTopologyPingTasks([...createdTaskIds])
+      const removed = await deps.deleteTopologyPingTasks([...createdTaskIds])
       recordTopologyWrite({
         trigger: 'auto',
         action: `回滚本轮新建的探测任务 ${summarizeTaskNames(createdTaskNames)}`,
-        outcome: 'ok',
-        detail: '配置未能保存，已把刚建的任务删掉',
+        outcome: removed ? 'ok' : 'failed',
+        detail: removed ? '配置未能保存，已把刚建的任务删掉' : '新任务清理未确认，可能已改变或缺少快照；请在后台核对',
       })
     }
   }
@@ -589,7 +588,7 @@ export async function runTopologyProbeRepair(deps: TopologyRepairDeps): Promise<
         trigger: 'auto',
         action: `清理已换掉的旧探测任务 ${summarizeTaskNames(cleanupNames)}`,
         outcome: removed ? 'ok' : 'failed',
-        detail: removed ? undefined : '删除请求未成功，新任务不受影响，下一轮会重试',
+        detail: removed ? undefined : `任务 ${cleanupIds.join('、')} 清理未确认或快照已变化；新任务不受影响，请在后台核对`,
       })
       if (!removed)
         return 'cleanup-failed'

@@ -7,9 +7,10 @@ import { onScopeDispose, ref, toValue, watch } from 'vue'
 import { useTopologyManager } from '@/composables/useTopologyManager'
 import { OPS_TOPOLOGY_HOP_PROBE } from '@/constants/ops'
 import { TIME_MS } from '@/constants/time'
-import { createTopologyEntryProbeTask, deleteTopologyPingTasks, ensureTopologyEntryProbeTask, ensureTopologyPingTask, loadAdminPingTasks } from '@/services/ping-task.service'
+import { createTopologyEntryProbeTask, ensureTopologyEntryProbeTask, ensureTopologyPingTask, loadAdminPingTasks } from '@/services/ping-task.service'
 import { planEntryProbeTask, planWorkingHopTask } from '@/services/topology-probe.service'
 import { canRunTopologyProbeRepair, runTopologyProbeRepair } from '@/services/topology-repair.service'
+import { deleteOwnedTopologyPingTasks } from '@/services/topology-task-cleanup.service'
 import { useAppStore } from '@/stores/app'
 import { logAppWarning } from '@/utils/safeError'
 import { parseTopologyConfig } from '@/utils/topologyConfig'
@@ -164,7 +165,7 @@ export function useTopologyProbeRepair(
         },
         planWorkingHopTask,
         ensureTopologyPingTask,
-        deleteTopologyPingTasks,
+        deleteTopologyPingTasks: ids => deleteOwnedTopologyPingTasks(ids, undefined, 'auto'),
         sessionCreatedTaskIds,
         planEntryProbeTask,
         ensureTopologyEntryProbeTask,

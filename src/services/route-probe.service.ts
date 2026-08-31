@@ -32,6 +32,10 @@ export const ROUTE_PROBE_MAX_NODES = 20
 /** 等结果的总时限。三家各最多 30 跳、每跳 1 秒超时，最坏接近 90 秒。 */
 const RESULT_TIMEOUT_MS = 150_000
 const RESULT_POLL_INTERVAL_MS = 5_000
+// Companion jobs can queue during helper backoff, then use a 180s lease (150s
+// collection plus upload). Follow the coordinator's full 10-minute job TTL,
+// with transport/polling margin, instead of applying the legacy exec deadline.
+const COMPANION_RESULT_TIMEOUT_MS = 10 * 60_000 + 30_000
 
 export interface RouteProbeCandidate {
   uuid: string
@@ -225,16 +229,16 @@ async function probeNodeRoutesViaCompanion(
   })
 
   const pending = new Map(candidates.map(candidate => [candidate.uuid, candidate]))
-  const lastStates = new Map<string, { status: string, helperSeenAt: number | null }>()
+  const lastStates = new Map<string, { status: string, attempts: number }>()
   const outcomes: RouteProbeOutcome[] = []
-  const deadline = Date.now() + RESULT_TIMEOUT_MS
+  const deadline = Date.now() + COMPANION_RESULT_TIMEOUT_MS
 
   while (pending.size && Date.now() < deadline) {
     const snapshot = await getCompanionRouteProbeBatch(batch.batch_id, options.signal)
     const completed = snapshot.jobs.filter(job => pending.has(job.client)
       && (job.status === 'completed' || job.status === 'failed'))
     for (const job of snapshot.jobs)
-      lastStates.set(job.client, { status: job.status, helperSeenAt: job.helper_seen_at })
+      lastStates.set(job.client, { status: job.status, attempts: job.attempts })
 
     if (completed.length) {
       // 和旧远程执行路径一样，写回前读取一次最新标签，避免覆盖检测期间的并发修改。
@@ -256,8 +260,10 @@ async function probeNodeRoutesViaCompanion(
           outcomes.push({
             uuid: candidate.uuid,
             name: candidate.name,
-            status: job.error === 'no-traceroute' ? 'no-traceroute' : 'failed',
-            detail: job.error === 'no-traceroute' ? '节点助手未找到 traceroute' : '节点助手未取得可用结果',
+            status: job.attempts === 0 ? 'helper-offline' : job.error === 'no-traceroute' ? 'no-traceroute' : 'failed',
+            detail: job.attempts === 0
+              ? '等待期间节点助手未领取任务，请检查安装或服务连接'
+              : job.error === 'no-traceroute' ? '节点助手未找到 traceroute' : '节点助手未取得可用结果',
           })
         }
       }
@@ -269,7 +275,7 @@ async function probeNodeRoutesViaCompanion(
 
   for (const candidate of pending.values()) {
     const state = lastStates.get(candidate.uuid)
-    const helperOffline = !state?.helperSeenAt && state?.status === 'queued'
+    const helperOffline = state?.attempts === 0 && state.status === 'queued'
     outcomes.push({
       uuid: candidate.uuid,
       name: candidate.name,

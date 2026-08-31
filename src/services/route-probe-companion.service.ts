@@ -1,4 +1,9 @@
+import type { CompanionStorageHealth } from '@/utils/companionStorage'
 import type { RouteTraceCity } from '@/utils/routeTrace'
+import { parseCompanionStorage } from '@/utils/companionStorage'
+
+export { companionStorageLabel, parseCompanionStorage } from '@/utils/companionStorage'
+export type { CompanionStorageHealth } from '@/utils/companionStorage'
 
 const API_BASE = import.meta.env.VITE_API_BASE || '/api'
 const COMPANION_ROOT = `${API_BASE.replace(/\/?api\/?$/, '')}/api/transit-route-probe/v1`
@@ -162,6 +167,7 @@ export interface CompanionHealth {
   ok: boolean
   protocol: number
   version: string | null
+  storage?: CompanionStorageHealth
 }
 
 function isCompanionHealth(value: unknown): value is CompanionHealth {
@@ -177,13 +183,14 @@ export function getCompanionRouteProbeHealth(signal?: AbortSignal): Promise<Comp
   return requestCompanion(`${COMPANION_ROOT}/health`, { method: 'GET', signal }, (payload) => {
     if (!isCompanionHealth(payload))
       throw new RouteProbeCompanionError(502, '伴生插件返回了无效的健康检查数据')
-    return { ok: payload.ok, protocol: payload.protocol, version: typeof payload.version === 'string' ? payload.version : null }
+    return { ok: payload.ok, protocol: payload.protocol, version: typeof payload.version === 'string' ? payload.version : null, ...(parseCompanionStorage(payload.storage) ? { storage: parseCompanionStorage(payload.storage) } : {}) }
   })
 }
 
 export interface CompanionRosterEntry {
   client: string
   helper_seen_at: number | null
+  active_job_until?: number | null
   helper_version: string | null
   last_job_at: number | null
   last_success_at: number | null
@@ -194,6 +201,8 @@ export interface CompanionRosterEntry {
 function isRosterEntry(value: unknown): value is CompanionRosterEntry {
   return isRecord(value) && typeof value.client === 'string'
     && (value.helper_seen_at === null || typeof value.helper_seen_at === 'number')
+    && (value.active_job_until === undefined || value.active_job_until === null
+      || (typeof value.active_job_until === 'number' && Number.isFinite(value.active_job_until) && value.active_job_until > 0))
     && (value.helper_version === undefined || value.helper_version === null || typeof value.helper_version === 'string')
     && (value.last_job_at === undefined || value.last_job_at === null || typeof value.last_job_at === 'number')
     && (value.last_success_at === undefined || value.last_success_at === null || typeof value.last_success_at === 'number')
@@ -219,6 +228,7 @@ export function getCompanionRouteProbeRoster(
     return payload.clients.map(entry => ({
       client: entry.client,
       helper_seen_at: entry.helper_seen_at,
+      active_job_until: entry.active_job_until ?? null,
       helper_version: typeof entry.helper_version === 'string' ? entry.helper_version : null,
       last_job_at: typeof entry.last_job_at === 'number' ? entry.last_job_at : null,
       last_success_at: typeof entry.last_success_at === 'number' ? entry.last_success_at : null,

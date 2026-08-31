@@ -337,15 +337,28 @@ describe('buildPingMetricState (Metric Store vs. legacy fallback gate)', () => {
 })
 
 describe('pickPreferredExactPingTaskId', () => {
+  test('combines partial stats with newer successful records instead of retaining old history', () => {
+    const records = [{ client: 'node', task_id: 11, value: 15, time: new Date().toISOString() }]
+    for (const newer of [[], [{ task_id: '11', total: 1, valid: 0 }]]) {
+      expect(pickPreferredExactPingTaskId(new Set([10, 11]), {
+        metricStats: [{ task_id: '10', total: 30, valid: 1 }, ...newer],
+        records,
+      })).toBe(11)
+    }
+    expect(pickPreferredExactPingTaskId(new Set([10, 11]), {
+      metricStats: [{ task_id: '10', total: 30, valid: 1 }],
+      records: [{ ...records[0]!, value: -1 }],
+    })).toBe(10)
+  })
   test('全部地区在三个精确任务选定后按样本量汇总', () => {
-    const first = { ...createEmptyNodePingStats(), hasData: true, hasLatencyData: true, sampleCount: 10, avgLatency: 50, avgLoss: 0, lineLoss: 0, availability: 100 }
-    const second = { ...createEmptyNodePingStats(), hasData: true, hasLatencyData: true, sampleCount: 30, avgLatency: 150, avgLoss: 10, lineLoss: 5, availability: 90 }
+    const first = { ...createEmptyNodePingStats(), hasData: true, hasLatencyData: true, sampleCount: 10, latencySampleCount: 10, avgLatency: 50, avgLoss: 0, lineLoss: 0, availability: 100 }
+    const second = { ...createEmptyNodePingStats(), hasData: true, hasLatencyData: true, sampleCount: 30, latencySampleCount: 27, avgLatency: 150, avgLoss: 10, lineLoss: 5, availability: 90 }
     expect(mergeCarrierPingStats([first, second])).toMatchObject({
       sampleCount: 40,
-      avgLatency: 125,
+      avgLatency: (50 * 10 + 150 * 27) / 37,
       avgLoss: 7.5,
       lineLoss: 3.75,
-      availability: 95,
+      availability: 92.5,
     })
   })
 

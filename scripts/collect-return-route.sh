@@ -12,11 +12,12 @@
 #   ./collect-return-route.sh                          # 只打印标签，不写回
 #   ./collect-return-route.sh --city sh                # 换用上海三网
 #   ./collect-return-route.sh --push --url https://status.example.com \
-#       --uuid <节点UUID> --key <Komari API Key>
+#       --uuid <节点UUID> --key-file /root/.config/transit/api-key
+#   省略 --key-file 时从终端隐藏输入密钥；不接受 --key 或 KOMARI_API_KEY。
 #
 # 依赖：traceroute（ICMP 模式需 root）；--push 另需 python3。
 # 建议 cron：每天一次足够，回程通常几周才变一次。
-#   0 4 * * * /opt/transit/collect-return-route.sh --push --url ... --uuid ... --key ... >/dev/null 2>&1
+#   0 4 * * * /opt/transit/collect-return-route.sh --push --url https://status.example.com --uuid ... --key-file /root/.config/transit/api-key >/dev/null 2>&1
 
 set -uo pipefail
 
@@ -24,11 +25,18 @@ CITY="bj"
 PUSH=0
 KOMARI_URL="${KOMARI_URL:-}"
 NODE_UUID="${KOMARI_UUID:-}"
-API_KEY="${KOMARI_API_KEY:-}"
+KEY_FILE=""
 MAX_HOPS=30
 
+# Reject legacy credentials before starting any child process. Parsing/shift cannot
+# erase an existing secret from the OS argument list or inherited environment.
+[ -z "${KOMARI_API_KEY+x}" ] || {
+  echo "不再接受 KOMARI_API_KEY；请改用 --key-file 或终端隐藏输入，并考虑轮换旧密钥。" >&2
+  exit 1
+}
+
 usage() {
-  sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'
   exit "${1:-0}"
 }
 
@@ -45,10 +53,11 @@ while [ $# -gt 0 ]; do
     --push) PUSH=1; shift ;;
     --url) need_value "$1" $#; KOMARI_URL="$2"; shift 2 ;;
     --uuid) need_value "$1" $#; NODE_UUID="$2"; shift 2 ;;
-    --key) need_value "$1" $#; API_KEY="$2"; shift 2 ;;
+    --key|--key=*) echo "不再接受 --key；请改用 --key-file 或终端隐藏输入，并考虑轮换旧密钥。" >&2; exit 1 ;;
+    --key-file) need_value "$1" $#; KEY_FILE="$2"; shift 2 ;;
     --max-hops) need_value "$1" $#; MAX_HOPS="$2"; shift 2 ;;
     -h|--help) usage 0 ;;
-    *) echo "未知参数：$1" >&2; usage 1 ;;
+    *) echo "未知参数，请使用 --help 查看用法。" >&2; exit 1 ;;
   esac
 done
 
@@ -131,40 +140,99 @@ fi
 
 [ -n "$KOMARI_URL" ] || { echo "--push 需要 --url" >&2; exit 1; }
 [ -n "$NODE_UUID" ] || { echo "--push 需要 --uuid" >&2; exit 1; }
-[ -n "$API_KEY" ] || { echo "--push 需要 --key" >&2; exit 1; }
 command -v python3 >/dev/null 2>&1 || { echo "--push 需要 python3" >&2; exit 1; }
 
 # 读回现有 tags、去掉旧的 transit-route 条目、把新条目接上去再写回。
 # 必须先读后写：admin:editClient 是按字段覆盖的，直接写会抹掉运营者自己的标签。
-KOMARI_URL="$KOMARI_URL" NODE_UUID="$NODE_UUID" API_KEY="$API_KEY" TAG="$TAG" python3 - <<'PY'
-import json, os, sys, urllib.error, urllib.request
+# 隔离模式禁止从当前目录、用户 site-packages 或 PYTHON* 环境变量加载模块。
+# sudo 运行时也不能让可写工作目录中的同名模块在凭据校验之前执行。
+KOMARI_URL="$KOMARI_URL" NODE_UUID="$NODE_UUID" TRANSIT_KEY_FILE="$KEY_FILE" TAG="$TAG" python3 -I - <<'PY'
+import getpass, json, os, ssl, stat, sys, urllib.error, urllib.parse, urllib.request, warnings
 
-base = os.environ["KOMARI_URL"].rstrip("/")
-uuid = os.environ["NODE_UUID"]
-tag = os.environ["TAG"]
+def endpoint(value):
+    # urlsplit silently removes some control characters; reject them first.
+    if any(ord(char) <= 32 or ord(char) >= 127 for char in value) or any(char in value for char in "\\?#"):
+        raise SystemExit("--url 必须是 HTTPS 源地址，不能包含凭据、路径、查询参数或控制字符。")
+    try:
+        parsed = urllib.parse.urlsplit(value)
+        valid = (parsed.scheme == "https" and parsed.hostname
+                 and parsed.username is None and parsed.password is None
+                 and parsed.path in ("", "/") and not parsed.netloc.endswith(":")
+                 and (parsed.port is None or 1 <= parsed.port <= 65535))
+    except ValueError:
+        valid = False
+    if not valid:
+        raise SystemExit("--url 必须是 HTTPS 源地址，不能包含凭据、路径、查询参数或控制字符。")
+    return urllib.parse.urlunsplit(("https", parsed.netloc, "", "", ""))
 
-def rpc(method, params):
+def read_key(filename):
+    if filename:
+        # Validate the opened descriptor, not an earlier path stat (TOCTOU).
+        # NONBLOCK prevents a FIFO from hanging before the regular-file check.
+        try:
+            flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
+            with os.fdopen(os.open(filename, flags), "rb") as stream:
+                info = os.fstat(stream.fileno())
+                if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
+                        or stat.S_IMODE(info.st_mode) not in (0o400, 0o600)):
+                    raise SystemExit("密钥文件必须由当前运行用户所有，且为权限 0400/0600 的普通文件。")
+                raw = stream.read(4097)
+            if len(raw) > 4096:
+                raise SystemExit("密钥文件过大。")
+            key = raw.decode("ascii").rstrip("\r\n")
+        except (OSError, UnicodeError, AttributeError):
+            raise SystemExit("无法安全读取密钥文件；请检查文件、属主及权限，不允许符号链接。")
+    else:
+        try:
+            with warnings.catch_warnings():
+                # getpass must never fall back to echoed/non-terminal stdin.
+                warnings.simplefilter("error", getpass.GetPassWarning)
+                key = getpass.getpass("Komari API Key（隐藏输入）: ")
+        except (getpass.GetPassWarning, EOFError, OSError, KeyboardInterrupt):
+            raise SystemExit("无法从终端安全读取密钥；无人值守运行请使用 --key-file。")
+    if not key or len(key) > 4096 or any(ord(char) < 33 or ord(char) > 126 for char in key):
+        raise SystemExit("密钥必须是非空的单行 ASCII 内容，不能包含空格或控制字符。")
+    return key
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def http_error_302(self, req, fp, code, msg, headers):
+        raise SystemExit("写回端点返回重定向，已停止；请配置最终 HTTPS 源地址。")
+
+    # Handle 308 explicitly even on older Python versions, before parsing Location.
+    http_error_301 = http_error_303 = http_error_307 = http_error_308 = http_error_302
+
+def rpc(opener, base, key, method, params):
     body = json.dumps({"jsonrpc": "2.0", "method": method, "params": params, "id": 1}).encode()
     request = urllib.request.Request(f"{base}/api/rpc2", data=body, method="POST", headers={
         "Content-Type": "application/json",
-        "Authorization": f"Bearer {os.environ['API_KEY']}",
+        "Authorization": f"Bearer {key}",
     })
-    with urllib.request.urlopen(request, timeout=20) as response:
+    with opener.open(request, timeout=20) as response:
         payload = json.load(response)
-    if payload.get("error"):
-        raise SystemExit(f"{method} 失败：{payload['error']}")
+    if not isinstance(payload, dict) or payload.get("error"):
+        # A server/proxy error may echo Authorization; do not print its contents.
+        raise SystemExit(f"{method} 失败：服务端返回错误或无效响应。")
     return payload.get("result")
 
+def main():
+    base = endpoint(os.environ["KOMARI_URL"])
+    key = read_key(os.environ["TRANSIT_KEY_FILE"])
+    uuid = os.environ["NODE_UUID"]
+    opener = urllib.request.build_opener(NoRedirect(), urllib.request.HTTPSHandler(context=ssl.create_default_context()))
+    client = rpc(opener, base, key, "admin:getClient", {"uuid": uuid})
+    if not isinstance(client, dict):
+        raise SystemExit("admin:getClient 未返回节点对象，已停止写回。")
+
+    kept = [t.strip() for t in str(client.get("tags") or "").split(";")
+            if t.strip() and not t.strip().lower().startswith("transit-route:")]
+    kept.append(os.environ["TAG"])
+    rpc(opener, base, key, "admin:editClient", {"uuid": uuid, "tags": ";".join(kept)})
+    print("已写回节点回程标签。", file=sys.stderr)
+
 try:
-    client = rpc("admin:getClient", {"uuid": uuid}) or {}
+    main()
 except urllib.error.HTTPError as error:
-    raise SystemExit(f"admin:getClient 失败：HTTP {error.code}（检查 --url 与 --key）")
-
-kept = [t.strip() for t in str(client.get("tags") or "").split(";")
-        if t.strip() and not t.strip().lower().startswith("transit-route:")]
-kept.append(tag)
-merged = ";".join(kept)
-
-rpc("admin:editClient", {"uuid": uuid, "tags": merged})
-print(f"已写回 tags：{merged}", file=sys.stderr)
+    raise SystemExit(f"写回失败：HTTP {error.code}（检查 HTTPS 地址及密钥）")
+except (OSError, ValueError, TypeError, urllib.error.URLError):
+    raise SystemExit("写回失败：连接、证书校验或响应异常；未输出原始错误以保护凭据。")
 PY

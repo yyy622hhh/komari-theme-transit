@@ -13,7 +13,7 @@ defineProps<{
   <div
     data-topology-edge-line
     :data-topology-edge-sample-rail="bars.length ? '' : undefined"
-    class="relative h-10 min-w-[150px] flex-1"
+    class="relative h-4 w-full min-w-0"
   >
     <span data-topology-edge-baseline class="pointer-events-none absolute inset-x-0 bottom-2 h-px" :class="lineClass" />
     <TelemetrySampleStrip

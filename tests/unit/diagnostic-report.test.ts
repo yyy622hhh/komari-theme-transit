@@ -1,5 +1,6 @@
 import type { DiagnosticReportInput } from '../../src/utils/diagnosticReport'
 import { describe, expect, test } from 'bun:test'
+import { companionStorageLabel, parseCompanionStorage } from '../../src/utils/companionStorage'
 import { buildDiagnosticReport } from '../../src/utils/diagnosticReport'
 
 function baseInput(overrides: Partial<DiagnosticReportInput> = {}): DiagnosticReportInput {
@@ -30,6 +31,15 @@ function baseInput(overrides: Partial<DiagnosticReportInput> = {}): DiagnosticRe
 }
 
 describe('buildDiagnosticReport', () => {
+  test('separates availability from degraded storage and does not include raw storage errors', () => {
+    const storage = parseCompanionStorage({ status: 'degraded', last_success_at: null, last_error: 'no-space', recovered_from_corrupt: false, path: '/private/secret-token' })
+    const report = buildDiagnosticReport(baseInput({ routeProbeEnabled: true, companionHealth: { ok: true, protocol: 1, version: '1.4.1', storage } }))
+    expect(report).toContain('存储降级：存储空间不足')
+    expect(report).toContain('重启可能丢失未保存状态')
+    expect(report).not.toContain('secret-token')
+    expect(parseCompanionStorage({ ...storage, last_error: '/private/secret-token' })).toBeUndefined()
+    expect(companionStorageLabel()).toContain('未报告')
+  })
   test('renders 未知 when the Komari server version could not be loaded', () => {
     const report = buildDiagnosticReport(baseInput({ serverVersion: null }))
     expect(report).toContain('Komari 服务端：未知')

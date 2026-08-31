@@ -7,6 +7,7 @@ import { basename, join, resolve } from 'node:path'
 import process from 'node:process'
 import { setTimeout as delay } from 'node:timers/promises'
 import { chromium } from '@playwright/test'
+import { verifyRouteProbeLab } from './komari-plugin-lab'
 
 interface ReleaseSpec {
   sha256: string
@@ -578,6 +579,11 @@ async function main(): Promise<void> {
   await verifyThemeInBrowser(baseUrl, 'after initial installation')
   const ids = await saveAndVerify(baseUrl)
   await verifyPingTaskRpcSurface(baseUrl, ids)
+  await verifyRouteProbeLab({ baseUrl, version, workspace, dataDir, client: ids.first, cookie: () => sessionCookie, restart: async () => {
+    await stopServer()
+    await startServer(port)
+    await login(baseUrl)
+  } })
   createRollbackSnapshot()
   await uploadTheme(baseUrl, zipPath, 'Same-package theme upgrade')
   if (existsSync(rollbackMarker))

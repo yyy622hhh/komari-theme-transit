@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, mock, test } from 'bun:test'
-import { getQueryMetricsRequestKey, loadPingTaskNamesForNode, partitionMetricEntityIds } from '../../src/services/metrics.service'
+import { getQueryMetricsRequestKey, invalidatePublicPingTasksCache, loadPingTaskNamesForNode, loadPublicPingTasks, partitionMetricEntityIds } from '../../src/services/metrics.service'
 import { resetSharedRpc } from '../../src/utils/rpc'
 
 describe('partitionMetricEntityIds', () => {
@@ -44,9 +44,57 @@ describe('getQueryMetricsRequestKey', () => {
 })
 
 afterEach(() => {
+  invalidatePublicPingTasksCache()
   mock.restore()
   resetSharedRpc()
 })
+
+for (const oldFinishesFirst of [true, false]) {
+  test(`invalidated in-flight public task lists cannot be returned or recached (old first: ${oldFinishesFirst})`, async () => {
+    invalidatePublicPingTasksCache()
+    const originalFetch = globalThis.fetch
+    const tasks = (id: number) => [{ id, name: '北京电信', clients: ['cache-node'], interval: 30, type: 'icmp' }]
+    let requests = 0
+    let releaseOld!: () => void
+    let releaseNew!: () => void
+    globalThis.fetch = (async (_url, init) => {
+      const rpc = JSON.parse(String(init?.body))
+      const index = ++requests
+      await new Promise<void>((resolve) => {
+        if (index === 1)
+          releaseOld = resolve
+        else
+          releaseNew = resolve
+      })
+      return Response.json({ jsonrpc: '2.0', id: rpc.id, result: tasks(index === 1 ? 10 : 11) })
+    }) as typeof fetch
+    try {
+      const old = loadPublicPingTasks()
+      invalidatePublicPingTasksCache()
+      const current = loadPublicPingTasks()
+      expect(requests).toBe(2)
+      if (oldFinishesFirst) {
+        releaseOld()
+        await new Promise(resolve => setTimeout(resolve, 0))
+        releaseNew()
+      }
+      else {
+        releaseNew()
+        await current
+        releaseOld()
+      }
+      expect(await old).toEqual(tasks(11))
+      expect(await current).toEqual(tasks(11))
+      expect(await loadPublicPingTasks()).toEqual(tasks(11))
+      expect(requests).toBe(2)
+    }
+    finally {
+      releaseOld?.()
+      releaseNew?.()
+      globalThis.fetch = originalFetch
+    }
+  })
+}
 
 describe('loadPingTaskNamesForNode', () => {
   test('uses explicit Komari client assignments instead of default_on as a global flag', async () => {

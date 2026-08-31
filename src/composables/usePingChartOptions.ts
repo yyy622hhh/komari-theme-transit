@@ -2,6 +2,7 @@ import type { ComputedRef, Ref, ShallowRef } from 'vue'
 import type { PingTaskInfo } from '@/utils/rpc'
 import { computed } from 'vue'
 import { ACCESSIBLE_LINE_TYPES } from '@/utils/chartPalette'
+import { escapeTooltipHtml, safeTooltipColor } from '@/utils/chartTooltip'
 import { formatMetricAxisTime, formatMetricTooltipTime } from '@/utils/metricRange'
 
 interface ChartThemeColors {
@@ -117,8 +118,8 @@ export function usePingChartOptions(options: PingChartOptions) {
 
             const task = options.tasks.value.find(candidate => candidate.name === entry.seriesName)
             const color = task ? colorMap.get(task.id) || options.chartColors[0] : options.chartColors[0]
-            const colorDot = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${color};margin-right:8px;flex-shrink:0"></span>`
-            html += `<div style="display:flex;align-items:center">${colorDot}<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${entry.seriesName}</span><span style="margin-left:auto;font-weight:600;margin-left:16px;font-variant-numeric:tabular-nums">${Math.round(entry.value)} ms</span></div>`
+            const colorDot = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${safeTooltipColor(color)};margin-right:8px;flex-shrink:0"></span>`
+            html += `<div style="display:flex;align-items:center">${colorDot}<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeTooltipHtml(entry.seriesName)}</span><span style="margin-left:auto;font-weight:600;margin-left:16px;font-variant-numeric:tabular-nums">${Math.round(entry.value)} ms</span></div>`
           }
           html += '</div>'
           return html

@@ -1,14 +1,19 @@
 import type { AdminPingTask } from '@/services/ping-task.model'
+import type { ProbeCurrentState } from '@/utils/pingCurrentState'
 import type { PingRecord, PingTaskMutation } from '@/utils/rpc'
 import type { TopologyProbeOption } from '@/utils/topologyPresets'
 import { OPS_ALERT_THRESHOLDS } from '@/constants/ops'
 import { TIME_MS } from '@/constants/time'
 import { requirePermission } from '@/services/auth.service'
+import { runCarrierMigration, runCarrierValidation } from '@/services/carrier-probe-migration.service'
+import { heldCarrierTaskIds } from '@/services/carrier-probe-operation.service'
 import { loadPingRecordsWithTasks } from '@/services/history.service'
 import { loadPingMetricStats, partitionMetricEntityIds, queryMetrics } from '@/services/metrics.service'
+import { loadRawPingSamples } from '@/services/ping-raw-samples.service'
 import { createAdminPingTask, deleteTopologyPingTasks, loadAdminPingTasks } from '@/services/ping-task.service'
 import { PING_LOSS_METRIC } from '@/utils/metricSeries'
 import { detectPingCommonModeLossKeys } from '@/utils/pingCommonMode'
+import { hasCurrentCommonModeFailure, mergeProbeCurrentStates, normalizeRawPingSamples, resolveProbeCurrentState } from '@/utils/pingCurrentState'
 import { normalizePingTaskName, normalizeTopologyProbeTarget, TOPOLOGY_PROBE_OPTIONS } from '@/utils/topologyPresets'
 import { recordTopologyWrite } from '@/utils/topologyWriteLog'
 
@@ -35,6 +40,8 @@ export interface CarrierProbeHealth {
   abnormalNodeUuids: string[]
   commonModeEvents: number
   fallback: CarrierProbeCandidate
+  current: ProbeCurrentState
+  recovered: boolean
 }
 
 export interface CarrierProbeCandidate {
@@ -49,6 +56,11 @@ export interface CarrierProbeCandidate {
   lowConfidence?: boolean
   migratable?: boolean
   reason?: string
+  createdAt?: number
+  expiresAt?: number
+  originalSnapshot?: string
+  candidateFingerprint?: string
+  evidenceClients?: string[]
 }
 
 export interface CarrierProbeMigrationResult {
@@ -56,12 +68,14 @@ export interface CarrierProbeMigrationResult {
   oldTaskId: number
   newTaskId?: number
   message: string
+  remainingTaskIds?: number[]
 }
 
 export interface CarrierNodeSamples {
   uuid: string
   total: number
   valid: number
+  records?: PingRecord[]
 }
 
 interface HealthEvidence {
@@ -70,20 +84,21 @@ interface HealthEvidence {
   commonModeEvents: number
 }
 
-interface CarrierProbeOperations {
+export interface CarrierProbeOperations {
   authorize?: () => Promise<void>
   now: () => number
   sleep: (ms: number) => Promise<void>
   createTask: (mutation: PingTaskMutation, key: string) => Promise<AdminPingTask>
   deleteTasks: (ids: readonly number[]) => Promise<boolean>
   loadTasks?: () => Promise<AdminPingTask[]>
-  loadSamples: (taskId: number, clients: readonly string[]) => Promise<CarrierNodeSamples[]>
+  loadSamples: (taskId: number, clients: readonly string[], since?: number) => Promise<CarrierNodeSamples[]>
+  withLock?: <T>(taskId: number, mutation: boolean, run: () => Promise<T>) => Promise<T>
+  isOnline?: (client: string) => boolean
+  progress?: (phase: import('@/services/carrier-probe-operation.service').CarrierOperationPhase, message: string, created?: AdminPingTask) => void
 }
 
 const CANARY_PREFIX = 'Transit-canary-'
 const CANARY_TTL_MS = 30 * TIME_MS.minute
-const SAMPLE_WAIT_MS = 10 * TIME_MS.second
-const SAMPLE_TIMEOUT_MS = 4 * TIME_MS.minute
 const MIN_NODE_SAMPLES = 3
 const SINGLE_NODE_SAMPLES = 5
 const MIGRATION_SUCCESS_RATE = 0.95
@@ -141,8 +156,14 @@ export function assessCarrierProbeCandidate(samples: readonly CarrierNodeSamples
     return { migratable: false, lowConfidence, successRate: 0, reason: '至少一台节点全部失败。' }
   const totals = aggregateSamples(samples)
   const successRate = totals.total > 0 ? totals.valid / totals.total : 0
-  if (successRate < MIGRATION_SUCCESS_RATE)
+  if (lowConfidence) {
+    const recent = normalizeRawPingSamples(samples[0]!.records ?? []).slice(-SINGLE_NODE_SAMPLES)
+    if (recent.length !== SINGLE_NODE_SAMPLES || recent.some(record => record.value < 0))
+      return { migratable: false, lowConfidence, successRate, reason: '尚未取得最近连续 5 个成功的原始样本。' }
+  }
+  else if (successRate < MIGRATION_SUCCESS_RATE) {
     return { migratable: false, lowConfidence, successRate, reason: '总体成功率低于 95%。' }
+  }
   return {
     migratable: true,
     lowConfidence,
@@ -205,24 +226,26 @@ async function loadTaskSamples(taskIdValue: number, clients: readonly string[]):
   }
 }
 
-const defaultOperations: CarrierProbeOperations = {
+export const defaultCarrierProbeOperations: CarrierProbeOperations = {
   authorize: assertCarrierProbePermission,
   now: () => Date.now(),
   sleep: ms => new Promise(resolve => setTimeout(resolve, ms)),
   createTask: (mutation, key) => createAdminPingTask(mutation, { requestKey: key }),
   deleteTasks: ids => deleteTopologyPingTasks(ids),
   loadTasks: () => loadAdminPingTasks({ fresh: true, requestKey: `carrier-migrate:reconcile:${Date.now()}` }),
-  loadSamples: loadTaskSamples,
+  loadSamples: async (id, clients, since = Date.now() - 3_600_000) => {
+    const records = await loadRawPingSamples(clients, since, id)
+    return clients.map((uuid) => {
+      const own = records.filter(record => record.client === uuid)
+      return { uuid, total: own.length, valid: own.filter(record => record.value >= 0).length, records: own }
+    })
+  },
 }
 
 async function assertCarrierProbePermission(): Promise<void> {
   const permission = await requirePermission('advancedTools', { force: true })
   if (!permission.granted)
     throw new Error('登录状态已过期，请重新登录后管理监测目标。')
-}
-
-function canaryName(profileKey: string, now: number): string {
-  return `${CANARY_PREFIX}${profileKey}-${now}`
 }
 
 export function staleTransitCanaryTaskIds(tasks: readonly AdminPingTask[], now = Date.now()): number[] {
@@ -240,7 +263,9 @@ export function staleTransitCanaryTaskIds(tasks: readonly AdminPingTask[], now =
 export async function cleanupStaleTransitCanaries(): Promise<number> {
   await assertCarrierProbePermission()
   const tasks = await loadAdminPingTasks({ fresh: true, requestKey: 'carrier-health:cleanup:list' })
+  const held = await heldCarrierTaskIds()
   const ids = staleTransitCanaryTaskIds(tasks)
+    .filter(id => !held.has(id))
   if (!ids.length)
     return 0
   const deleted = await deleteTopologyPingTasks(ids)
@@ -292,9 +317,11 @@ async function loadCommonModeCounts(nodes: readonly CarrierProbeNode[]): Promise
 export async function loadCarrierProbeHealth(nodes: readonly CarrierProbeNode[]): Promise<CarrierProbeHealth[]> {
   await assertCarrierProbePermission()
   const tasks = await loadAdminPingTasks({ fresh: true, requestKey: 'carrier-health:list' })
-  const [samplesByTaskId, commonModeByTaskId] = await Promise.all([
+  const now = Date.now()
+  const [samplesByTaskId, commonModeByTaskId, raw] = await Promise.all([
     loadAllTaskSamples(tasks.filter(task => TOPOLOGY_PROBE_OPTIONS.some(option => isCarrierTask(task, option))), nodes),
     loadCommonModeCounts(nodes),
+    loadRawPingSamples(nodes.filter(node => node.online).map(node => node.uuid), Math.floor(now / 60_000) * 60_000 - 3_600_000).catch(() => [] as PingRecord[]),
   ])
   const nodeById = new Map(nodes.map(node => [node.uuid, node]))
 
@@ -307,10 +334,22 @@ export async function loadCarrierProbeHealth(nodes: readonly CarrierProbeNode[])
     const abnormal = observations.filter(item => item.total >= MIN_NODE_SAMPLES && item.valid / item.total < MIGRATION_SUCCESS_RATE)
     const commonModeEvents = id === null ? 0 : commonModeByTaskId.get(id) ?? 0
     const fallback = buildCarrierProbeCandidate('tcp', option.dnsAddress, 53, 'builtin')!
+    const taskRecords = raw.filter(record => record.task_id === id)
+    const current = task?.clients.length && !onlineClients.length
+      ? resolveProbeCurrentState(taskRecords, { online: false, now })
+      : mergeProbeCurrentStates(onlineClients.map(client => resolveProbeCurrentState(taskRecords.filter(record => record.client === client), { interval: task?.interval, now })))
+    const sharedFailure = hasCurrentCommonModeFailure(taskRecords, onlineClients, task?.interval ?? 30, now)
+    const status: CarrierProbeHealthStatus = sharedFailure
+      ? 'shared-target-anomaly'
+      : current.status === 'failed' || current.status === 'intermittent'
+        ? 'single-path-anomaly'
+        : current.status === 'healthy' && onlineClients.length >= 2 ? 'healthy' : 'insufficient-evidence'
     return {
       key: option.key,
       label: option.label,
-      status: task ? classifyCarrierProbeHealth({ onlineNodes: onlineClients.length, observations, commonModeEvents }) : 'insufficient-evidence',
+      status,
+      current,
+      recovered: current.status === 'healthy' && (commonModeEvents > 0 || totals.valid < totals.total),
       task,
       currentTarget: task?.target ?? '',
       probeType: task?.type ?? '',
@@ -326,132 +365,22 @@ export async function loadCarrierProbeHealth(nodes: readonly CarrierProbeNode[])
   })
 }
 
-async function waitForCandidateSamples(
-  task: AdminPingTask,
-  clients: readonly string[],
-  operations: CarrierProbeOperations,
-): Promise<CarrierNodeSamples[]> {
-  const id = taskId(task)
-  if (id === null)
-    throw new Error('临时任务缺少有效 ID。')
-  const startedAt = operations.now()
-  let latest: CarrierNodeSamples[] = []
-  const maximumAttempts = Math.ceil(SAMPLE_TIMEOUT_MS / SAMPLE_WAIT_MS) + 1
-  for (let attempt = 0; attempt < maximumAttempts && operations.now() - startedAt <= SAMPLE_TIMEOUT_MS; attempt++) {
-    latest = await operations.loadSamples(id, clients)
-    const required = clients.length === 1 ? SINGLE_NODE_SAMPLES : MIN_NODE_SAMPLES
-    if (latest.length === clients.length && latest.every(item => item.total >= required))
-      return latest
-    await operations.sleep(SAMPLE_WAIT_MS)
-  }
-  return latest
-}
-
 export async function validateCarrierProbeCandidate(
   profileKey: string,
   currentTask: AdminPingTask,
   candidate: CarrierProbeCandidate,
   onlineClientUuids: readonly string[],
-  operations: CarrierProbeOperations = defaultOperations,
+  operations: CarrierProbeOperations = defaultCarrierProbeOperations,
 ): Promise<CarrierProbeCandidate> {
-  await (operations.authorize?.() ?? assertCarrierProbePermission())
-  const clients = [...new Set(onlineClientUuids.map(value => value.trim()).filter(uuid => currentTask.clients.includes(uuid)))].slice(0, 5)
-  if (!clients.length)
-    return { ...candidate, migratable: false, reason: '原任务没有在线节点可用于验证。' }
-  const name = canaryName(profileKey, operations.now())
-  const task = await operations.createTask({
-    name,
-    clients,
-    default_on: false,
-    type: candidate.type,
-    target: candidate.target,
-    interval: 30,
-  }, `carrier-canary:${profileKey}:${name}`)
-  const id = taskId(task)
-  if (id === null)
-    throw new Error('临时任务创建后没有取得 ID。')
-  try {
-    const verdict = assessCarrierProbeCandidate(await waitForCandidateSamples(task, clients, operations))
-    recordTopologyWrite({ trigger: 'manual', action: `验证备用目标 ${currentTask.name}`, outcome: verdict.migratable ? 'ok' : 'failed', detail: verdict.reason })
-    return { ...candidate, ...verdict, canaryTaskId: id, canaryTaskName: name }
-  }
-  catch (error) {
-    await operations.deleteTasks([id])
-    throw error
-  }
-}
-
-async function waitForFirstSuccess(task: AdminPingTask, operations: CarrierProbeOperations): Promise<boolean> {
-  const id = taskId(task)
-  if (id === null)
-    return false
-  const startedAt = operations.now()
-  const maximumAttempts = Math.ceil(SAMPLE_TIMEOUT_MS / SAMPLE_WAIT_MS) + 1
-  for (let attempt = 0; attempt < maximumAttempts && operations.now() - startedAt <= SAMPLE_TIMEOUT_MS; attempt++) {
-    const samples = await operations.loadSamples(id, task.clients)
-    if (samples.some(item => item.valid > 0))
-      return true
-    await operations.sleep(SAMPLE_WAIT_MS)
-  }
-  return false
+  return runCarrierValidation(profileKey, currentTask, candidate, onlineClientUuids, operations)
 }
 
 export async function migrateCarrierProbeTask(
   currentTask: AdminPingTask,
   candidate: CarrierProbeCandidate,
-  operations: CarrierProbeOperations = defaultOperations,
+  operations: CarrierProbeOperations = defaultCarrierProbeOperations,
 ): Promise<CarrierProbeMigrationResult> {
-  await (operations.authorize?.() ?? assertCarrierProbePermission())
-  const oldTaskId = taskId(currentTask)
-  if (oldTaskId === null)
-    throw new Error('当前任务缺少有效 ID。')
-  if (candidate.source !== 'current' && !candidate.migratable)
-    throw new Error('候选目标尚未通过验证。')
-  let replacement: AdminPingTask | null = null
-  try {
-    replacement = await operations.createTask({
-      name: currentTask.name,
-      clients: [...currentTask.clients],
-      default_on: Boolean(currentTask.default_on),
-      type: candidate.type,
-      target: candidate.target,
-      interval: currentTask.interval || 30,
-    }, `carrier-migrate:${oldTaskId}:${operations.now()}`)
-    if (!await waitForFirstSuccess(replacement, operations))
-      throw new Error('新任务在等待窗口内没有产生成功样本。')
-    const cleanupIds = [oldTaskId, candidate.canaryTaskId].filter((id): id is number => Number.isInteger(id))
-    const newTaskId = taskId(replacement)!
-    if (!await operations.deleteTasks(cleanupIds)) {
-      let liveTasks: AdminPingTask[] | null = null
-      try {
-        liveTasks = operations.loadTasks ? await operations.loadTasks() : null
-      }
-      catch {}
-      if (!liveTasks) {
-        const message = '旧任务清理结果无法确认；为避免监测空窗，已保留验证成功的新任务。'
-        recordTopologyWrite({ trigger: 'manual', action: `迁移监测目标 ${currentTask.name}`, outcome: 'failed', detail: message })
-        return { ok: false, oldTaskId, newTaskId, message }
-      }
-      const liveIds = new Set(liveTasks.map(task => taskId(task)).filter((id): id is number => id !== null))
-      if (liveIds.has(oldTaskId))
-        throw new Error('新任务已验证，但旧任务清理失败。')
-      if (candidate.canaryTaskId && liveIds.has(candidate.canaryTaskId))
-        await operations.deleteTasks([candidate.canaryTaskId])
-    }
-    const message = candidate.source === 'current' ? '当前任务已用新 ID 重建，旧历史已隔离。' : '目标迁移成功，旧历史已隔离。'
-    recordTopologyWrite({ trigger: 'manual', action: `迁移监测目标 ${currentTask.name}`, outcome: 'ok', detail: `${oldTaskId} → ${newTaskId}` })
-    return { ok: true, oldTaskId, newTaskId, message }
-  }
-  catch (error) {
-    const createdId = replacement ? taskId(replacement) : null
-    if (createdId !== null)
-      await operations.deleteTasks([createdId])
-    if (candidate.canaryTaskId)
-      await operations.deleteTasks([candidate.canaryTaskId])
-    const message = error instanceof Error ? error.message : '迁移失败'
-    recordTopologyWrite({ trigger: 'manual', action: `迁移监测目标 ${currentTask.name}`, outcome: 'failed', detail: message })
-    return { ok: false, oldTaskId, message: `迁移失败，旧任务已保留：${message}` }
-  }
+  return runCarrierMigration(currentTask, candidate, operations)
 }
 
 export function currentCarrierProbeCandidate(task: AdminPingTask): CarrierProbeCandidate | null {

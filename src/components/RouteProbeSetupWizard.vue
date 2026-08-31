@@ -5,6 +5,7 @@ import { computed, ref, watch } from 'vue'
 import { AppDialog } from '@/components/ui/app-dialog'
 import { Button } from '@/components/ui/button'
 import { useRouteProbeSetupWizard } from '@/composables/useRouteProbeSetupWizard'
+import { companionStorageLabel } from '@/services/route-probe-companion.service'
 import { formatDateTime } from '@/utils/helper'
 
 const props = defineProps<{ nodes: NodeData[], open: boolean }>()
@@ -42,7 +43,7 @@ function close(): void {
 }
 
 async function copyInstallCommand(): Promise<void> {
-  if (!navigator.clipboard?.writeText)
+  if (!wizard.installCommand.value || !navigator.clipboard?.writeText)
     return
   await navigator.clipboard.writeText(wizard.installCommand.value)
   copiedCommand.value = true
@@ -135,7 +136,13 @@ async function handleEnable(): Promise<void> {
               </div>
             </div>
             <span class="shrink-0 rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground">
-              <template v-if="wizard.pluginInstalled.value === true">已安装{{ wizard.pluginVersion.value ? ` · v${wizard.pluginVersion.value}` : '' }}</template>
+              <template v-if="wizard.pluginInstalled.value === true">
+                已安装{{ wizard.pluginVersion.value ? ` · v${wizard.pluginVersion.value}` : '' }}
+                <p class="mt-1 text-xs" :class="wizard.pluginStorage.value && wizard.pluginStorage.value.status !== 'healthy' ? 'text-amber-700 dark:text-amber-300' : 'text-muted-foreground'">
+                  {{ companionStorageLabel(wizard.pluginStorage.value) }}
+                  <span v-if="wizard.pluginStorage.value?.last_success_at"> · 最后保存 {{ formatDateTime(new Date(wizard.pluginStorage.value.last_success_at)) }}</span>
+                </p>
+              </template>
               <template v-else-if="wizard.pluginInstalled.value === false">未安装</template>
               <template v-else>未知</template>
             </span>
@@ -197,6 +204,7 @@ async function handleEnable(): Promise<void> {
                     >
                       {{ node.helperVersion ? `v${node.helperVersion}` : '旧版助手' }}
                     </span>
+                    <span v-if="node.helperBusy" class="ml-1 text-muted-foreground">执行中</span>
                   </p>
                   <p v-if="node.lastError" class="truncate text-destructive">
                     最近错误：{{ node.lastError }}
@@ -241,12 +249,13 @@ async function handleEnable(): Promise<void> {
         <div v-else-if="wizard.missingHelperNodes.value.length" class="space-y-2 rounded-lg border border-amber-500/20 bg-amber-500/8 p-3">
           <div class="flex flex-wrap items-center justify-between gap-2">
             <p class="text-xs text-amber-700 dark:text-amber-400">
-              还有 {{ wizard.missingHelperNodes.value.length }} 台境外节点未安装助手
+              还有 {{ wizard.missingHelperNodes.value.length }} 台境外节点助手未连接，请检查安装或服务状态
             </p>
             <Button
               variant="outline"
               size="xs"
               class="border-amber-500/30 bg-background/60 text-amber-700 hover:bg-amber-500/10 dark:text-amber-400"
+              :disabled="!wizard.installCommand.value"
               @click="copyInstallCommand"
             >
               <Icon :icon="copiedCommand ? 'tabler:check' : 'tabler:copy'" width="12" height="12" />
@@ -267,6 +276,9 @@ async function handleEnable(): Promise<void> {
               {{ node.name }}
             </button>
           </div>
+          <p v-if="!wizard.installCommand.value" role="alert" class="text-xs text-amber-700 dark:text-amber-400">
+            请通过 HTTPS 地址打开面板后生成安装命令；不会自动允许明文传输节点凭据。
+          </p>
           <p class="text-[10px] text-muted-foreground">
             命令不含 token；在节点上执行后会提示输入 Agent token，届时点击对应节点名称复制粘贴即可。
           </p>
@@ -296,7 +308,7 @@ async function handleEnable(): Promise<void> {
             {{ wizard.onlineHelperCount.value }} 台境外节点助手在线，启用后主题会在管理员打开首页约 20 秒时开始检测。
           </p>
           <p v-if="wizard.missingHelperNodes.value.length" class="text-xs text-muted-foreground">
-            还有 {{ wizard.missingHelperNodes.value.length }} 台尚未安装助手的节点会先跳过，安装完成后下次自动检测会补上。
+            还有 {{ wizard.missingHelperNodes.value.length }} 台助手未连接的节点会先跳过，恢复连接后下次自动检测会补上。
           </p>
         </div>
 

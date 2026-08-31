@@ -10,64 +10,34 @@ const fs = require('fs')
 const path = require('path')
 const server = require('server')
 const { RouteProbeCoordinator } = require('./protocol.cjs')
+const { ClientRequestLimiter } = require('./request-limits.cjs')
 
 const API_ROOT = '/api/transit-route-probe/v1'
 // Kept in sync with komari-plugin.json's "version" by scripts/publish.ts (same as
 // helper.sh's own VERSION constant) rather than `require('./komari-plugin.json')` —
 // Komari's goja module loader has never been exercised against a JSON require
 // anywhere in this plugin, and a load-time failure there would take down every route.
-const PLUGIN_VERSION = '1.4.0'
-const STATE_FILENAME = 'state-v1.json'
-const HEARTBEAT_CHECKPOINT_MS = 60 * 1000
-const coordinator = new RouteProbeCoordinator({
-  // Hex is supported by every Buffer implementation bundled with Komari's
-  // goja runtime; unlike base64url it also needs no punctuation filtering.
-  randomId: () => crypto.randomBytes(18).toString('hex'),
+const PLUGIN_VERSION = '1.4.1'
+const { StorageCheckpoint } = require('./storage.cjs')
+
+const coordinator = new RouteProbeCoordinator({ randomId: () => crypto.randomBytes(18).toString('hex') })
+const limiter = new ClientRequestLimiter()
+const storage = new StorageCheckpoint({
+  fs,
+  path,
+  coordinator,
+  directory: typeof globalThis.__storageDir__ === 'string' ? globalThis.__storageDir__ : '',
+  warn: message => console.warn(message),
 })
-const storageDirectory = typeof globalThis.__storageDir__ === 'string' ? globalThis.__storageDir__ : ''
-const statePath = storageDirectory ? path.join(storageDirectory, STATE_FILENAME) : ''
-let lastPersistedAt = 0
-
 function persistState() {
-  if (!statePath)
-    return
-  const temporaryPath = `${statePath}.tmp`
-  try {
-    fs.mkdirSync(storageDirectory, { recursive: true })
-    fs.writeFileSync(temporaryPath, JSON.stringify(coordinator.exportState()), { encoding: 'utf8', mode: 0o600 })
-    fs.renameSync(temporaryPath, statePath)
-    coordinator.markStatePersisted()
-    lastPersistedAt = Date.now()
-  }
-  catch (error) {
-    try {
-      fs.unlinkSync(temporaryPath)
-    }
-    catch {}
-    console.warn(`[route-probe] unable to persist state: ${error && error.message ? error.message : 'unknown error'}`)
-  }
+  storage.persist()
 }
-
 function checkpointHeartbeat() {
-  if (coordinator.hasTaskStateChanges() || Date.now() - lastPersistedAt >= HEARTBEAT_CHECKPOINT_MS)
-    persistState()
+  storage.checkpoint()
 }
-
 function restoreState() {
-  if (!statePath || !fs.existsSync(statePath))
-    return
-  try {
-    coordinator.importState(JSON.parse(fs.readFileSync(statePath, 'utf8')))
-    persistState()
-  }
-  catch (error) {
-    const corruptedPath = path.join(storageDirectory, `state-v1.corrupt-${Date.now()}.json`)
-    try {
-      fs.renameSync(statePath, corruptedPath)
-    }
-    catch {}
-    console.warn(`[route-probe] ignored corrupt state and preserved it as ${path.basename(corruptedPath)}: ${error && error.message ? error.message : 'unknown error'}`)
-  }
+  storage.restore()
+  storage.checkpoint()
 }
 
 function helperVersion(req) {
@@ -124,7 +94,14 @@ function parseJsonBody(req) {
     throw new TypeError('application/json required')
   if (!req.body || req.body.length > 8192)
     throw new TypeError('invalid request body')
-  return JSON.parse(req.body)
+  let body
+  try {
+    body = JSON.parse(req.body)
+  }
+  catch { throw new TypeError('invalid JSON body') }
+  if (!body || typeof body !== 'object' || Array.isArray(body))
+    throw new TypeError('JSON object required')
+  return body
 }
 
 function parseFormBody(req) {
@@ -133,7 +110,7 @@ function parseFormBody(req) {
     throw new TypeError('form body required')
   if (req.body.length > 4096)
     throw new TypeError('request body too large')
-  const result = {}
+  const result = Object.create(null)
   for (const pair of req.body.split('&')) {
     const separator = pair.indexOf('=')
     const rawKey = separator >= 0 ? pair.slice(0, separator) : pair
@@ -154,11 +131,44 @@ function handleError(res, error) {
   return json(res, error instanceof TypeError ? 400 : 409, { error: message })
 }
 
+function isLimited(res, client, kind) {
+  const retry = limiter.take(client, kind)
+  if (!retry)
+    return false
+  res.setHeader('Retry-After', String(retry))
+  text(res, 429, 'too many requests\n')
+  return true
+}
+
+function poll(req, res) {
+  const client = agentClient(req)
+  if (!client) {
+    res.setHeader('Retry-After', '300')
+    return text(res, 401, 'agent token required\n')
+  }
+  if (isLimited(res, client, 'poll'))
+    return
+  try {
+    if (req.method === 'POST')
+      parseJsonBody(req)
+    const job = coordinator.poll(client, { version: helperVersion(req) })
+    if (!job) {
+      checkpointHeartbeat()
+      return text(res, 204)
+    }
+    persistState()
+    console.warn(`[route-probe] leased ${job.id} to ${client}`)
+    return text(res, 200, `${job.id}\t${job.city}\n`)
+  }
+  catch (error) { return handleError(res, error) }
+}
+
 function load() {
   server.route('GET', `${API_ROOT}/health`, (req, res) => {
     if (!isAdmin(req) || !hasBrowserGuard(req))
       return json(res, 403, { error: 'admin authentication required' })
-    return json(res, 200, { ok: true, protocol: 1, version: PLUGIN_VERSION })
+    checkpointHeartbeat()
+    return json(res, 200, { ok: true, protocol: 1, version: PLUGIN_VERSION, storage: storage.snapshot() })
   })
 
   server.route('POST', `${API_ROOT}/enqueue`, (req, res) => {
@@ -205,36 +215,26 @@ function load() {
     }
   })
 
-  server.route('GET', `${API_ROOT}/poll`, (req, res) => {
-    const client = agentClient(req)
-    if (!client) {
-      res.setHeader('Retry-After', '300')
-      return text(res, 401, 'agent token required\n')
-    }
-    try {
-      const job = coordinator.poll(client, { version: helperVersion(req) })
-      if (!job) {
-        checkpointHeartbeat()
-        return text(res, 204)
-      }
-      persistState()
-      console.warn(`[route-probe] leased ${job.id} to ${client}`)
-      return text(res, 200, `${job.id}\t${job.city}\n`)
-    }
-    catch (error) {
-      return handleError(res, error)
-    }
-  })
+  // Komari resolves agent identity from JSON token before invoking routes.
+  // Keep legacy GET/form callers; new helpers never fall back to URL credentials.
+  server.route('GET', `${API_ROOT}/poll`, poll)
+  server.route('POST', `${API_ROOT}/poll`, poll)
 
   server.route('POST', `${API_ROOT}/result`, (req, res) => {
     const client = agentClient(req)
     if (!client)
       return text(res, 401, 'agent token required\n')
+    if (isLimited(res, client, 'result'))
+      return
     try {
-      const result = coordinator.submit(client, parseFormBody(req))
-      persistState()
-      console.warn(`[route-probe] accepted result for ${client}: ${result.status}`)
-      return json(res, 200, result)
+      const body = String(req.headers['content-type'] || '').toLowerCase().startsWith('application/json')
+        ? parseJsonBody(req)
+        : parseFormBody(req)
+      const result = coordinator.submit(client, body)
+      checkpointHeartbeat()
+      if (result.changed)
+        console.warn(`[route-probe] accepted result for ${client}: ${result.status}`)
+      return json(res, 200, { status: result.status })
     }
     catch (error) {
       return handleError(res, error)
@@ -243,4 +243,4 @@ function load() {
 }
 
 globalThis.load = load
-globalThis.unload = persistState
+globalThis.unload = () => storage.persist(true)

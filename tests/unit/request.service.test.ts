@@ -6,6 +6,31 @@ function wait(milliseconds: number): Promise<void> {
 }
 
 describe('RequestManager', () => {
+  test('does not start or join work for a pre-aborted consumer', async () => {
+    const manager = new RequestManager()
+    const controller = new AbortController()
+    controller.abort()
+    let runs = 0
+    await expect(manager.run('pre-abort', async () => ++runs, { signal: controller.signal }))
+      .rejects
+      .toMatchObject({ name: 'AbortError' })
+    expect(runs).toBe(0)
+    await expect(manager.run('pre-abort', async () => ++runs)).resolves.toBe(1)
+  })
+
+  test('observes the source rejection when a task synchronously aborts its consumer', async () => {
+    const manager = new RequestManager()
+    const controller = new AbortController()
+    const pending = manager.run('sync-abort', async () => {
+      controller.abort()
+      throw new Error('source rejected during cancellation')
+    }, { signal: controller.signal, retryAttempts: 0 })
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+    // Bun fails this test if the underlying rejection is not consumed.
+    await wait(0)
+    await expect(manager.run('sync-abort', async () => 'fresh')).resolves.toBe('fresh')
+  })
+
   test('keeps a replacement request registered after an aborted request settles', async () => {
     const manager = new RequestManager()
     let taskRuns = 0

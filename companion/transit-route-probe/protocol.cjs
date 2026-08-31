@@ -152,7 +152,7 @@ class RouteProbeCoordinator {
     if (job.client !== client)
       throw new Error('job belongs to another client')
     if (job.status === 'completed' || job.status === 'failed')
-      return { status: job.status }
+      return { status: job.status, changed: false }
     if (job.status !== 'running')
       throw new Error('job was not leased')
 
@@ -182,10 +182,11 @@ class RouteProbeCoordinator {
     }
     job.updatedAt = now
     job.leaseUntil = 0
-    this.activeByClientCity.delete(`${job.client}\n${job.city}`)
+    if (this.activeByClientCity.get(`${job.client}\n${job.city}`) === job.id)
+      this.activeByClientCity.delete(`${job.client}\n${job.city}`)
     this.helperStateByClient.set(client, helper)
     this.taskStateDirty = true
-    return { status: job.status }
+    return { status: job.status, changed: true }
   }
 
   status(batchId) {
@@ -225,10 +226,18 @@ class RouteProbeCoordinator {
   roster(clients) {
     this.cleanup()
     const normalizedClients = normalizeClients(clients, ROSTER_MAX_CLIENTS)
+    const activeUntil = new Map()
+    const now = this.now()
+    for (const job of this.jobs.values()) {
+      const until = Math.min(job.leaseUntil, job.createdAt + JOB_TTL_MS)
+      if (job.status === 'running' && until > now)
+        activeUntil.set(job.client, Math.max(activeUntil.get(job.client) || 0, until))
+    }
     return {
       clients: normalizedClients.map(client => ({
         client,
         helper_seen_at: this.lastSeenByClient.get(client) ?? null,
+        active_job_until: activeUntil.get(client) ?? null,
         helper_version: this.helperStateByClient.get(client)?.helperVersion ?? null,
         last_job_at: this.helperStateByClient.get(client)?.lastJobAt ?? null,
         last_success_at: this.helperStateByClient.get(client)?.lastSuccessAt ?? null,
@@ -278,8 +287,6 @@ class RouteProbeCoordinator {
         error: VALID_ERRORS.has(raw.error) ? raw.error : null,
       }
       this.jobs.set(job.id, job)
-      if (job.status === 'queued' || job.status === 'running')
-        this.activeByClientCity.set(`${job.client}\n${job.city}`, job.id)
     }
 
     for (const raw of state.batches) {
@@ -308,6 +315,48 @@ class RouteProbeCoordinator {
       this.lastSeenByClient.set(String(raw.client), helperSeenAt)
     }
     this.cleanup()
+    this.reconcileActiveJobs()
+  }
+
+  /** A delayed disk read may merge different IDs for the same logical probe. */
+  reconcileActiveJobs() {
+    this.activeByClientCity.clear()
+    const now = this.now()
+    const jobs = [...this.jobs.values()]
+    const active = job => job.status === 'queued' || job.status === 'running'
+    const retire = (job) => {
+      job.status = 'failed'
+      job.error = 'probe-failed'
+      job.tag = null
+      job.leaseUntil = 0
+      job.updatedAt = now
+      this.taskStateDirty = true
+    }
+    // A newer completed probe from the read-failure period must not revive old queued work.
+    const finished = jobs.filter(job => job.status === 'completed')
+    for (const job of jobs) {
+      if (!active(job))
+        continue
+      if (finished.some(other => other.client === job.client && other.city === job.city
+        && other.createdAt >= job.createdAt && other.updatedAt > job.updatedAt)) {
+        retire(job)
+        continue
+      }
+      const key = `${job.client}\n${job.city}`
+      const previous = this.jobs.get(this.activeByClientCity.get(key))
+      if (!previous) {
+        this.activeByClientCity.set(key, job.id)
+        continue
+      }
+      // Keep a usable lease before queued work. With equal lease priority prefer newer work.
+      const leased = value => value.status === 'running' && value.leaseUntil > now ? 1 : 0
+      const preferJob = leased(job) !== leased(previous)
+        ? leased(job) > leased(previous)
+        : job.updatedAt > previous.updatedAt || (job.updatedAt === previous.updatedAt && job.createdAt >= previous.createdAt)
+      retire(preferJob ? previous : job)
+      if (preferJob)
+        this.activeByClientCity.set(key, job.id)
+    }
   }
 
   hasTaskStateChanges() {
@@ -326,7 +375,8 @@ class RouteProbeCoordinator {
         job.error = 'probe-failed'
         job.updatedAt = now
         job.leaseUntil = 0
-        this.activeByClientCity.delete(`${job.client}\n${job.city}`)
+        if (this.activeByClientCity.get(`${job.client}\n${job.city}`) === job.id)
+          this.activeByClientCity.delete(`${job.client}\n${job.city}`)
         this.taskStateDirty = true
       }
     }

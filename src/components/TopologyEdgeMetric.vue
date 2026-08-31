@@ -7,6 +7,7 @@ import { computed, watch } from 'vue'
 import TopologyEdgeSamples from '@/components/TopologyEdgeSamples.vue'
 import { useNodePingStats } from '@/composables/useNodePingStats'
 import { formatDateTime } from '@/utils/helper'
+import { formatProbeCurrentLabel, probeCurrentTone, probeFailureRateLabel } from '@/utils/pingCurrentState'
 import { resolveTopologySegmentHealth } from '@/utils/topologyHealth'
 import { calculateTopologyLatencyBaseline, formatTopologyLatency, formatTopologyLoss, resolveTopologyMetricSource, resolveTopologySampleTone } from '@/utils/topologyHelper'
 import { formatTopologyTelemetryLabel, parseTopologyMetric } from '@/utils/topologyLegacyFormat'
@@ -41,11 +42,19 @@ const ping = useNodePingStats(
   },
 )
 
-const latency = computed(() => ping.hasData.value && !ping.stale.value
+const hasLiveData = computed(() => config.value.live && ping.hasData.value && !ping.stale.value)
+const metricSourceLabel = computed(() => hasLiveData.value ? '近 1 小时平均' : config.value.live ? '备用配置基线' : '配置基线')
+const latency = computed(() => hasLiveData.value
   ? (ping.hasLatencyData.value ? ping.avgLatency.value : null)
   : config.value.fallbackLatency)
-const loss = computed(() => ping.hasData.value && !ping.stale.value ? ping.avgLoss.value : config.value.fallbackLoss)
-const latencyText = computed(() => config.value.live && ping.hasData.value && !ping.stale.value && !ping.hasLatencyData.value
+const currentStatus = computed(() => sourceNode.value?.online === false ? 'offline' : ping.current.value.status)
+const currentLabel = computed(() => probeMode.value === 'auto' ? '等待探测' : !config.value.live ? '静态基线' : formatProbeCurrentLabel(currentStatus.value, ping.avgLoss.value > 0))
+const sampleUpdateLabel = computed(() => !config.value.live
+  ? '配置值，不代表近期采样'
+  : ping.current.value.latestAt ? `样本更新 ${formatDateTime(new Date(ping.current.value.latestAt), 'HH:mm:ss')}` : '无近期原始样本')
+const failureLabel = computed(() => probeFailureRateLabel(ping.probeType.value))
+const loss = computed(() => hasLiveData.value ? ping.avgLoss.value : config.value.fallbackLoss)
+const latencyText = computed(() => hasLiveData.value && !ping.hasLatencyData.value
   ? '无响应'
   : formatTopologyLatency(latency.value))
 const sourceState = computed(() => {
@@ -67,15 +76,15 @@ const sourceState = computed(() => {
     return { label: '实时数据可能不是最新，继续显示最后数据', line: 'bg-amber-400/55' }
   if (!ping.hasData.value)
     return { label: '暂无匹配的实时数据，当前显示备用基线', line: 'bg-amber-400/55' }
-  // 有采样但一次都没成功：探测确实打不通，不是没数据，两者要能分辨。
+  // 这里描述历史窗口；当前连通性只能由原始样本单独判断。
   if (!ping.hasLatencyData.value)
-    return { label: '探测任务没有任何成功响应', line: 'bg-rose-400/55' }
+    return { label: '近 1 小时没有成功响应', line: 'bg-rose-400/55' }
   return { label: '实时 Ping 数据', line: 'bg-slate-400/70 dark:bg-slate-600/70' }
 })
 const lossTone = computed(() => {
   if (loss.value === null || loss.value <= 1)
     return 'text-slate-600 dark:text-slate-300'
-  if (loss.value <= 3)
+  if (loss.value <= 3 || currentStatus.value === 'healthy')
     return 'text-amber-700 dark:text-amber-300'
   return 'text-rose-600 dark:text-rose-400'
 })
@@ -105,7 +114,7 @@ const telemetry = computed<TopologySegmentTelemetry>(() => ({
   latency: latency.value,
   loss: loss.value,
   volatility: ping.hasData.value && !ping.stale.value ? ping.avgVolatility.value : null,
-  hasLiveData: config.value.live && ping.hasData.value && !ping.stale.value,
+  hasLiveData: hasLiveData.value,
   stale: ping.stale.value,
 }))
 
@@ -125,7 +134,7 @@ const sampleBars = computed<TelemetrySample[]>(() => {
   return points.map((point, index) => {
     const tone = resolveTopologySampleTone(point.latency, point.loss, baseline)
     const latencyText = point.latency === null ? '无响应' : formatTopologyLatency(point.latency)
-    const lossText = `丢包 ${formatTopologyLoss(point.loss)}`
+    const lossText = `${failureLabel.value} ${formatTopologyLoss(point.loss)}`
     return {
       key: `${props.segmentIndex}-${points.length - 1 - index}`,
       height: sampleHeight(point.latency, baseline),
@@ -143,38 +152,39 @@ const sampleBars = computed<TelemetrySample[]>(() => {
 <template>
   <div
     v-if="!observeOnly"
-    class="relative flex h-10 flex-1 items-center"
+    class="relative flex flex-1 flex-col gap-1 py-2 text-center"
     :class="mobile ? 'min-w-0' : 'min-w-[150px]'"
     :data-topology-edge-samples="sampleBars.length ? '' : undefined"
     :title="`${sourceState.label}${config.live ? ` · ${config.taskFilter || '未指定任务'}` : ''}`"
-    :aria-label="`${sourceState.label}：${latencyText}，丢包 ${formatTopologyLoss(loss)}`"
+    :aria-label="`${sourceState.label}，当前：${currentLabel}，${metricSourceLabel}：${latencyText}，${failureLabel} ${formatTopologyLoss(loss)}`"
   >
+    <span
+      :data-topology-current="config.live ? currentStatus : 'static'"
+      class="min-w-0 break-words text-[11px] font-medium leading-4"
+      :class="config.live ? probeCurrentTone(currentStatus) : 'text-slate-600 dark:text-slate-300'"
+      :title="`当前：${currentLabel}；样本更新：${ping.current.value.latestAt ? formatDateTime(new Date(ping.current.value.latestAt)) : '未知'}；最近成功：${ping.current.value.lastSuccessAt ? formatDateTime(new Date(ping.current.value.lastSuccessAt)) : '窗口内无成功'}`"
+    >{{ currentLabel }}</span>
     <TopologyEdgeSamples
       :bars="sampleBars"
       :line-class="sourceState.line"
       :label="telemetryLabel"
     />
+    <span data-topology-sample-updated class="min-w-0 break-words text-[10px] leading-4 text-slate-600 dark:text-slate-300">{{ sampleUpdateLabel }}</span>
     <button
       type="button"
       data-topology-current-metric
-      class="absolute left-1/2 top-0 z-2 -translate-x-1/2 whitespace-nowrap rounded px-1 text-[10px] font-medium tabular-nums text-slate-500 transition-colors hover:text-slate-900 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500/60 dark:text-slate-400 dark:hover:text-slate-100 dark:focus-visible:ring-emerald-400/60 sm:text-[11px]"
-      :aria-label="`${telemetryLabel}，线路状态：${sourceState.label}，${latencyText}，丢包 ${formatTopologyLoss(loss)}，查看线路历史`"
+      :data-topology-history-source="hasLiveData ? 'history' : config.live ? 'fallback' : 'configured'"
+      class="transit-divider flex min-w-0 flex-wrap items-center justify-center gap-x-2 gap-y-0.5 rounded border-t px-1 pt-1 text-[11px] leading-4 tabular-nums text-slate-600 transition-colors hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-500 dark:text-slate-300 dark:hover:text-slate-100"
+      :aria-label="`${telemetryLabel}，当前：${currentLabel}，${metricSourceLabel} ${latencyText}，${failureLabel} ${formatTopologyLoss(loss)}，查看线路历史`"
       @click="emit('openDetail')"
     >
-      <span
-        v-if="probeMode !== 'live'"
-        data-topology-probe-mode-label
-        :data-probe-mode="probeMode"
-        class="mr-1 rounded border px-1 py-px text-[8px] font-semibold tracking-wide"
-        :class="probeMode === 'auto'
-          ? 'border-amber-400/35 bg-amber-400/10 text-amber-700 dark:border-amber-400/30 dark:bg-amber-400/10 dark:text-amber-300'
-          : 'border-slate-400/30 bg-slate-400/10 text-slate-500 dark:border-slate-500/35 dark:bg-slate-500/10 dark:text-slate-400'"
-      >
-        {{ probeMode === 'auto' ? '待探测' : '静态' }}
+      <span class="w-full text-[10px]">
+        <span v-if="hasLiveData">近 1 小时</span>
+        <span v-else-if="config.live">备用基线</span>
+        <span v-else data-topology-probe-mode-label :data-probe-mode="probeMode">{{ probeMode === 'auto' ? '待探测' : '静态' }}</span>
       </span>
-      {{ latencyText }}
-      <span class="mx-0.5 text-slate-400 dark:text-slate-600">/</span>
-      <span :class="lossTone">{{ formatTopologyLoss(loss) }}</span>
+      <span class="min-w-0 break-words">{{ hasLiveData ? '均值' : '基线' }} <strong class="font-medium text-slate-800 dark:text-slate-200">{{ latencyText }}</strong></span>
+      <span class="min-w-0 break-words">{{ failureLabel }} <strong class="font-medium" :class="lossTone">{{ formatTopologyLoss(loss) }}</strong></span>
     </button>
   </div>
   <span v-else data-topology-telemetry-observer class="hidden" aria-hidden="true" />

@@ -74,7 +74,7 @@ describe('Transit Route Probe companion protocol', () => {
     expect(() => value.submit(CLIENT_B, { job_id: job.id, error: 'probe-failed' })).toThrow('another client')
 
     const tag = `transit-route:ct=4809.4134,cu=9929,cm=58807@${Math.floor(NOW / 1000)}`
-    expect(value.submit(CLIENT_A, { job_id: job.id, tag })).toEqual({ status: 'completed' })
+    expect(value.submit(CLIENT_A, { job_id: job.id, tag })).toEqual({ status: 'completed', changed: true })
     expect(value.status(batch.batch_id).jobs[0]).toMatchObject({ status: 'completed', tag })
   })
 
@@ -84,8 +84,8 @@ describe('Transit Route Probe companion protocol', () => {
     const first = value.poll(CLIENT_A)!
     advance(JOB_LEASE_MS + 1)
     expect(value.poll(CLIENT_A)).toEqual(first)
-    expect(value.submit(CLIENT_A, { job_id: first.id, error: 'no-traceroute' })).toEqual({ status: 'failed' })
-    expect(value.submit(CLIENT_A, { job_id: first.id, error: 'no-traceroute' })).toEqual({ status: 'failed' })
+    expect(value.submit(CLIENT_A, { job_id: first.id, error: 'no-traceroute' })).toEqual({ status: 'failed', changed: true })
+    expect(value.submit(CLIENT_A, { job_id: first.id, error: 'no-traceroute' })).toEqual({ status: 'failed', changed: false })
   })
 
   test('拒绝任意错误文本和伪造、过期或空路线标签', () => {
@@ -116,8 +116,8 @@ describe('Transit Route Probe companion protocol', () => {
     const { value, advance } = coordinator()
     expect(value.roster([CLIENT_A, CLIENT_B])).toEqual({
       clients: [
-        { client: CLIENT_A, helper_seen_at: null, helper_version: null, last_job_at: null, last_success_at: null, last_error: null, last_duration_ms: null },
-        { client: CLIENT_B, helper_seen_at: null, helper_version: null, last_job_at: null, last_success_at: null, last_error: null, last_duration_ms: null },
+        { client: CLIENT_A, helper_seen_at: null, active_job_until: null, helper_version: null, last_job_at: null, last_success_at: null, last_error: null, last_duration_ms: null },
+        { client: CLIENT_B, helper_seen_at: null, active_job_until: null, helper_version: null, last_job_at: null, last_success_at: null, last_error: null, last_duration_ms: null },
       ],
     })
 
@@ -126,8 +126,8 @@ describe('Transit Route Probe companion protocol', () => {
     advance(1000)
     expect(value.roster([CLIENT_A, CLIENT_B])).toEqual({
       clients: [
-        { client: CLIENT_A, helper_seen_at: NOW, helper_version: null, last_job_at: null, last_success_at: null, last_error: null, last_duration_ms: null },
-        { client: CLIENT_B, helper_seen_at: null, helper_version: null, last_job_at: null, last_success_at: null, last_error: null, last_duration_ms: null },
+        { client: CLIENT_A, helper_seen_at: NOW, active_job_until: null, helper_version: null, last_job_at: null, last_success_at: null, last_error: null, last_duration_ms: null },
+        { client: CLIENT_B, helper_seen_at: null, active_job_until: null, helper_version: null, last_job_at: null, last_success_at: null, last_error: null, last_duration_ms: null },
       ],
     })
 

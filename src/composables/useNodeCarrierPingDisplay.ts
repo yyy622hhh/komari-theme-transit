@@ -1,10 +1,13 @@
 import type { MaybeRefOrGetter } from 'vue'
 import type { ChinaCarrierKey, NodePingHistoryPoint } from '@/composables/useNodePingStats'
 import type { TelemetrySample, TelemetrySampleTone } from '@/types/telemetry'
-import { computed } from 'vue'
+import type { ProbeCurrentStatus } from '@/utils/pingCurrentState'
+import { computed, toValue } from 'vue'
 import { useNodeCarrierPingStats } from '@/composables/useNodePingStats'
 import { useAppStore } from '@/stores/app'
+import { useNodesStore } from '@/stores/nodes'
 import { formatDateTime } from '@/utils/helper'
+import { formatProbeCurrentCompactLabel, formatProbeCurrentLabel, probeFailureRateLabel } from '@/utils/pingCurrentState'
 import { formatPingFreshnessAge } from '@/utils/pingFreshness'
 
 export type CarrierPingBar = TelemetrySample
@@ -26,6 +29,10 @@ export interface CarrierPingDisplay {
   lossTooltip: string
   delayed: boolean
   stale: boolean
+  currentLabel: string
+  currentCompactLabel: string
+  currentStatus: ProbeCurrentStatus
+  probeType: string
 }
 
 const EMPTY_PING_BAR_COUNT = 20
@@ -71,6 +78,7 @@ function buildHistoryBars(
   carrierKey: ChinaCarrierKey,
   history: NodePingHistoryPoint[],
   metric: 'latency' | 'loss',
+  probeType: string,
 ): CarrierPingBar[] {
   return history.map((point, index) => {
     const value = point[metric]
@@ -80,7 +88,7 @@ function buildHistoryBars(
         ? getLatencyTone(value)
         : getLossTone(value)
     const latencyText = point.latency === null ? '无响应' : `${Math.round(point.latency)} ms`
-    const lossText = `丢包 ${formatLoss(point.loss)}`
+    const lossText = `${probeFailureRateLabel(probeType)} ${formatLoss(point.loss)}`
 
     return {
       key: `${carrierKey}-${metric}-${history.length - 1 - index}`,
@@ -107,6 +115,7 @@ function buildEmptyBars(carrierLabel: string, carrierKey: ChinaCarrierKey, metri
 
 export function useNodeCarrierPingDisplay(uuid: MaybeRefOrGetter<string>) {
   const appStore = useAppStore()
+  const nodesStore = useNodesStore()
 
   const carrierRegionConfig = computed(() => {
     const fallback = { filter: '北京', labelZh: '北京三网', labelEn: 'Beijing carriers' }
@@ -143,6 +152,8 @@ export function useNodeCarrierPingDisplay(uuid: MaybeRefOrGetter<string>) {
   })
 
   const carrierDisplays = computed<CarrierPingDisplay[]>(() => carrierStats.carriers.value.map((carrier) => {
+    const currentStatus = nodesStore.nodesByUuid.get(toValue(uuid))?.online === false ? 'offline' : carrier.current.status
+    const currentLabel = formatProbeCurrentLabel(currentStatus, carrier.stats.commonModeLossEvents > 0 || carrier.stats.avgLoss > 0)
     const label = appStore.lang === 'zh-CN' ? carrier.labelZh : carrier.labelEn
     const taskHint = carrier.taskNames.length
       ? carrier.taskNames.join(' / ')
@@ -159,10 +170,10 @@ export function useNodeCarrierPingDisplay(uuid: MaybeRefOrGetter<string>) {
             : taskHint
 
     const baseLatencyBars = carrier.stats.history.length
-      ? buildHistoryBars(label, carrier.key, carrier.stats.history, 'latency')
+      ? buildHistoryBars(label, carrier.key, carrier.stats.history, 'latency', carrier.probeType)
       : buildEmptyBars(label, carrier.key, 'latency', emptyReason)
     const baseLossBars = carrier.stats.history.length
-      ? buildHistoryBars(label, carrier.key, carrier.stats.history, 'loss')
+      ? buildHistoryBars(label, carrier.key, carrier.stats.history, 'loss', carrier.probeType)
       : buildEmptyBars(label, carrier.key, 'loss', emptyReason)
     const markStale = (bar: CarrierPingBar): CarrierPingBar => ({
       ...bar,
@@ -189,17 +200,17 @@ export function useNodeCarrierPingDisplay(uuid: MaybeRefOrGetter<string>) {
           ? (appStore.lang === 'zh-CN' ? '加载中' : 'Loading')
           : '-'
     const volatilityDisplay = carrier.hasLatency
-      ? `±${carrier.stats.avgVolatility.toFixed(1)} ms`
+      ? `${carrier.stats.avgVolatility.toFixed(2)}×`
       : '-'
 
     const latencyTooltip = carrier.hasLatency
       ? `${taskHint}\n${appStore.lang === 'zh-CN' ? '平均延迟' : 'Average latency'} ${Math.round(carrier.stats.avgLatency)} ms`
       : taskHint
     const volatility = carrier.stats.avgVolatility > 0
-      ? `，${appStore.lang === 'zh-CN' ? '平均抖动' : 'average jitter'} ${carrier.stats.avgVolatility.toFixed(1)} ms`
+      ? `，${appStore.lang === 'zh-CN' ? '波动 P99/P50' : 'variability P99/P50'} ${carrier.stats.avgVolatility.toFixed(2)}×`
       : ''
     const lossTooltip = carrier.stats.hasData
-      ? `${taskHint}\n${appStore.lang === 'zh-CN' ? '平均丢包' : 'Average loss'} ${carrier.stats.avgLoss.toFixed(1)}%${volatility}${carrier.stats.commonModeLossEvents > 0
+      ? `${taskHint}\n${appStore.lang === 'zh-CN' ? (carrier.probeType === 'icmp' ? '近 1 小时 ICMP 丢包率' : '近 1 小时探测失败率') : 'Last hour probe failure rate'} ${carrier.stats.avgLoss.toFixed(1)}%${volatility}${carrier.stats.commonModeLossEvents > 0
         ? appStore.lang === 'zh-CN'
           ? `，其中 ${carrier.stats.commonModeLossEvents} 次为多节点同步目标异常，未计入节点告警`
           : `; ${carrier.stats.commonModeLossEvents} synchronized target failure(s) excluded from node alerts`
@@ -219,9 +230,13 @@ export function useNodeCarrierPingDisplay(uuid: MaybeRefOrGetter<string>) {
       latencyBars,
       lossBars,
       latencyTooltip,
-      lossTooltip,
+      lossTooltip: `${lossTooltip}\n当前：${currentLabel}；样本更新：${carrier.current.latestAt ? formatDateTime(new Date(carrier.current.latestAt)) : '未知'}；最近成功：${carrier.current.lastSuccessAt ? formatDateTime(new Date(carrier.current.lastSuccessAt)) : '窗口内无成功'}`,
       delayed: carrier.delayed,
       stale: carrier.stale,
+      currentStatus,
+      currentLabel,
+      currentCompactLabel: formatProbeCurrentCompactLabel(currentStatus, carrier.stats.commonModeLossEvents > 0 || carrier.stats.avgLoss > 0),
+      probeType: carrier.probeType,
     }
   }))
 
@@ -243,8 +258,8 @@ export function useNodeCarrierPingDisplay(uuid: MaybeRefOrGetter<string>) {
       return `${carrierScopeLabel.value} · ${freshnessAge.value}`
     if (commonModeLossEvents.value > 0) {
       return appStore.lang === 'zh-CN'
-        ? `${carrierScopeLabel.value} · 目标异常`
-        : `${carrierScopeLabel.value} · target issue`
+        ? `${carrierScopeLabel.value} · 近 1 小时曾异常`
+        : `${carrierScopeLabel.value} · past-hour incident`
     }
     return carrierScopeLabel.value
   })
@@ -253,7 +268,7 @@ export function useNodeCarrierPingDisplay(uuid: MaybeRefOrGetter<string>) {
       if (!commonModeLossEvents.value)
         return ''
       return appStore.lang === 'zh-CN'
-        ? `检测到 ${commonModeLossEvents.value} 次多节点同步失败，更可能是公共探测目标异常；原始丢包保留，但不计入逐节点告警。`
+        ? `近 1 小时检测到 ${commonModeLossEvents.value} 次多节点同步失败事件；历史失败率保留，不代表当前仍异常，也不计入逐节点告警。`
         : `${commonModeLossEvents.value} synchronized multi-node failure(s) look like a shared target issue. Raw loss is retained but excluded from per-node alerts.`
     }
     return appStore.lang === 'zh-CN'

@@ -41,12 +41,42 @@ function populatedStats() {
     hasData: true,
     hasLatencyData: true,
     sampleCount: 1,
+    latencySampleCount: 1,
     avgLatency: 42,
     history: [{ time: '2026-08-20T00:00:00.000Z', latency: 42, loss: 0 }],
   }
 }
 
 describe('node Ping stats cache freshness', () => {
+  test('Guangzhou and Guangdong normalized-exact aliases share the same cache', async () => {
+    writeStatsCache('alias-node', 1, 240, populatedStats(), Date.now(), '广州-电信', 'normalized-exact')
+    await Promise.resolve()
+    expect(readStatsCache('alias-node', 1, 240, '广东电信', 'normalized-exact')?.stats.avgLatency).toBe(42)
+    expect(readStatsCache('alias-node', 1, 240, '广东电信', 'exact')).toBeNull()
+  })
+  test('a quota failure in the deferred index write is contained and later writes recover', () => {
+    const originalQueue = globalThis.queueMicrotask
+    const setItem = storage.setItem
+    let flush!: () => void
+    try {
+      globalThis.queueMicrotask = (callback) => {
+        flush = callback
+      }
+      writeStatsCache('quota-node', 1, 240, populatedStats(), Date.now())
+      storage.setItem = () => {
+        throw new DOMException('Quota exceeded', 'QuotaExceededError')
+      }
+      expect(() => flush()).not.toThrow()
+      storage.setItem = setItem
+      writeStatsCache('recovered-node', 1, 240, populatedStats(), Date.now())
+      expect(() => flush()).not.toThrow()
+      expect(readStatsCache('recovered-node', 1, 240)?.stats.avgLatency).toBe(42)
+    }
+    finally {
+      globalThis.queueMicrotask = originalQueue
+      storage.setItem = setItem
+    }
+  })
   test('preserves the real sample time when the same data is written again', async () => {
     const sampleUpdatedAt = Date.now() - 12 * 60_000
     const stats = populatedStats()

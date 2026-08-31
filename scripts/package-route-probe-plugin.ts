@@ -27,6 +27,8 @@ await new Promise<void>((resolveArchive, reject) => {
   archive.file(resolve(source, 'komari-plugin.json'), { name: 'komari-plugin.json' })
   archive.file(resolve(source, 'script.js'), { name: 'script.js' })
   archive.file(resolve(source, 'protocol.cjs'), { name: 'protocol.cjs' })
+  archive.file(resolve(source, 'storage.cjs'), { name: 'storage.cjs' })
+  archive.file(resolve(source, 'request-limits.cjs'), { name: 'request-limits.cjs' })
   void archive.finalize()
 })
 

@@ -71,6 +71,7 @@ const publicPingTasksCache = new SharedCache<PingTaskInfo[]>({
   ttl: CACHE_CONFIG.publicPingTasks.ttl,
   cleanupInterval: CACHE_CONFIG.cleanup.interval,
 })
+let publicPingTasksGeneration = 0
 
 export function getMetricDefinitionsRequestKey(): string {
   return 'metrics:definitions'
@@ -171,15 +172,20 @@ export async function loadPublicPingTasks(): Promise<PingTaskInfo[]> {
   if (cached)
     return cached
 
+  const generation = publicPingTasksGeneration
   const tasks = await requestManager.run(
-    key,
+    `${key}:${generation}`,
     async signal => getSharedRpc().getPublicPingTasks(signal),
     { shouldRetry: shouldRetryMetricRequest },
   )
+  // Neither return nor re-cache a pre-mutation snapshot, even if it arrives last.
+  if (generation !== publicPingTasksGeneration)
+    return loadPublicPingTasks()
   return publicPingTasksCache.set(key, tasks)
 }
 
 export function invalidatePublicPingTasksCache(): void {
+  publicPingTasksGeneration += 1
   publicPingTasksCache.clear()
 }
 

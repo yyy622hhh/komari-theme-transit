@@ -179,11 +179,16 @@ export async function createAdminPingTask(
   throwIfAborted(signal)
   const before = await fetchAdminPingTasks(signal, `${options.requestKey ?? 'admin:ping:create'}:before`)
   const previousIds = new Set(before.map(task => task.id).filter((id): id is number => Number.isInteger(id)))
-  const findCreated = (tasks: readonly AdminPingTask[]): AdminPingTask | undefined => tasks
-    .filter(task => task.name.trim() === mutation.name.trim())
-    .filter(task => task.type === mutation.type && task.target === mutation.target)
-    .filter(task => Number.isInteger(task.id) && !previousIds.has(task.id!))
-    .sort((left, right) => (right.id ?? 0) - (left.id ?? 0))[0]
+  const findCreated = (tasks: readonly AdminPingTask[]): AdminPingTask | undefined => {
+    const matches = tasks
+      .filter(task => task.name === mutation.name && task.type === mutation.type && task.target === mutation.target)
+      .filter(task => task.interval === mutation.interval && Boolean(task.default_on) === Boolean(mutation.default_on))
+      .filter(task => JSON.stringify([...task.clients].sort()) === JSON.stringify([...mutation.clients].sort()))
+      .filter(task => Number.isInteger(task.id) && !previousIds.has(task.id!))
+    if (matches.length > 1)
+      throw new Error(`新任务归属不明确，请人工回查任务 ID：${matches.map(task => task.id).join('、')}。`)
+    return matches[0]
+  }
   try {
     await requestManager.run(
       `${options.requestKey ?? 'admin:ping:create'}:add`,
@@ -200,8 +205,11 @@ export async function createAdminPingTask(
       return reconciled
     throw error
   }
-  invalidatePublicPingTasksCache()
-  invalidateAdminPingTasksCache()
+  finally {
+    // A lost response may still have committed, including ambiguous reconciliation.
+    invalidatePublicPingTasksCache()
+    invalidateAdminPingTasksCache()
+  }
   const after = await fetchAdminPingTasks(undefined, `${options.requestKey ?? 'admin:ping:create'}:after`)
   const created = findCreated(after)
   if (!created)
@@ -380,8 +388,11 @@ async function adoptExistingEntryTask(
     try {
       const refreshed = await fetchAdminPingTasks(undefined, `admin:ping:list:entry:${requestKey}:after-edit-error`)
       const committed = refreshed.find(task => task.id === template.id && isPingTaskAssignedToSource(task, source.uuid))
-      if (committed)
+      if (committed) {
+        invalidatePublicPingTasksCache()
+        invalidateAdminPingTasksCache()
         return committed
+      }
     }
     catch (reconcileError) {
       if (isRpcPermissionError(reconcileError))

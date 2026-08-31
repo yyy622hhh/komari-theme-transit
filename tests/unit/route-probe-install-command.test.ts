@@ -8,9 +8,9 @@ describe('route probe helper install command', () => {
     expect(command).not.toContain('/v1.3.11/collect-return-route.sh')
   })
 
-  test('quotes the endpoint and adds --allow-insecure-http for HTTP origins', () => {
+  test('does not generate an insecure command for HTTP origins', () => {
     const command = buildRouteProbeInstallCommand('http://192.168.1.10:25774', 'v1.3.6')
-    expect(command).toContain(`install --endpoint 'http://192.168.1.10:25774' --allow-insecure-http`)
+    expect(command).toBe('')
   })
 
   test('quotes IPv6 origins so bash does not treat [::1] as a glob', () => {

@@ -238,12 +238,20 @@ bun run build:route-probe
 
 插件要求 Komari `>=1.4.0`，声明 `node`、`allowRoutes` 以及请求体大小、超时限制；不会申请系统 RPC、子进程执行、端口监听、HTML 注入、全盘文件或请求钩子权限。
 
-然后在每台节点下载**同一 GitHub Release** 的两个脚本并安装。安装器会交互式读取该节点现有的 Komari Agent token，输入不会进入 shell 历史；下面的 `<版本>` 应替换为正在使用的发布标签（例如 `v1.3.12`），不要长期跟随会变化的 `main`：
+然后在每台节点下载**同一 GitHub Release** 的两个脚本并安装。推荐使用 HTTPS 面板设置向导生成命令。下面的 `v1.4.1` 应替换为实际已发布且与插件一致的标签，不要长期跟随会变化的 `main`。下载在独占私有目录中进行，任一失败即中止，不会执行当前目录的同名旧文件；安装器交互式读取 Agent token，输入不会进入 shell 历史：
 
 ```bash
-curl -fsSLO https://github.com/yyy622hhh/komari-theme-transit/releases/download/<版本>/transit-route-probe-helper.sh
-curl -fsSL https://github.com/yyy622hhh/komari-theme-transit/releases/download/<版本>/transit-collect-return-route.sh -o collect-return-route.sh
-sudo bash transit-route-probe-helper.sh install --endpoint https://status.example.com
+(
+  set -eu
+  umask 077
+  transit_release=v1.4.1
+  transit_install_dir=$(mktemp -d /tmp/transit-route-probe-install.XXXXXX) || exit 1
+  trap 'transit_install_status=$?; rm -f -- "$transit_install_dir/transit-route-probe-helper.sh" "$transit_install_dir/collect-return-route.sh"; rmdir -- "$transit_install_dir"; exit "$transit_install_status"' EXIT
+  cd "$transit_install_dir" || exit 1
+  curl -q --proto '=https' --proto-redir '=https' -fsSL "https://github.com/yyy622hhh/komari-theme-transit/releases/download/$transit_release/transit-route-probe-helper.sh" -o transit-route-probe-helper.sh || exit 1
+  curl -q --proto '=https' --proto-redir '=https' -fsSL "https://github.com/yyy622hhh/komari-theme-transit/releases/download/$transit_release/transit-collect-return-route.sh" -o collect-return-route.sh || exit 1
+  sudo bash "$transit_install_dir/transit-route-probe-helper.sh" install --endpoint https://status.example.com
+)
 ```
 
 批量自动化可以改用只允许 root 读取的 `--token-file`。节点必须已有 `curl`、`traceroute`、`timeout` 和 systemd；安装器不会擅自安装系统软件。服务以独立的 `transit-route-probe` 用户运行，只保留 `CAP_NET_RAW`，并启用 `NoNewPrivileges`、只读系统目录、私有设备和网络地址族限制。查看状态使用 `systemctl status transit-route-probe`。
@@ -265,6 +273,8 @@ sudo bash transit-route-probe-helper.sh install --endpoint https://status.exampl
 不想用向导也可以跳过，直接在主题设置里手动开启 **启用三网回程检测**（`routeProbeEnabled`），效果完全一样。
 
 开启后，已登录管理员打开首页约 20 秒，主题会挑出「非中国大陆、在线，且没测过或结果已超过 7 天」的节点跑一轮。回程几周才变一次，这个条件天然把频率压到每台约每周一次；同一浏览器的多个标签页还共享 30 分钟冷却时间。首页工具栏另有一个「检测回程 N」按钮，刚加完机器不想等时可以手动点，N 是当前待测台数；全部节点都新鲜时按钮变成「重新检测回程 N」，手动点击会跳过 7 天新鲜度、强制重新测一遍在线的境外节点——这个跳过只对手动点击生效，后台自动检测永远不会绕过新鲜度。中国大陆节点到国内目标通常不经过可判定的国际骨干，这项指标也没有实际意义，因此不会进入待测数量或失败统计；香港、澳门和台湾节点仍会正常检测。
+
+安装命令只在 HTTPS 面板提供，不会自动允许远端明文 HTTP。升级时**先升级插件，再升级助手**：新助手只用 JSON POST 请求体传凭据；遇到不支持 POST 轮询的旧插件会提示升级，不会回退 URL token。新插件仍接受旧助手，但旧助手的 URL 凭据日志风险只有升级节点后才消除。代理/CDN/APM 应隐藏凭据查询参数及请求体，同时保留路径、状态码等访问审计；历史日志中的 token 若曾暴露，应由管理员另行轮换。详见[插件安全与升级说明](companion/transit-route-probe/README.md#credential-transport-and-upgrade-order)。
 
 关于节点助手的安全边界，有几点是明确设计过的：
 
@@ -289,8 +299,12 @@ sudo bash transit-route-probe-helper.sh install --endpoint https://status.exampl
 
 ```bash
 sudo ./collect-return-route.sh --push \
-  --url https://status.example.com --uuid <节点UUID> --key <Komari API Key>
+  --url https://status.example.com --uuid <节点UUID>
 ```
+
+脚本会从终端**隐藏输入**管理员 API Key。无人值守运行改用 `--key-file /root/.config/transit/api-key`，文件内容仅为一行密钥，可带末尾换行；文件必须由脚本运行用户所有，权限为 `0400` 或 `0600`，不能是符号链接。以上 `sudo` 示例需要 root 所有的密钥文件。请通过安全编辑器或凭据管理工具创建文件，不要把密钥写进 shell 命令、历史或 cron 配置；父目录也应只允许该用户访问。
+
+手动写回只接受最终 **HTTPS 源地址**（例如 `https://status.example.com:443`），校验证书且不跟随任何重定向；不接受 URL 凭据、子路径、查询参数或明文 HTTP。`--key` 和 `KOMARI_API_KEY` 已禁用，旧 cron 需改为 `--key-file`，否则会停止执行。原来仅打印标签或由伴生助手调用的采集方式不变。若旧密钥曾经通过明文 HTTP、命令行或日志暴露，应由管理员轮换；长期优先使用伴生助手，避免把面板管理员密钥放在节点上。
 
 ### 存放格式
 

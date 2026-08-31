@@ -18,6 +18,8 @@ export interface NodePingStatsState {
   p95Latency: number | null
   availability: number | null
   sampleCount: number
+  /** Successful samples contributing latency, excluding timeouts. */
+  latencySampleCount: number
   history: NodePingHistoryPoint[]
   hasData: boolean
   hasLatencyData: boolean
@@ -51,6 +53,7 @@ export function createEmptyNodePingStats(): NodePingStatsState {
     p95Latency: null,
     availability: null,
     sampleCount: 0,
+    latencySampleCount: 0,
     history: [],
     hasData: false,
     hasLatencyData: false,
@@ -284,6 +287,7 @@ export function buildNodePingStats(
       p95Latency: getPercentile(recordLatencies, 0.95) ?? (p99Values.length ? weightedAverage(p99Values) : null),
       availability: availabilityFromLoss(avgLoss, sampleCount > 0),
       sampleCount,
+      latencySampleCount: statsWithSamples.reduce((sum, stat) => sum + (stat.valid > 0 && (isFiniteNumber(stat.avg) || isFiniteNumber(stat.latest)) ? stat.valid : 0), 0),
       history,
       hasData: true,
       hasLatencyData: latencyValues.length > 0 || latestLatencyValues.length > 0,
@@ -355,6 +359,7 @@ export function buildNodePingStats(
     p95Latency: getPercentile(validLatencyValues, 0.95),
     availability: availabilityFromLoss(avgLoss, filteredRecords.length > 0),
     sampleCount: filteredRecords.length,
+    latencySampleCount: validLatencyValues.length,
     history,
     hasData,
     hasLatencyData: validLatencyValues.length > 0,

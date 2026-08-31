@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import VChart from 'vue-echarts'
 import { CardX } from '@/components/ui/card-x'
+import { escapeTooltipHtml, safeTooltipColor } from '@/utils/chartTooltip'
 import { formatBytes } from '@/utils/helper'
 import MetricChartHeader from './MetricChartHeader.vue'
 import '@/utils/echarts'
@@ -85,9 +86,9 @@ const chartOption = computed(() => ({
       const rows = items.map((item) => {
         const source = props.series[item.seriesIndex]
         const kind = source?.kind ?? primaryKind.value
-        return `<div style="display:flex;align-items:center;gap:8px"><span style="width:8px;height:8px;border-radius:2px;background:${item.color};flex:none"></span><span>${item.seriesName}</span><strong style="margin-left:auto;padding-left:12px">${formatMetricValue(item.data?.[1], kind)}</strong></div>`
+        return `<div style="display:flex;align-items:center;gap:8px"><span style="width:8px;height:8px;border-radius:2px;background:${safeTooltipColor(item.color)};flex:none"></span><span>${escapeTooltipHtml(item.seriesName)}</span><strong style="margin-left:auto;padding-left:12px">${formatMetricValue(item.data?.[1], kind)}</strong></div>`
       }).join('')
-      return `<div style="margin-bottom:6px;color:var(--color-muted-foreground)">${items[0]?.axisValueLabel ?? ''}</div><div style="display:flex;flex-direction:column;gap:4px">${rows}</div>`
+      return `<div style="margin-bottom:6px;color:var(--color-muted-foreground)">${escapeTooltipHtml(items[0]?.axisValueLabel)}</div><div style="display:flex;flex-direction:column;gap:4px">${rows}</div>`
     },
   },
   legend: {

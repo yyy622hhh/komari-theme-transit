@@ -60,6 +60,8 @@ bun run test:functional
 
 `test:functional` 会在 Chromium、Firefox、WebKit 与移动 WebKit 上验证公开浏览、详情跳转、后台入口契约和排序持久化。
 
+视觉预览使用本机 4173 端口，功能测试使用 4174 端口与独立的 `dist-functional/`，避免并行运行时误用不含故障注入组件的生产预览。
+
 无障碍相关改动也可先单独运行：
 
 ```bash

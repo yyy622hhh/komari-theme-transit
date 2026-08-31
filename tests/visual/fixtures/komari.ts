@@ -96,6 +96,10 @@ export interface VisualFixtureOptions {
   quickTopologyMutationDelayMs?: number
   /** 让健康中心迁移时删除旧任务失败，验证补偿会保留旧任务。 */
   carrierMigrationDeleteFailure?: boolean
+  carrierRawSamples?: boolean
+  carrierRecentOutcome?: 'healthy' | 'failed' | 'stale' | 'insufficient'
+  preserveOperationJournal?: boolean
+  routeProbeStorageDegraded?: boolean
   quickTopologyNoTasks?: boolean
   quickTopologyNoAddress?: boolean
   /**
@@ -329,6 +333,36 @@ function buildMetricResponse(
   const entityIds = Array.isArray(payload.entity_ids)
     ? payload.entity_ids.map(String)
     : [typeof payload.entity_id === 'string' ? payload.entity_id : uuidFor(0)]
+  if (options.carrierRecentOutcome && payload.downsample === false) {
+    const outcome = options.carrierRecentOutcome
+    const series = entityIds.flatMap(entity_id => pingTasks.flatMap(task => requested.map(metric_key => ({
+      entity_id,
+      metric_key,
+      downsampled: false,
+      tags: { task_id: String(task.id) },
+      points: outcome === 'insufficient'
+        ? []
+        : Array.from({ length: 3 }, (_, index) => ({
+            time: new Date(Date.parse(FIXED_NOW) - (outcome === 'stale' ? 300_000 : 1000) - (2 - index) * 60_000).toISOString(),
+            value: metric_key === 'ping.loss' ? (outcome === 'failed' ? 1 : 0) : outcome === 'failed' ? -1 : 50,
+            count: 1,
+          })),
+    }))))
+    return { start: payload.start, end: FIXED_NOW, series, count: series.length }
+  }
+  if (options.carrierRawSamples && payload.downsample === false) {
+    const start = Date.parse(String(payload.start))
+    const end = Date.parse(FIXED_NOW)
+    const series = entityIds.flatMap(entity_id => pingTasks.flatMap(task => requested.map(metric_key => ({
+      entity_id,
+      metric_key,
+      type: 'gauge',
+      downsampled: false,
+      tags: { task_id: String(task.id), task_name: task.name },
+      points: Array.from({ length: 5 }, (_, index) => ({ time: new Date(Math.max(start, end - 120_000) + index).toISOString(), value: metric_key === 'ping.loss' ? 0 : 15, count: 1 })),
+    }))))
+    return { start: payload.start, end: FIXED_NOW, series, count: series.length }
+  }
   const insightHours = Number(payload.hours)
   const detailedInsightWindow = options.opsTopologyInsights
     && Number(payload.max_points) === 240
@@ -365,7 +399,7 @@ function buildMetricResponse(
                 ? 0
                 : key === 'ping.loss'
                   ? options.carrierCommonModeLoss
-                    ? task?.id === 11 && point.index >= pointCount - 2 ? 1 : 0
+                    ? task?.id === 11 && (options.carrierRecentOutcome ? point.index === 10 || point.index === 20 : point.index >= pointCount - 2) ? 1 : 0
                     : options.opsTopologyInsights ? 0 : metricValue(key, point.index)
                   : options.opsTopologyInsights && detailedInsightWindow
                     ? (insightHours === 168 && point.index >= 120 ? 150 : 80) + (task?.id ?? 0) + eveningPenalty
@@ -596,7 +630,7 @@ async function handleRpc(
       result = METRIC_KEYS.map(name => ({ name, description: name, type: 'gauge', retention_days: 30 }))
       break
     case 'public:queryMetrics':
-      result = buildMetricResponse(payload.params ?? {}, options, pingTasks)
+      result = buildMetricResponse(payload.params ?? {}, options, options.carrierRawSamples ? adminPingTasks as Array<{ id: number, name: string }> : pingTasks)
       break
     case 'public:getPingMetricStats':
       result = options.topologyProbeStats
@@ -630,9 +664,9 @@ async function handleRpc(
                 name: task.name,
                 interval: task.interval,
                 tags: { task_id: String(task.id), task_name: task.name },
-                total: 48,
-                valid: task.id === 11 ? 46 : 48,
-                loss: task.id === 11 ? 100 / 24 : 0,
+                total: options.carrierRecentOutcome ? 61 : 48,
+                valid: (options.carrierRecentOutcome ? 61 : 48) - (task.id === 11 ? 2 : 0),
+                loss: task.id === 11 ? 200 / (options.carrierRecentOutcome ? 61 : 48) : 0,
                 loss_approximate: false,
                 avg: 80 + task.id,
                 latest: 90 + task.id,
@@ -680,7 +714,7 @@ async function handleRpc(
       break
     case 'admin:deletePingTask': {
       const removedIds = new Set((payload.params?.id as number[] | undefined ?? []).map(Number))
-      if (options.carrierMigrationDeleteFailure && removedIds.has(13) && removedIds.has(101)) {
+      if (options.carrierMigrationDeleteFailure && removedIds.has(13)) {
         await route.fulfill({
           contentType: 'application/json',
           body: JSON.stringify(jsonRpcError(payload.id, -32000, 'visual migration cleanup failed')),
@@ -949,25 +983,28 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
     settings.topologyConfig = JSON.stringify(config)
   }
 
-  await page.addInitScript(({ fixedNow, dark, setupWizardFirstRun }) => {
+  await page.addInitScript(({ fixedNow, dark, setupWizardFirstRun, movingClock, preserveJournal }) => {
+    const journals = preserveJournal ? Object.entries(localStorage).filter(([key]) => key.startsWith('transit:carrier-operation:v1:')) : []
     localStorage.clear()
+    journals.forEach(([key, value]) => localStorage.setItem(key, value))
     sessionStorage.clear()
     localStorage.setItem('appearance', dark ? 'dark' : 'light')
     localStorage.setItem('color', 'green')
     if (!setupWizardFirstRun)
       localStorage.setItem('transit:setup-wizard-dismissed', '1')
     const NativeDate = Date
+    const reference = performance.now()
     class FixedDate extends NativeDate {
       constructor(...args: ConstructorParameters<typeof Date>) {
-        super(args.length ? args[0] : fixedNow)
+        super(args.length ? args[0] : FixedDate.now())
       }
 
       static now() {
-        return new NativeDate(fixedNow).getTime()
+        return new NativeDate(fixedNow).getTime() + (movingClock ? Math.floor(performance.now() - reference) : 0)
       }
     }
     window.Date = FixedDate as DateConstructor
-  }, { fixedNow: FIXED_NOW, dark: options.dark ?? false, setupWizardFirstRun: options.setupWizardFirstRun ?? false })
+  }, { fixedNow: FIXED_NOW, dark: options.dark ?? false, setupWizardFirstRun: options.setupWizardFirstRun ?? false, movingClock: options.carrierRawSamples ?? false, preserveJournal: options.preserveOperationJournal ?? false })
 
   await page.route('**/api/public', route => route.fulfill({
     contentType: 'application/json',
@@ -1052,7 +1089,7 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
     if (url.pathname.endsWith('/health')) {
       await route.fulfill({
         contentType: 'application/json',
-        body: JSON.stringify({ ok: true, protocol: 1, version: '1.1.4-visual' }),
+        body: JSON.stringify({ ok: true, protocol: 1, version: '1.1.4-visual', ...(options.routeProbeStorageDegraded ? { storage: { status: 'degraded', last_success_at: null, last_error: 'permission-denied', recovered_from_corrupt: false } } : {}) }),
       })
       return
     }

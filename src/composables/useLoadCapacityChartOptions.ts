@@ -5,6 +5,7 @@ import type { getLoadChartPalette } from '@/utils/chartPalette'
 import type { getLoadChartThemeColors, getLoadChartTooltipConfig } from '@/utils/loadChartTheme'
 import type { RecordFormat } from '@/utils/recordHelper'
 import { computed } from 'vue'
+import { escapeTooltipHtml, safeTooltipColor } from '@/utils/chartTooltip'
 import { formatBytes } from '@/utils/helper'
 import { LOAD_CHART_MARGIN, LOAD_CHART_MARGIN_WITH_LEGEND } from '@/utils/loadChartTheme'
 import { formatMetricTooltipTime } from '@/utils/metricRange'
@@ -68,7 +69,7 @@ export function useLoadCapacityChartOptions(context: LoadCapacityChartContext) {
         html += '<div style="display:flex;flex-direction:column;gap:4px">'
 
         for (const item of p) {
-          const colorDot = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${item.color};margin-right:8px;flex-shrink:0"></span>`
+          const colorDot = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${safeTooltipColor(item.color)};margin-right:8px;flex-shrink:0"></span>`
           if (item.seriesName === 'CPU') {
             html += `<div style="display:flex;align-items:center">${colorDot}<span>CPU</span><span style="margin-left:auto;font-weight:600;margin-left:16px">${item.value?.toFixed(1) ?? '-'}%</span></div>`
           }
@@ -163,7 +164,7 @@ export function useLoadCapacityChartOptions(context: LoadCapacityChartContext) {
         html += '<div style="display:flex;flex-direction:column;gap:4px">'
 
         for (const item of p) {
-          const colorDot = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${item.color};margin-right:8px;flex-shrink:0"></span>`
+          const colorDot = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${safeTooltipColor(item.color)};margin-right:8px;flex-shrink:0"></span>`
           if (item.seriesName === 'RAM') {
             html += `<div style="display:flex;align-items:center">${colorDot}<span>RAM</span><span style="margin-left:auto;font-weight:600;margin-left:16px">${formatCapacityBytes(ramUsed)} (${ramPercent}${ramPercent === '-' ? '' : '%'})</span></div>`
           }
@@ -271,9 +272,9 @@ export function useLoadCapacityChartOptions(context: LoadCapacityChartContext) {
         let html = `<div style="font-weight:600;margin-bottom:6px;color:${chartThemeColors.value.textSecondary}">${timeStr}</div>`
         html += '<div style="display:flex;flex-direction:column;gap:4px">'
         for (const item of p) {
-          const colorDot = `<span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${item.color};margin-right:8px;flex-shrink:0"></span>`
+          const colorDot = `<span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${safeTooltipColor(item.color)};margin-right:8px;flex-shrink:0"></span>`
           const text = item.seriesName === '磁盘总量' ? formatCapacityBytes(diskTotal) : `${formatCapacityBytes(diskUsed)} (${diskPercent}${diskPercent === '-' ? '' : '%'})`
-          html += `<div style="display:flex;align-items:center">${colorDot}<span>${item.seriesName}</span><span style="margin-left:auto;font-weight:600;margin-left:16px">${text}</span></div>`
+          html += `<div style="display:flex;align-items:center">${colorDot}<span>${escapeTooltipHtml(item.seriesName)}</span><span style="margin-left:auto;font-weight:600;margin-left:16px">${text}</span></div>`
         }
         html += '</div>'
         return html

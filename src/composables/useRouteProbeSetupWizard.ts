@@ -1,4 +1,5 @@
 import type { MaybeRefOrGetter } from 'vue'
+import type { CompanionStorageHealth } from '@/services/route-probe-companion.service'
 import type { NodeData } from '@/stores/nodes'
 import { computed, onScopeDispose, ref, toValue } from 'vue'
 import { TIME_MS } from '@/constants/time'
@@ -12,6 +13,9 @@ import { isRouteProbeOnlineNode, loadRouteProbeNodeTokens } from '@/services/rou
 import { saveManagedThemeSettings } from '@/services/theme-settings.service'
 import { useAppStore } from '@/stores/app'
 import { getRegionCode } from '@/utils/regionHelper'
+import { buildRouteProbeInstallCommand } from '@/utils/routeProbeInstall'
+
+export { buildRouteProbeInstallCommand } from '@/utils/routeProbeInstall'
 
 /**
  * 三网回程检测设置向导：环境检查 → 安装节点助手 → 启用检测。
@@ -43,6 +47,7 @@ export interface RouteProbeSetupNode {
   uuid: string
   name: string
   helperOnline: boolean
+  helperBusy: boolean
   helperVersion: string | null
   helperVersionMatches: boolean | null
   lastJobAt: number | null
@@ -58,19 +63,6 @@ function chunk<T>(items: readonly T[], size: number): T[][] {
   return chunks
 }
 
-function shellSingleQuote(value: string): string {
-  return `'${value.replace(/'/g, `'\\''`)}'`
-}
-
-export function buildRouteProbeInstallCommand(endpoint: string, release: string): string {
-  const insecure = endpoint.startsWith('http://') ? ' --allow-insecure-http' : ''
-  return [
-    `curl -fsSLO https://github.com/yyy622hhh/komari-theme-transit/releases/download/${release}/transit-route-probe-helper.sh`,
-    `curl -fsSL https://github.com/yyy622hhh/komari-theme-transit/releases/download/${release}/transit-collect-return-route.sh -o collect-return-route.sh`,
-    `sudo bash transit-route-probe-helper.sh install --endpoint ${shellSingleQuote(endpoint)}${insecure}`,
-  ].join('\n')
-}
-
 export function useRouteProbeSetupWizard(nodes: MaybeRefOrGetter<NodeData[]>) {
   const appStore = useAppStore()
   const step = ref<WizardStep>('check')
@@ -78,6 +70,7 @@ export function useRouteProbeSetupWizard(nodes: MaybeRefOrGetter<NodeData[]>) {
   const checkError = ref('')
   const pluginInstalled = ref<boolean | null>(null)
   const pluginVersion = ref<string | null>(null)
+  const pluginStorage = ref<CompanionStorageHealth>()
   const eligibleNodes = ref<RouteProbeSetupNode[]>([])
   const mainlandCount = ref(0)
   const saving = ref(false)
@@ -133,9 +126,11 @@ export function useRouteProbeSetupWizard(nodes: MaybeRefOrGetter<NodeData[]>) {
       const state = roster.get(node.uuid)
       const lastSeen = state?.helper_seen_at ?? null
       const version = state?.helper_version ?? null
+      const helperBusy = (state?.active_job_until ?? 0) > now
       return {
         ...node,
-        helperOnline: lastSeen !== null && now - lastSeen <= HELPER_ONLINE_WINDOW_MS,
+        helperOnline: helperBusy || (lastSeen !== null && now - lastSeen <= HELPER_ONLINE_WINDOW_MS),
+        helperBusy,
         helperVersion: version,
         helperVersionMatches: version ? version === __BUILD_VERSION__ : null,
         lastJobAt: state?.last_job_at ?? null,
@@ -163,17 +158,20 @@ export function useRouteProbeSetupWizard(nodes: MaybeRefOrGetter<NodeData[]>) {
         const health = await getCompanionRouteProbeHealth(controller.signal)
         pluginInstalled.value = true
         pluginVersion.value = health.version
+        pluginStorage.value = health.storage
       }
       catch (error) {
         if (!(error instanceof RouteProbeCompanionUnavailableError))
           throw error
         pluginInstalled.value = false
         pluginVersion.value = null
+        pluginStorage.value = undefined
         if (generation !== rosterGeneration)
           return
         eligibleNodes.value = eligible.map(node => ({
           ...node,
           helperOnline: false,
+          helperBusy: false,
           helperVersion: null,
           helperVersionMatches: null,
           lastJobAt: null,
@@ -200,8 +198,8 @@ export function useRouteProbeSetupWizard(nodes: MaybeRefOrGetter<NodeData[]>) {
   }
 
   /**
-   * 后台自动补测：装完助手后不用手动点“重新检查”。只在插件已确认安装、还有
-   * 缺助手节点、且没有别的检查正在跑时才做事；失败静默吞掉——这是后台轮询，
+   * 后台自动补测：装完助手后不用手动点“重新检查”。插件已确认安装且有节点时
+   * 持续更新（包括执行租约过期），没有别的检查正在跑时才做事；失败静默吞掉，
    * 不该用告警打断运营者，出问题时手动“重新检查”仍会完整校验并报错。不重复
    * `requirePermission`，会话校验已在 `runCheck` 里做过。
    *
@@ -211,7 +209,7 @@ export function useRouteProbeSetupWizard(nodes: MaybeRefOrGetter<NodeData[]>) {
    * 把刚上线的节点重新判成缺助手。
    */
   async function refreshMissingHelpers(): Promise<void> {
-    if (refreshing || step.value !== 'check' || checking.value || pluginInstalled.value !== true || !missingHelperNodes.value.length)
+    if (refreshing || step.value !== 'check' || checking.value || pluginInstalled.value !== true || !eligibleNodes.value.length)
       return
     refreshing = true
     const generation = rosterGeneration
@@ -308,6 +306,7 @@ export function useRouteProbeSetupWizard(nodes: MaybeRefOrGetter<NodeData[]>) {
     saveError.value = ''
     pluginInstalled.value = null
     pluginVersion.value = null
+    pluginStorage.value = undefined
     eligibleNodes.value = []
     mainlandCount.value = 0
     nodeTokens.value = {}
@@ -319,6 +318,7 @@ export function useRouteProbeSetupWizard(nodes: MaybeRefOrGetter<NodeData[]>) {
     checkError,
     pluginInstalled,
     pluginVersion,
+    pluginStorage,
     eligibleNodes,
     mainlandCount,
     missingHelperNodes,

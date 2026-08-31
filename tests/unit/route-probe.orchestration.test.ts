@@ -12,6 +12,7 @@ import { resetSharedRpc } from '../../src/utils/rpc'
 
 const originalFetch = globalThis.fetch
 const originalSetTimeout = globalThis.setTimeout
+const originalNow = Date.now
 
 /** 把 sleep() 背后的 setTimeout 变成几乎立即触发，绕开 5 秒轮询间隔的真实等待。 */
 function stubInstantTimers(): void {
@@ -78,6 +79,7 @@ afterEach(() => {
   mock.restore()
   globalThis.fetch = originalFetch
   globalThis.setTimeout = originalSetTimeout
+  Date.now = originalNow
   resetSharedRpc()
   setAuthSessionFromLogin(false)
 })
@@ -125,6 +127,61 @@ describe('probeNodeRoutes 顶层门禁', () => {
 })
 
 describe('probeNodeRoutes：节点助手路径', () => {
+  for (const completeAt of [160_000, 520_000]) {
+    test(`waits for a valid companion result after ${completeAt / 1000}s including queue/backoff and upload`, async () => {
+      const started = originalNow()
+      let elapsed = 0
+      let edits = 0
+      Date.now = () => started + elapsed
+      globalThis.setTimeout = ((fn: (...args: unknown[]) => void, ms?: number, ...args: unknown[]) => {
+        if (ms === 5000) {
+          elapsed += ms
+          return originalSetTimeout(fn, 0, ...args)
+        }
+        return originalSetTimeout(fn, ms, ...args)
+      }) as typeof setTimeout
+      const restore = mockBackend({
+        companionBatch: () => ({ batch_id: 'batch-1', jobs: [{
+          client: 'slow',
+          city: 'beijing',
+          status: elapsed >= completeAt ? 'completed' : elapsed < completeAt - 160_000 ? 'queued' : 'running',
+          tag: elapsed >= completeAt ? `transit-route:ct=4134,cu=4837,cm=9808@${Math.floor(Date.now() / 1000)}` : null,
+          error: null,
+          attempts: 1,
+          helper_seen_at: Date.now(),
+        }] }),
+        getNodes: () => ({ slow: { tags: 'keep-original-tag' } }),
+        editClient: (params) => {
+          edits++
+          expect(String(params.tags)).toContain('keep-original-tag;transit-route:')
+        },
+      })
+      try {
+        expect((await probeNodeRoutes(candidates('slow'), 'beijing'))?.outcomes[0]?.status).toBe('updated')
+        expect(edits).toBe(1)
+        expect(elapsed).toBe(completeAt)
+      }
+      finally { restore() }
+    })
+  }
+  test('a companion that never finishes still has a bounded wait', async () => {
+    const started = originalNow()
+    let elapsed = 0
+    Date.now = () => started + elapsed
+    globalThis.setTimeout = ((fn: (...args: unknown[]) => void, ms?: number, ...args: unknown[]) => {
+      if (ms === 5000) {
+        elapsed += ms
+        return originalSetTimeout(fn, 0, ...args)
+      }
+      return originalSetTimeout(fn, ms, ...args)
+    }) as typeof setTimeout
+    const restore = mockBackend({ companionBatch: () => ({ batch_id: 'batch-1', jobs: [{ client: 'stuck', city: 'beijing', status: 'running', tag: null, error: null, attempts: 1, helper_seen_at: Date.now() }] }) })
+    try {
+      expect((await probeNodeRoutes(candidates('stuck'), 'beijing'))?.outcomes[0]?.status).toBe('timeout')
+      expect(elapsed).toBe(630_000)
+    }
+    finally { restore() }
+  })
   test('两台节点在第一次轮询就全部拿到结果：一台成功写回，一台报告未装 traceroute', async () => {
     const routeTag = formatNodeRouteTag(parseRouteTraceOutput(REAL_TRACE_OUTPUT), Date.now())
     const restore = mockBackend({

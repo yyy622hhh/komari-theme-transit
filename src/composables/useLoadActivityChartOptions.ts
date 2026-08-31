@@ -5,6 +5,7 @@ import type { getLoadChartPalette } from '@/utils/chartPalette'
 import type { getLoadChartThemeColors, getLoadChartTooltipConfig } from '@/utils/loadChartTheme'
 import type { RecordFormat } from '@/utils/recordHelper'
 import { computed } from 'vue'
+import { escapeTooltipHtml, safeTooltipColor } from '@/utils/chartTooltip'
 import { formatBytes } from '@/utils/helper'
 import { LOAD_CHART_MARGIN, LOAD_CHART_MARGIN_WITH_LEGEND } from '@/utils/loadChartTheme'
 import { formatMetricTooltipTime } from '@/utils/metricRange'
@@ -71,7 +72,7 @@ export function useLoadActivityChartOptions(context: LoadActivityChartContext) {
         html += '<div style="display:flex;flex-direction:column;gap:4px">'
 
         for (const item of p) {
-          const colorDot = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${item.color};margin-right:8px;flex-shrink:0"></span>`
+          const colorDot = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${safeTooltipColor(item.color)};margin-right:8px;flex-shrink:0"></span>`
           const label = item.seriesName === '下载' ? '↓ 下载' : '↑ 上传'
           html += `<div style="display:flex;align-items:center">${colorDot}<span>${label}</span><span style="margin-left:auto;font-weight:600;margin-left:16px">${typeof item.value === 'number' && Number.isFinite(item.value) ? `${formatBytes(item.value)}/s` : '-'}</span></div>`
         }
@@ -154,8 +155,8 @@ export function useLoadActivityChartOptions(context: LoadActivityChartContext) {
         html += '<div style="display:flex;flex-direction:column;gap:4px">'
 
         for (const item of p) {
-          const colorDot = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${item.color};margin-right:8px;flex-shrink:0"></span>`
-          html += `<div style="display:flex;align-items:center">${colorDot}<span>${item.seriesName}</span><span style="margin-left:auto;font-weight:600;margin-left:16px">${item.value?.toFixed(1) ?? '-'}%</span></div>`
+          const colorDot = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${safeTooltipColor(item.color)};margin-right:8px;flex-shrink:0"></span>`
+          html += `<div style="display:flex;align-items:center">${colorDot}<span>${escapeTooltipHtml(item.seriesName)}</span><span style="margin-left:auto;font-weight:600;margin-left:16px">${item.value?.toFixed(1) ?? '-'}%</span></div>`
         }
 
         if (record.gpu_detailed) {
@@ -165,7 +166,7 @@ export function useLoadActivityChartOptions(context: LoadActivityChartContext) {
             const usage = detail.usage == null ? '-' : `${detail.usage.toFixed(1)}%`
             const memory = detail.memory == null ? '-' : `${detail.memory.toFixed(1)}%`
             const temp = detail.temperature == null ? '' : ` · ${Math.round(detail.temperature)}℃`
-            html += `<div style="display:flex;align-items:center;gap:8px;color:${chartThemeColors.value.textSecondary}"><span>${name}</span><span style="margin-left:auto">${usage} / ${memory}${temp}</span></div>`
+            html += `<div style="display:flex;align-items:center;gap:8px;color:${chartThemeColors.value.textSecondary}"><span>${escapeTooltipHtml(name)}</span><span style="margin-left:auto">${usage} / ${memory}${temp}</span></div>`
           }
           html += '</div>'
         }
@@ -267,9 +268,9 @@ export function useLoadActivityChartOptions(context: LoadActivityChartContext) {
         html += '<div style="display:flex;flex-direction:column;gap:4px">'
 
         for (const item of p) {
-          const colorDot = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${item.color};margin-right:8px;flex-shrink:0"></span>`
+          const colorDot = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${safeTooltipColor(item.color)};margin-right:8px;flex-shrink:0"></span>`
           const displayValue = item.value != null ? Math.round(item.value) : '-'
-          html += `<div style="display:flex;align-items:center">${colorDot}<span>${item.seriesName}</span><span style="margin-left:auto;font-weight:600;margin-left:16px">${displayValue}</span></div>`
+          html += `<div style="display:flex;align-items:center">${colorDot}<span>${escapeTooltipHtml(item.seriesName)}</span><span style="margin-left:auto;font-weight:600;margin-left:16px">${displayValue}</span></div>`
         }
         html += '</div>'
         return html

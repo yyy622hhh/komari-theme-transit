@@ -21,6 +21,8 @@ import {
   retainSharedPingRecordsEntry,
 } from '@/services/nodePingRecords.shared'
 import { readStatsCache, writeStatsCache } from '@/services/nodePingStatsCache'
+import { mergeCarrierPingHistory } from '@/utils/carrierPingHistory'
+import { mergeProbeCurrentStates, resolveProbeCurrentState } from '@/utils/pingCurrentState'
 import { resolvePingFreshness } from '@/utils/pingFreshness'
 import { buildNodePingStats, createEmptyNodePingStats } from '@/utils/pingStats'
 import { buildTopologyInsightPoints } from '@/utils/topologyInsights'
@@ -154,6 +156,21 @@ export function useNodePingStats(
     }
   })
   const stats = computed<NodePingStatsState>(() => resolvedStats.value.stats)
+  const current = computed(() => {
+    const { uuid: nodeUuid, hours, maxCount } = resolved.value
+    const state = getSharedPingRecordsEntry(hours, maxCount, nodeUuid).data.value
+    const id = resolvedStats.value.taskId
+    if (!state || id === null)
+      return resolveProbeCurrentState([])
+    return resolveProbeCurrentState((state.rawRecordsByClient?.get(nodeUuid) ?? []).filter(record => record.task_id === id), {
+      now: pingFreshnessTick.value,
+      interval: state.taskIntervalsById?.get(id),
+    })
+  })
+  const probeType = computed(() => {
+    const { uuid: nodeUuid, hours, maxCount } = resolved.value
+    return getSharedPingRecordsEntry(hours, maxCount, nodeUuid).data.value?.taskTypesById?.get(resolvedStats.value.taskId ?? -1) ?? ''
+  })
 
   const taskNames = computed<string[]>(() => {
     const { uuid: nodeUuid, hours, maxCount, taskNameFilter, taskNameMatch, enabled } = resolved.value
@@ -188,7 +205,9 @@ export function useNodePingStats(
   ))
   const delayed = computed(() => freshness.value === 'delayed')
   const stale = computed(() => freshness.value === 'stale')
-  const freshnessAgeMs = computed(() => Math.max(0, pingFreshnessTick.value - lastFetchedAt.value))
+  const freshnessAgeMs = computed(() => lastFetchedAt.value > 0
+    ? Math.max(0, pingFreshnessTick.value - lastFetchedAt.value)
+    : 0)
 
   const error = computed<string | null>(() => {
     const { uuid: nodeUuid, hours, maxCount, enabled } = resolved.value
@@ -259,6 +278,8 @@ export function useNodePingStats(
 
   return {
     stats,
+    current,
+    probeType,
     loading,
     error,
     history: computed(() => stats.value.history),
@@ -311,32 +332,25 @@ export function mergeCarrierPingStats(states: readonly NodePingStatsState[]): No
   if (!usable.length)
     return createEmptyNodePingStats()
   const sampleCount = usable.reduce((sum, state) => sum + state.sampleCount, 0)
+  const latencySampleCount = usable.reduce((sum, state) => sum + state.latencySampleCount, 0)
   const weighted = (read: (state: NodePingStatsState) => number): number => sampleCount > 0
     ? usable.reduce((sum, state) => sum + read(state) * state.sampleCount, 0) / sampleCount
     : 0
-  const historyLength = Math.max(...usable.map(state => state.history.length), 0)
-  const history = Array.from({ length: historyLength }, (_, index) => {
-    const points = usable.flatMap((state) => {
-      const point = state.history[state.history.length - historyLength + index]
-      return point ? [point] : []
-    })
-    const timestamps = points.map(point => Date.parse(point.time)).filter(Number.isFinite)
-    return {
-      time: timestamps.length ? new Date(Math.max(...timestamps)).toISOString() : points[0]?.time ?? new Date(0).toISOString(),
-      latency: averageAvailable(points.map(point => point.latency)),
-      loss: averageAvailable(points.map(point => point.loss)),
-    }
-  })
+  const weightedLatency = (read: (state: NodePingStatsState) => number): number => latencySampleCount > 0
+    ? usable.reduce((sum, state) => sum + read(state) * state.latencySampleCount, 0) / latencySampleCount
+    : 0
+  const history = mergeCarrierPingHistory(usable.map(state => state.history))
   return {
-    avgLatency: weighted(state => state.avgLatency),
+    avgLatency: weightedLatency(state => state.avgLatency),
     avgLoss: weighted(state => state.avgLoss),
     lineLoss: weighted(state => state.lineLoss),
     commonModeLossEvents: usable.reduce((sum, state) => sum + state.commonModeLossEvents, 0),
-    avgVolatility: weighted(state => state.avgVolatility),
+    avgVolatility: weightedLatency(state => state.avgVolatility),
     p50Latency: averageAvailable(usable.map(state => state.p50Latency)),
     p95Latency: averageAvailable(usable.map(state => state.p95Latency)),
-    availability: averageAvailable(usable.map(state => state.availability)),
+    availability: sampleCount > 0 ? Math.max(0, Math.min(100, 100 - weighted(state => state.avgLoss))) : null,
     sampleCount,
+    latencySampleCount,
     history,
     hasData: true,
     hasLatencyData: usable.some(state => state.hasLatencyData),
@@ -362,6 +376,13 @@ export function useNodeCarrierPingStats(uuid: MaybeRefOrGetter<string>, options?
     }
   })
 
+  // Use the oldest available active sample for the aggregate delay label.
+  // Disabled regions have no timestamp and must never contribute epoch-sized ages.
+  const lastFetchedAt = computed(() => {
+    const timestamps = carrierPings.flatMap(carrier => carrier.regionalPings.map(ping => ping.lastFetchedAt.value))
+      .filter(timestamp => timestamp > 0)
+    return timestamps.length ? Math.min(...timestamps) : 0
+  })
   return {
     carriers: computed(() => carrierPings.map((carrier) => {
       const active = carrier.regionalPings.filter(ping => ping.hasData.value || ping.loading.value || ping.error.value || ping.taskNames.value.length)
@@ -372,6 +393,8 @@ export function useNodeCarrierPingStats(uuid: MaybeRefOrGetter<string>, options?
         labelEn: carrier.labelEn,
         taskNames: [...new Set(active.flatMap(ping => ping.taskNames.value))],
         stats,
+        current: mergeProbeCurrentStates(active.map(ping => ping.current.value)),
+        probeType: active.every(ping => ping.probeType.value === 'icmp') ? 'icmp' : 'tcp',
         hasLatency: stats.hasLatencyData,
         delayed: active.some(ping => ping.delayed.value),
         stale: active.length > 0 && active.every(ping => ping.stale.value),
@@ -379,8 +402,8 @@ export function useNodeCarrierPingStats(uuid: MaybeRefOrGetter<string>, options?
     })),
     loading: computed(() => carrierPings.some(carrier => carrier.regionalPings.some(ping => ping.loading.value))),
     error: computed(() => carrierPings.flatMap(carrier => carrier.regionalPings.map(ping => ping.error.value)).find(Boolean) ?? null),
-    lastFetchedAt: computed(() => Math.max(...carrierPings.flatMap(carrier => carrier.regionalPings.map(ping => ping.lastFetchedAt.value)), 0)),
-    freshnessAgeMs: computed(() => Math.max(...carrierPings.flatMap(carrier => carrier.regionalPings.map(ping => ping.freshnessAgeMs.value)), 0)),
+    lastFetchedAt,
+    freshnessAgeMs: computed(() => lastFetchedAt.value > 0 ? Math.max(0, pingFreshnessTick.value - lastFetchedAt.value) : 0),
     delayed: computed(() => carrierPings.some(carrier => carrier.regionalPings.some(ping => ping.delayed.value))),
     stale: computed(() => {
       const active = carrierPings.flatMap(carrier => carrier.regionalPings)

@@ -4,10 +4,8 @@ import {
   assessCarrierProbeCandidate,
   buildCarrierProbeCandidate,
   classifyCarrierProbeHealth,
-  migrateCarrierProbeTask,
   selectCarrierProbeTask,
   staleTransitCanaryTaskIds,
-  validateCarrierProbeCandidate,
 } from '../../src/services/carrier-probe.service'
 import { getTopologyProbe } from '../../src/utils/topologyPresets'
 
@@ -57,7 +55,10 @@ describe('carrier probe health and migration', () => {
   })
 
   test('候选门槛支持多节点 95% 和单节点连续五次的低置信度', () => {
-    expect(assessCarrierProbeCandidate([{ uuid: 'a', total: 5, valid: 5 }])).toMatchObject({ migratable: true, lowConfidence: true, successRate: 1 })
+    const records = Array.from({ length: 5 }, (_, i) => ({ client: 'a', task_id: 1, value: 12, time: new Date(Date.now() - (5 - i) * 30_000).toISOString() }))
+    expect(assessCarrierProbeCandidate([{ uuid: 'a', total: 5, valid: 5, records }])).toMatchObject({ migratable: true, lowConfidence: true, successRate: 1 })
+    expect(assessCarrierProbeCandidate([{ uuid: 'a', total: 20, valid: 19 }]).migratable).toBeFalse()
+    expect(assessCarrierProbeCandidate([{ uuid: 'a', total: 20, valid: 19, records: [...records.slice(0, 4), { ...records[4]!, value: -1 }] }]).migratable).toBeFalse()
     expect(assessCarrierProbeCandidate([
       { uuid: 'a', total: 20, valid: 19 },
       { uuid: 'b', total: 20, valid: 19 },
@@ -93,105 +94,5 @@ describe('carrier probe health and migration', () => {
       task({ id: 3, name: `Other-canary-beijing-mobile-${now - 60 * 60_000}` }),
       task({ id: 4, name: `Transit-canary-unknown-${now - 60 * 60_000}` }),
     ], now)).toEqual([1])
-  })
-
-  test('验证备用目标创建临时任务并取得每台三次样本', async () => {
-    let now = 1_777_000_000_000
-    const created: AdminPingTask[] = []
-    const candidate = buildCarrierProbeCandidate('tcp', '221.130.33.52', 53, 'builtin')!
-    const result = await validateCarrierProbeCandidate('beijing-mobile', task(), candidate, CLIENTS, {
-      authorize: async () => {},
-      now: () => now,
-      sleep: async (ms: number) => { now += ms },
-      createTask: async (mutation: any) => {
-        const value = task({ ...mutation, id: 20 })
-        created.push(value)
-        return value
-      },
-      deleteTasks: async () => true,
-      loadSamples: async () => CLIENTS.map(uuid => ({ uuid, total: 3, valid: 3 })),
-    })
-    expect(created[0]).toMatchObject({ id: 20, interval: 30, clients: CLIENTS })
-    expect(result).toMatchObject({ migratable: true, canaryTaskId: 20, successRate: 1 })
-  })
-
-  test('迁移等待首个成功样本后删除旧任务，失败则只清本轮资源', async () => {
-    let now = 1_777_000_000_000
-    const deleted: number[][] = []
-    const replacement = task({ id: 30, target: '221.130.33.52:53', type: 'tcp' })
-    const candidate = { ...buildCarrierProbeCandidate('tcp', '221.130.33.52', 53, 'builtin')!, migratable: true, canaryTaskId: 20 }
-    const success = await migrateCarrierProbeTask(task(), candidate, {
-      authorize: async () => {},
-      now: () => now,
-      sleep: async (ms: number) => { now += ms },
-      createTask: async () => replacement,
-      deleteTasks: async (ids: readonly number[]) => {
-        deleted.push([...ids])
-        return true
-      },
-      loadTasks: async () => [],
-      loadSamples: async () => [{ uuid: CLIENTS[0]!, total: 1, valid: 1 }],
-    })
-    expect(success).toMatchObject({ ok: true, oldTaskId: 10, newTaskId: 30 })
-    expect(deleted).toEqual([[10, 20]])
-
-    deleted.length = 0
-    now = 1_777_000_000_000
-    const failed = await migrateCarrierProbeTask(task(), candidate, {
-      authorize: async () => {},
-      now: () => now,
-      sleep: async () => { now += 5 * 60_000 },
-      createTask: async () => replacement,
-      deleteTasks: async (ids: readonly number[]) => {
-        deleted.push([...ids])
-        return deleted.length > 1
-      },
-      loadTasks: async () => [task(), replacement],
-      loadSamples: async () => CLIENTS.map(uuid => ({ uuid, total: 5, valid: 0 })),
-    })
-    expect(failed.ok).toBeFalse()
-    expect(failed.message).toContain('旧任务已保留')
-    expect(deleted).toEqual([[30], [20]])
-  })
-
-  test('删除响应丢失但回查确认旧任务已删除时不误删新任务', async () => {
-    const deleted: number[][] = []
-    const replacement = task({ id: 30, target: '221.130.33.52:53', type: 'tcp' })
-    const candidate = { ...buildCarrierProbeCandidate('tcp', '221.130.33.52', 53, 'builtin')!, migratable: true, canaryTaskId: 20 }
-    const result = await migrateCarrierProbeTask(task(), candidate, {
-      authorize: async () => {},
-      now: () => 1_777_000_000_000,
-      sleep: async () => {},
-      createTask: async () => replacement,
-      deleteTasks: async (ids: readonly number[]) => {
-        deleted.push([...ids])
-        return false
-      },
-      loadTasks: async () => [replacement],
-      loadSamples: async () => [{ uuid: CLIENTS[0]!, total: 1, valid: 1 }],
-    })
-    expect(result).toMatchObject({ ok: true, newTaskId: 30 })
-    expect(deleted).toEqual([[10, 20]])
-  })
-
-  test('旧任务仍存在时才补偿删除本轮创建的新任务', async () => {
-    const deleted: number[][] = []
-    const replacement = task({ id: 30, target: '221.130.33.52:53', type: 'tcp' })
-    const candidate = { ...buildCarrierProbeCandidate('tcp', '221.130.33.52', 53, 'builtin')!, migratable: true, canaryTaskId: 20 }
-    const result = await migrateCarrierProbeTask(task(), candidate, {
-      authorize: async () => {},
-      now: () => 1_777_000_000_000,
-      sleep: async () => {},
-      createTask: async () => replacement,
-      deleteTasks: async (ids: readonly number[]) => {
-        deleted.push([...ids])
-        return deleted.length > 1
-      },
-      loadTasks: async () => [task(), replacement],
-      loadSamples: async () => [{ uuid: CLIENTS[0]!, total: 1, valid: 1 }],
-    })
-    expect(result.ok).toBeFalse()
-    expect(result.message).toContain('旧任务已保留')
-    expect(deleted).toEqual([[10, 20], [30], [20]])
   })
 })

@@ -38,8 +38,12 @@ function createAbortError(message = 'Request aborted'): Error {
 }
 
 function raceWithAbort<T>(task: Promise<T>, signal: AbortSignal): Promise<T> {
-  if (signal.aborted)
+  if (signal.aborted) {
+    // The task may have synchronously aborted its caller before returning.
+    // Its rejection still needs an observer even though this consumer is gone.
+    void task.catch(() => {})
     return Promise.reject(createAbortError())
+  }
 
   let abort = () => {}
   const aborted = new Promise<never>((_, reject) => {
@@ -75,6 +79,8 @@ export class RequestManager {
   private activeCount = 0
 
   run<T>(key: string, task: (signal: AbortSignal) => Promise<T>, options: RequestManagerOptions = {}): Promise<T> {
+    if (options.signal?.aborted)
+      return Promise.reject(createAbortError())
     const existing = this.pending.get(key) as PendingRequest<T> | undefined
     if (existing)
       return this.consume(existing, options.signal)

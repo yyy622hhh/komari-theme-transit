@@ -8,6 +8,7 @@ import { computed } from 'vue'
 import TelemetrySampleStrip from '@/components/TelemetrySampleStrip.vue'
 import { useNodePingStats } from '@/composables/useNodePingStats'
 import { formatDateTime } from '@/utils/helper'
+import { formatProbeCurrentLabel, probeFailureRateLabel } from '@/utils/pingCurrentState'
 import { resolveTopologySegmentHealth } from '@/utils/topologyHealth'
 import { calculateTopologyLatencyBaseline, formatTopologyLatency, formatTopologyLoss, resolveTopologyMetricSource, resolveTopologySampleTone } from '@/utils/topologyHelper'
 import { calculateAdaptiveBaseline } from '@/utils/topologyIntelligence'
@@ -61,6 +62,8 @@ const baselinePing = useNodePingStats(
 )
 
 const hasLiveData = computed(() => config.value.live && ping.hasData.value && !ping.stale.value)
+const failureLabel = computed(() => probeFailureRateLabel(ping.probeType.value))
+const currentLabel = computed(() => !config.value.live ? '静态基线' : sourceNode.value?.online === false ? '来源离线' : formatProbeCurrentLabel(currentPing.current.value.status, currentPing.avgLoss.value > 0))
 const latency = computed(() => hasLiveData.value
   ? (ping.hasLatencyData.value ? ping.avgLatency.value : null)
   : config.value.fallbackLatency)
@@ -109,7 +112,7 @@ const status = computed(() => {
     if (ping.error.value)
       return { label: '实时任务读取失败', tone: 'text-rose-600 dark:text-rose-400', dot: 'bg-rose-400' }
     if ((loss.value ?? 0) >= 20)
-      return { label: '严重丢包', tone: 'text-rose-600 dark:text-rose-400', dot: 'bg-rose-400' }
+      return { label: '历史失败率高', tone: 'text-rose-600 dark:text-rose-400', dot: 'bg-rose-400' }
     if ((latency.value ?? 0) >= 1000)
       return { label: '延迟异常', tone: 'text-rose-600 dark:text-rose-400', dot: 'bg-rose-400' }
     return { label: '异常', tone: 'text-rose-600 dark:text-rose-400', dot: 'bg-rose-400' }
@@ -124,7 +127,7 @@ const status = computed(() => {
     return { label: probeMode.value === 'auto' ? '等待自动探测' : config.value.live ? '等待任务数据' : '静态基线', tone: 'text-slate-500 dark:text-slate-400', dot: probeMode.value === 'auto' ? 'bg-amber-400' : 'bg-slate-500' }
   if ((loss.value ?? 0) > 3 || ping.avgVolatility.value > 1.8)
     return { label: '存在波动', tone: 'text-amber-700 dark:text-amber-300', dot: 'bg-amber-400' }
-  return { label: '实时稳定', tone: 'text-emerald-700 dark:text-emerald-300', dot: 'bg-emerald-400' }
+  return { label: '窗口内稳定', tone: 'text-emerald-700 dark:text-emerald-300', dot: 'bg-emerald-400' }
 })
 
 function sampleHeight(latency: number | null): number {
@@ -156,7 +159,7 @@ const adaptiveTone = computed(() => {
 
 const sampleBars = computed<TelemetrySample[]>(() => history.value.map((point, index) => {
   const latencyText = point.latency === null ? '无响应' : formatTopologyLatency(point.latency)
-  const lossText = `丢包 ${formatTopologyLoss(point.loss)}`
+  const lossText = `${failureLabel.value} ${formatTopologyLoss(point.loss)}`
   const tone = resolveTopologySampleTone(point.latency, point.loss, baselineLatency.value)
   return {
     key: `${history.value.length - 1 - index}`,
@@ -185,9 +188,13 @@ const sampleBars = computed<TelemetrySample[]>(() => history.value.map((point, i
         </div>
       </div>
       <div class="flex shrink-0 items-center gap-1.5 text-[10px]" :class="status.tone">
-        <span class="size-1.5 rounded-full" :class="status.dot" />{{ status.label }}
+        <span class="size-1.5 rounded-full" :class="status.dot" />{{ hours }}h：{{ status.label }}
       </div>
     </header>
+
+    <p data-segment-current class="mt-2 text-[10px] text-muted-foreground">
+      {{ config.live ? `当前：${currentLabel} · 以下为近 ${hours} 小时统计` : '静态配置基线，不代表近期采样。' }}
+    </p>
 
     <div class="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
       <div class="rounded-lg bg-card/55 px-2.5 py-2">
@@ -214,7 +221,7 @@ const sampleBars = computed<TelemetrySample[]>(() => history.value.map((point, i
           {{ hasLiveData ? formatAvailability(ping.availability.value) : '-' }}
         </div>
         <div class="mt-0.5 text-[9px] text-muted-foreground">
-          丢包 {{ formatTopologyLoss(loss) }}
+          {{ failureLabel }} {{ formatTopologyLoss(loss) }}
         </div>
       </div>
       <div class="rounded-lg bg-card/55 px-2.5 py-2">

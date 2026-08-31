@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { CardX } from '@/components/ui/card-x'
 import { useGlobalDiagnostics } from '@/composables/useGlobalDiagnostics'
+import { companionStorageLabel } from '@/services/route-probe-companion.service'
 import { useAppStore } from '@/stores/app'
 import { useNodesStore } from '@/stores/nodes'
 import { WS_STATE_LABELS } from '@/utils/diagnosticReport'
@@ -160,6 +161,10 @@ const themeGitHash = __BUILD_GIT_HASH__
               <Icon v-if="companionHealthLoading" icon="tabler:loader-2" width="14" height="14" class="animate-spin" />
               <template v-else>
                 {{ companionHealth ? (companionHealth.ok ? `正常 · ${companionHealth.version ? `v${companionHealth.version}` : '未知'}` : '异常') : '不可用' }}
+                <p v-if="companionHealth" class="mt-1 text-xs" :class="companionHealth.storage && companionHealth.storage.status !== 'healthy' ? 'text-amber-700 dark:text-amber-300' : 'text-muted-foreground'">
+                  {{ companionStorageLabel(companionHealth.storage) }}
+                  <span v-if="companionHealth.storage?.last_success_at"> · 最后保存 {{ formatBeijingTime(companionHealth.storage.last_success_at) }}</span>
+                </p>
               </template>
             </dd>
           </div>

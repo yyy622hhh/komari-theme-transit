@@ -7,6 +7,8 @@ import { AppDialog } from '@/components/ui/app-dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useCarrierProbeHealthCenter } from '@/composables/useCarrierProbeHealthCenter'
+import { formatDateTime } from '@/utils/helper'
+import { PROBE_CURRENT_LABELS } from '@/utils/pingCurrentState'
 
 const props = defineProps<{ nodes: NodeData[], open: boolean }>()
 const emit = defineEmits<{ 'update:open': [open: boolean] }>()
@@ -108,6 +110,21 @@ async function confirmRebuild(item: CarrierProbeHealth): Promise<void> {
       <p v-if="center.error.value" class="rounded-md bg-destructive/8 px-3 py-2 text-xs text-destructive">
         {{ center.error.value }}
       </p>
+      <p v-if="center.activeKey.value && center.operation.value" role="status" class="rounded-md bg-primary/5 px-3 py-2 text-xs">
+        {{ center.operation.value.message }} 关闭此窗口后继续；刷新或关闭浏览器会中断，需要回查。
+      </p>
+      <p v-else-if="center.operation.value?.phase === 'failed' && !center.migration.value && !center.error.value" class="rounded-md bg-destructive/8 px-3 py-2 text-xs text-destructive">
+        {{ center.operation.value.message }}
+      </p>
+      <p v-if="!center.mutationSupported" class="text-xs text-amber-700 dark:text-amber-300">
+        当前浏览器不支持 Web Locks，迁移和重建已禁用；查看和验证仍可使用。
+      </p>
+      <div v-for="record in center.recovery.value" :key="record.id" class="rounded-md border border-amber-500/40 p-3 text-xs">
+        <p>{{ record.original.name }}：{{ record.message }}</p>
+        <Button class="mt-2" size="xs" variant="outline" :disabled="!center.mutationSupported || Boolean(center.activeKey.value)" @click="pendingConfirmation === `recover:${record.id}` ? center.recover(record) : pendingConfirmation = `recover:${record.id}`">
+          {{ pendingConfirmation === `recover:${record.id}` ? '再次确认：保留原任务，清理本次残留资源' : '核对并清理残留资源' }}
+        </Button>
+      </div>
       <p
         v-if="center.migration.value"
         class="rounded-md px-3 py-2 text-xs"
@@ -148,7 +165,7 @@ async function confirmRebuild(item: CarrierProbeHealth): Promise<void> {
             <div class="flex items-center gap-3 text-right">
               <div class="hidden sm:block">
                 <p class="text-xs tabular-nums">
-                  {{ percent(item.successRate) }}
+                  近1h成功 {{ percent(item.successRate) }}
                 </p>
                 <p class="text-[10px] text-muted-foreground">
                   {{ item.sampleCount }} 样本 · {{ item.onlineNodes }} 在线
@@ -160,11 +177,17 @@ async function confirmRebuild(item: CarrierProbeHealth): Promise<void> {
 
           <div v-if="expandedKey === item.key" class="space-y-3 border-t border-border/60 px-3 py-3">
             <div class="grid gap-2 text-[11px] text-muted-foreground sm:grid-cols-3">
+              <p>当前：{{ PROBE_CURRENT_LABELS[item.current.status] }}</p>
+              <p>最近成功：{{ item.current.lastSuccessAt ? formatDateTime(new Date(item.current.lastSuccessAt)) : '窗口内无成功' }}</p>
+              <p>样本更新：{{ item.current.latestAt ? formatDateTime(new Date(item.current.latestAt)) : '未知' }}</p>
+              <p v-if="item.recovered" class="sm:col-span-3 text-emerald-700 dark:text-emerald-300">
+                已恢复，近 1 小时窗口内曾异常；历史统计保留。
+              </p>
               <p>分配 {{ item.assignedNodes }} 台 / 在线 {{ item.onlineNodes }} 台</p>
               <p>达到采样门槛 {{ item.sampledNodes }} 台</p>
-              <p>同步目标异常 {{ item.commonModeEvents }} 次</p>
+              <p>近 1 小时同步目标异常 {{ item.commonModeEvents }} 次</p>
               <p v-if="item.abnormalNodeUuids.length" class="sm:col-span-3 text-amber-700 dark:text-amber-300">
-                异常节点：{{ abnormalNames(item) }}
+                近 1 小时异常节点：{{ abnormalNames(item) }}
               </p>
             </div>
 
@@ -178,14 +201,14 @@ async function confirmRebuild(item: CarrierProbeHealth): Promise<void> {
                     TCP · {{ item.fallback.target }}
                   </p>
                 </div>
-                <Button size="xs" variant="outline" :disabled="Boolean(center.activeKey.value) || Boolean(center.results.value[item.key])" @click="center.verify(item, item.fallback)">
+                <Button size="xs" variant="outline" :disabled="Boolean(center.activeKey.value)" @click="center.verify(item, item.fallback)">
                   <Icon v-if="center.activeKey.value === item.key" icon="tabler:loader-2" class="animate-spin" />
                   验证备用目标
                 </Button>
               </div>
 
               <div class="grid gap-2 rounded-md border border-border/50 p-2.5 sm:grid-cols-[7rem_minmax(0,1fr)_6rem_auto]">
-                <select v-model="customType" class="h-8 rounded-md border border-input bg-background px-2 text-xs">
+                <select v-model="customType" aria-label="候选探测类型" class="h-8 rounded-md border border-input bg-background px-2 text-xs">
                   <option value="icmp">
                     ICMP
                   </option>
@@ -215,7 +238,7 @@ async function confirmRebuild(item: CarrierProbeHealth): Promise<void> {
                     v-if="center.results.value[item.key].migratable"
                     size="xs"
                     :variant="pendingConfirmation === `migrate:${item.key}` ? 'default' : 'outline'"
-                    :disabled="Boolean(center.activeKey.value)"
+                    :disabled="Boolean(center.activeKey.value) || !center.mutationSupported"
                     @click="confirmMigration(item)"
                   >
                     {{ pendingConfirmation === `migrate:${item.key}` ? '再次点击确认迁移' : '迁移到此目标' }}
@@ -230,7 +253,7 @@ async function confirmRebuild(item: CarrierProbeHealth): Promise<void> {
                 <Button
                   size="xs"
                   variant="ghost"
-                  :disabled="Boolean(center.activeKey.value)"
+                  :disabled="Boolean(center.activeKey.value) || !center.mutationSupported"
                   @click="confirmRebuild(item)"
                 >
                   {{ pendingConfirmation === `rebuild:${item.key}` ? '再次点击确认重建' : '重建当前任务' }}

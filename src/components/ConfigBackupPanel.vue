@@ -11,6 +11,8 @@ const {
   history,
   isCurrentEntry,
   importing,
+  readingImport,
+  writing,
   exporting,
   rollingBackAt,
   importPreview,
@@ -71,7 +73,7 @@ function formatDiffValue(value: unknown): string {
       </template>
       <div class="flex flex-wrap items-center justify-end gap-2">
         <input ref="fileInput" type="file" accept="application/json" class="hidden" @change="handleFileChange">
-        <Button size="sm" variant="outline" class="bg-background/60" :disabled="importing" @click="openFilePicker">
+        <Button size="sm" variant="outline" class="bg-background/60" :disabled="writing" @click="openFilePicker">
           <Icon icon="tabler:upload" width="14" height="14" />
           导入配置
         </Button>
@@ -82,6 +84,12 @@ function formatDiffValue(value: unknown): string {
       </div>
     </CardX>
 
+    <p v-if="readingImport" role="status" class="text-xs text-muted-foreground">
+      正在读取配置文件…
+      <Button size="sm" variant="ghost" @click="cancelImport">
+        取消
+      </Button>
+    </p>
     <div v-if="importError" class="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
       <Icon icon="tabler:alert-triangle" width="14" height="14" class="mt-0.5 shrink-0" />
       {{ importError }}
@@ -104,10 +112,10 @@ function formatDiffValue(value: unknown): string {
           与当前配置完全一致，没有需要写入的差异。
         </div>
         <div class="flex justify-end gap-2">
-          <Button size="sm" variant="outline" class="bg-background/60" :disabled="importing" @click="cancelImport">
+          <Button size="sm" variant="outline" class="bg-background/60" :disabled="writing" @click="cancelImport">
             取消
           </Button>
-          <Button size="sm" :disabled="importing" @click="confirmImport">
+          <Button size="sm" :disabled="writing || readingImport || Boolean(importError)" @click="confirmImport">
             <Icon v-if="importing" icon="tabler:loader-2" width="14" height="14" class="animate-spin" />
             确认导入
           </Button>
@@ -132,10 +140,10 @@ function formatDiffValue(value: unknown): string {
           与当前配置完全一致，没有需要写入的差异。
         </div>
         <div class="flex justify-end gap-2">
-          <Button size="sm" variant="outline" class="bg-background/60" :disabled="Boolean(rollingBackAt)" @click="cancelRollback">
+          <Button size="sm" variant="outline" class="bg-background/60" :disabled="writing" @click="cancelRollback">
             取消
           </Button>
-          <Button size="sm" variant="destructive" :disabled="Boolean(rollingBackAt)" @click="confirmRollback">
+          <Button size="sm" variant="destructive" :disabled="writing" @click="confirmRollback">
             <Icon v-if="rollingBackAt" icon="tabler:loader-2" width="14" height="14" class="animate-spin" />
             确认回滚
           </Button>
@@ -165,7 +173,7 @@ function formatDiffValue(value: unknown): string {
             size="sm"
             variant="outline"
             class="h-6 bg-background/60 px-2 text-[11px]"
-            :disabled="Boolean(rollingBackAt)"
+            :disabled="writing"
             @click="stageRollback(entry as ThemeSettingsVersionEntry)"
           >
             <Icon :icon="rollingBackAt === entry.at ? 'tabler:loader-2' : 'tabler:history'" width="12" height="12" :class="rollingBackAt === entry.at && 'animate-spin'" />
