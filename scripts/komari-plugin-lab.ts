@@ -15,6 +15,16 @@ interface Lab {
   restart: () => Promise<void>
 }
 
+const LAB_REQUEST_TIMEOUT_MS = 15_000
+
+/** Bound every real plugin request so compatibility failures remain actionable. */
+async function fetch(input: string | URL | Request, init: RequestInit = {}): Promise<Response> {
+  return await globalThis.fetch(input, {
+    ...init,
+    signal: init.signal ?? AbortSignal.timeout(LAB_REQUEST_TIMEOUT_MS),
+  })
+}
+
 /** Uses only the disposable lab server and its generated clients, never operator targets. */
 export async function verifyRouteProbeLab(lab: Lab): Promise<void> {
   const headers = () => ({ 'cookie': lab.cookie(), 'X-Transit-Route-Probe': '1' })

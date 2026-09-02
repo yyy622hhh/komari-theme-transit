@@ -95,6 +95,15 @@ const themeCanaryValue = `komari-${version}-${randomBytes(8).toString('hex')}`
 let serverProcess: ReturnType<typeof spawn> | null = null
 let sessionCookie = ''
 let rpcId = 0
+const LAB_REQUEST_TIMEOUT_MS = 15_000
+
+/** Keep a stalled disposable server or runner network from consuming the whole 60-minute job. */
+async function fetch(input: string | URL | Request, init: RequestInit = {}): Promise<Response> {
+  return await globalThis.fetch(input, {
+    ...init,
+    signal: init.signal ?? AbortSignal.timeout(LAB_REQUEST_TIMEOUT_MS),
+  })
+}
 
 async function downloadBinary(): Promise<void> {
   if (process.env.TRANSIT_KOMARI_BINARY) {
@@ -102,7 +111,10 @@ async function downloadBinary(): Promise<void> {
       throw new Error('TRANSIT_KOMARI_BINARY does not exist')
     return
   }
-  const response = await fetch(spec.url, { redirect: 'follow' })
+  const response = await fetch(spec.url, {
+    redirect: 'follow',
+    signal: AbortSignal.timeout(120_000),
+  })
   if (!response.ok)
     throw new Error(`Komari download failed with HTTP ${response.status}`)
   const bytes = new Uint8Array(await response.arrayBuffer())
@@ -225,6 +237,7 @@ function resetLegacyPassword(): void {
   const status = spawnSync(binaryPath, ['--database', databasePath, 'chpasswd', '--password', password], {
     cwd: labDir,
     stdio: 'ignore',
+    timeout: 15_000,
   })
   if (status.status !== 0)
     throw new Error(`Could not initialize the Komari ${version} lab password`)
