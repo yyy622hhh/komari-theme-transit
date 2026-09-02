@@ -232,6 +232,13 @@ test('home dark mobile', async ({ page }) => {
 })
 
 test('personal wallpaper upload persists with glass, blur and HD effects', async ({ page }) => {
+  // macos-15 runner images may inherit the host's Reduce Transparency setting.
+  // This scenario verifies the explicit glass mode, so pin that media feature
+  // instead of weakening the product's accessibility fallback to a solid card.
+  const cdp = await page.context().newCDPSession(page)
+  await cdp.send('Emulation.setEmulatedMedia', {
+    features: [{ name: 'prefers-reduced-transparency', value: 'no-preference' }],
+  })
   await page.setViewportSize({ width: 1280, height: 800 })
   await installKomariFixture(page, { opsDashboard: true })
   await openStablePage(page)
