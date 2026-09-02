@@ -210,6 +210,10 @@ export function useNodePingStats(
     const { uuid: nodeUuid, hours, maxCount } = resolved.value
     return getSharedPingRecordsEntry(hours, maxCount, nodeUuid).data.value?.taskTypesById?.get(resolvedStats.value.taskId ?? -1) ?? ''
   })
+  const probeInterval = computed(() => {
+    const { uuid: nodeUuid, hours, maxCount } = resolved.value
+    return getSharedPingRecordsEntry(hours, maxCount, nodeUuid).data.value?.taskIntervalsById?.get(resolvedStats.value.taskId ?? -1) ?? null
+  })
 
   const taskNames = computed<string[]>(() => {
     const { uuid: nodeUuid, hours, maxCount, taskNameFilter, taskNameMatch, taskType, enabled } = resolved.value
@@ -321,6 +325,7 @@ export function useNodePingStats(
     stats,
     current,
     probeType,
+    probeInterval,
     loading,
     error,
     history: computed(() => stats.value.history),
@@ -331,6 +336,7 @@ export function useNodePingStats(
     p95Latency: computed(() => stats.value.p95Latency),
     availability: computed(() => stats.value.availability),
     sampleCount: computed(() => stats.value.sampleCount),
+    latencySampleCount: computed(() => stats.value.latencySampleCount),
     hasData: computed(() => stats.value.hasData),
     hasLatencyData: computed(() => stats.value.hasLatencyData),
     lastFetchedAt,

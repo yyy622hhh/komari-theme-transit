@@ -2,6 +2,18 @@
 
 所有面向用户的重要变化记录在此。项目遵循 [Semantic Versioning](https://semver.org/)。
 
+## [1.4.3] - 2026-09-02
+
+### Fixed
+
+- 拓扑线路机到落地机固定使用 ICMP 探测，不再自动降级到 TCP 后把“连接失败率”误作丢包率；旧 TCP 绑定会安全迁回独立 ICMP 任务，入口段的兼容探测阶梯保持不变。
+- 新建或重建的拓扑任务在达到 30 个样本前显示真实 Ping、丢包与“采集中”进度，但暂不参与线路告警、评分和推荐，避免少量超时把短窗口放大成 50%–100% 的稳定结论。
+- 拓扑概览、线路详情、历史与诊断报告改为显示真实采样跨度、总数、成功数和丢失数；只有时间覆盖达到请求窗口的 90% 才显示完整窗口名称，且原始时间戳优先于理论探测间隔。
+
+### Testing
+
+- 补充旧 TCP 绑定迁移、后台自动修复、ICMP 全丢失、30 样本置信度门槛、真实窗口计算和跨浏览器展示回归。
+
 ## [1.4.1] - 2026-08-31
 
 ### Fixed
@@ -950,7 +962,10 @@
 - 亮暗主题、桌面/移动布局和 Transit 风格内嵌 Komari 管理端。
 - Playwright 视觉与交互回归、自动构建和 GitHub Release 发布流程。
 
-[Unreleased]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.3.5...HEAD
+[Unreleased]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.4.3...HEAD
+[1.4.3]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.4.2...v1.4.3
+[1.4.1]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.4.0...v1.4.1
+[1.4.0]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.3.12...v1.4.0
 [1.3.5]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.3.4...v1.3.5
 [1.3.4]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.3.3...v1.3.4
 [1.3.3]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.3.2...v1.3.3

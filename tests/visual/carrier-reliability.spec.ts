@@ -59,11 +59,11 @@ for (const initial of ['missing', 'stale'] as const) {
       // Use the existing shared resume scheduler; no component-local polling is introduced.
       await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
       await expect(edge).toHaveAttribute('data-topology-history-source', 'history')
-      await expect(edge).toContainText('近 1 小时')
+      await expect(edge).toContainText('近 2 分钟 · 3 次')
       await expect(edge).toContainText('均值 222ms')
       await expect(edge).not.toContainText('备用基线')
-      await expect(edge).toHaveAttribute('aria-label', /近 1 小时平均 222ms/)
-      await expect(container.locator('[data-topology-current]')).toHaveText('正常')
+      await expect(edge).toHaveAttribute('aria-label', /近 2 分钟 · 3 次平均 222ms/)
+      await expect(container.locator('[data-topology-current]')).toHaveText('采集中（3\/30）')
     })
   }
 }
@@ -86,7 +86,7 @@ for (const [outcome, detailLabel] of [
     await expect(card.locator('[data-carrier-table-head]')).toContainText('丢包率')
     await expect(page.locator('[data-topology-current]').first()).toContainText(detailLabel)
     await expect(page.locator('[data-topology-current]').first()).toHaveClass(/sr-only/)
-    await expect(page.locator('[data-topology-current-metric]').first()).toHaveAttribute('aria-label', /近 1 小时平均 .*ICMP 丢包率/)
+    await expect(page.locator('[data-topology-current-metric]').first()).toHaveAttribute('aria-label', /近 1 小时 · 61 次平均 .*ICMP 丢包率/)
     if (outcome === 'healthy') {
       await test.info().attach('current-normal-historical-3.3', { body: await card.screenshot(), contentType: 'image/png' })
       await page.locator('[data-topology-current-metric]').first().click()

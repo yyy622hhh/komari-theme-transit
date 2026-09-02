@@ -13,6 +13,8 @@ export interface TopologyReliabilityWindow {
   stale: boolean
   loading: boolean
   error: string | null
+  windowLabel?: string
+  completeWindow?: boolean
 }
 
 export interface TopologyAdaptiveBaseline {

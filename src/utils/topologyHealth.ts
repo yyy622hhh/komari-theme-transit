@@ -1,4 +1,5 @@
 import type { TopologyProbeMode } from '@/utils/topologyModel'
+import { OPS_TOPOLOGY_SAMPLE_CONFIDENCE } from '@/constants/ops'
 import { probeFailureRateColumnLabel } from '@/utils/pingCurrentState'
 
 export type TopologyRouteHealth = 'healthy' | 'warning' | 'pending' | 'error' | 'offline'
@@ -11,6 +12,13 @@ export interface TopologySegmentTelemetry {
   hasLiveData: boolean
   stale: boolean
   probeType?: string
+  /** 当前统计窗口内的实际探测次数。 */
+  sampleCount?: number
+  successCount?: number
+  lostCount?: number
+  /** 真实采样覆盖范围，而不是请求参数里的理论范围。 */
+  windowLabel?: string
+  collecting?: boolean
 }
 
 export interface TopologySegmentHealthInput {
@@ -27,6 +35,63 @@ export interface TopologySegmentHealthInput {
   avgVolatility: number
   fallbackLatency: number | null
   fallbackLoss: number | null
+  sampleCount?: number
+  minimumSamples?: number
+}
+
+export interface TopologySampleWindow {
+  sampleCount: number
+  coverageMs: number | null
+  coverageMinutes: number | null
+  completeWindow: boolean
+  sufficient: boolean
+  label: string
+}
+
+function formatTopologyWindowRange(minutes: number): string {
+  if (minutes >= 24 * 60 && minutes % (24 * 60) === 0)
+    return `近 ${minutes / (24 * 60)} 天`
+  if (minutes >= 60 && minutes % 60 === 0)
+    return `近 ${minutes / 60} 小时`
+  return `近 ${minutes} 分钟`
+}
+
+export function resolveTopologySampleWindow(input: {
+  sampleCount: number
+  from?: number | null
+  to?: number | null
+  intervalSeconds?: number | null
+  requestedMinutes?: number
+  minimumSamples?: number
+}): TopologySampleWindow {
+  const sampleCount = Math.max(0, Math.floor(Number.isFinite(input.sampleCount) ? input.sampleCount : 0))
+  const requestedMinutes = Math.max(1, Math.floor(input.requestedMinutes ?? 60))
+  const observedCoverage = Number.isFinite(input.from) && Number.isFinite(input.to) && (input.to ?? 0) >= (input.from ?? 0)
+    ? Math.max(0, (input.to ?? 0) - (input.from ?? 0))
+    : null
+  const estimatedCoverage = input.intervalSeconds && input.intervalSeconds > 0 && sampleCount > 1
+    ? (sampleCount - 1) * input.intervalSeconds * 1000
+    : null
+  // Raw sample timestamps are the source of truth. The interval-derived range is
+  // only a fallback for aggregate responses that do not expose individual points;
+  // otherwise bursty or duplicated samples could falsely claim a full window.
+  const coverageMs = observedCoverage ?? estimatedCoverage
+  const coverageMinutes = coverageMs === null ? null : Math.max(1, Math.ceil(coverageMs / 60_000))
+  const completeWindow = coverageMs !== null
+    && coverageMs >= requestedMinutes * 60_000 * OPS_TOPOLOGY_SAMPLE_CONFIDENCE.fullWindowCoverageRatio
+  const minimumSamples = input.minimumSamples ?? OPS_TOPOLOGY_SAMPLE_CONFIDENCE.minAlertSamples
+  const sufficient = sampleCount >= minimumSamples
+  const range = completeWindow
+    ? formatTopologyWindowRange(requestedMinutes)
+    : coverageMinutes === null ? '当前窗口' : formatTopologyWindowRange(Math.min(requestedMinutes, coverageMinutes))
+  return {
+    sampleCount,
+    coverageMs,
+    coverageMinutes,
+    completeWindow,
+    sufficient,
+    label: `${range} · ${sampleCount} 次`,
+  }
 }
 
 export interface TopologyHealthDeduction {
@@ -108,6 +173,8 @@ export function resolveTopologySegmentHealth(input: TopologySegmentHealthInput):
   if (input.stale)
     return 'pending'
   if (input.loading || !input.hasData)
+    return 'pending'
+  if (input.sampleCount !== undefined && input.sampleCount < (input.minimumSamples ?? OPS_TOPOLOGY_SAMPLE_CONFIDENCE.minAlertSamples))
     return 'pending'
   if (input.avgLoss >= 20 || (input.avgLatency ?? 0) >= 1000)
     return 'error'

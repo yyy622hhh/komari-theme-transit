@@ -77,6 +77,8 @@ export interface VisualFixtureOptions {
   opsNoRecentTask?: boolean
   opsComparableRoutes?: boolean
   opsLiveFirstHop?: boolean
+  /** 第二段既有任务类型；用于验证旧 TCP 绑定迁回 ICMP。 */
+  topologyHopProbeType?: 'icmp' | 'tcp'
   topologyAutoRepairEnabled?: boolean
   opsCustomFirstMetric?: boolean
   opsKnownEntryCustomTask?: boolean
@@ -91,6 +93,8 @@ export interface VisualFixtureOptions {
   opsTopologyInsights?: boolean
   opsSevereLoss?: boolean
   opsExtremeLatency?: boolean
+  /** 新建拓扑任务尚未达到置信度门槛时的实际样本数。 */
+  opsPartialTopologySamples?: number
   /** 让北京联通任务在多数节点的同两个时间桶同步失败。 */
   carrierCommonModeLoss?: boolean
   opsMetricDelayMs?: number
@@ -376,11 +380,13 @@ function buildMetricResponse(
     return { start: payload.start, end: FIXED_NOW, series, count: series.length }
   }
   const insightHours = Number(payload.hours)
-  const detailedInsightWindow = options.opsTopologyInsights
+  const detailedInsightWindow = (options.opsTopologyInsights || options.opsComparableRoutes)
     && Number(payload.max_points) === 240
     && (insightHours === 24 || insightHours === 168)
     && requested.every(key => key.startsWith('ping.'))
-  const pointCount = detailedInsightWindow ? insightHours : 48
+  const pointCount = options.opsPartialTopologySamples
+    ? options.opsPartialTopologySamples
+    : detailedInsightWindow ? insightHours : 48
   const pointInterval = detailedInsightWindow ? 60 * 60 * 1000 : 75_000
   const points = Array.from({ length: pointCount }, (_, index) => ({
     time: new Date(Date.parse(FIXED_NOW) - (pointCount - 1 - index) * pointInterval).toISOString(),
@@ -690,7 +696,7 @@ async function handleRpc(
               })))
               return { start: FIXED_NOW, end: FIXED_NOW, interval_seconds: 60, stats, count: stats.length }
             })()
-          : options.pingTaskOrdering || options.opsTopologyInsights
+          : options.pingTaskOrdering || options.opsTopologyInsights || options.opsComparableRoutes || options.opsPartialTopologySamples
             ? {
                 start: FIXED_NOW,
                 end: FIXED_NOW,
@@ -701,9 +707,9 @@ async function handleRpc(
                   name: task.name,
                   interval: task.interval,
                   tags: { task_id: String(task.id), task_name: task.name },
-                  total: 48,
-                  valid: 48,
-                  loss: 0,
+                  total: options.opsPartialTopologySamples ?? 48,
+                  valid: options.opsSevereLoss && task.name === '北京电信' ? 0 : options.opsPartialTopologySamples ?? 48,
+                  loss: options.opsSevereLoss && task.name === '北京电信' ? 100 : 0,
                   loss_approximate: false,
                   min: options.opsTopologyInsights ? 70 : 40 + task.id,
                   max: options.opsTopologyInsights ? 145 : 120 + task.id,
@@ -881,7 +887,7 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
         { id: 11, weight: 1, name: '北京联通', clients: allClientUuids, default_on: true, type: options.carrierProbeType ?? 'tcp', target: options.carrierProbeType === 'icmp' ? '198.51.100.11' : '198.51.100.11:80', interval: 60 },
         { id: 12, weight: 2, name: '北京电信', clients: allClientUuids, default_on: true, type: options.carrierProbeType ?? 'tcp', target: options.carrierProbeType === 'icmp' ? '198.51.100.12' : '198.51.100.12:80', interval: 60 },
         { id: 13, weight: 3, name: '北京移动', clients: allClientUuids, default_on: true, type: options.carrierProbeType ?? 'tcp', target: options.carrierProbeType === 'icmp' ? '198.51.100.13' : '198.51.100.13:80', interval: 60 },
-        { id: 18, weight: 4, name: options.topologyGeneratedHopName ? `Transit-主控-洛杉矶-to-${REGION_FIXTURES[1].name}` : 'PandaOps-Local-Hop', clients: [uuidFor(0), uuidFor(2)], default_on: false, type: 'icmp', target: clientFixtures[uuidFor(1)]?.ipv4 ?? '192.0.2.11', interval: 30 },
+        { id: 18, weight: 4, name: options.topologyGeneratedHopName ? `Transit-主控-洛杉矶-to-${REGION_FIXTURES[1].name}` : 'PandaOps-Local-Hop', clients: [uuidFor(0), uuidFor(2)], default_on: false, type: options.topologyHopProbeType ?? 'icmp', target: options.topologyHopProbeType === 'tcp' ? `${clientFixtures[uuidFor(1)]?.ipv4 ?? '192.0.2.11'}:22` : clientFixtures[uuidFor(1)]?.ipv4 ?? '192.0.2.11', interval: 30 },
       ]
   if (options.opsNoRecentTask) {
     adminPingTasks.push({ id: 99, weight: 99, name: 'Configured-No-Recent-Sample', clients: [uuidFor(2)], default_on: false, type: 'icmp', target: '198.51.100.99', interval: 30 })

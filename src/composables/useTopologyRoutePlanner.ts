@@ -6,7 +6,7 @@ import type { NodeData } from '@/stores/nodes'
 import type { TopologyRouteConfig } from '@/utils/topologyModel'
 import type { TopologyProbeOption } from '@/utils/topologyPresets'
 import { ref, toValue } from 'vue'
-import { OPS_TOPOLOGY_CUSTOM_ENTRY_PROBE_LADDER, OPS_TOPOLOGY_ENTRY_PROBE_LADDER, OPS_TOPOLOGY_HOP_PROBE_LADDER } from '@/constants/ops'
+import { OPS_TOPOLOGY_CUSTOM_ENTRY_PROBE_LADDER, OPS_TOPOLOGY_ENTRY_PROBE_LADDER } from '@/constants/ops'
 import { describeTopologyHopProbe, normalizeTopologyHopProbe } from '@/services/ping-task.service'
 import { planEntryProbeTask, planWorkingHopTask } from '@/services/topology-probe.service'
 import { applyTopologyProbeToRoute, getTopologyRouteEntryProbe, getTopologyRouteProbeKey, resolveTopologyNode, shouldAutoApplyTopologyProbe } from '@/utils/topologyHelper'
@@ -81,7 +81,7 @@ function ladderText(ladder: readonly TopologyHopProbe[]): string {
   return ladder.map(rung => describeTopologyHopProbe(normalizeTopologyHopProbe(rung))).join('、')
 }
 
-const HOP_PROBE_LADDER_TEXT = ladderText(OPS_TOPOLOGY_HOP_PROBE_LADDER)
+const HOP_PROBE_LADDER_TEXT = describeTopologyHopProbe({ type: 'icmp' })
 const ENTRY_PROBE_LADDER_TEXT = ladderText(OPS_TOPOLOGY_ENTRY_PROBE_LADDER)
 const CUSTOM_ENTRY_PROBE_LADDER_TEXT = ladderText(OPS_TOPOLOGY_CUSTOM_ENTRY_PROBE_LADDER)
 export interface TopologyRouteHintInput {
@@ -455,7 +455,7 @@ export function useTopologyRoutePlanner(
             catalog.rememberTask(segmentSource.uuid, metric.taskFilter)
           continue
         }
-        const planned = await planWorkingHopTask(segmentSource, segmentTarget, metric.taskFilter)
+        const planned = await planWorkingHopTask(segmentSource, segmentTarget, metric.taskFilter, { icmpOnly: true })
         if (routeTaskRuns.get(route.id) !== runId || !isOpen() || !manager.routes.includes(route))
           return
         metric.live = true

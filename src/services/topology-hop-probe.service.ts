@@ -12,7 +12,7 @@ import {
   topologyHopTaskName,
   topologyPingTargets,
 } from '@/services/ping-task.service'
-import { assessHopTask, chooseInitialHopProbe, loadSourceProbeProfile, nextLadderProbe } from '@/services/topology-probe-profile.service'
+import { assessHopTask, chooseInitialHopProbe, LADDER, loadSourceProbeProfile, nextLadderProbe } from '@/services/topology-probe-profile.service'
 
 /** 第 2 段（线路机 → 落地机）探测任务的规划：只读，不发写请求。 */
 
@@ -53,9 +53,11 @@ function healthyLandingProbes(
   profile: SourceProbeProfile,
   source: TopologyPingEndpoint,
   landing: TopologyPingEndpoint,
+  allowedProbes: readonly TopologyHopProbe[] | null,
 ): TopologyHopProbe[] {
   const targetHosts = new Set(topologyPingTargets(landing))
-  const skipIcmp = chooseInitialHopProbe(profile).type !== 'icmp'
+  const icmpOnly = allowedProbes?.length === 1 && allowedProbes[0]?.type === 'icmp'
+  const skipIcmp = !icmpOnly && chooseInitialHopProbe(profile).type !== 'icmp'
   const probes: TopologyHopProbe[] = []
   for (const task of profile.tasks) {
     if (!targetHosts.has(pingTaskTargetHost(task.target)))
@@ -64,6 +66,10 @@ function healthyLandingProbes(
       continue
     const probe = topologyHopProbeFromTask(task)
     if (!probe || probes.some(existing => isSameTopologyHopProbe(existing, probe)))
+      continue
+    // 第 2 段只展示 Ping 与丢包率。其它来源即使证明某个 TCP 端口能连，也不能
+    // 把当前线路降级成“连接失败率”。
+    if (allowedProbes && !allowedProbes.some(rung => isSameTopologyHopProbe(rung, probe)))
       continue
     if (skipIcmp && probe.type === 'icmp')
       continue
@@ -149,7 +155,7 @@ export async function planWorkingHopTask(
   source: TopologyPingEndpoint,
   landing: TopologyPingEndpoint,
   currentTaskName = '',
-  options: { fresh?: boolean } = {},
+  options: { fresh?: boolean, icmpOnly?: boolean } = {},
 ): Promise<HopTaskPlan> {
   if (!source.uuid.trim() || !landing.uuid.trim())
     throw new Error('线路机或落地机已失效，请重新选择。')
@@ -160,6 +166,11 @@ export async function planWorkingHopTask(
   const addressOf = (task?: Pick<AdminPingTask, 'target'>, endpoint: TopologyPingEndpoint = landing) =>
     (task ? pingTaskTargetHost(task.target) : '') || topologyPingTargets(endpoint)[0] || targetAddress
   const profile = await loadSourceProbeProfile(source.uuid, options)
+  const probeLadder: readonly TopologyHopProbe[] = options.icmpOnly
+    ? [DEFAULT_TOPOLOGY_HOP_PROBE]
+    : LADDER
+  const isAllowedHopProbe = (probe: TopologyHopProbe) => !options.icmpOnly
+    || probeLadder.some(rung => isSameTopologyHopProbe(rung, probe))
   const hopTasks = listTopologyPingTasks(profile.tasks, source.uuid, landing)
   const verdictRank: Record<HopTaskVerdict, number> = { healthy: 0, pending: 1, missing: 1, dead: 2 }
   const preferredTask = (tasks: readonly AdminPingTask[]): AdminPingTask | undefined => {
@@ -228,6 +239,9 @@ export async function planWorkingHopTask(
   const existingHealthy = (excluded?: AdminPingTask): AdminPingTask | undefined => hopTasks.find((task) => {
     if (assessHopTask(profile, task) !== 'healthy')
       return false
+    const probe = topologyHopProbeFromTask(task)
+    if (!probe || !isAllowedHopProbe(probe))
+      return false
     if (excluded && Number.isInteger(excluded.id) && Number.isInteger(task.id))
       return task.id !== excluded.id
     return task !== excluded
@@ -235,6 +249,32 @@ export async function planWorkingHopTask(
 
   if (bound) {
     const boundProbe = topologyHopProbeFromTask(bound) ?? DEFAULT_TOPOLOGY_HOP_PROBE
+    // 旧版本可能把后半段自动降级成 TCP。新策略必须迁回 ICMP，不能因为旧 TCP
+    // 当前健康就继续展示“连接失败率”。若已经有 ICMP 任务则直接认回（即便它
+    // 正在显示 100% 丢包），否则创建一条独立任务并写回新绑定。
+    if (options.icmpOnly && !isAllowedHopProbe(boundProbe)) {
+      const preferredProbe = probeLadder[0] ?? DEFAULT_TOPOLOGY_HOP_PROBE
+      const existingPreferred = preferredTask(hopTasks.filter((task) => {
+        const probe = topologyHopProbeFromTask(task)
+        return probe !== null && isSameTopologyHopProbe(probe, preferredProbe)
+      }))
+      if (existingPreferred) {
+        const plan = planForTask(existingPreferred, preferredProbe, boundProbe)
+        return { ...plan, exhausted: plan.verdict === 'dead' }
+      }
+      const endpoint = landingForProbe(landing, profile, source, preferredProbe)
+      const task = draftTopologyPingTask(source, endpoint, preferredProbe, profile.tasks)
+      return {
+        task,
+        probe: preferredProbe,
+        verdict: 'pending',
+        needsCreation: true,
+        exhausted: false,
+        switchedFrom: boundProbe,
+        targetAddress: addressOf(task, endpoint),
+        retiredTasks: retire(task),
+      }
+    }
     const verdict = assessHopTask(profile, bound)
     if (verdict !== 'dead') {
       return {
@@ -255,13 +295,13 @@ export async function planWorkingHopTask(
       return planForTask(healthyTask, healthyProbe, boundProbe)
     }
 
-    for (const provenProbe of healthyLandingProbes(profile, source, landing)) {
+    for (const provenProbe of healthyLandingProbes(profile, source, landing, options.icmpOnly ? probeLadder : null)) {
       const provenPlan = planForProbe(provenProbe, boundProbe)
       if (provenPlan)
         return provenPlan
     }
 
-    const nextProbe = nextLadderProbe(profile, boundProbe, hopTasks)
+    const nextProbe = nextLadderProbe(profile, boundProbe, hopTasks, probeLadder)
     if (!nextProbe) {
       return {
         task: bound,
@@ -285,17 +325,17 @@ export async function planWorkingHopTask(
     return planForTask(healthyTask, healthyProbe, null)
   }
 
-  for (const provenProbe of healthyLandingProbes(profile, source, landing)) {
+  for (const provenProbe of healthyLandingProbes(profile, source, landing, options.icmpOnly ? probeLadder : null)) {
     const provenPlan = planForProbe(provenProbe, null)
     if (provenPlan)
       return provenPlan
   }
 
-  const initialProbe = chooseInitialHopProbe(profile)
+  const initialProbe = options.icmpOnly ? DEFAULT_TOPOLOGY_HOP_PROBE : chooseInitialHopProbe(profile)
   const initialPlan = planForProbe(initialProbe, null)
   if (initialPlan)
     return initialPlan
-  const nextProbe = nextLadderProbe(profile, initialProbe, hopTasks)
+  const nextProbe = nextLadderProbe(profile, initialProbe, hopTasks, probeLadder)
   if (nextProbe) {
     const nextPlan = planForProbe(nextProbe, initialProbe)
     if (nextPlan)

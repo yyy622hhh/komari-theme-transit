@@ -89,6 +89,9 @@ export function buildTopologyDiagnosticReport(input: TopologyDiagnosticReportInp
     const probeMode = segment.probeMode ?? insights?.probeMode ?? (insights?.live ? 'live' : 'static')
     lines.push('', `分段 ${index + 1}：${segment.sourceName} → ${segment.targetName}`)
     lines.push(`当前：延迟 ${latency(segment.telemetry?.latency)} / 丢包 ${loss(segment.telemetry?.loss)}`)
+    if (segment.telemetry?.hasLiveData && segment.telemetry.sampleCount !== undefined) {
+      lines.push(`当前样本：${segment.telemetry.windowLabel ?? '当前窗口'} / 成功 ${segment.telemetry.successCount ?? 0} / 丢失 ${segment.telemetry.lostCount ?? 0}${segment.telemetry.collecting ? ' / 采集中，暂不告警评分' : ''}`)
+    }
     if (!insights?.live || !evidence) {
       lines.push(`数据依据：${probeMode === 'auto' ? '等待自动探测任务' : insights?.live === false ? '静态基线' : '待积累'}`)
       return
@@ -108,7 +111,7 @@ export function buildTopologyDiagnosticReport(input: TopologyDiagnosticReportInp
   if (input.directions?.length) {
     lines.push('', '双向探测：')
     for (const direction of input.directions)
-      lines.push(`${direction.label} ${direction.sourceName} → ${direction.targetName}：延迟 ${latency(direction.telemetry?.latency)} / 丢包 ${loss(direction.telemetry?.loss)}`)
+      lines.push(`${direction.label} ${direction.sourceName} → ${direction.targetName}：延迟 ${latency(direction.telemetry?.latency)} / 丢包 ${loss(direction.telemetry?.loss)}${direction.telemetry?.sampleCount === undefined ? '' : ` / ${direction.telemetry.windowLabel ?? '当前窗口'} / 成功 ${direction.telemetry.successCount ?? 0} / 丢失 ${direction.telemetry.lostCount ?? 0}`}`)
   }
 
   lines.push('', '说明：本报告仅依据公开 Ping 样本生成，不代表确认发生路由变化。')

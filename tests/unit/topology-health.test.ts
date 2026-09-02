@@ -1,6 +1,6 @@
 import type { TopologySegmentTelemetry } from '../../src/utils/topologyHealth'
 import { describe, expect, test } from 'bun:test'
-import { calculateTopologyRouteScore, resolveTopologySegmentHealth } from '../../src/utils/topologyHealth'
+import { calculateTopologyRouteScore, resolveTopologySampleWindow, resolveTopologySegmentHealth } from '../../src/utils/topologyHealth'
 
 function segment(overrides: Partial<TopologySegmentTelemetry> = {}): TopologySegmentTelemetry {
   return {
@@ -15,6 +15,24 @@ function segment(overrides: Partial<TopologySegmentTelemetry> = {}): TopologySeg
 }
 
 describe('topology health scoring', () => {
+  test('keeps raw loss visible but does not classify a thin new window as failed', () => {
+    expect(resolveTopologySegmentHealth({
+      live: true,
+      sourceExists: true,
+      sourceOnline: true,
+      loading: false,
+      error: null,
+      stale: false,
+      hasData: true,
+      avgLatency: 20,
+      avgLoss: 60,
+      avgVolatility: 0,
+      fallbackLatency: null,
+      fallbackLoss: null,
+      sampleCount: 21,
+    })).toBe('pending')
+  })
+
   test('keeps a partially sampled route in the pending state', () => {
     const score = calculateTopologyRouteScore({
       segments: [segment(), undefined],
@@ -96,6 +114,60 @@ describe('topology health scoring', () => {
 
     expect(score).toMatchObject({ score: 0, label: '异常', tone: 'critical' })
     expect(score.deductions[0]).toMatchObject({ key: '0:loss-critical', points: 100 })
+  })
+})
+
+describe('topology sample window confidence', () => {
+  test('shows the observed range and denominator while a task is still collecting', () => {
+    expect(resolveTopologySampleWindow({
+      sampleCount: 21,
+      from: Date.parse('2026-09-02T08:00:00Z'),
+      to: Date.parse('2026-09-02T08:10:00Z'),
+      intervalSeconds: 30,
+    })).toMatchObject({
+      coverageMinutes: 10,
+      completeWindow: false,
+      sufficient: false,
+      label: '近 10 分钟 · 21 次',
+    })
+  })
+
+  test('starts classification at 30 samples without claiming a full hour', () => {
+    expect(resolveTopologySampleWindow({
+      sampleCount: 30,
+      intervalSeconds: 30,
+    })).toMatchObject({
+      coverageMinutes: 15,
+      completeWindow: false,
+      sufficient: true,
+      label: '近 15 分钟 · 30 次',
+    })
+  })
+
+  test('uses the full-window label only after enough temporal coverage', () => {
+    expect(resolveTopologySampleWindow({
+      sampleCount: 120,
+      intervalSeconds: 30,
+    })).toMatchObject({
+      coverageMinutes: 60,
+      completeWindow: true,
+      sufficient: true,
+      label: '近 1 小时 · 120 次',
+    })
+  })
+
+  test('prefers observed timestamps over an interval estimate', () => {
+    expect(resolveTopologySampleWindow({
+      sampleCount: 120,
+      from: Date.parse('2026-09-02T08:00:00Z'),
+      to: Date.parse('2026-09-02T08:10:00Z'),
+      intervalSeconds: 30,
+    })).toMatchObject({
+      coverageMinutes: 10,
+      completeWindow: false,
+      sufficient: true,
+      label: '近 10 分钟 · 120 次',
+    })
   })
 })
 

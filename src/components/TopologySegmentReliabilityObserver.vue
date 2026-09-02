@@ -5,6 +5,7 @@ import type { TopologyReliabilityWindow, TopologySegmentReliabilitySnapshot } fr
 import type { TopologyProbeMode } from '@/utils/topologyModel'
 import { computed, watch } from 'vue'
 import { useNodePingStats } from '@/composables/useNodePingStats'
+import { resolveTopologySampleWindow } from '@/utils/topologyHealth'
 import { resolveTopologyMetricSource } from '@/utils/topologyHelper'
 import { analyzeTopologyPeakInsight, bucketTopologyInsightsByBeijingHour, calculateTopologyInsightBaseline, detectTopologyBaselineShift, diagnoseTopologySegment, getTopologyInsightCoverage } from '@/utils/topologyInsights'
 import { calculateAdaptiveBaseline } from '@/utils/topologyIntelligence'
@@ -50,17 +51,29 @@ const weekPing = useNodePingStats(
 )
 
 function reliabilityWindow(hours: 24 | 168, ping: typeof dayPing): TopologyReliabilityWindow {
+  const coverage = getTopologyInsightCoverage(ping.insightPoints.value, ping.stale.value)
+  const sampleWindow = resolveTopologySampleWindow({
+    sampleCount: ping.sampleCount.value,
+    from: coverage.from,
+    to: coverage.to,
+    intervalSeconds: ping.probeInterval.value,
+    requestedMinutes: hours * 60,
+  })
+  const completeWindow = sampleWindow.completeWindow || (coverage.from === null && sampleWindow.sufficient)
+  const hasData = ping.hasData.value && sampleWindow.sufficient && completeWindow
   return {
     hours,
-    availability: ping.hasData.value ? ping.availability.value : null,
-    avgLatency: ping.hasLatencyData.value ? ping.avgLatency.value : null,
-    p50Latency: ping.hasLatencyData.value ? ping.p50Latency.value : null,
-    p95Latency: ping.hasLatencyData.value ? ping.p95Latency.value : null,
-    sampleCount: ping.hasData.value ? ping.sampleCount.value : 0,
-    hasData: ping.hasData.value,
+    availability: hasData ? ping.availability.value : null,
+    avgLatency: hasData && ping.hasLatencyData.value ? ping.avgLatency.value : null,
+    p50Latency: hasData && ping.hasLatencyData.value ? ping.p50Latency.value : null,
+    p95Latency: hasData && ping.hasLatencyData.value ? ping.p95Latency.value : null,
+    sampleCount: hasData ? ping.sampleCount.value : 0,
+    hasData,
     stale: ping.stale.value,
     loading: ping.loading.value,
     error: ping.error.value,
+    windowLabel: sampleWindow.label,
+    completeWindow,
   }
 }
 
@@ -86,7 +99,7 @@ const snapshot = computed<TopologySegmentReliabilitySnapshot>(() => {
       diagnosis: diagnoseTopologySegment({
         currentLatency: props.current?.latency ?? null,
         currentLoss: props.current?.loss ?? null,
-        hasLiveData: props.current?.hasLiveData ?? false,
+        hasLiveData: Boolean(props.current?.hasLiveData && !props.current.collecting),
         stale: props.current?.stale ?? true,
         history: dayPoints,
       }),

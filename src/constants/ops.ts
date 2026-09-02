@@ -57,7 +57,19 @@ export const OPS_TOPOLOGY_HOP_PROBE = {
   recheckIntervalMs: TIME_MS.minute,
 } as const
 
-/** 第 2 段（线路机 → 落地机）探测方式阶梯：ICMP 不通就依次退到常见的 TCP 端口。 */
+/**
+ * 拓扑实时窗口的最低置信度。
+ *
+ * 新建或重建任务刚开始时，少数超时会让百分比剧烈跳动。原始 Ping/丢包仍然
+ * 如实展示，但达到最低样本数前不参与线路告警、评分和推荐。
+ */
+export const OPS_TOPOLOGY_SAMPLE_CONFIDENCE = {
+  minAlertSamples: 30,
+  /** 覆盖达到请求窗口的 90% 后，才可以把范围简写成完整窗口。 */
+  fullWindowCoverageRatio: 0.9,
+} as const
+
+/** 探测协议候选全集；第 2 段目前只取 ICMP，自定义入口仍会使用后续 TCP 档。 */
 export const OPS_TOPOLOGY_HOP_PROBE_LADDER = [
   { type: 'icmp' },
   { type: 'tcp', port: 443 },

@@ -8,6 +8,7 @@ import { computed, ref } from 'vue'
 import TelemetrySampleStrip from '@/components/TelemetrySampleStrip.vue'
 import TopologySegmentHistory from '@/components/TopologySegmentHistory.vue'
 import { AppDialog } from '@/components/ui/app-dialog'
+import { OPS_TOPOLOGY_SAMPLE_CONFIDENCE } from '@/constants/ops'
 import { message } from '@/utils/message'
 import { probeFailureRateColumnLabel, probeFailureRateExplanation } from '@/utils/pingCurrentState'
 import { describeTopologyPeakInsight } from '@/utils/topologyInsights'
@@ -42,6 +43,8 @@ export interface TopologyRouteDetail {
   segmentMetrics: Array<TopologySegmentTelemetry | undefined>
   segmentReliability: Array<TopologySegmentReliabilitySnapshot | undefined>
   directionComparison?: TopologyDirectionComparison
+  collecting?: boolean
+  collectionLabel?: string
 }
 
 const props = defineProps<{ open: boolean, route: TopologyRouteDetail | null, nodes: NodeData[] }>()
@@ -114,7 +117,13 @@ function directionLatencyDelta(comparison: TopologyDirectionComparison): string 
 function directionFreshnessLabel(reading: TopologyDirectionReading): string {
   if (!reading.telemetry?.hasLiveData)
     return '待数据'
-  return reading.telemetry.stale ? '数据已过期' : '近 1 小时均值'
+  return reading.telemetry.stale ? '数据已过期' : reading.telemetry.windowLabel ?? '当前窗口'
+}
+
+function sampleCountLabel(telemetry: TopologySegmentTelemetry | undefined): string {
+  if (!telemetry?.hasLiveData || telemetry.sampleCount === undefined)
+    return '样本待积累'
+  return `成功 ${telemetry.successCount ?? 0} · 丢失 ${telemetry.lostCount ?? 0} · 共 ${telemetry.sampleCount} 次`
 }
 
 function hourlySamples(snapshot: TopologySegmentReliabilitySnapshot, segmentIndex: number): TelemetrySample[] {
@@ -247,10 +256,10 @@ async function copyDiagnosticReport(): Promise<void> {
 
       <section data-topology-score-detail class="grid gap-3 rounded-xl border border-border/60 bg-background/35 p-3.5 sm:grid-cols-[120px_1fr]">
         <div class="flex items-baseline gap-2 sm:block">
-          <strong class="text-3xl font-semibold tabular-nums" :class="scoreTone(route.score)">{{ route.score.score }}</strong>
-          <span data-topology-detail-score-label class="text-xs font-medium" :class="scoreTone(route.score)">{{ route.score.label }}</span>
+          <strong class="text-3xl font-semibold tabular-nums" :class="scoreTone(route.score)">{{ route.collecting ? '—' : route.score.score }}</strong>
+          <span data-topology-detail-score-label class="text-xs font-medium" :class="scoreTone(route.score)">{{ route.collecting ? '采集中' : route.score.label }}</span>
           <div class="mt-1 hidden text-[10px] text-muted-foreground sm:block">
-            近 1 小时线路健康评分
+            {{ route.collecting ? `达到 ${OPS_TOPOLOGY_SAMPLE_CONFIDENCE.minAlertSamples} 次后计算评分` : '近 1 小时线路健康评分' }}
           </div>
         </div>
         <div class="min-w-0">
@@ -261,7 +270,10 @@ async function copyDiagnosticReport(): Promise<void> {
               <span v-if="route.ranking.recommended" class="ml-1 text-emerald-700 dark:text-emerald-300">推荐</span>
             </span>
           </div>
-          <div v-if="route.score.deductions.length" class="mt-1.5 grid gap-1 sm:grid-cols-2">
+          <div v-if="route.collecting" class="mt-1.5 text-[11px] text-muted-foreground">
+            {{ route.collectionLabel }}；百分比按原始样本显示，暂不用于线路告警和推荐。
+          </div>
+          <div v-else-if="route.score.deductions.length" class="mt-1.5 grid gap-1 sm:grid-cols-2">
             <div v-for="item in route.score.deductions.slice(0, 4)" :key="item.key" class="flex min-w-0 items-center justify-between gap-3 text-[11px]">
               <span class="truncate text-foreground/80">{{ item.label }}</span>
               <span class="shrink-0 tabular-nums text-muted-foreground">-{{ item.points }}</span>
@@ -362,6 +374,9 @@ async function copyDiagnosticReport(): Promise<void> {
               <span>延迟 <strong>{{ formatLatency(reading.telemetry?.latency ?? null) }}</strong></span>
               <span>{{ failureLabelFor(reading.telemetry) }} <strong>{{ formatLoss(reading.telemetry?.loss) }}</strong></span>
             </div>
+            <div class="mt-1 text-[9px] tabular-nums text-muted-foreground">
+              {{ sampleCountLabel(reading.telemetry) }}
+            </div>
             <dl class="mt-2 grid gap-1 text-[9px] text-muted-foreground">
               <div class="flex min-w-0 gap-2">
                 <dt class="shrink-0">
@@ -413,11 +428,14 @@ async function copyDiagnosticReport(): Promise<void> {
           <dl class="mt-3 grid gap-2 text-[10px] sm:grid-cols-2 lg:grid-cols-4">
             <div class="rounded-lg border border-border/45 bg-background/35 p-2.5">
               <dt class="text-muted-foreground">
-                近 1h 均值 / {{ snapshotFailureLabel(snapshot) }}
+                {{ route.segmentMetrics[index]?.windowLabel ?? '当前窗口' }}均值 / {{ snapshotFailureLabel(snapshot) }}
               </dt>
               <dd class="mt-1 font-semibold tabular-nums">
                 {{ formatLatency(snapshot.insights.evidence.currentLatency) }} / {{ formatLoss(snapshot.insights.evidence.currentLoss) }}
               </dd>
+              <div class="mt-0.5 text-[9px] text-muted-foreground tabular-nums">
+                {{ sampleCountLabel(route.segmentMetrics[index]) }}
+              </div>
             </div>
             <div class="rounded-lg border border-border/45 bg-background/35 p-2.5">
               <dt class="text-muted-foreground">

@@ -238,13 +238,13 @@ bun run build:route-probe
 
 插件要求 Komari `>=1.4.0`，声明 `node`、`allowRoutes` 以及请求体大小、超时限制；不会申请系统 RPC、子进程执行、端口监听、HTML 注入、全盘文件或请求钩子权限。
 
-然后在每台节点下载**同一 GitHub Release** 的两个脚本并安装。推荐使用 HTTPS 面板设置向导生成命令。下面的 `v1.4.1` 应替换为实际已发布且与插件一致的标签，不要长期跟随会变化的 `main`。下载在独占私有目录中进行，任一失败即中止，不会执行当前目录的同名旧文件；安装器交互式读取 Agent token，输入不会进入 shell 历史：
+然后在每台节点下载**同一 GitHub Release** 的两个脚本并安装。推荐使用 HTTPS 面板设置向导生成命令。下面的 `v1.4.3` 应替换为实际已发布且与插件一致的标签，不要长期跟随会变化的 `main`。下载在独占私有目录中进行，任一失败即中止，不会执行当前目录的同名旧文件；安装器交互式读取 Agent token，输入不会进入 shell 历史：
 
 ```bash
 (
   set -eu
   umask 077
-  transit_release=v1.4.1
+  transit_release=v1.4.3
   transit_install_dir=$(mktemp -d /tmp/transit-route-probe-install.XXXXXX) || exit 1
   trap 'transit_install_status=$?; rm -f -- "$transit_install_dir/transit-route-probe-helper.sh" "$transit_install_dir/collect-return-route.sh"; rmdir -- "$transit_install_dir"; exit "$transit_install_status"' EXIT
   cd "$transit_install_dir" || exit 1

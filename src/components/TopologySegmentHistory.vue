@@ -7,10 +7,12 @@ import type { TopologyProbeMode } from '@/utils/topologyModel'
 import { computed } from 'vue'
 import TelemetrySampleStrip from '@/components/TelemetrySampleStrip.vue'
 import { useNodePingStats } from '@/composables/useNodePingStats'
+import { OPS_TOPOLOGY_SAMPLE_CONFIDENCE } from '@/constants/ops'
 import { formatDateTime } from '@/utils/helper'
 import { formatProbeCurrentLabel, probeFailureRateLabel } from '@/utils/pingCurrentState'
-import { resolveTopologySegmentHealth } from '@/utils/topologyHealth'
+import { resolveTopologySampleWindow, resolveTopologySegmentHealth } from '@/utils/topologyHealth'
 import { calculateTopologyLatencyBaseline, formatTopologyLatency, formatTopologyLoss, resolveTopologyMetricSource, resolveTopologySampleTone } from '@/utils/topologyHelper'
+import { getTopologyInsightCoverage } from '@/utils/topologyInsights'
 import { calculateAdaptiveBaseline } from '@/utils/topologyIntelligence'
 import { formatTopologyTelemetryLabel, parseTopologyMetric } from '@/utils/topologyLegacyFormat'
 
@@ -62,6 +64,15 @@ const baselinePing = useNodePingStats(
 )
 
 const hasLiveData = computed(() => config.value.live && ping.hasData.value && !ping.stale.value)
+const sampleCoverage = computed(() => getTopologyInsightCoverage(ping.insightPoints.value, ping.stale.value))
+const sampleWindow = computed(() => resolveTopologySampleWindow({
+  sampleCount: ping.sampleCount.value,
+  from: sampleCoverage.value.from,
+  to: sampleCoverage.value.to,
+  intervalSeconds: ping.probeInterval.value,
+  requestedMinutes: props.hours * 60,
+}))
+const collecting = computed(() => hasLiveData.value && !sampleWindow.value.sufficient)
 const failureLabel = computed(() => probeFailureRateLabel(ping.probeType.value))
 const currentLabel = computed(() => !config.value.live ? '静态基线' : sourceNode.value?.online === false ? '来源离线' : formatProbeCurrentLabel(currentPing.current.value.status, currentPing.avgLoss.value > 0))
 const latency = computed(() => hasLiveData.value
@@ -86,6 +97,7 @@ const health = computed<TopologyRouteHealth>(() => resolveTopologySegmentHealth(
   avgVolatility: ping.avgVolatility.value,
   fallbackLatency: config.value.fallbackLatency,
   fallbackLoss: config.value.fallbackLoss,
+  sampleCount: ping.sampleCount.value,
 }))
 const baselineWindow = computed<TopologyReliabilityWindow>(() => ({
   hours: 24,
@@ -94,7 +106,7 @@ const baselineWindow = computed<TopologyReliabilityWindow>(() => ({
   p50Latency: baselinePing.hasLatencyData.value ? baselinePing.p50Latency.value : null,
   p95Latency: baselinePing.hasLatencyData.value ? baselinePing.p95Latency.value : null,
   sampleCount: baselinePing.hasData.value ? baselinePing.sampleCount.value : 0,
-  hasData: baselinePing.hasData.value,
+  hasData: baselinePing.hasData.value && baselinePing.sampleCount.value >= OPS_TOPOLOGY_SAMPLE_CONFIDENCE.minAlertSamples,
   stale: baselinePing.stale.value,
   loading: baselinePing.loading.value,
   error: baselinePing.error.value,
@@ -125,6 +137,8 @@ const status = computed(() => {
     return { label: '数据可能不是最新', tone: 'text-amber-700 dark:text-amber-300', dot: 'bg-amber-400' }
   if (!hasLiveData.value)
     return { label: probeMode.value === 'auto' ? '等待自动探测' : config.value.live ? '等待任务数据' : '静态基线', tone: 'text-slate-500 dark:text-slate-400', dot: probeMode.value === 'auto' ? 'bg-amber-400' : 'bg-slate-500' }
+  if (collecting.value)
+    return { label: `采集中 ${ping.sampleCount.value}/${OPS_TOPOLOGY_SAMPLE_CONFIDENCE.minAlertSamples}`, tone: 'text-slate-600 dark:text-slate-300', dot: 'bg-slate-400' }
   if ((loss.value ?? 0) > 3 || ping.avgVolatility.value > 1.8)
     return { label: '存在波动', tone: 'text-amber-700 dark:text-amber-300', dot: 'bg-amber-400' }
   return { label: '窗口内稳定', tone: 'text-emerald-700 dark:text-emerald-300', dot: 'bg-emerald-400' }
@@ -193,7 +207,7 @@ const sampleBars = computed<TelemetrySample[]>(() => history.value.map((point, i
     </header>
 
     <p data-segment-current class="mt-2 text-[10px] text-muted-foreground">
-      {{ config.live ? `当前：${currentLabel} · 以下为近 ${hours} 小时统计` : '静态配置基线，不代表近期采样。' }}
+      {{ config.live ? `当前：${currentLabel} · ${hasLiveData ? sampleWindow.label : `请求近 ${hours} 小时`}` : '静态配置基线，不代表近期采样。' }}
     </p>
 
     <div class="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -223,6 +237,9 @@ const sampleBars = computed<TelemetrySample[]>(() => history.value.map((point, i
         <div class="mt-0.5 text-[9px] text-muted-foreground">
           {{ failureLabel }} {{ formatTopologyLoss(loss) }}
         </div>
+        <div v-if="hasLiveData" class="mt-0.5 text-[9px] text-muted-foreground tabular-nums">
+          成功 {{ ping.latencySampleCount.value }} · 丢失 {{ Math.max(0, ping.sampleCount.value - ping.latencySampleCount.value) }}
+        </div>
       </div>
       <div class="rounded-lg bg-card/55 px-2.5 py-2">
         <div class="text-[10px] text-muted-foreground">
@@ -240,7 +257,7 @@ const sampleBars = computed<TelemetrySample[]>(() => history.value.map((point, i
     <div class="mt-4">
       <div class="mb-2 flex items-center justify-between text-[10px] text-muted-foreground">
         <span>延迟走势</span>
-        <span>{{ hours === 1 ? '最近 1 小时' : hours === 24 ? '最近 24 小时' : '最近 7 天' }}</span>
+        <span>{{ hasLiveData ? sampleWindow.label : hours === 1 ? '请求近 1 小时' : hours === 24 ? '请求近 24 小时' : '请求近 7 天' }}</span>
       </div>
       <div v-if="sampleBars.length" class="flex h-14 items-end rounded-lg bg-card/35 px-2 py-2">
         <TelemetrySampleStrip

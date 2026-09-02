@@ -255,6 +255,29 @@ describe('planWorkingHopTask cache freshness', () => {
 })
 
 describe('topology hop task planning', () => {
+  test('icmp-only mode migrates a healthy legacy TCP binding instead of relabeling its failures as packet loss', async () => {
+    const tcpTaskName = 'Transit-Relay-JP-to-Exit-SG-tcp-22'
+    const restore = mockKomari(
+      [{ id: 1, name: tcpTaskName, clients: [source.uuid], type: 'tcp', target: `${landing.ipv4}:22`, interval: 30 }],
+      [{ task_id: '1', name: tcpTaskName, total: 100, valid: 100 }],
+    )
+    try {
+      const planned = await planWorkingHopTask(source, landing, tcpTaskName, { icmpOnly: true })
+      expect(planned.probe).toEqual({ type: 'icmp' })
+      expect(planned.needsCreation).toBe(true)
+      expect(planned.switchedFrom).toEqual({ type: 'tcp', port: 22 })
+      expect(planned.task).toMatchObject({
+        name: 'Transit-Relay-JP-to-Exit-SG',
+        type: 'icmp',
+        target: landing.ipv4,
+        clients: [source.uuid],
+      })
+    }
+    finally {
+      restore()
+    }
+  })
+
   test('plans a TCP hop task when the relay cannot use ICMP', async () => {
     const restore = mockKomari(
       [{ id: 1, name: 'telecom', clients: [source.uuid], type: 'tcp', target: '198.51.100.2:443', interval: 30 }],

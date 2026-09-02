@@ -12,7 +12,6 @@
  *   且不碰运营者自己的标签。
  */
 
-import type { CompanionProbeJob } from '@/services/route-probe-companion.service'
 import type { PublicSettingsUpdater } from '@/services/theme-settings.service'
 import type { NodeInfo } from '@/utils/api.types'
 import type { RouteProbeResults } from '@/utils/routeProbeResults'
@@ -25,6 +24,7 @@ import {
   RouteProbeCompanionError,
   RouteProbeCompanionUnavailableError,
 } from '@/services/route-probe-companion.service'
+import { classifyCompanionJobFailure, waitForRouteProbe } from '@/services/route-probe-execution.service'
 import { cleanupPersistedLegacyRouteTag, saveRouteProbeResults } from '@/services/route-probe-results.service'
 import { getRegionCode } from '@/utils/regionHelper'
 import { resolveNodeRouteTag } from '@/utils/routeProbeResults'
@@ -252,41 +252,6 @@ export function classifyRouteProbeOutputFailure(
 }
 
 /**
- * 助手确实没接单（`attempts === 0`）只在错误原因不是插件自身问题时才归因给
- * 「未安装/未连接」——`invalid-city` 和 `internal-error` 是伴生插件即使完全
- * 没有助手参与也可能产生的失败，报成「未连接」会把运营者指去错误的排查方向
- * （查节点，而不是查插件本身）。
- */
-function classifyCompanionJobFailure(job: Pick<CompanionProbeJob, 'attempts' | 'error'>): Pick<RouteProbeOutcome, 'status' | 'detail'> {
-  if (job.error === 'no-traceroute')
-    return { status: 'no-traceroute', detail: '节点助手未找到 traceroute' }
-  if (job.error === 'invalid-city')
-    return { status: 'failed', detail: '伴生插件不识别本次探测城市，请检查插件版本是否与主题匹配' }
-  if (job.error === 'internal-error')
-    return { status: 'failed', detail: '伴生插件处理任务时出现内部错误，请查看其日志' }
-  if (job.attempts === 0)
-    return { status: 'helper-offline', detail: '等待期间节点助手未领取任务，请检查安装或服务连接' }
-  return { status: 'failed', detail: '节点助手未取得可用结果' }
-}
-
-function sleep(ms: number, signal?: AbortSignal): Promise<void> {
-  if (signal?.aborted)
-    return Promise.reject(signal.reason ?? new DOMException('Aborted', 'AbortError'))
-  return new Promise((resolve, reject) => {
-    let timeoutId: ReturnType<typeof setTimeout>
-    const abort = () => {
-      clearTimeout(timeoutId)
-      reject(signal?.reason ?? new DOMException('Aborted', 'AbortError'))
-    }
-    timeoutId = setTimeout(() => {
-      signal?.removeEventListener('abort', abort)
-      resolve()
-    }, ms)
-    signal?.addEventListener('abort', abort, { once: true })
-  })
-}
-
-/**
  * 跑一轮采集。返回逐节点的结果，调用方负责展示。
  *
  * 任何一台失败都不影响其余节点——一台机器没装 traceroute 不该拖垮整轮。
@@ -355,7 +320,7 @@ async function probeNodeRoutesViaCompanion(
       if (consecutivePollFailures > POLL_FAILURE_TOLERANCE)
         throw error
       logAppWarning('route-probe-poll', error)
-      await sleep(RESULT_POLL_INTERVAL_MS, options.signal)
+      await waitForRouteProbe(RESULT_POLL_INTERVAL_MS, options.signal)
       continue
     }
 
@@ -388,7 +353,7 @@ async function probeNodeRoutesViaCompanion(
       outcomes.push(...await writeRouteTagsBatch(writeRequests, options.trigger, options.persistence))
     }
     if (pending.size) {
-      await sleep(RESULT_POLL_INTERVAL_MS, options.signal)
+      await waitForRouteProbe(RESULT_POLL_INTERVAL_MS, options.signal)
     }
   }
 
@@ -430,7 +395,7 @@ async function probeNodeRoutesViaRemoteExec(
   const deadline = Date.now() + RESULT_TIMEOUT_MS
 
   while (pending.size && Date.now() < deadline) {
-    await sleep(RESULT_POLL_INTERVAL_MS, options.signal)
+    await waitForRouteProbe(RESULT_POLL_INTERVAL_MS, options.signal)
 
     const results = await rpc.getExecTaskResults(dispatch.task_id, options.signal)
     const completedResults = results.filter(result => result.finished_at && pending.has(result.client))

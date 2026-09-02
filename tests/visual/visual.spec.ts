@@ -474,7 +474,7 @@ test('Transit desktop topology and cards remain contained', async ({ page }) => 
   await expect(routeScores.first()).toContainText(/\d+ 分/)
   const historyButtons = page.getByRole('button', { name: /查看线路历史/ })
   await expect(historyButtons).toHaveCount(4)
-  await expect(historyButtons.first()).toHaveAttribute('aria-label', /探测来源：[^，]+，当前：暂无数据，近 1 小时平均 [^，]+，连接失败率 [^，]+，查看线路历史/)
+  await expect(historyButtons.first()).toHaveAttribute('aria-label', /探测来源：[^，]+，当前：暂无数据，近 1 小时 · 48 次平均 [^，]+，连接失败率 [^，]+，查看线路历史/)
   await expect(page.locator('[data-topology-status]')).toHaveCount(0)
   for (const line of await page.locator('[data-topology-edge-line]').all()) {
     await expect.poll(() => line.evaluate(element => element.getBoundingClientRect().width)).toBeGreaterThan(150)
@@ -534,7 +534,7 @@ test('Transit desktop topology and cards remain contained', async ({ page }) => 
   // 而不是「三选一」的通用说明。
   await expect(page.getByRole('dialog')).toContainText('TCP 连接失败率表示连接或请求未成功的样本比例，不是 ICMP 丢包率。')
   await expect(page.getByRole('dialog')).toContainText('健康评分')
-  await expect(page.getByRole('dialog').locator('[data-topology-score-detail]')).toContainText('1/2 段有数据')
+  await expect(page.getByRole('dialog').locator('[data-topology-score-detail]')).toContainText('0/2 段有数据')
   await page.getByRole('dialog').getByRole('button', { name: '关闭' }).click()
   await page.getByRole('button', { name: '查看异常时间线' }).click()
   const timelineDialog = page.getByRole('dialog', { name: '异常时间线' })
@@ -915,6 +915,31 @@ test('Transit treats complete Ping loss as an error', async ({ page }) => {
   await expect(metric).not.toContainText('0ms')
 })
 
+test('Transit keeps a high-loss new task in collection state until 30 samples', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await installKomariFixture(page, {
+    opsDashboard: true,
+    dark: true,
+    opsSevereLoss: true,
+    opsPartialTopologySamples: 21,
+  })
+  await openStablePage(page)
+
+  const firstRoute = page.locator('.topology-scroll article').first()
+  await expect(firstRoute.locator('[data-topology-route-status]')).toHaveAttribute('data-status', 'pending')
+  await expect(firstRoute.locator('[data-topology-route-score]')).toContainText('采集中 21/30')
+  const metric = firstRoute.locator('[data-topology-current-metric]').first()
+  await expect(metric).toContainText('近 25 分钟 · 21 次')
+  await expect(metric).toContainText('100.0%')
+  await expect(metric.locator('strong').last()).toHaveClass(/text-slate-600/)
+
+  await firstRoute.locator('[data-topology-route-score]').click()
+  const dialog = page.getByRole('dialog')
+  await expect(dialog.locator('[data-topology-detail-score-label]')).toHaveText('采集中')
+  await expect(dialog).toContainText('达到 30 次后计算评分')
+  await expect(dialog).toContainText('成功 0 · 丢失 21')
+})
+
 test('Transit keeps extreme latency status consistent between the route and segment detail', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 })
   await installKomariFixture(page, { opsDashboard: true, dark: true, opsExtremeLatency: true })
@@ -1143,16 +1168,15 @@ test('Transit topology manager adds a relay-only route when the optional landing
   expect(addedTasks[0]?.name).toBe('北京电信')
 })
 
-test('Transit topology creates a TCP hop when the relay cannot use ICMP', async ({ page }) => {
+test('Transit topology keeps new landing hops on ICMP even when the relay has no prior ICMP success', async ({ page }) => {
   const addedTasks: Array<Record<string, unknown>> = []
   await page.setViewportSize({ width: 1440, height: 900 })
   await installKomariFixture(page, {
     opsDashboard: true,
     authenticated: true,
     emptyTopology: true,
-    // 线路机上 ICMP 任务一次都没成功；三网入口任务健康，但它们打的是运营商测速
-    // 点，不是这条新线路的落地机，不能拿它们用的端口（TCP 80）当作新落地机也
-    // 开放同一端口的证据——新线路必须统一从阶梯第一个 TCP 档（443）开始试。
+    // 线路机上 ICMP 任务一次都没成功；第二段仍固定使用 ICMP，不能拿 TCP 连接
+    // 失败率冒充丢包率。
     topologyProbeStats: [
       { task_id: 1, name: 'Tokyo', total: 48, valid: 0 },
       { task_id: 11, name: '北京联通', total: 48, valid: 47 },
@@ -1171,13 +1195,13 @@ test('Transit topology creates a TCP hop when the relay cannot use ICMP', async 
   await dialog.getByRole('button', { name: '添加线路' }).click()
 
   const route = dialog.locator('[data-topology-route-id]').first()
-  await expect(route).toHaveAttribute('data-topology-hop-probe', 'TCP 443')
-  await expect(route).toHaveAttribute('data-topology-hop-task', 'Transit-东京-高负载-to-新加坡-A100-tcp-443')
+  await expect(route).toHaveAttribute('data-topology-hop-probe', 'ICMP')
+  await expect(route).toHaveAttribute('data-topology-hop-task', 'Transit-东京-高负载-to-新加坡-A100')
   await expect.poll(() => addedTasks.length).toBe(1)
-  expect(addedTasks[0]).toMatchObject({ type: 'tcp', target: '192.0.2.13:443' })
+  expect(addedTasks[0]).toMatchObject({ type: 'icmp', target: '192.0.2.13' })
 })
 
-test('Transit topology switches the hop probe once ICMP is proven dead', async ({ page }) => {
+test('Transit topology keeps a dead ICMP hop instead of relabeling TCP failures as packet loss', async ({ page }) => {
   const addedTasks: Array<Record<string, unknown>> = []
   const deletedTaskIds: number[][] = []
   await page.setViewportSize({ width: 1440, height: 900 })
@@ -1186,8 +1210,8 @@ test('Transit topology switches the hop probe once ICMP is proven dead', async (
     authenticated: true,
     opsLiveFirstHop: true,
     topologyAutoRepairEnabled: false,
-    // 已绑定的 ICMP 中转任务采满样本却一次都没成功，且线路机上没有别的健康任务
-    // 可以参考，只能靠阶梯回退到 TCP。
+    // 已绑定的 ICMP 中转任务采满样本却一次都没成功；仍保留 ICMP，让页面如实
+    // 显示 100% 丢包，而不是切换成含义不同的 TCP 连接失败率。
     topologyProbeStats: [{ task_id: 18, name: 'PandaOps-Local-Hop', total: 48, valid: 0 }],
   })
   page.on('request', (request) => {
@@ -1203,14 +1227,14 @@ test('Transit topology switches the hop probe once ICMP is proven dead', async (
 
   const dialog = await openTopologyManager(page)
   const firstRoute = dialog.locator('[data-topology-route-id]').first()
-  await expect(firstRoute).toHaveAttribute('data-topology-hop-probe', 'TCP 443')
-  await expect(firstRoute.locator('[data-topology-hop-hint]')).toContainText('ICMP 探测不通，已自动改用 TCP 443')
-  await expect.poll(() => addedTasks.some(task => task.type === 'tcp' && task.target === '192.0.2.11:443')).toBe(true)
-  // 换下来的是操作者自己建的任务（名字不属于主题命名空间），绝不能顺手删掉。
+  await expect(firstRoute).toHaveAttribute('data-topology-hop-probe', 'ICMP')
+  await expect(firstRoute.locator('[data-topology-hop-hint]')).toContainText('ICMP 都探测不通')
+  expect(addedTasks.every(task => task.type === 'icmp')).toBe(true)
+  expect(addedTasks.some(task => task.type === 'tcp')).toBe(false)
   expect(deletedTaskIds).toEqual([])
 })
 
-test('Transit topology repairs a dead hop after the manager is closed', async ({ page }) => {
+test('Transit background repair migrates an existing TCP hop to ICMP', async ({ page }) => {
   const addedTasks: Array<Record<string, unknown>> = []
   const saves: unknown[] = []
   await page.setViewportSize({ width: 1440, height: 900 })
@@ -1218,7 +1242,8 @@ test('Transit topology repairs a dead hop after the manager is closed', async ({
     opsDashboard: true,
     authenticated: true,
     opsComparableRoutes: true,
-    topologyProbeStats: [{ task_id: 18, total: 48, valid: 0 }],
+    topologyHopProbeType: 'tcp',
+    topologyProbeStats: [{ task_id: 18, total: 48, valid: 48 }],
   })
   page.on('request', (request) => {
     if (request.method() !== 'POST')
@@ -1234,7 +1259,7 @@ test('Transit topology repairs a dead hop after the manager is closed', async ({
   await expect(page.locator('.topology-scroll article').first()).toBeVisible()
   await page.clock.fastForward(60_000)
 
-  await expect.poll(() => addedTasks.some(task => task.type === 'tcp' && task.target === '192.0.2.11:443')).toBe(true)
+  await expect.poll(() => addedTasks.some(task => task.type === 'icmp' && task.target === '192.0.2.11')).toBe(true)
   await expect.poll(() => saves.length).toBeGreaterThan(0)
 })
 
@@ -1279,11 +1304,11 @@ test('Transit topology never deletes a pre-existing task based on its name alone
   await openStablePage(page)
 
   const dialog = await openTopologyManager(page)
-  await expect(dialog.locator('[data-topology-route-id]').first()).toHaveAttribute('data-topology-hop-probe', 'TCP 443')
+  await expect(dialog.locator('[data-topology-route-id]').first()).toHaveAttribute('data-topology-hop-probe', 'ICMP')
   expect(deletedTaskIds).toEqual([])
 })
 
-test('Transit topology retires only a probe task created in the current session', async ({ page }) => {
+test('Transit topology keeps its session-created ICMP task after failed samples', async ({ page }) => {
   const probeStats: Array<{ task_id: number, total: number, valid: number }> = []
   const deletedTaskIds: number[][] = []
   const hopTaskIds: number[] = []
@@ -1320,8 +1345,8 @@ test('Transit topology retires only a probe task created in the current session'
 
   probeStats.push({ task_id: hopTaskIds[0]!, total: 48, valid: 0 })
   await dialog.getByRole('button', { name: '重新检测' }).click()
-  await expect(route).toHaveAttribute('data-topology-hop-probe', 'TCP 443')
-  await expect.poll(() => deletedTaskIds.flat()).toContain(hopTaskIds[0]!)
+  await expect(route).toHaveAttribute('data-topology-hop-probe', 'ICMP')
+  expect(deletedTaskIds).toEqual([])
 })
 
 test('Transit topology switches the entry probe once ICMP is proven dead, retiring the task it created', async ({ page }) => {

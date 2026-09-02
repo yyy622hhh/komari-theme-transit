@@ -429,11 +429,11 @@ describe('runTopologyProbeRepair persistence', () => {
   test('requests a fresh (uncached) plan for the in-lock re-check but not for the initial pass', async () => {
     const staleRoute = route({ taskFilter: 'Transit-Relay-JP-to-Exit-SG-tcp-443' })
     const { manager } = createManager([staleRoute])
-    const freshFlagsSeen: Array<boolean | undefined> = []
+    const optionsSeen: Array<{ fresh?: boolean, icmpOnly?: boolean } | undefined> = []
     const outcome = await runTopologyProbeRepair(createDeps({
       manager,
       planWorkingHopTask: async (_source, _landing, _currentTaskName, options) => {
-        freshFlagsSeen.push(options?.fresh)
+        optionsSeen.push(options)
         return hopPlan({ needsCreation: false, task: { ...hopPlan().task, name: 'Transit-Relay-JP-to-Exit-SG' } })
       },
     }))
@@ -442,7 +442,10 @@ describe('runTopologyProbeRepair persistence', () => {
     // the lock we must not silently reuse the same snapshot the outer pass
     // already saw, or a concurrent tab's create/delete of a competing task
     // goes unnoticed and the repair binds to (or duplicates) a stale task.
-    expect(freshFlagsSeen).toEqual([undefined, true])
+    expect(optionsSeen).toEqual([
+      { icmpOnly: true },
+      { fresh: true, icmpOnly: true },
+    ])
   })
 
   test('aborts mid-repair once canRepair turns false without saving', async () => {

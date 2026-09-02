@@ -32,7 +32,7 @@ export interface TopologyRepairDeps {
     source: TopologyPingEndpoint,
     landing: TopologyPingEndpoint,
     currentTaskName?: string,
-    options?: { fresh?: boolean },
+    options?: { fresh?: boolean, icmpOnly?: boolean },
   ) => Promise<HopTaskPlan>
   ensureTopologyPingTask: (
     source: TopologyPingEndpoint,
@@ -244,7 +244,7 @@ export async function runTopologyProbeRepair(deps: TopologyRepairDeps): Promise<
     if (source.online === false || landing.online === false)
       return null
 
-    const planned = await deps.planWorkingHopTask(source, landing, metric.taskFilter, options)
+    const planned = await deps.planWorkingHopTask(source, landing, metric.taskFilter, { ...options, icmpOnly: true })
     const renamed = route.nodes[segmentIndex]?.name.trim() !== source.name.trim()
       || route.nodes[segmentIndex + 1]?.name.trim() !== landing.name.trim()
     const bindingChanged = metric.nodeName.trim() !== source.name.trim()

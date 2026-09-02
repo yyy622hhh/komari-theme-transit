@@ -17,6 +17,7 @@ import TopologyRouteDetailDialog from '@/components/TopologyRouteDetailDialog.vu
 import TopologySegmentReliabilityObserver from '@/components/TopologySegmentReliabilityObserver.vue'
 import { useTopologyManager } from '@/composables/useTopologyManager'
 import { useTopologyProbeRepair } from '@/composables/useTopologyProbeRepair'
+import { OPS_TOPOLOGY_SAMPLE_CONFIDENCE } from '@/constants/ops'
 import { loadPublicPingTasks } from '@/services/metrics.service'
 import { useAppStore } from '@/stores/app'
 import { getNodeRole } from '@/utils/nodeRoleHelper'
@@ -283,7 +284,12 @@ function updateRouteSegmentMetrics(routeKey: string, segmentIndex: number, metri
     && previous.volatility === metrics.volatility
     && previous.hasLiveData === metrics.hasLiveData
     && previous.stale === metrics.stale
-    && previous.probeType === metrics.probeType) {
+    && previous.probeType === metrics.probeType
+    && previous.sampleCount === metrics.sampleCount
+    && previous.successCount === metrics.successCount
+    && previous.lostCount === metrics.lostCount
+    && previous.windowLabel === metrics.windowLabel
+    && previous.collecting === metrics.collecting) {
     return
   }
   routeSegmentMetrics.value = {
@@ -311,6 +317,28 @@ function getRouteScore(route: RouteRow): TopologyRouteScore {
     hasOfflineNode: route.nodes.slice(1).some(item => item.node?.online === false),
     hasMissingNode: route.nodes.slice(1).some(item => !item.node),
   })
+}
+
+function routeCollectingMetrics(route: RouteRow): TopologySegmentTelemetry[] {
+  const expectedSegments = Math.max(1, route.nodes.length - 1)
+  return Array.from({ length: expectedSegments }, (_, index) => routeSegmentMetrics.value[route.key]?.[index])
+    .filter((segment): segment is TopologySegmentTelemetry => Boolean(segment?.collecting))
+}
+
+function routeCollectingLabel(route: RouteRow): string {
+  const collecting = routeCollectingMetrics(route)
+  if (!collecting.length)
+    return ''
+  const count = Math.min(...collecting.map(segment => segment.sampleCount ?? 0))
+  return `采集中 ${count}/${OPS_TOPOLOGY_SAMPLE_CONFIDENCE.minAlertSamples}`
+}
+
+function routeScoreAriaLabel(route: RouteRow): string {
+  const collectingLabel = routeCollectingLabel(route)
+  if (collectingLabel)
+    return `线路状态：采集中，${collectingLabel}，达到 ${OPS_TOPOLOGY_SAMPLE_CONFIDENCE.minAlertSamples} 次后计算线路评分，查看详情`
+  const score = getRouteScore(route)
+  return `线路状态：${routeStatusLabel(route)}，近 1 小时线路健康评分 ${score.score} 分，${score.label}${routeRankingLabel(route) ? `，${routeRankingLabel(route)}` : ''}，查看详情`
 }
 
 function getRouteReliability(route: RouteRow): TopologyRouteReliability {
@@ -407,6 +435,8 @@ const selectedRoute = computed<TopologyRouteDetail | null>(() => {
     metrics: route.metrics,
     probeModes: route.probeModes,
     score: getRouteScore(route),
+    collecting: Boolean(routeCollectingLabel(route)),
+    collectionLabel: routeCollectingLabel(route),
     reliability: getRouteReliability(route),
     ranking: ['healthy', 'warning'].includes(getRouteHealth(route)) ? routeRankings.value[route.key] : undefined,
     probeLabel: route.probeLabel,
@@ -439,15 +469,18 @@ const healthSummary = computed(() => {
   const counts = healthCounts.value
   if (counts.healthy === routes.value.length)
     return { label: '全部正常', dot: 'bg-emerald-400' }
+  const collecting = routes.value.filter(route => Boolean(routeCollectingLabel(route))).length
+  const pending = Math.max(0, counts.pending - collecting)
   const parts = [
     counts.offline ? `${counts.offline} 失联` : '',
     counts.error ? `${counts.error} 异常` : '',
     counts.warning ? `${counts.warning} 波动` : '',
-    counts.pending ? `${counts.pending} 待数据` : '',
+    collecting ? `${collecting} 采集中` : '',
+    pending ? `${pending} 待数据` : '',
   ].filter(Boolean)
   return {
     label: parts.join(' · '),
-    dot: counts.offline || counts.error ? 'bg-rose-400' : counts.warning || counts.pending ? 'bg-amber-400' : 'bg-emerald-400',
+    dot: counts.offline || counts.error ? 'bg-rose-400' : counts.warning ? 'bg-amber-400' : counts.pending ? 'bg-slate-400' : 'bg-emerald-400',
   }
 })
 
@@ -458,7 +491,7 @@ function routeStatusLabel(route: RouteRow): string {
   if (status === 'error')
     return '异常'
   if (status === 'pending')
-    return '待数据'
+    return routeCollectingLabel(route) ? '采集中' : '待数据'
   if (status === 'warning')
     return '波动'
   return '正常'
@@ -469,7 +502,7 @@ function routeDotClass(route: RouteRow): string {
   if (status === 'offline' || status === 'error')
     return 'bg-rose-400'
   if (status === 'warning' || status === 'pending')
-    return 'bg-amber-400'
+    return status === 'warning' ? 'bg-amber-400' : 'bg-slate-400'
   return 'bg-emerald-400'
 }
 
@@ -669,10 +702,10 @@ function desktopRouteGridTemplate(route: RouteRow): string {
               :data-topology-route-ranking="routeRankingLabel(route) || undefined"
               class="ml-4 mt-0.5 whitespace-nowrap text-[9px] font-medium tabular-nums transition-colors hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500/60"
               :class="routeScoreClass(route)"
-              :aria-label="`线路状态：${routeStatusLabel(route)}，近 1 小时线路健康评分 ${getRouteScore(route).score} 分，${getRouteScore(route).label}${routeRankingLabel(route) ? `，${routeRankingLabel(route)}` : ''}，查看详情`"
+              :aria-label="routeScoreAriaLabel(route)"
               @click="openRouteDetail(route)"
             >
-              近1h {{ getRouteScore(route).score }} 分
+              {{ routeCollectingLabel(route) || `近1h ${getRouteScore(route).score} 分` }}
               <span
                 v-if="routeRankingLabel(route)"
                 class="ml-1 rounded border border-current/20 px-1 py-px text-[8px] no-underline"
@@ -779,10 +812,10 @@ function desktopRouteGridTemplate(route: RouteRow): string {
               :data-topology-route-ranking="routeRankingLabel(route) || undefined"
               class="whitespace-nowrap text-[9px] font-medium tabular-nums focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-emerald-500/60"
               :class="routeScoreClass(route)"
-              :aria-label="`线路状态：${routeStatusLabel(route)}，近 1 小时线路健康评分 ${getRouteScore(route).score} 分，${getRouteScore(route).label}${routeRankingLabel(route) ? `，${routeRankingLabel(route)}` : ''}，查看详情`"
+              :aria-label="routeScoreAriaLabel(route)"
               @click="openRouteDetail(route)"
             >
-              近1h {{ getRouteScore(route).score }} 分
+              {{ routeCollectingLabel(route) || `近1h ${getRouteScore(route).score} 分` }}
               <span v-if="routeRankingLabel(route)" class="ml-1 rounded border border-current/20 px-1 py-px text-[8px]">
                 {{ routeRankingLabel(route) }}
               </span>
