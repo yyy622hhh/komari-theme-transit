@@ -11,9 +11,15 @@ import { observePingTaskEpochs } from '../../src/services/ping-task-epoch.servic
 // `shouldLoadRecords` 判定为 false，从而完全绕开真实网络请求——不需要 mock fetch。
 
 let uuidCounter = 0
+let taskIdCounter = 1_200_000
 function uniqueUuid(): string {
   uuidCounter += 1
   return `ping-stats-spike-${uuidCounter}`
+}
+
+function uniqueTaskId(): number {
+  taskIdCounter += 1
+  return taskIdCounter
 }
 
 function pingRecord(taskId: number, uuid: string, value: number, time: string): PingRecord {
@@ -66,7 +72,7 @@ describe('disabled or unresolved node', () => {
 describe('live derivation from a seeded shared entry', () => {
   test('an observed in-place target edit excludes the old target history from loss and current state', async () => {
     const uuid = uniqueUuid()
-    const taskId = 90_000 + uuidCounter
+    const taskId = uniqueTaskId()
     const now = Date.now()
     observePingTaskEpochs([{ id: taskId, type: 'icmp', target: '202.106.195.68' }], 'admin', now - 120_000)
     observePingTaskEpochs([{ id: taskId, type: 'icmp', target: '202.106.50.1' }], 'admin', now - 60_000)
@@ -98,21 +104,22 @@ describe('live derivation from a seeded shared entry', () => {
 
   test('a contains filter that matches exactly one task selects it and builds stats from its records', async () => {
     const uuid = uniqueUuid()
+    const taskId = uniqueTaskId()
     const now = Date.now()
     seedEntry(uuid, 24, 100, sharedState({
       recordsByClient: new Map([[uuid, [
-        pingRecord(1, uuid, 42, new Date(now - 60_000).toISOString()),
-        pingRecord(1, uuid, 44, new Date(now).toISOString()),
+        pingRecord(taskId, uuid, 42, new Date(now - 60_000).toISOString()),
+        pingRecord(taskId, uuid, 44, new Date(now).toISOString()),
       ]]]),
-      sampleUpdatedAtByTaskId: new Map([[1, now]]),
-      taskNamesById: new Map([[1, '北京电信']]),
-      taskClientsById: new Map([[1, new Set([uuid])]]),
+      sampleUpdatedAtByTaskId: new Map([[taskId, now]]),
+      taskNamesById: new Map([[taskId, '北京电信']]),
+      taskClientsById: new Map([[taskId, new Set([uuid])]]),
     }))
 
     const { composable, scope } = mountPingStats(uuid, { hours: 24, maxCount: 100, taskNameFilter: '电信' })
     await nextTick()
 
-    expect(composable.selectedTaskId.value).toBe(1)
+    expect(composable.selectedTaskId.value).toBe(taskId)
     expect(composable.selectedTaskName.value).toBe('北京电信')
     expect(composable.taskNames.value).toEqual(['北京电信'])
     expect(composable.stats.value.hasData).toBe(true)
@@ -122,12 +129,13 @@ describe('live derivation from a seeded shared entry', () => {
 
   test('an unrelated filter yields no match and reports empty stats even though the node has data', async () => {
     const uuid = uniqueUuid()
+    const taskId = uniqueTaskId()
     const now = Date.now()
     seedEntry(uuid, 24, 100, sharedState({
-      recordsByClient: new Map([[uuid, [pingRecord(1, uuid, 42, new Date(now).toISOString())]]]),
-      sampleUpdatedAtByTaskId: new Map([[1, now]]),
-      taskNamesById: new Map([[1, '北京电信']]),
-      taskClientsById: new Map([[1, new Set([uuid])]]),
+      recordsByClient: new Map([[uuid, [pingRecord(taskId, uuid, 42, new Date(now).toISOString())]]]),
+      sampleUpdatedAtByTaskId: new Map([[taskId, now]]),
+      taskNamesById: new Map([[taskId, '北京电信']]),
+      taskClientsById: new Map([[taskId, new Set([uuid])]]),
     }))
 
     const { composable, scope } = mountPingStats(uuid, { hours: 24, maxCount: 100, taskNameFilter: '上海移动' })
@@ -140,15 +148,17 @@ describe('live derivation from a seeded shared entry', () => {
 
   test('an empty filter aggregates every task instead of narrowing to one', async () => {
     const uuid = uniqueUuid()
+    const telecomTaskId = uniqueTaskId()
+    const unicomTaskId = uniqueTaskId()
     const now = Date.now()
     seedEntry(uuid, 24, 100, sharedState({
       recordsByClient: new Map([[uuid, [
-        pingRecord(1, uuid, 10, new Date(now).toISOString()),
-        pingRecord(2, uuid, 20, new Date(now).toISOString()),
+        pingRecord(telecomTaskId, uuid, 10, new Date(now).toISOString()),
+        pingRecord(unicomTaskId, uuid, 20, new Date(now).toISOString()),
       ]]]),
-      sampleUpdatedAtByTaskId: new Map([[1, now], [2, now]]),
-      taskNamesById: new Map([[1, '北京电信'], [2, '北京联通']]),
-      taskClientsById: new Map([[1, new Set([uuid])], [2, new Set([uuid])]]),
+      sampleUpdatedAtByTaskId: new Map([[telecomTaskId, now], [unicomTaskId, now]]),
+      taskNamesById: new Map([[telecomTaskId, '北京电信'], [unicomTaskId, '北京联通']]),
+      taskClientsById: new Map([[telecomTaskId, new Set([uuid])], [unicomTaskId, new Set([uuid])]]),
     }))
 
     const { composable, scope } = mountPingStats(uuid, { hours: 24, maxCount: 100 })
@@ -164,12 +174,13 @@ describe('live derivation from a seeded shared entry', () => {
   test('only counts a task toward this node when it is actually assigned or sampled here', async () => {
     const uuid = uniqueUuid()
     const otherUuid = uniqueUuid()
+    const taskId = uniqueTaskId()
     const now = Date.now()
     seedEntry(uuid, 24, 100, sharedState({
-      recordsByClient: new Map([[otherUuid, [pingRecord(1, otherUuid, 10, new Date(now).toISOString())]]]),
-      sampleUpdatedAtByTaskId: new Map([[1, now]]),
-      taskNamesById: new Map([[1, '别的节点的任务']]),
-      taskClientsById: new Map([[1, new Set([otherUuid])]]),
+      recordsByClient: new Map([[otherUuid, [pingRecord(taskId, otherUuid, 10, new Date(now).toISOString())]]]),
+      sampleUpdatedAtByTaskId: new Map([[taskId, now]]),
+      taskNamesById: new Map([[taskId, '别的节点的任务']]),
+      taskClientsById: new Map([[taskId, new Set([otherUuid])]]),
     }))
 
     const { composable, scope } = mountPingStats(uuid, { hours: 24, maxCount: 100 })
@@ -192,14 +203,15 @@ describe('freshness', () => {
 
   test('reports fresh right after a sample lands', async () => {
     const uuid = uniqueUuid()
+    const taskId = uniqueTaskId()
     const now = Date.now()
     pingFreshnessTick.value = now
     pingFreshnessGraceUntil.value = 0
     seedEntry(uuid, 24, 100, sharedState({
-      recordsByClient: new Map([[uuid, [pingRecord(1, uuid, 10, new Date(now).toISOString())]]]),
-      sampleUpdatedAtByTaskId: new Map([[1, now]]),
-      taskNamesById: new Map([[1, 'task']]),
-      taskClientsById: new Map([[1, new Set([uuid])]]),
+      recordsByClient: new Map([[uuid, [pingRecord(taskId, uuid, 10, new Date(now).toISOString())]]]),
+      sampleUpdatedAtByTaskId: new Map([[taskId, now]]),
+      taskNamesById: new Map([[taskId, 'task']]),
+      taskClientsById: new Map([[taskId, new Set([uuid])]]),
     }))
 
     const { composable, scope } = mountPingStats(uuid, { hours: 24, maxCount: 100 })
@@ -213,15 +225,16 @@ describe('freshness', () => {
 
   test('reports stale once the freshest sample is far enough in the past', async () => {
     const uuid = uniqueUuid()
+    const taskId = uniqueTaskId()
     const now = Date.now()
     pingFreshnessTick.value = now
     pingFreshnessGraceUntil.value = 0
     const staleSampleAt = now - 40 * 60_000
     seedEntry(uuid, 24, 100, sharedState({
-      recordsByClient: new Map([[uuid, [pingRecord(1, uuid, 10, new Date(staleSampleAt).toISOString())]]]),
-      sampleUpdatedAtByTaskId: new Map([[1, staleSampleAt]]),
-      taskNamesById: new Map([[1, 'task']]),
-      taskClientsById: new Map([[1, new Set([uuid])]]),
+      recordsByClient: new Map([[uuid, [pingRecord(taskId, uuid, 10, new Date(staleSampleAt).toISOString())]]]),
+      sampleUpdatedAtByTaskId: new Map([[taskId, staleSampleAt]]),
+      taskNamesById: new Map([[taskId, 'task']]),
+      taskClientsById: new Map([[taskId, new Set([uuid])]]),
     }))
 
     const { composable, scope } = mountPingStats(uuid, { hours: 24, maxCount: 100 })
@@ -234,15 +247,16 @@ describe('freshness', () => {
 
   test('reports fresh during the post-resume grace period even for an old sample', async () => {
     const uuid = uniqueUuid()
+    const taskId = uniqueTaskId()
     const now = Date.now()
     pingFreshnessTick.value = now
     pingFreshnessGraceUntil.value = now + 60_000
     const staleSampleAt = now - 60 * 60_000
     seedEntry(uuid, 24, 100, sharedState({
-      recordsByClient: new Map([[uuid, [pingRecord(1, uuid, 10, new Date(staleSampleAt).toISOString())]]]),
-      sampleUpdatedAtByTaskId: new Map([[1, staleSampleAt]]),
-      taskNamesById: new Map([[1, 'task']]),
-      taskClientsById: new Map([[1, new Set([uuid])]]),
+      recordsByClient: new Map([[uuid, [pingRecord(taskId, uuid, 10, new Date(staleSampleAt).toISOString())]]]),
+      sampleUpdatedAtByTaskId: new Map([[taskId, staleSampleAt]]),
+      taskNamesById: new Map([[taskId, 'task']]),
+      taskClientsById: new Map([[taskId, new Set([uuid])]]),
     }))
 
     const { composable, scope } = mountPingStats(uuid, { hours: 24, maxCount: 100 })
@@ -284,17 +298,20 @@ describe('shared subscription lifecycle', () => {
 describe('useNodeCarrierPingStats', () => {
   test('fans out into three carrier-specific views that share one node’s cache entry', async () => {
     const uuid = uniqueUuid()
+    const unicomTaskId = uniqueTaskId()
+    const telecomTaskId = uniqueTaskId()
+    const mobileTaskId = uniqueTaskId()
     const now = Date.now()
     seedEntry(uuid, 24, 100, sharedState({
       recordsByClient: new Map([[uuid, [
-        pingRecord(1, uuid, 10, new Date(now).toISOString()),
-        pingRecord(2, uuid, 20, new Date(now).toISOString()),
-        pingRecord(3, uuid, 30, new Date(now).toISOString()),
+        pingRecord(unicomTaskId, uuid, 10, new Date(now).toISOString()),
+        pingRecord(telecomTaskId, uuid, 20, new Date(now).toISOString()),
+        pingRecord(mobileTaskId, uuid, 30, new Date(now).toISOString()),
       ]]]),
-      sampleUpdatedAtByTaskId: new Map([[1, now], [2, now], [3, now]]),
-      taskNamesById: new Map([[1, '北京联通'], [2, '北京电信'], [3, '北京移动']]),
-      taskClientsById: new Map([[1, new Set([uuid])], [2, new Set([uuid])], [3, new Set([uuid])]]),
-      taskTypesById: new Map([[1, 'icmp'], [2, 'icmp'], [3, 'icmp']]),
+      sampleUpdatedAtByTaskId: new Map([[unicomTaskId, now], [telecomTaskId, now], [mobileTaskId, now]]),
+      taskNamesById: new Map([[unicomTaskId, '北京联通'], [telecomTaskId, '北京电信'], [mobileTaskId, '北京移动']]),
+      taskClientsById: new Map([[unicomTaskId, new Set([uuid])], [telecomTaskId, new Set([uuid])], [mobileTaskId, new Set([uuid])]]),
+      taskTypesById: new Map([[unicomTaskId, 'icmp'], [telecomTaskId, 'icmp'], [mobileTaskId, 'icmp']]),
     }))
 
     const scope = effectScope()
@@ -315,13 +332,14 @@ describe('useNodeCarrierPingStats', () => {
     // 任务仍可能是 TCP；这时展示的是「探测失败率」而不是丢包率，但数据不能
     // 因为协议不是 ICMP 就整段消失——那会让还没迁移的站点三网卡片突然空白。
     const uuid = uniqueUuid()
+    const taskId = uniqueTaskId()
     const now = Date.now()
     seedEntry(uuid, 24, 100, sharedState({
-      recordsByClient: new Map([[uuid, [pingRecord(1, uuid, -1, new Date(now).toISOString())]]]),
-      sampleUpdatedAtByTaskId: new Map([[1, now]]),
-      taskNamesById: new Map([[1, '北京电信']]),
-      taskClientsById: new Map([[1, new Set([uuid])]]),
-      taskTypesById: new Map([[1, 'tcp']]),
+      recordsByClient: new Map([[uuid, [pingRecord(taskId, uuid, -1, new Date(now).toISOString())]]]),
+      sampleUpdatedAtByTaskId: new Map([[taskId, now]]),
+      taskNamesById: new Map([[taskId, '北京电信']]),
+      taskClientsById: new Map([[taskId, new Set([uuid])]]),
+      taskTypesById: new Map([[taskId, 'tcp']]),
     }))
 
     const scope = effectScope()

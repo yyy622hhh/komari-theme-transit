@@ -9,6 +9,7 @@ import { formatPingFreshnessAge } from '../../src/utils/pingFreshness'
 
 const originalStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
 const tick = pingFreshnessTick.value
+let taskIdCounter = 1_100_000
 afterEach(() => {
   pingFreshnessTick.value = tick
   if (originalStorage)
@@ -19,9 +20,10 @@ afterEach(() => {
 
 function seed(uuid: string, tasks: Array<{ name: string, at: number, values: number[] }>) {
   const entry = getSharedPingRecordsEntry(1, PING_RECORD_MAX_COUNT, uuid)
+  const taskIds = tasks.map(() => ++taskIdCounter)
   const records = tasks.flatMap((task, index) => task.values.map((value, sample) => ({
     client: uuid,
-    task_id: index + 1,
+    task_id: taskIds[index]!,
     value,
     time: new Date(task.at - (task.values.length - sample - 1) * 30_000).toISOString(),
   })))
@@ -29,10 +31,10 @@ function seed(uuid: string, tasks: Array<{ name: string, at: number, values: num
   entry.data.value = {
     source: 'legacy',
     recordsByClient: new Map([[uuid, records]]),
-    taskNamesById: new Map(tasks.map((task, index) => [index + 1, task.name])),
-    sampleUpdatedAtByTaskId: new Map(tasks.map((task, index) => [index + 1, task.at])),
-    taskClientsById: new Map(tasks.map((_, index) => [index + 1, new Set([uuid])])),
-    taskTypesById: new Map(tasks.map((_, index) => [index + 1, 'icmp'])),
+    taskNamesById: new Map(tasks.map((task, index) => [taskIds[index]!, task.name])),
+    sampleUpdatedAtByTaskId: new Map(tasks.map((task, index) => [taskIds[index]!, task.at])),
+    taskClientsById: new Map(tasks.map((_, index) => [taskIds[index]!, new Set([uuid])])),
+    taskTypesById: new Map(tasks.map((_, index) => [taskIds[index]!, 'icmp'])),
   }
 }
 
