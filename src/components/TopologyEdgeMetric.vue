@@ -7,7 +7,7 @@ import { computed, watch } from 'vue'
 import TopologyEdgeSamples from '@/components/TopologyEdgeSamples.vue'
 import { useNodePingStats } from '@/composables/useNodePingStats'
 import { formatDateTime } from '@/utils/helper'
-import { formatProbeCurrentLabel, probeCurrentTone, probeFailureRateLabel } from '@/utils/pingCurrentState'
+import { formatProbeCurrentLabel, probeFailureRateLabel } from '@/utils/pingCurrentState'
 import { resolveTopologySegmentHealth } from '@/utils/topologyHealth'
 import { calculateTopologyLatencyBaseline, formatTopologyLatency, formatTopologyLoss, resolveTopologyMetricSource, resolveTopologySampleTone } from '@/utils/topologyHelper'
 import { formatTopologyTelemetryLabel, parseTopologyMetric } from '@/utils/topologyLegacyFormat'
@@ -21,6 +21,7 @@ const props = defineProps<{
   sourceUuid?: string
   probeMode?: TopologyProbeMode
   mobile?: boolean
+  compact?: boolean
   observeOnly?: boolean
 }>()
 const emit = defineEmits<{
@@ -116,6 +117,7 @@ const telemetry = computed<TopologySegmentTelemetry>(() => ({
   volatility: ping.hasData.value && !ping.stale.value ? ping.avgVolatility.value : null,
   hasLiveData: hasLiveData.value,
   stale: ping.stale.value,
+  probeType: ping.probeType.value,
 }))
 
 watch(telemetry, value => emit('metricsChange', value), { immediate: true })
@@ -152,16 +154,18 @@ const sampleBars = computed<TelemetrySample[]>(() => {
 <template>
   <div
     v-if="!observeOnly"
-    class="relative flex flex-1 flex-col gap-1 py-2 text-center"
-    :class="mobile ? 'min-w-0' : 'min-w-[150px]'"
+    class="relative flex flex-1 flex-col text-center"
+    :class="[
+      mobile ? 'min-w-0' : 'min-w-[150px]',
+      compact ? 'gap-0.5 py-1' : 'gap-1 py-2',
+    ]"
     :data-topology-edge-samples="sampleBars.length ? '' : undefined"
     :title="`${sourceState.label}${config.live ? ` · ${config.taskFilter || '未指定任务'}` : ''}`"
     :aria-label="`${sourceState.label}，当前：${currentLabel}，${metricSourceLabel}：${latencyText}，${failureLabel} ${formatTopologyLoss(loss)}`"
   >
     <span
       :data-topology-current="config.live ? currentStatus : 'static'"
-      class="min-w-0 break-words text-[11px] font-medium leading-4"
-      :class="config.live ? probeCurrentTone(currentStatus) : 'text-slate-600 dark:text-slate-300'"
+      class="sr-only"
       :title="`当前：${currentLabel}；样本更新：${ping.current.value.latestAt ? formatDateTime(new Date(ping.current.value.latestAt)) : '未知'}；最近成功：${ping.current.value.lastSuccessAt ? formatDateTime(new Date(ping.current.value.lastSuccessAt)) : '窗口内无成功'}`"
     >{{ currentLabel }}</span>
     <TopologyEdgeSamples
@@ -169,16 +173,21 @@ const sampleBars = computed<TelemetrySample[]>(() => {
       :line-class="sourceState.line"
       :label="telemetryLabel"
     />
-    <span data-topology-sample-updated class="min-w-0 break-words text-[10px] leading-4 text-slate-600 dark:text-slate-300">{{ sampleUpdateLabel }}</span>
+    <span
+      data-topology-sample-updated
+      class="min-w-0 break-words text-[10px] leading-4 text-slate-600 dark:text-slate-300"
+      :class="compact && 'sr-only'"
+    >{{ sampleUpdateLabel }}</span>
     <button
       type="button"
       data-topology-current-metric
       :data-topology-history-source="hasLiveData ? 'history' : config.live ? 'fallback' : 'configured'"
-      class="transit-divider flex min-w-0 flex-wrap items-center justify-center gap-x-2 gap-y-0.5 rounded border-t px-1 pt-1 text-[11px] leading-4 tabular-nums text-slate-600 transition-colors hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-500 dark:text-slate-300 dark:hover:text-slate-100"
+      class="transit-divider flex min-w-0 flex-wrap items-center justify-center gap-x-2 gap-y-0.5 rounded border-t px-1 text-[11px] leading-4 tabular-nums text-slate-600 transition-colors hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-emerald-500 dark:text-slate-300 dark:hover:text-slate-100"
+      :class="compact ? 'pt-0.5' : 'pt-1'"
       :aria-label="`${telemetryLabel}，当前：${currentLabel}，${metricSourceLabel} ${latencyText}，${failureLabel} ${formatTopologyLoss(loss)}，查看线路历史`"
       @click="emit('openDetail')"
     >
-      <span class="w-full text-[10px]">
+      <span class="w-full text-[10px]" :class="compact && 'sr-only'">
         <span v-if="hasLiveData">近 1 小时</span>
         <span v-else-if="config.live">备用基线</span>
         <span v-else data-topology-probe-mode-label :data-probe-mode="probeMode">{{ probeMode === 'auto' ? '待探测' : '静态' }}</span>

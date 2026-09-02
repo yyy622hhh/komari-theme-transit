@@ -65,7 +65,7 @@ for (const seenPreviously of [false, true]) {
         return Response.json({ jsonrpc: '2.0', id: request.id, result: { 'no-helper': { tags: '' } } })
       throw new Error(`Unexpected ${target}`)
     }) as typeof fetch
-    const result = await probeNodeRoutes([{ uuid: 'no-helper', name: 'No helper installed' }], 'beijing')
+    const result = await probeNodeRoutes([{ uuid: 'no-helper', name: 'No helper installed' }], 'beijing', { trigger: 'manual', persistence: { theme: 'Transit' } })
     expect(result?.outcomes[0]?.status).toBe('helper-offline')
     expect(result?.outcomes[0]?.detail).toContain('未领取任务')
     expect(now - started).toBe(605000)
@@ -125,6 +125,51 @@ test('an old helper executing a valid lease remains busy until completion or lea
     await wizard.runCheck()
     expect(wizard.onlineHelperCount.value).toBe(1)
     expect(wizard.eligibleNodes.value[0]?.helperBusy).toBeFalse()
+  }
+  finally {
+    scope.stop()
+    disposePinia(pinia)
+  }
+})
+
+test('missing-helper token fetch is skipped once the set has not changed since the last check', async () => {
+  const now = originalNow()
+  const coordinator = new RouteProbeCoordinator({ now: () => now, randomId: () => 'qa' })
+  Date.now = () => now
+  const values = new Map<string, string>()
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => values.set(key, value),
+    removeItem: (key: string) => values.delete(key),
+  } })
+  let getNodesCalls = 0
+  globalThis.fetch = (async (url, init) => {
+    const target = String(url)
+    if (target.endsWith('/api/me'))
+      return Response.json({ logged_in: true, username: 'admin' })
+    if (target.endsWith('/health'))
+      return Response.json({ ok: true, protocol: 1, version: '1.4.1' })
+    if (target.includes('/roster?'))
+      return Response.json(coordinator.roster(['no-helper']))
+    const request = JSON.parse(String(init?.body))
+    if (request.method === 'common:getNodes') {
+      getNodesCalls += 1
+      return Response.json({ jsonrpc: '2.0', id: request.id, result: { 'no-helper': { token: 'secret-token' } } })
+    }
+    throw new Error(`Unexpected ${target}`)
+  }) as typeof fetch
+  const pinia = createPinia()
+  setActivePinia(pinia)
+  const scope = effectScope()
+  try {
+    const wizard = scope.run(() => useRouteProbeSetupWizard([{ uuid: 'no-helper', name: 'No helper', online: true, region: 'US' }] as NodeData[]))!
+    await wizard.runCheck()
+    expect(wizard.missingHelperNodes.value).toHaveLength(1)
+    expect(wizard.tokenFor('no-helper')).toBe('secret-token')
+    expect(getNodesCalls).toBe(1)
+    // 助手依旧缺失、集合没变——重新检查不该再把全节点表连同 token 拉一遍。
+    await wizard.runCheck()
+    expect(getNodesCalls).toBe(1)
   }
   finally {
     scope.stop()

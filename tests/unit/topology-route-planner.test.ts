@@ -91,9 +91,9 @@ describe('formatTopologyRouteHint', () => {
     })).toBe('正在按 TCP 80 自动创建探测任务。')
   })
 
-  test('reports a healthy binding', () => {
+  test('reports a usable binding without claiming that the line is healthy', () => {
     expect(formatTopologyRouteHint({ ...baseInput, state: state({ verdict: 'healthy' }) }))
-      .toBe('探测方式：ICMP · 正常')
+      .toBe('探测方式：ICMP · 可用')
   })
 
   test('reports a dead binding that is about to be switched', () => {

@@ -254,7 +254,10 @@ export default defineConfig({
   build: {
     outDir: isFunctionalTestBuild ? 'dist-functional' : 'dist',
     target: ['es2018', 'safari15.4'],
-    cssTarget: 'safari15.4',
+    // Preserve both the standard and WebKit-prefixed glass properties. A
+    // Safari-only CSS target lets the minifier discard `backdrop-filter`,
+    // which silently removes glass surfaces in Chromium-based browsers.
+    cssTarget: ['chrome87', 'firefox78', 'safari15.4'],
     chunkSizeWarningLimit: 600,
     rollupOptions: {
       output: {

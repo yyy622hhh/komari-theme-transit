@@ -521,7 +521,7 @@ const nodeCardGridClass = computed(() => {
   if (appStore.opsDashboardEnabled) {
     const transitCardSizeClass: Record<typeof appStore.nodeCardSize, string> = {
       mini: 'gap-3 md:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4',
-      compact: 'gap-3 md:grid-cols-2 xl:grid-cols-3',
+      compact: 'gap-3 md:grid-cols-2 xl:grid-cols-3 min-[1600px]:!grid-cols-4',
       comfortable: 'gap-4 lg:grid-cols-2 2xl:grid-cols-3',
       large: 'gap-5 xl:grid-cols-2',
     }
@@ -563,7 +563,10 @@ const nodeCardGridClass = computed(() => {
 
     <div
       class="node-info p-3 pt-0 sm:p-4 sm:pt-0 flex flex-col gap-4 relative z-1 pointer-events-none"
-      :class="!appStore.opsDashboardEnabled && !!appStore.hideGeneralCard && 'pt-4'"
+      :class="[
+        !appStore.opsDashboardEnabled && !!appStore.hideGeneralCard && 'pt-4',
+        appStore.opsDashboardEnabled && 'mx-auto w-full max-w-[1712px]',
+      ]"
     >
       <div class="nodes min-w-0">
         <Tabs v-model="appStore.nodeSelectedGroup" class="w-full flex-col gap-4">
@@ -634,13 +637,13 @@ const nodeCardGridClass = computed(() => {
                 size="icon"
                 class="size-8 shrink-0 border-none bg-background/50 backdrop-blur-xs shadow-none hover:bg-background/60"
                 aria-label="打开监测目标健康中心"
-                title="检查三网监测目标并安全验证备用目标"
+                title="检查三网监测目标并安全验证内置候选目标"
                 @click="carrierProbeHealthOpen = true"
               >
                 <Icon icon="tabler:heart-rate-monitor" :width="14" :height="14" />
               </UiButton>
               <NodeRouteProbeButton
-                v-if="appStore.routeProbeEnabled"
+                v-if="appStore.privateFeaturesAllowed"
                 :nodes="nodesStore.visibleNodes"
               />
               <UiButton

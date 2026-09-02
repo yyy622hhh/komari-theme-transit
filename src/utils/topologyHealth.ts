@@ -1,4 +1,5 @@
 import type { TopologyProbeMode } from '@/utils/topologyModel'
+import { probeFailureRateColumnLabel } from '@/utils/pingCurrentState'
 
 export type TopologyRouteHealth = 'healthy' | 'warning' | 'pending' | 'error' | 'offline'
 
@@ -9,6 +10,7 @@ export interface TopologySegmentTelemetry {
   volatility: number | null
   hasLiveData: boolean
   stale: boolean
+  probeType?: string
 }
 
 export interface TopologySegmentHealthInput {
@@ -149,7 +151,7 @@ export function calculateTopologyRouteScore(options: RouteScoreOptions): Topolog
     if (segment.status === 'error') {
       if (segment.loss !== null && segment.loss >= 20) {
         const points = Math.round(Math.min(100, segment.loss * 4))
-        deductions.push({ key: `${index}:loss-critical`, label: `${label}高探测失败率 ${segment.loss.toFixed(1)}%`, points })
+        deductions.push({ key: `${index}:loss-critical`, label: `${label}高${probeFailureRateColumnLabel([segment.probeType ?? ''])} ${segment.loss.toFixed(1)}%`, points })
         return points
       }
       deductions.push({ key: `${index}:error`, label: `${label}读取失败`, points: 55 })
@@ -171,7 +173,7 @@ export function calculateTopologyRouteScore(options: RouteScoreOptions): Topolog
     if (segment.loss !== null && segment.loss > 0) {
       const points = Math.round(Math.min(45, segment.loss * 4))
       if (points > 0) {
-        deductions.push({ key: `${index}:loss`, label: `${label}探测失败率 ${segment.loss.toFixed(1)}%`, points })
+        deductions.push({ key: `${index}:loss`, label: `${label}${probeFailureRateColumnLabel([segment.probeType ?? ''])} ${segment.loss.toFixed(1)}%`, points })
         penalty += points
       }
     }

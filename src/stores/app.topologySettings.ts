@@ -1,7 +1,9 @@
 import type { ComputedRef } from 'vue'
+import type { RouteProbeResults } from '@/utils/routeProbeResults'
 import type { ThemeSettings } from '@/utils/themeSettings'
 import { computed } from 'vue'
 import { readBooleanSetting, readStringSetting } from '@/stores/app.settings'
+import { normalizeRouteProbeResults, ROUTE_PROBE_RESULTS_SETTING } from '@/utils/routeProbeResults'
 
 /**
  * 拓扑与回程相关的托管设置读取。
@@ -14,6 +16,7 @@ export interface TopologySettings {
   topologyEnabled: ComputedRef<boolean>
   topologyAutoRepairEnabled: ComputedRef<boolean>
   routeProbeEnabled: ComputedRef<boolean>
+  routeProbeResults: ComputedRef<RouteProbeResults>
   topologyConfig: ComputedRef<string>
   topologyRoute: ComputedRef<string>
   topologyMetrics: ComputedRef<string>
@@ -33,6 +36,15 @@ export function createTopologySettings(themeSettings: ComputedRef<ThemeSettings>
      * 不受影响。
      */
     routeProbeEnabled: computed(() => readBooleanSetting(themeSettings.value, 'routeProbeEnabled', false)),
+
+    /**
+     * Return-route evidence is public monitoring data, but it is not a user tag.
+     * Keeping it in theme settings prevents Komari's admin billing column from
+     * rendering the internal `transit-route:` payload as a badge.
+     */
+    routeProbeResults: computed(() => normalizeRouteProbeResults(
+      themeSettings.value[ROUTE_PROBE_RESULTS_SETTING],
+    )),
 
     /** JSON 格式的拓扑配置，取代下面两条遗留字符串；读取一律走 readTopologyRoutes()。 */
     topologyConfig: computed(() => readStringSetting(themeSettings.value, 'topologyConfig')),

@@ -95,6 +95,8 @@ test('HTTPS wizard copies a private fail-closed installer without node credentia
   await page.goto('https://transit.test/')
   await page.getByRole('button', { name: '配置回程检测', exact: true }).click()
   const dialog = page.getByRole('dialog')
+  await expect(dialog).toContainText('已自动使用当前 Komari 面板根地址：https://transit.test')
+  await expect(dialog).toContainText('无需手工替换地址或版本')
   await dialog.getByRole('button', { name: '复制安装命令' }).click()
   const command = await page.evaluate(() => (window as any).copiedCommand as string)
   const version = JSON.parse(readFileSync('komari-theme.json', 'utf8')).version

@@ -2,10 +2,11 @@ import type { MaybeRefOrGetter } from 'vue'
 import type { RouteProbeOutcome } from '@/services/route-probe.service'
 import type { NodeData } from '@/stores/nodes'
 import type { RouteTraceCity } from '@/utils/routeTrace'
-import { computed, onScopeDispose, ref, toValue } from 'vue'
+import { computed, onScopeDispose, ref, toValue, watch } from 'vue'
 import { TIME_MS } from '@/constants/time'
-import { probeNodeRoutes, selectRouteProbeCandidates } from '@/services/route-probe.service'
+import { migrateLegacyRouteTags, probeNodeRoutes, selectRouteProbeCandidates } from '@/services/route-probe.service'
 import { useAppStore } from '@/stores/app'
+import { parseNodeRouteTag } from '@/utils/routeTag'
 import { isRpcPermissionError } from '@/utils/rpc'
 import { logAppWarning } from '@/utils/safeError'
 
@@ -17,7 +18,7 @@ import { logAppWarning } from '@/utils/safeError'
  * 时候跑」更重要。除了显式总开关，下面的约束都由主题强制执行：
  *
  * 1. **显式启用**：默认不加载候选、不显示入口，也不向节点下发任务。
- * 2. **挑节点**：只有「非中国大陆、在线，且标签缺失或已过期（7 天）」的节点进
+ * 2. **挑节点**：只有「非中国大陆、在线，且结果缺失或已过期（7 天）」的节点进
  *    候选。回程几周才变一次，这一条就把频率压到每台约每周一次。运营者手动点
  *    按钮时可以传 `force` 跳过新鲜度这一条（见 `probeNow`），但自动轮询永远
  *    不会这样做。
@@ -28,7 +29,7 @@ import { logAppWarning } from '@/utils/safeError'
  * 7. **没权限就停**：见 `autoBlocked`，2FA 场景下不做无意义的循环重试。
  *
  * 跨标签页的重复下发再由 localStorage 冷却时间直接压住；不同设备之间不共享浏览器
- * 存储，仍由候选标签与单轮失败跳过控制。
+ * 存储，仍由候选结果与单轮失败跳过控制。
  */
 
 /** 同一浏览器、同一站点的两轮自动采集之间的最小间隔。 */
@@ -106,6 +107,55 @@ export function useRouteProbe(nodes: MaybeRefOrGetter<NodeData[]>) {
   const autoSkipped = new Set<string>()
   let timer: ReturnType<typeof setInterval> | null = null
   let controller: AbortController | null = null
+  let migrationInFlight: Promise<void> | null = null
+  let migratedFingerprint = ''
+  let migrationRetryAt = 0
+
+  function persistence() {
+    return {
+      theme: appStore.publicSettings?.theme ?? '',
+      activeNodeIds: toValue(nodes).map(node => node.uuid).filter(Boolean),
+      onPublicSettings: appStore.applyPublicSettings,
+    }
+  }
+
+  async function migrateVisibleLegacyTags(): Promise<void> {
+    // Startup fetches auth, public settings and nodes independently. A node list can arrive
+    // before the active theme name; that is a not-ready state, not a failed migration worth
+    // backing off for five minutes. The watcher below retries as soon as the theme is known.
+    if (disposed || !appStore.privateFeaturesAllowed || !appStore.publicSettings?.theme
+      || migrationInFlight || Date.now() < migrationRetryAt) {
+      return migrationInFlight ?? Promise.resolve()
+    }
+    const currentNodes = toValue(nodes)
+    const fingerprint = currentNodes
+      .flatMap((node) => {
+        const report = parseNodeRouteTag(node.tags)
+        return report ? [`${node.uuid}:${report.raw}`] : []
+      })
+      .sort()
+      .join('|')
+    if (!fingerprint || fingerprint === migratedFingerprint)
+      return
+
+    migrationInFlight = (async () => {
+      try {
+        const result = await migrateLegacyRouteTags(currentNodes, persistence())
+        if (result.cleanupFailed === 0)
+          migratedFingerprint = fingerprint
+        else
+          migrationRetryAt = Date.now() + 5 * TIME_MS.minute
+      }
+      catch (error) {
+        migrationRetryAt = Date.now() + 5 * TIME_MS.minute
+        logAppWarning('route-probe-tag-migration', error)
+      }
+      finally {
+        migrationInFlight = null
+      }
+    })()
+    return migrationInFlight
+  }
 
   /**
    * 当前有多少台节点该测。按钮显示这个数字，所以它要算上「自动跳过」的那些——
@@ -118,7 +168,13 @@ export function useRouteProbe(nodes: MaybeRefOrGetter<NodeData[]>) {
   function pendingCount(force = false): number {
     if (!appStore.routeProbeEnabled)
       return 0
-    return selectRouteProbeCandidates(toValue(nodes), Date.now(), new Set(), force).length
+    return selectRouteProbeCandidates(
+      toValue(nodes),
+      Date.now(),
+      new Set(),
+      force,
+      appStore.routeProbeResults,
+    ).length
   }
 
   /**
@@ -148,6 +204,7 @@ export function useRouteProbe(nodes: MaybeRefOrGetter<NodeData[]>) {
       return
     if (trigger === 'auto' && !pageIsVisible())
       return
+    await migrateVisibleLegacyTags()
     const sharedLastRunAt = trigger === 'auto' ? readSharedAutoRunAt() : 0
     if (trigger === 'auto' && Math.max(lastRunAt, sharedLastRunAt) > 0
       && Date.now() - Math.max(lastRunAt, sharedLastRunAt) < AUTO_PROBE_COOLDOWN_MS) {
@@ -160,7 +217,13 @@ export function useRouteProbe(nodes: MaybeRefOrGetter<NodeData[]>) {
     // 跳过清单要交给挑选函数在截断台数之前用掉，不能等拿到结果再过滤。
     // force 只在手动触发时才可能为 true——自动轮询永远不该跳过新鲜度检查，
     // 否则每 20 秒就会在所有节点上重新执行一遍命令。
-    const candidates = selectRouteProbeCandidates(toValue(nodes), Date.now(), autoSkipped, trigger === 'manual' && force)
+    const candidates = selectRouteProbeCandidates(
+      toValue(nodes),
+      Date.now(),
+      autoSkipped,
+      trigger === 'manual' && force,
+      appStore.routeProbeResults,
+    )
     if (!candidates.length)
       return
 
@@ -170,12 +233,16 @@ export function useRouteProbe(nodes: MaybeRefOrGetter<NodeData[]>) {
       writeSharedAutoRunAt(lastRunAt)
     controller = new AbortController()
     try {
-      const summary = await probeNodeRoutes(candidates, probeCity(), { trigger, signal: controller.signal })
+      const summary = await probeNodeRoutes(candidates, probeCity(), {
+        trigger,
+        signal: controller.signal,
+        persistence: persistence(),
+      })
       if (summary && !disposed) {
         lastOutcomes.value = summary.outcomes
         lastError.value = ''
         for (const outcome of summary.outcomes) {
-          if (outcome.status !== 'updated')
+          if (outcome.status !== 'updated' && outcome.status !== 'updated-cleanup-pending')
             autoSkipped.add(outcome.uuid)
         }
       }
@@ -208,6 +275,15 @@ export function useRouteProbe(nodes: MaybeRefOrGetter<NodeData[]>) {
   }
 
   if (typeof window !== 'undefined') {
+    watch(
+      () => [
+        appStore.privateFeaturesAllowed,
+        appStore.publicSettings?.theme ?? '',
+        toValue(nodes).map(node => `${node.uuid}:${node.tags}`).join('|'),
+      ],
+      () => void migrateVisibleLegacyTags(),
+      { immediate: true },
+    )
     timer = setInterval(() => {
       void run('auto')
     }, AUTO_PROBE_CHECK_INTERVAL_MS)
@@ -233,12 +309,14 @@ export function useRouteProbe(nodes: MaybeRefOrGetter<NodeData[]>) {
       return lastError.value
     if (!lastOutcomes.value.length)
       return ''
-    const counts = { 'updated': 0, 'helper-offline': 0, 'remote-disabled': 0, 'no-traceroute': 0, 'failed': 0, 'timeout': 0 }
+    const counts = { 'updated': 0, 'updated-cleanup-pending': 0, 'helper-offline': 0, 'remote-disabled': 0, 'no-traceroute': 0, 'failed': 0, 'timeout': 0 }
     for (const outcome of lastOutcomes.value)
       counts[outcome.status] += 1
     const parts: string[] = []
     if (counts.updated)
       parts.push(`${counts.updated} 台已更新`)
+    if (counts['updated-cleanup-pending'])
+      parts.push(`${counts['updated-cleanup-pending']} 台已更新，旧标签待清理`)
     if (counts['helper-offline'])
       parts.push(`${counts['helper-offline']} 台节点助手未连接`)
     if (counts['remote-disabled'])

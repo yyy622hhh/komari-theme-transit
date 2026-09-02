@@ -5,6 +5,7 @@ import { CACHE_CONFIG } from '@/constants/cache'
 import { isAuthenticated, requirePermission, setAuthSessionFromLogin, subscribeAuthSession } from '@/services/auth.service'
 import { SharedCache } from '@/services/cache.service'
 import { invalidatePublicPingTasksCache } from '@/services/metrics.service'
+import { observePingTaskEpochs } from '@/services/ping-task-epoch.service'
 import {
   buildTopologyEntryProbeDraft,
   DEFAULT_TOPOLOGY_HOP_PROBE,
@@ -130,6 +131,7 @@ export async function loadAdminPingTasks(options: { fresh?: boolean, requestKey?
     undefined,
     options.requestKey ?? (options.fresh ? `admin:ping:list:fresh:${generation}` : ADMIN_PING_TASKS_CACHE_KEY),
   )
+  observePingTaskEpochs(tasks, 'admin')
   if (generation === adminPingTasksCacheGeneration && isAuthenticated())
     adminPingTasksCache.set(ADMIN_PING_TASKS_CACHE_KEY, tasks)
   return tasks

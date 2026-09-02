@@ -33,6 +33,7 @@ export interface TopologySegmentReliabilitySnapshot {
     sourceUuid: string
     taskId: number | null
     taskName: string
+    probeType?: string
     diagnosis: TopologyDiagnosis | null
     hourlyProfile: TopologyHourlyBucket[]
     peakInsight: TopologyPeakInsight | null

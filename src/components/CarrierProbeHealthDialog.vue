@@ -23,7 +23,7 @@ const statusMeta: Record<CarrierProbeHealthStatus, { label: string, icon: string
   'healthy': { label: '健康', icon: 'tabler:circle-check', tone: 'text-emerald-600 dark:text-emerald-400' },
   'single-path-anomaly': { label: '单节点路径异常', icon: 'tabler:alert-triangle', tone: 'text-amber-600 dark:text-amber-400' },
   'shared-target-anomaly': { label: '公共目标异常', icon: 'tabler:world-x', tone: 'text-rose-600 dark:text-rose-400' },
-  'insufficient-evidence': { label: '证据不足', icon: 'tabler:help-circle', tone: 'text-muted-foreground' },
+  'insufficient-evidence': { label: '暂无数据', icon: 'tabler:help-circle', tone: 'text-muted-foreground' },
 }
 
 watch(() => props.open, (open) => {
@@ -91,7 +91,7 @@ async function confirmRebuild(item: CarrierProbeHealth): Promise<void> {
   <AppDialog
     :open="open"
     title="监测目标健康"
-    description="检查九个三网任务，先用临时任务验证候选目标，再由管理员确认迁移。"
+    description="当前任务状态来自 Komari；内置目标只作为候选，验证并确认后才会迁移。"
     content-class="max-w-4xl"
     icon="tabler:heart-rate-monitor"
     @update:open="emit('update:open', $event)"
@@ -99,7 +99,7 @@ async function confirmRebuild(item: CarrierProbeHealth): Promise<void> {
     <div class="space-y-3">
       <div class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/60 bg-background/45 px-3 py-2">
         <p class="text-[11px] leading-5 text-muted-foreground">
-          不会自动修改现有任务。备用目标只建立 Komari Ping 临时任务，不会交给回程助手或写入 Shell 命令。
+          不会自动修改现有任务。内置候选目标只建立 Komari Ping 临时任务，不会交给回程助手或写入 Shell 命令。
         </p>
         <Button variant="outline" size="xs" :disabled="center.loading.value" @click="center.refresh()">
           <Icon :icon="center.loading.value ? 'tabler:loader-2' : 'tabler:refresh'" :class="center.loading.value && 'animate-spin'" />
@@ -192,20 +192,23 @@ async function confirmRebuild(item: CarrierProbeHealth): Promise<void> {
             </div>
 
             <template v-if="item.task">
-              <div class="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border/50 bg-muted/20 p-2.5">
+              <div v-if="item.fallback" class="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border/50 bg-muted/20 p-2.5">
                 <div>
                   <p class="text-xs font-medium">
-                    内置备用目标
+                    内置候选目标
                   </p>
                   <p class="mt-0.5 font-mono text-[11px] text-muted-foreground">
-                    TCP · {{ item.fallback.target }}
+                    {{ item.fallback.type.toUpperCase() }} · {{ item.fallback.target }}
                   </p>
                 </div>
                 <Button size="xs" variant="outline" :disabled="Boolean(center.activeKey.value)" @click="center.verify(item, item.fallback)">
                   <Icon v-if="center.activeKey.value === item.key" icon="tabler:loader-2" class="animate-spin" />
-                  验证备用目标
+                  验证候选目标
                 </Button>
               </div>
+              <p v-else class="rounded-md border border-border/50 bg-muted/20 p-2.5 text-[11px] text-muted-foreground">
+                当前任务已在使用内置候选目标，没有别的内置地址可比较；如需验证，请在下方填写自定义候选。
+              </p>
 
               <div class="grid gap-2 rounded-md border border-border/50 p-2.5 sm:grid-cols-[7rem_minmax(0,1fr)_6rem_auto]">
                 <select v-model="customType" aria-label="候选探测类型" class="h-8 rounded-md border border-input bg-background px-2 text-xs">

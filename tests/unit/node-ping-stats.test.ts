@@ -4,6 +4,7 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { effectScope, nextTick } from 'vue'
 import { useNodeCarrierPingStats, useNodePingStats } from '../../src/composables/useNodePingStats'
 import { getSharedPingRecordsEntry, pingFreshnessGraceUntil, pingFreshnessTick } from '../../src/services/nodePingRecords.shared'
+import { observePingTaskEpochs } from '../../src/services/ping-task-epoch.service'
 
 // 这个 composable 从共享缓存条目（entry.data）派生所有统计，不直接发请求。
 // 直接把 entry.data 和 entry.lastFetchedAt 填好，就能让 watch 里的
@@ -63,6 +64,38 @@ describe('disabled or unresolved node', () => {
 })
 
 describe('live derivation from a seeded shared entry', () => {
+  test('an observed in-place target edit excludes the old target history from loss and current state', async () => {
+    const uuid = uniqueUuid()
+    const taskId = 90_000 + uuidCounter
+    const now = Date.now()
+    observePingTaskEpochs([{ id: taskId, type: 'icmp', target: '202.106.195.68' }], 'admin', now - 120_000)
+    observePingTaskEpochs([{ id: taskId, type: 'icmp', target: '202.106.50.1' }], 'admin', now - 60_000)
+    const samples = [
+      pingRecord(taskId, uuid, -1, new Date(now - 90_000).toISOString()),
+      pingRecord(taskId, uuid, 49, new Date(now - 50_000).toISOString()),
+      pingRecord(taskId, uuid, 49, new Date(now - 40_000).toISOString()),
+      pingRecord(taskId, uuid, 49, new Date(now - 30_000).toISOString()),
+    ]
+    seedEntry(uuid, 1, 100, sharedState({
+      recordsByClient: new Map([[uuid, samples]]),
+      rawRecordsByClient: new Map([[uuid, samples]]),
+      sampleUpdatedAtByTaskId: new Map([[taskId, now - 30_000]]),
+      taskNamesById: new Map([[taskId, '北京联通']]),
+      taskClientsById: new Map([[taskId, new Set([uuid])]]),
+      taskIntervalsById: new Map([[taskId, 30]]),
+      taskTypesById: new Map([[taskId, 'icmp']]),
+    }))
+
+    const { composable, scope } = mountPingStats(uuid, { hours: 1, maxCount: 100, taskNameFilter: '北京联通', taskNameMatch: 'normalized-exact' })
+    await nextTick()
+
+    expect(composable.stats.value.sampleCount).toBe(3)
+    expect(composable.avgLatency.value).toBe(49)
+    expect(composable.avgLoss.value).toBe(0)
+    expect(composable.current.value.status).toBe('healthy')
+    scope.stop()
+  })
+
   test('a contains filter that matches exactly one task selects it and builds stats from its records', async () => {
     const uuid = uniqueUuid()
     const now = Date.now()
@@ -261,6 +294,7 @@ describe('useNodeCarrierPingStats', () => {
       sampleUpdatedAtByTaskId: new Map([[1, now], [2, now], [3, now]]),
       taskNamesById: new Map([[1, '北京联通'], [2, '北京电信'], [3, '北京移动']]),
       taskClientsById: new Map([[1, new Set([uuid])], [2, new Set([uuid])], [3, new Set([uuid])]]),
+      taskTypesById: new Map([[1, 'icmp'], [2, 'icmp'], [3, 'icmp']]),
     }))
 
     const scope = effectScope()
@@ -273,6 +307,31 @@ describe('useNodeCarrierPingStats', () => {
     expect(byKey.get('mobile')?.taskNames).toEqual(['北京移动'])
     expect(byKey.get('unicom')?.stats.hasData).toBe(true)
     expect(carrierStats.loading.value).toBe(false)
+    scope.stop()
+  })
+
+  test('a still-TCP carrier task shows its data, tagged as TCP rather than silently dropped', async () => {
+    // docs/MonitoringTargetHealth.md: 站点在完成「监测目标健康」迁移之前，三网
+    // 任务仍可能是 TCP；这时展示的是「探测失败率」而不是丢包率，但数据不能
+    // 因为协议不是 ICMP 就整段消失——那会让还没迁移的站点三网卡片突然空白。
+    const uuid = uniqueUuid()
+    const now = Date.now()
+    seedEntry(uuid, 24, 100, sharedState({
+      recordsByClient: new Map([[uuid, [pingRecord(1, uuid, -1, new Date(now).toISOString())]]]),
+      sampleUpdatedAtByTaskId: new Map([[1, now]]),
+      taskNamesById: new Map([[1, '北京电信']]),
+      taskClientsById: new Map([[1, new Set([uuid])]]),
+      taskTypesById: new Map([[1, 'tcp']]),
+    }))
+
+    const scope = effectScope()
+    const carrierStats = scope.run(() => useNodeCarrierPingStats(uuid, { hours: 24, maxCount: 100 }))!
+    await nextTick()
+
+    const telecom = carrierStats.carriers.value.find(carrier => carrier.key === 'telecom')!
+    expect(telecom.taskNames).toEqual(['北京电信'])
+    expect(telecom.stats.hasData).toBe(true)
+    expect(telecom.probeType).toBe('tcp')
     scope.stop()
   })
 

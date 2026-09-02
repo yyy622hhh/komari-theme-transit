@@ -30,6 +30,7 @@ const VISUAL_TRACE_OUTPUT = [
 let routeProbeExecCalls: Array<{ command: string, clients: string[] }> = []
 let routeProbeEdits: Array<{ uuid: string, tags: string }> = []
 let routeProbeCompanionCalls: Array<{ clients: string[], city: string, guard: string | undefined }> = []
+let routeProbeThemeSettingsSaves: Array<Record<string, unknown>> = []
 
 export function readRouteProbeExecCalls(): Array<{ command: string, clients: string[] }> {
   return routeProbeExecCalls
@@ -41,6 +42,10 @@ export function readRouteProbeEdits(): Array<{ uuid: string, tags: string }> {
 
 export function readRouteProbeCompanionCalls(): Array<{ clients: string[], city: string, guard: string | undefined }> {
   return routeProbeCompanionCalls
+}
+
+export function readRouteProbeThemeSettingsSaves(): Array<Record<string, unknown>> {
+  return routeProbeThemeSettingsSaves
 }
 
 const REGION_FIXTURES = [
@@ -98,8 +103,12 @@ export interface VisualFixtureOptions {
   carrierMigrationDeleteFailure?: boolean
   carrierRawSamples?: boolean
   carrierRecentOutcome?: 'healthy' | 'failed' | 'stale' | 'insufficient'
+  /** 三网卡片数据协议；默认保留 TCP，用于覆盖迁移前场景。 */
+  carrierProbeType?: 'icmp' | 'tcp'
   preserveOperationJournal?: boolean
   routeProbeStorageDegraded?: boolean
+  /** 拒绝回程结果的主题设置保存，验证保存失败时不会清理旧标签。 */
+  routeProbeThemeSaveFailure?: boolean
   quickTopologyNoTasks?: boolean
   quickTopologyNoAddress?: boolean
   /**
@@ -107,6 +116,8 @@ export interface VisualFixtureOptions {
    * 验证过期判定不再着色。
    */
   returnRouteTag?: 'unknown' | 'fresh' | 'stale' | 'inconclusive'
+  /** 回程标签所在的 fixture 节点；默认为 1，用于精确复现同节点并发修改。 */
+  returnRouteTagNodeIndex?: number
   /** 记录并模拟三网回程的远程执行（admin:exec / 结果轮询 / 写回）。 */
   routeProbeExec?: boolean
   /** 模拟优先的固定能力节点助手伴生插件路径。 */
@@ -123,6 +134,7 @@ export interface VisualFixtureOptions {
   routeProbeResult?: 'success' | 'remote-disabled' | 'missing-traceroute'
   /** 模拟命令执行期间管理员新增的标签，用来验证写回不会拿旧快照覆盖它。 */
   routeProbeConcurrentTag?: string
+  routeProbeEditFailure?: boolean
   /**
    * 覆写 `public:getPingMetricStats` 的采样结果，用来驱动第 2 段探测方式的
    * 自动挑选与自愈：`valid > 0` 代表这种探测方式通，`total > 0 && valid === 0`
@@ -457,9 +469,9 @@ async function handleRpc(
     : options.opsDashboard
       ? [
           { id: 1, name: 'Tokyo', interval: 60, loss: 3.2, weight: 1 },
-          { id: 11, name: '北京联通', interval: 60, loss: 0, weight: 2 },
-          { id: 12, name: '北京电信', interval: 60, loss: 0, weight: 3 },
-          { id: 13, name: '北京移动', interval: 60, loss: 0, weight: 4 },
+          { id: 11, name: '北京联通', type: options.carrierProbeType ?? 'tcp', interval: 60, loss: 0, weight: 2 },
+          { id: 12, name: '北京电信', type: options.carrierProbeType ?? 'tcp', interval: 60, loss: 0, weight: 3 },
+          { id: 13, name: '北京移动', type: options.carrierProbeType ?? 'tcp', interval: 60, loss: 0, weight: 4 },
           { id: 18, name: 'PandaOps-Local-Hop', interval: 30, loss: 0, weight: 5 },
         ]
       : [{ id: 1, name: 'Tokyo', interval: 60, loss: 3.2, weight: 1 }]
@@ -577,8 +589,13 @@ async function handleRpc(
       })
       break
     case 'admin:editClient':
-      if (!options.routeProbeExec && !options.routeProbeCompanion)
-        break
+      if (options.routeProbeEditFailure) {
+        await route.fulfill({
+          contentType: 'application/json',
+          body: JSON.stringify(jsonRpcError(payload.id, -32000, '模拟旧标签清理失败')),
+        })
+        return
+      }
       routeProbeEdits.push({
         uuid: String(payload.params?.uuid ?? ''),
         tags: String(payload.params?.tags ?? ''),
@@ -819,6 +836,7 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
   routeProbeExecCalls = []
   routeProbeEdits = []
   routeProbeCompanionCalls = []
+  routeProbeThemeSettingsSaves = []
 
   await page.route('**/__transit-visual-font-chinese.woff2', route => route.fulfill({
     path: VISUAL_FONT_FILES.chinese,
@@ -845,7 +863,7 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
     // unknown 故意不带时间戳。
     const ageMs = options.returnRouteTag === 'stale' ? 30 * 24 * 60 * 60 * 1000 : 60 * 60 * 1000
     const measuredAt = Math.floor((new Date(FIXED_NOW).getTime() - ageMs) / 1000)
-    const node = clientFixtures[uuidFor(1)]! as Record<string, unknown>
+    const node = clientFixtures[uuidFor(options.returnRouteTagNodeIndex ?? 1)]! as Record<string, unknown>
     const stamp = options.returnRouteTag === 'unknown' ? '' : `@${measuredAt}`
     const routes = options.returnRouteTag === 'inconclusive'
       ? 'ct=4134,cu=4837,cm=58453'
@@ -860,9 +878,9 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
     ? []
     : [
         { id: 1, weight: 0, name: 'Tokyo', clients: [uuidFor(2)], default_on: false, type: 'icmp', target: '198.51.100.1', interval: 60 },
-        { id: 11, weight: 1, name: '北京联通', clients: allClientUuids, default_on: true, type: 'tcp', target: '198.51.100.11:80', interval: 60 },
-        { id: 12, weight: 2, name: '北京电信', clients: allClientUuids, default_on: true, type: 'tcp', target: '198.51.100.12:80', interval: 60 },
-        { id: 13, weight: 3, name: '北京移动', clients: allClientUuids, default_on: true, type: 'tcp', target: '198.51.100.13:80', interval: 60 },
+        { id: 11, weight: 1, name: '北京联通', clients: allClientUuids, default_on: true, type: options.carrierProbeType ?? 'tcp', target: options.carrierProbeType === 'icmp' ? '198.51.100.11' : '198.51.100.11:80', interval: 60 },
+        { id: 12, weight: 2, name: '北京电信', clients: allClientUuids, default_on: true, type: options.carrierProbeType ?? 'tcp', target: options.carrierProbeType === 'icmp' ? '198.51.100.12' : '198.51.100.12:80', interval: 60 },
+        { id: 13, weight: 3, name: '北京移动', clients: allClientUuids, default_on: true, type: options.carrierProbeType ?? 'tcp', target: options.carrierProbeType === 'icmp' ? '198.51.100.13' : '198.51.100.13:80', interval: 60 },
         { id: 18, weight: 4, name: options.topologyGeneratedHopName ? `Transit-主控-洛杉矶-to-${REGION_FIXTURES[1].name}` : 'PandaOps-Local-Hop', clients: [uuidFor(0), uuidFor(2)], default_on: false, type: 'icmp', target: clientFixtures[uuidFor(1)]?.ipv4 ?? '192.0.2.11', interval: 30 },
       ]
   if (options.opsNoRecentTask) {
@@ -1063,8 +1081,17 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
     const body = route.request().postDataJSON() as Record<string, unknown> | null
     if (options.themeSaveDelayMs)
       await new Promise(resolve => setTimeout(resolve, options.themeSaveDelayMs))
+    if (body && Object.hasOwn(body, 'pandaOpsRouteProbeResults') && options.routeProbeThemeSaveFailure) {
+      return route.fulfill({
+        status: 500,
+        contentType: 'application/json',
+        body: JSON.stringify({ status: 'error', message: '模拟主题数据保存失败' }),
+      })
+    }
     if (body)
       settings = structuredClone(body)
+    if (body && Object.hasOwn(body, 'pandaOpsRouteProbeResults'))
+      routeProbeThemeSettingsSaves.push(structuredClone(body))
     return route.fulfill({
       contentType: 'application/json',
       body: JSON.stringify({ status: 'success', message: 'ok' }),

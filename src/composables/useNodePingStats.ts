@@ -21,6 +21,12 @@ import {
   retainSharedPingRecordsEntry,
 } from '@/services/nodePingRecords.shared'
 import { readStatsCache, writeStatsCache } from '@/services/nodePingStatsCache'
+import {
+  filterMetricLossToCurrentEpoch,
+  filterPingRecordsToCurrentEpoch,
+  pingTaskEpochRevision,
+  pingTaskEpochStartedAt,
+} from '@/services/ping-task-epoch.service'
 import { mergeCarrierPingHistory } from '@/utils/carrierPingHistory'
 import { mergeProbeCurrentStates, resolveProbeCurrentState } from '@/utils/pingCurrentState'
 import { resolvePingFreshness } from '@/utils/pingFreshness'
@@ -29,10 +35,26 @@ import { buildTopologyInsightPoints } from '@/utils/topologyInsights'
 
 export { buildPingMetricState, collectNodePingTaskIds, pickPreferredExactPingTaskId } from '@/services/nodePingRecords.shared'
 
+/**
+ * 严格匹配，类型未知时不算命中。
+ *
+ * `taskType` 目前没有任何调用方在用——三网卡片曾经靠它把统计限定在 ICMP，
+ * 但那样会让还没迁移到 ICMP 的站点三网卡片直接消失，已经改回不按类型过滤
+ * （见 `useNodeCarrierPingStats`），协议区分交给展示层的 `probeFailureRateLabel`
+ * 之类的函数按实际 `probeType` 动态措辞。这里保留严格匹配是为未来可能的调用方
+ * 定基调：类型缺失时宁可判不中，也不能让「未知」悄悄冒充成某个具体协议。
+ */
+function taskTypeMatches(rawType: string | undefined, wantedType: string): boolean {
+  return rawType?.trim().toLowerCase() === wantedType
+}
+
 function latestMatchingSampleAt(sampleUpdatedAtByTaskId: ReadonlyMap<number, number>, taskIds: ReadonlySet<number>): number {
   let latest = 0
-  for (const taskId of taskIds)
-    latest = Math.max(latest, sampleUpdatedAtByTaskId.get(taskId) ?? 0)
+  for (const taskId of taskIds) {
+    const sampleAt = sampleUpdatedAtByTaskId.get(taskId) ?? 0
+    if (sampleAt >= pingTaskEpochStartedAt(taskId))
+      latest = Math.max(latest, sampleAt)
+  }
   return latest
 }
 
@@ -44,6 +66,7 @@ export function useNodePingStats(
     maxCount?: MaybeRefOrGetter<number | undefined>
     taskNameFilter?: MaybeRefOrGetter<string>
     taskNameMatch?: MaybeRefOrGetter<PingTaskNameMatch>
+    taskType?: MaybeRefOrGetter<string>
   },
 ) {
   const loading = ref(false)
@@ -53,6 +76,7 @@ export function useNodePingStats(
     const maxCount = normalizeMaxCount(toValue(options?.maxCount) ?? PING_RECORD_MAX_COUNT)
     const taskNameFilter = toValue(options?.taskNameFilter)?.trim() ?? ''
     const requestedMatch = toValue(options?.taskNameMatch)
+    const taskType = toValue(options?.taskType)?.trim().toLowerCase() ?? ''
     const taskNameMatch: PingTaskNameMatch = requestedMatch === 'exact' || requestedMatch === 'normalized-exact'
       ? requestedMatch
       : 'contains'
@@ -63,6 +87,7 @@ export function useNodePingStats(
       cacheKey: getSharedPingRecordsKey(hours, maxCount, toValue(uuid)),
       taskNameFilter,
       taskNameMatch,
+      taskType,
       enabled: toValue(options?.enabled) ?? true,
     }
   })
@@ -100,7 +125,8 @@ export function useNodePingStats(
     sampleUpdatedAt: number
     source: 'live' | 'cache' | 'empty'
   }>(() => {
-    const { uuid: nodeUuid, hours, maxCount, taskNameFilter, taskNameMatch, enabled } = resolved.value
+    void pingTaskEpochRevision.value
+    const { uuid: nodeUuid, hours, maxCount, taskNameFilter, taskNameMatch, taskType, enabled } = resolved.value
     if (!enabled || !nodeUuid.trim())
       return { stats: createEmptyNodePingStats(), insightPoints: [], taskId: null, taskName: '', sampleUpdatedAt: 0, source: 'empty' }
 
@@ -111,7 +137,7 @@ export function useNodePingStats(
     if (!state) {
       // 网络不可用时仍按分钟检查缓存的真实样本时间；缓存自身不会因此被重新写入。
       void pingFreshnessTick.value
-      const cached = readStatsCache(nodeUuid, hours, maxCount, taskNameFilter, taskNameMatch)
+      const cached = readStatsCache(nodeUuid, hours, maxCount, taskNameFilter, taskNameMatch, taskType)
       return cached
         ? { stats: cached.stats, insightPoints: [], taskId: null, taskName: '', sampleUpdatedAt: cached.sampleUpdatedAt, source: 'cache' }
         : { stats: createEmptyNodePingStats(), insightPoints: [], taskId: null, taskName: '', sampleUpdatedAt: 0, source: 'empty' }
@@ -125,21 +151,34 @@ export function useNodePingStats(
       state.metricLossPoints,
       state.taskClientsById,
     )
+    const nameMatchingTaskIds = normalizedFilter
+      ? new Set([...state.taskNamesById.entries()]
+          .filter(([taskId, name]) => nodeTaskIds.has(taskId) && matchesTaskName(name, normalizedFilter, taskNameMatch))
+          .map(([taskId]) => taskId))
+      : new Set(nodeTaskIds)
+    const typedMatchingTaskIds = taskType
+      ? new Set([...nameMatchingTaskIds].filter(taskId => taskTypeMatches(state.taskTypesById?.get(taskId), taskType)))
+      : nameMatchingTaskIds
     const matchingTaskIds = resolveExactMatchingTaskIds(
       normalizedFilter
-        ? new Set([...state.taskNamesById.entries()]
-            .filter(([taskId, name]) => nodeTaskIds.has(taskId) && matchesTaskName(name, normalizedFilter, taskNameMatch))
-            .map(([taskId]) => taskId))
-        : null,
+        ? typedMatchingTaskIds
+        : taskType ? typedMatchingTaskIds : null,
       taskNameMatch,
       state.metricStats,
       state.recordsByClient.get(nodeUuid) ?? [],
     )
-    const records = (state.recordsByClient.get(nodeUuid) ?? [])
-      .filter(record => !matchingTaskIds || matchingTaskIds.has(record.task_id))
-    const metricStats = state.metricStats?.filter(stat => !matchingTaskIds || matchingTaskIds.has(normalizeTaskId(stat.task_id)))
-    const metricLossPoints = state.metricLossPoints?.filter(point => !matchingTaskIds || matchingTaskIds.has(point.taskId))
-    const stats = records.length || metricStats?.length
+    const records = filterPingRecordsToCurrentEpoch((state.recordsByClient.get(nodeUuid) ?? [])
+      .filter(record => !matchingTaskIds || matchingTaskIds.has(record.task_id)))
+    const metricLossPoints = state.metricLossPoints
+      ? filterMetricLossToCurrentEpoch(state.metricLossPoints
+          .filter(point => !matchingTaskIds || matchingTaskIds.has(point.taskId)))
+      : undefined
+    const rangeStartedAt = pingFreshnessTick.value - hours * 60 * 60 * 1000
+    const metricStats = state.metricStats?.filter((stat) => {
+      const id = normalizeTaskId(stat.task_id)
+      return (!matchingTaskIds || matchingTaskIds.has(id)) && pingTaskEpochStartedAt(id) <= rangeStartedAt
+    })
+    const stats = records.length || metricStats?.length || metricLossPoints?.length
       ? buildNodePingStats(records, metricStats, metricLossPoints)
       : createEmptyNodePingStats()
     const sampleTaskIds = matchingTaskIds ?? nodeTaskIds
@@ -162,7 +201,7 @@ export function useNodePingStats(
     const id = resolvedStats.value.taskId
     if (!state || id === null)
       return resolveProbeCurrentState([])
-    return resolveProbeCurrentState((state.rawRecordsByClient?.get(nodeUuid) ?? []).filter(record => record.task_id === id), {
+    return resolveProbeCurrentState(filterPingRecordsToCurrentEpoch((state.rawRecordsByClient?.get(nodeUuid) ?? []).filter(record => record.task_id === id)), {
       now: pingFreshnessTick.value,
       interval: state.taskIntervalsById?.get(id),
     })
@@ -173,7 +212,7 @@ export function useNodePingStats(
   })
 
   const taskNames = computed<string[]>(() => {
-    const { uuid: nodeUuid, hours, maxCount, taskNameFilter, taskNameMatch, enabled } = resolved.value
+    const { uuid: nodeUuid, hours, maxCount, taskNameFilter, taskNameMatch, taskType, enabled } = resolved.value
     if (!enabled || !nodeUuid.trim())
       return []
 
@@ -190,7 +229,9 @@ export function useNodePingStats(
       state.taskClientsById,
     )
     return [...new Set([...state.taskNamesById.entries()]
-      .filter(([taskId, name]) => nodeTaskIds.has(taskId) && matchesTaskName(name, normalizedFilter, taskNameMatch))
+      .filter(([taskId, name]) => nodeTaskIds.has(taskId)
+        && matchesTaskName(name, normalizedFilter, taskNameMatch)
+        && (!taskType || taskTypeMatches(state.taskTypesById?.get(taskId), taskType)))
       .map(([, name]) => name))]
   })
 
@@ -260,8 +301,8 @@ export function useNodePingStats(
 
   // 共享记录会定时刷新，节流回写 localStorage，避免多节点同时重算时密集写盘。
   const persistStats = useThrottleFn(
-    (nodeUuid: string, hours: number, maxCount: number | undefined, taskNameFilter: string, taskNameMatch: PingTaskNameMatch, value: NodePingStatsState, sampleUpdatedAt: number) => {
-      writeStatsCache(nodeUuid, hours, maxCount, value, sampleUpdatedAt, taskNameFilter, taskNameMatch)
+    (nodeUuid: string, hours: number, maxCount: number | undefined, taskNameFilter: string, taskNameMatch: PingTaskNameMatch, taskType: string, value: NodePingStatsState, sampleUpdatedAt: number) => {
+      writeStatsCache(nodeUuid, hours, maxCount, value, sampleUpdatedAt, taskNameFilter, taskNameMatch, taskType)
     },
     30_000,
     true,
@@ -271,9 +312,9 @@ export function useNodePingStats(
   watch(resolvedStats, (value) => {
     if (value.source !== 'live' || !value.stats.hasData || value.sampleUpdatedAt <= 0)
       return
-    const { uuid: nodeUuid, hours, maxCount, taskNameFilter, taskNameMatch, enabled } = resolved.value
+    const { uuid: nodeUuid, hours, maxCount, taskNameFilter, taskNameMatch, taskType, enabled } = resolved.value
     if (enabled && nodeUuid.trim())
-      persistStats(nodeUuid, hours, maxCount, taskNameFilter, taskNameMatch, value.stats, value.sampleUpdatedAt)
+      persistStats(nodeUuid, hours, maxCount, taskNameFilter, taskNameMatch, taskType, value.stats, value.sampleUpdatedAt)
   })
 
   return {
@@ -368,6 +409,10 @@ export function useNodeCarrierPingStats(uuid: MaybeRefOrGetter<string>, options?
         maxCount: options?.maxCount,
         taskNameFilter: `${region}${carrier.labelZh}`,
         taskNameMatch: 'normalized-exact',
+        // 三网卡片按地区+运营商的任务名精确匹配就已经唯一确定了任务，不能再按
+        // 类型二次过滤——`docs/MonitoringTargetHealth.md` 记录的当前行为是
+        // ICMP、TCP 都要显示，只是失败率的措辞不同（丢包率 vs 探测失败率）。
+        // 按 icmp 强制过滤会让还没迁移的 TCP 监测任务在三网卡片上直接消失。
       })
     })
     return {
@@ -387,6 +432,11 @@ export function useNodeCarrierPingStats(uuid: MaybeRefOrGetter<string>, options?
     carriers: computed(() => carrierPings.map((carrier) => {
       const active = carrier.regionalPings.filter(ping => ping.hasData.value || ping.loading.value || ping.error.value || ping.taskNames.value.length)
       const stats = mergeCarrierPingStats(active.map(ping => ping.stats.value))
+      // 只在活跃分区一致时才报出具体类型（icmp 或 tcp 都可能），分区之间类型
+      // 不一致或未知时退回空字符串——展示层据此选用「丢包率」还是「失败率」
+      // 措辞，混用状态下不该冒充确定的某一种。
+      const activeProbeTypes = new Set(active.map(ping => ping.probeType.value))
+      const uniformProbeType = activeProbeTypes.size === 1 ? [...activeProbeTypes][0]! : ''
       return {
         key: carrier.key,
         labelZh: carrier.labelZh,
@@ -394,7 +444,7 @@ export function useNodeCarrierPingStats(uuid: MaybeRefOrGetter<string>, options?
         taskNames: [...new Set(active.flatMap(ping => ping.taskNames.value))],
         stats,
         current: mergeProbeCurrentStates(active.map(ping => ping.current.value)),
-        probeType: active.every(ping => ping.probeType.value === 'icmp') ? 'icmp' : 'tcp',
+        probeType: uniformProbeType,
         hasLatency: stats.hasLatencyData,
         delayed: active.some(ping => ping.delayed.value),
         stale: active.length > 0 && active.every(ping => ping.stale.value),

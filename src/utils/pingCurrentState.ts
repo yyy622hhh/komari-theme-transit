@@ -14,7 +14,7 @@ export const PROBE_CURRENT_LABELS: Record<ProbeCurrentStatus, string> = {
   healthy: '正常',
   failed: '持续失败',
   intermittent: '间歇失败',
-  insufficient: '证据不足',
+  insufficient: '暂无数据',
   stale: '数据过期',
   offline: '来源离线',
 }
@@ -25,7 +25,11 @@ export function formatProbeCurrentLabel(status: ProbeCurrentStatus, historicalFa
 }
 
 export function formatProbeCurrentCompactLabel(status: ProbeCurrentStatus, historicalFailure = false): string {
-  return status === 'healthy' && historicalFailure ? '已恢复' : PROBE_CURRENT_LABELS[status]
+  if (status === 'healthy')
+    return historicalFailure ? '已恢复' : '正常'
+  if (status === 'failed' || status === 'intermittent')
+    return '异常'
+  return '暂无数据'
 }
 
 export function probeCurrentTone(status: ProbeCurrentStatus): string {
@@ -39,7 +43,23 @@ export function probeCurrentTone(status: ProbeCurrentStatus): string {
 }
 
 export function probeFailureRateLabel(type: string): string {
-  return type === 'icmp' ? 'ICMP 丢包率' : '探测失败率'
+  return type === 'icmp' ? 'ICMP 丢包率' : '连接失败率'
+}
+
+export function probeFailureRateColumnLabel(types: string[]): string {
+  const normalizedTypes = [...new Set(types.map(type => type.trim().toLowerCase()).filter(Boolean))]
+  if (normalizedTypes.length !== 1)
+    return '失败率'
+  return normalizedTypes[0] === 'icmp' ? '丢包率' : '失败率'
+}
+
+export function probeFailureRateExplanation(types: string[]): string {
+  const normalizedTypes = [...new Set(types.map(type => type.trim().toLowerCase()).filter(Boolean))]
+  if (normalizedTypes.length === 1 && normalizedTypes[0] === 'icmp')
+    return 'ICMP 丢包率表示监测包未收到响应的比例，不等同于业务流量的真实丢包率。'
+  if (normalizedTypes.length === 1)
+    return `${normalizedTypes[0]!.toUpperCase()} 连接失败率表示连接或请求未成功的样本比例，不是 ICMP 丢包率。`
+  return 'ICMP 显示丢包率，TCP 或 HTTP 显示连接失败率。'
 }
 
 export function probeSampleFreshnessMs(interval = 30): number {

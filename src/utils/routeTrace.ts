@@ -35,7 +35,7 @@ const MAX_HOPS = 30
 export const ROUTE_TRACE_MISSING_MARKER = '__TRANSIT_ROUTE_NO_TRACEROUTE__'
 
 /**
- * 取某城市三家运营商的骨干网关地址。
+ * 取某城市三家运营商的内置 ICMP 候选地址。
  * 直接复用入口预设表，避免地址在两处各写一份而漂移。
  */
 export function routeTraceTargets(city: RouteTraceCity): Record<RouteCarrier, string> {

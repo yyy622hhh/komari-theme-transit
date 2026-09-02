@@ -16,7 +16,7 @@ import { parseNodeRouteTag } from '@/utils/routeTag'
  * 的对应关系，不冒充完整拓扑方向。真实方向与逐跳证据仍放在可聚焦的依据提示里。
  */
 const props = defineProps<{
-  /** 节点的原始 `tags` 字段；没有回程标签时整个面板不渲染。 */
+  /** 单条回程结果或兼容旧版的节点 `tags`；没有数据时整个面板不渲染。 */
   tags?: string | null
 }>()
 

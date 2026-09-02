@@ -1,9 +1,10 @@
 /**
- * 回程判定结果在 Komari 里的存放格式。
+ * 回程判定结果的兼容传输格式。
  *
  * 主题不能自己跑 traceroute（浏览器没有原始套接字，Komari 的 Ping 任务也只有
- * icmp/tcp/http），采集必须在节点上完成。这里定义节点把结果交回来的那个格式：
- * 复用 Komari 节点自带的 `tags` 字段，写成一条带保留前缀的标签。
+ * icmp/tcp/http），采集必须在节点上完成。这里定义节点助手交回结果时使用的格式。
+ * 当前主题把它存入 `pandaOpsRouteProbeResults`；早期版本和独立采集脚本曾把它写进
+ * 节点 `tags`，所以解析与迁移仍需长期兼容这一格式。
  *
  * ```text
  * transit-route:ct=4809.4809.4134,cu=4837.4837,cm=58807.9808@1755000000
@@ -15,9 +16,7 @@
  * - `ct=` 这种空值表示探了但一个骨干跳都没认出来，和「没探」是两回事。
  * - `@` 后面是采集时刻的 Unix 秒。
  *
- * 选 `tags` 而不是新开主题配置，是为了不给运营者加旋钮：有这条标签就显示，没有
- * 就当没这功能。`parseTags` 会把它从普通标签里滤掉，所以它不会以彩色徽章的形式
- * 漏到界面上。
+ * `parseTags` 仍会过滤遗留条目，避免迁移完成前在 Transit 自己的标签区域重复显示。
  */
 
 import type { RouteCarrier, RouteClassification } from '@/utils/routeClassification'
@@ -86,7 +85,7 @@ function resolveFreshness(measuredAt: number | null, now: number): RouteFreshnes
 }
 
 /**
- * 从节点的 `tags` 字段里取出回程判定结果。
+ * 从单条结果或节点的遗留 `tags` 字段里取出回程判定结果。
  *
  * 没有保留标签、标签写坏了、或者一个运营商都没解析出来时返回 `null`——采集端
  * 没配好不应该在界面上留下半截空壳。

@@ -42,6 +42,8 @@ for (const initial of ['missing', 'stale'] as const) {
         await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ jsonrpc: '2.0', id: payload.id, result }) })
       })
       await page.goto('/')
+      if (dark)
+        await page.getByRole('button', { name: '展开线路详情' }).click()
       const edge = page.locator('[data-topology-current-metric]').first()
       const container = edge.locator('xpath=..')
       await expect(container).toHaveAttribute('title', initial === 'stale' ? /实时数据已过期/ : /暂无匹配的实时数据/)
@@ -66,29 +68,34 @@ for (const initial of ['missing', 'stale'] as const) {
   }
 }
 
-for (const [outcome, label] of [['healthy', '已恢复'], ['failed', '持续失败'], ['stale', '数据过期'], ['insufficient', '证据不足']] as const) {
+for (const [outcome, detailLabel] of [
+  ['healthy', '正常'],
+  ['failed', '持续失败'],
+  ['stale', '数据过期'],
+  ['insufficient', '暂无数据'],
+] as const) {
   test(`carrier current ${outcome} does not overwrite the historical 3.3%`, async ({ page }) => {
-    await installKomariFixture(page, { opsDashboard: true, carrierCommonModeLoss: true, carrierRecentOutcome: outcome })
+    await installKomariFixture(page, { opsDashboard: true, carrierCommonModeLoss: true, carrierRecentOutcome: outcome, carrierProbeType: 'icmp' })
     await page.goto('/')
     const card = page.getByRole('button', { name: '查看节点 主控-洛杉矶 详情' }).locator('xpath=..')
     const row = card.locator('[data-node-carrier-row]').filter({ hasText: '联通' })
-    await expect(row.locator('[data-probe-current]')).toHaveText(label)
+    await expect(row.locator('[data-probe-current]')).toHaveAttribute('data-probe-current', outcome)
+    await expect(row).not.toContainText(/正常|异常|已恢复|暂无数据/)
     await expect(row.locator('[data-carrier-target-incident]')).toHaveText('3.3%')
-    await expect(row.locator('[data-carrier-target-incident]')).toHaveAttribute('title', /近 1 小时探测失败率 3\.3%/)
-    await expect(card.locator('[data-carrier-table-head]')).toContainText('失败率')
-    await expect(card.locator('[data-node-insight-mode="carrier"]')).toContainText('近 1 小时曾异常')
-    await expect(page.locator('[data-topology-current]').first()).toContainText(outcome === 'healthy' ? '正常' : label)
-    await expect(page.locator('[data-topology-current-metric]').first()).toHaveAttribute('aria-label', /近 1 小时平均 .*探测失败率/)
-    const statusBox = await page.locator('[data-topology-current]').first().boundingBox()
-    const railBox = await page.locator('[data-topology-edge-line]').first().boundingBox()
-    expect(statusBox!.y + statusBox!.height).toBeLessThan(railBox!.y)
+    await expect(row.locator('[data-carrier-target-incident]')).toHaveAttribute('title', /近 1 小时 ICMP 丢包率 3\.3%/)
+    await expect(card.locator('[data-carrier-table-head]')).toContainText('丢包率')
+    await expect(page.locator('[data-topology-current]').first()).toContainText(detailLabel)
+    await expect(page.locator('[data-topology-current]').first()).toHaveClass(/sr-only/)
+    await expect(page.locator('[data-topology-current-metric]').first()).toHaveAttribute('aria-label', /近 1 小时平均 .*ICMP 丢包率/)
     if (outcome === 'healthy') {
       await test.info().attach('current-normal-historical-3.3', { body: await card.screenshot(), contentType: 'image/png' })
       await page.locator('[data-topology-current-metric]').first().click()
       const dialog = page.getByRole('dialog')
       await expect(dialog).toContainText('近 1 小时线路健康评分')
       await expect(dialog.locator('[data-segment-current]').first()).toContainText('当前：正常')
-      await expect(dialog).toContainText('TCP 探测失败率不代表业务流量丢包')
+      // 这条线路唯一有实时探测数据的一段是 ICMP，说明该给出针对 ICMP 的具体解释，
+      // 而不是「三选一」的通用说明。
+      await expect(dialog).toContainText('ICMP 丢包率表示监测包未收到响应的比例，不等同于业务流量的真实丢包率')
       await expect(dialog).not.toContainText('实时稳定')
     }
   })
@@ -98,11 +105,16 @@ for (const width of [320, 390, 768, 1440]) {
   for (const dark of [false, true]) {
     test(`approved carrier design stays contained at ${width}px in ${dark ? 'dark' : 'light'}`, async ({ page }) => {
       await page.setViewportSize({ width, height: 1100 })
-      await installKomariFixture(page, { opsDashboard: true, dark, carrierCommonModeLoss: true, carrierRecentOutcome: 'failed', nodeCardSize: 'compact', returnRouteTag: 'fresh' })
+      await installKomariFixture(page, { opsDashboard: true, dark, carrierCommonModeLoss: true, carrierRecentOutcome: 'failed', carrierProbeType: 'icmp', nodeCardSize: 'compact', returnRouteTag: 'fresh' })
       await page.goto('/')
-      const card = page.getByRole('button', { name: '查看节点 主控-洛杉矶 详情' }).locator('xpath=..')
+      // The dialog makes the background tree inert while it is open, so keep this
+      // locator independent of role visibility for the post-open layout assertion.
+      const card = page.locator('.transit-node-card').filter({
+        has: page.locator('[aria-label="查看节点 主控-洛杉矶 详情"]'),
+      })
       const panel = card.locator('[data-node-insight-mode="carrier"]')
-      await expect(panel.locator('[data-probe-current]').first()).toHaveText('持续失败')
+      await expect(panel.locator('[data-probe-current]').first()).toHaveAttribute('data-probe-current', 'failed')
+      await expect(panel).not.toContainText(/正常|异常|已恢复|暂无数据/)
       // Detect actual text rectangles, not just scrollWidth: overflow:hidden must not hide a regression.
       const checkLayout = async () => {
         expect(await panel.evaluate((element) => {
@@ -117,20 +129,22 @@ for (const width of [320, 390, 768, 1440]) {
       }
       await checkLayout()
       await expect(panel.locator('[data-carrier-sample]')).toHaveCount(36)
-      await panel.getByRole('button', { name: '采样详情' }).click()
-      await expect(panel.locator('[data-carrier-details]')).toContainText('近 1 小时探测失败率 3.3%')
-      await expect(panel.locator('[data-carrier-details]')).toContainText('样本更新')
+      const cardHeightsBefore = await page.locator('[data-node-card-grid] .transit-node-card').evaluateAll(cards => cards.map(card => card.getBoundingClientRect().height))
+      await panel.getByRole('button', { name: '打开三网采样详情' }).click()
+      const detailDialog = page.getByRole('dialog', { name: /Ping 与丢包/ })
+      await expect(detailDialog.locator('[data-carrier-details]')).toContainText('近 1 小时 ICMP 丢包率 3.3%')
+      await expect(detailDialog.locator('[data-carrier-details]')).toContainText('样本更新')
       await expect(page).toHaveURL(/\/$/)
       await checkLayout()
-      await panel.getByRole('button', { name: '收起详情' }).click()
-      await expect(panel.locator('[data-carrier-details]')).toHaveCount(0)
+      const cardHeightsAfter = await page.locator('[data-node-card-grid] .transit-node-card').evaluateAll(cards => cards.map(card => card.getBoundingClientRect().height))
+      expect(cardHeightsAfter).toEqual(cardHeightsBefore)
+      await detailDialog.getByRole('button', { name: '关闭' }).click()
+      await expect(detailDialog).toBeHidden()
       const edges = page.locator('[data-topology-current-metric]')
       for (const edge of await edges.all()) {
         const bounds = await edge.locator('xpath=..').boundingBox()
-        const current = await edge.locator('xpath=..').locator('[data-topology-current]').boundingBox()
         const history = await edge.boundingBox()
         const rail = await edge.locator('xpath=..').locator('[data-topology-edge-line]').boundingBox()
-        expect(current!.y + current!.height).toBeLessThan(rail!.y)
         expect(history!.y).toBeGreaterThan(rail!.y + rail!.height)
         expect(history!.x).toBeGreaterThanOrEqual(bounds!.x)
         expect(history!.x + history!.width).toBeLessThanOrEqual(bounds!.x + bounds!.width + 1)
@@ -166,8 +180,8 @@ test('canary continues after dialog close and navigation; reload only reconciles
       writes++
   })
   const dialog = await openCenter(page)
-  await dialog.getByRole('button', { name: '验证备用目标' }).click()
-  await expect(dialog.getByRole('button', { name: '验证备用目标' })).toBeDisabled()
+  await dialog.getByRole('button', { name: '验证候选目标' }).click()
+  await expect(dialog.getByRole('button', { name: '验证候选目标' })).toBeDisabled()
   await page.keyboard.press('Escape')
   await expect(dialog).toBeHidden()
   await page.getByRole('button', { name: '查看节点 主控-洛杉矶 详情' }).click()
@@ -209,7 +223,7 @@ test('without Web Locks viewing and candidate validation remain available but mu
   const dialog = await openCenter(page)
   await expect(dialog).toContainText('Web Locks')
   await expect(dialog.getByRole('button', { name: '重建当前任务' })).toBeDisabled()
-  await expect(dialog.getByRole('button', { name: '验证备用目标' })).toBeEnabled()
+  await expect(dialog.getByRole('button', { name: '验证候选目标' })).toBeEnabled()
   const violations = (await new AxeBuilder({ page }).disableRules(['color-contrast']).analyze()).violations
   expect(violations.filter(item => item.impact === 'serious' || item.impact === 'critical')).toEqual([])
 })

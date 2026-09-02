@@ -433,6 +433,8 @@ export async function loadSharedPingRecords(entry: SharedPingRecordsEntry, hours
             taskNamesById.set(taskId, name)
           if (!taskClientsById.has(taskId))
             taskClientsById.set(taskId, new Set(Array.isArray(task.clients) ? task.clients : []))
+          if (task.type && !taskTypesById.has(taskId))
+            taskTypesById.set(taskId, task.type)
         }
         if (entry.subscribers === 0 || controller.signal.aborted)
           return

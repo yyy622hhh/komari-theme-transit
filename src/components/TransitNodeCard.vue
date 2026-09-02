@@ -13,6 +13,7 @@ import { getDiskPercentage, getMemoryPercentage, getTrafficUsed, getTrafficUsedP
 import { getConfiguredNodeRole, getNodeRole } from '@/utils/nodeRoleHelper'
 import { getOSImage, getOSName } from '@/utils/osImageHelper'
 import { getRegionCode, getRegionDisplayName } from '@/utils/regionHelper'
+import { resolveNodeRouteTag } from '@/utils/routeProbeResults'
 import { parseNodeRouteTag } from '@/utils/routeTag'
 import { formatPriceWithCycle, getDaysUntilExpired, getExpireStatus, isFreePrice, parseTags } from '@/utils/tagHelper'
 
@@ -30,8 +31,13 @@ const trafficPercentage = computed(() => getTrafficUsedPercentage(props.node))
 const showPrice = computed(() => appStore.isLoggedIn || !appStore.hidePriceWhenLoggedOut)
 const role = computed(() => getNodeRole(props.node.tags, props.node.groups)
   ?? getConfiguredNodeRole(props.node.name, appStore.topologyRoute))
+const effectiveRouteTag = computed(() => resolveNodeRouteTag(
+  props.node.uuid,
+  props.node.tags,
+  appStore.routeProbeResults,
+))
 /** 有回程数据时右边那一格才存在，没有的话网络概览独占整行。 */
-const hasReturnRoute = computed(() => parseNodeRouteTag(props.node.tags) !== null)
+const hasReturnRoute = computed(() => parseNodeRouteTag(effectiveRouteTag.value) !== null)
 const tags = computed(() => parseTags(props.node.tags)
   .map(tag => tag.text)
   .filter(tag => tag !== role.value)
@@ -100,7 +106,7 @@ const statusEdgeStyle = computed(() => ({ '--node-status-tone': statusEdgeTone.v
     :data-transit-node-card-size="appStore.nodeCardSize"
     :data-node-status-edge="node.online ? '' : undefined"
     :data-node-alert-edge="node.online && visibleAlert ? '' : undefined"
-    class="transit-node-card group relative h-full min-w-0 cursor-pointer overflow-hidden rounded-2xl p-3.5 pl-6 transition duration-200 hover:-translate-y-px hover:border-emerald-400/25"
+    class="transit-node-card group relative h-full min-w-0 cursor-pointer overflow-hidden rounded-2xl p-3 pl-5.5 transition duration-200 hover:-translate-y-px hover:border-emerald-400/25"
     :class="!node.online ? 'opacity-75' : ''"
     :style="statusEdgeStyle"
   >
@@ -178,14 +184,14 @@ const statusEdgeStyle = computed(() => ({ '--node-status-tone': statusEdgeTone.v
       </div>
     </header>
 
-    <div data-node-resource-grid class="transit-divider pointer-events-none relative z-1 mt-3 grid grid-cols-3 gap-3 border-y py-2.5">
+    <div data-node-resource-grid class="transit-divider pointer-events-none relative z-1 mt-2.5 grid grid-cols-3 gap-2.5 border-y py-2">
       <div>
         <div class="flex items-center justify-between gap-2 text-[10px]">
           <span class="text-slate-500 dark:text-slate-400">CPU</span>
           <strong class="font-medium tabular-nums text-slate-700 dark:text-slate-200">{{ (node.cpu ?? 0).toFixed(1) }}%</strong>
         </div>
         <ProgressThin class="mt-1.5" :percentage="node.cpu" :status="resourceStatus(node.cpu)" :height="3" />
-        <div data-node-resource-value class="mt-1 break-words text-[9px] leading-tight tabular-nums text-slate-500 dark:text-slate-400">
+        <div data-node-resource-value class="mt-1 break-words text-[10px] leading-tight tabular-nums text-slate-500 dark:text-slate-400">
           {{ (node.load ?? 0).toFixed(2) }}, {{ (node.load5 ?? 0).toFixed(2) }}, {{ (node.load15 ?? 0).toFixed(2) }}
         </div>
       </div>
@@ -195,7 +201,7 @@ const statusEdgeStyle = computed(() => ({ '--node-status-tone': statusEdgeTone.v
           <strong class="font-medium tabular-nums text-slate-700 dark:text-slate-200">{{ memoryPercentage.toFixed(1) }}%</strong>
         </div>
         <ProgressThin class="mt-1.5" :percentage="memoryPercentage" :status="resourceStatus(memoryPercentage)" :height="3" />
-        <div data-node-resource-value class="mt-1 break-words text-[9px] leading-tight tabular-nums text-slate-500 dark:text-slate-400">
+        <div data-node-resource-value class="mt-1 break-words text-[10px] leading-tight tabular-nums text-slate-500 dark:text-slate-400">
           {{ formatBytes(node.ram) }} / {{ formatBytes(node.mem_total) }}
         </div>
       </div>
@@ -205,23 +211,23 @@ const statusEdgeStyle = computed(() => ({ '--node-status-tone': statusEdgeTone.v
           <strong class="font-medium tabular-nums text-slate-700 dark:text-slate-200">{{ diskPercentage.toFixed(1) }}%</strong>
         </div>
         <ProgressThin class="mt-1.5" :percentage="diskPercentage" :status="resourceStatus(diskPercentage)" :height="3" />
-        <div data-node-resource-value class="mt-1 break-words text-[9px] leading-tight tabular-nums text-slate-500 dark:text-slate-400">
+        <div data-node-resource-value class="mt-1 break-words text-[10px] leading-tight tabular-nums text-slate-500 dark:text-slate-400">
           {{ formatBytes(node.disk) }} / {{ formatBytes(node.disk_total) }}
         </div>
       </div>
     </div>
 
-    <div data-node-card-detail-grid class="node-card-detail-grid pointer-events-none relative z-1 mt-2.5 grid gap-2">
+    <div data-node-card-detail-grid class="node-card-detail-grid pointer-events-none relative z-1 mt-2 grid gap-1.5">
       <!--
         网络概览：上下行、累计流量和到期并成一格，让右边空出位置给三网回程。
         没有回程数据时这一格独占整行，不留半格空白。
       -->
       <div
         data-node-network-cell
-        class="node-card-cell min-w-0 overflow-hidden p-0 text-[9px]"
+        class="node-card-cell min-w-0 overflow-hidden p-0 text-[10px]"
         :class="!hasReturnRoute && 'node-card-cell--full'"
       >
-        <div class="flex items-center justify-between gap-2 px-2.5 py-2 text-slate-500 dark:text-slate-400">
+        <div class="flex items-center justify-between gap-2 px-2.5 py-1.5 text-slate-500 dark:text-slate-400">
           <span>网络概览</span>
           <span v-if="hasTrafficLimit(node)" class="shrink-0 tabular-nums">{{ trafficPercentage.toFixed(1) }}%</span>
         </div>
@@ -260,19 +266,19 @@ const statusEdgeStyle = computed(() => ({ '--node-status-tone': statusEdgeTone.v
             </div>
             <div data-node-expiry-row class="mt-0.5 flex h-[1.65rem] min-w-0 flex-col items-start gap-y-0.5 text-slate-500 dark:text-slate-400">
               <span data-node-expiry-text class="max-w-full whitespace-nowrap">{{ expiryText }}</span>
-              <span v-if="expiryDate" data-node-expiry-date class="max-w-full whitespace-nowrap text-[8px] tabular-nums">{{ expiryDate }}</span>
+              <span v-if="expiryDate" data-node-expiry-date class="max-w-full whitespace-nowrap text-[9px] tabular-nums">{{ expiryDate }}</span>
             </div>
           </div>
         </div>
       </div>
 
-      <NodeRoutePanel :tags="node.tags" />
+      <NodeRoutePanel :tags="effectiveRouteTag" />
 
       <NodeCardInsightPanel :node="node" />
     </div>
 
     <footer v-if="tags.length" data-node-tag-row class="pointer-events-none relative z-1 mt-2.5 flex min-w-0 items-center gap-1 overflow-hidden">
-      <span v-for="tag in tags" :key="tag" class="transit-divider shrink-0 rounded-full border px-2 py-0.5 text-[9px] text-slate-500 dark:text-slate-400">
+      <span v-for="tag in tags" :key="tag" class="transit-divider shrink-0 rounded-full border px-2 py-0.5 text-[10px] text-slate-500 dark:text-slate-400">
         {{ tag }}
       </span>
     </footer>
@@ -282,7 +288,7 @@ const statusEdgeStyle = computed(() => ({ '--node-status-tone': statusEdgeTone.v
         <div class="text-xs font-semibold text-rose-600 dark:text-rose-400">
           离线
         </div>
-        <div class="mt-1 text-[9px] text-slate-500 dark:text-slate-400">
+        <div class="mt-1 text-[10px] text-slate-500 dark:text-slate-400">
           {{ formatDateTime(node.time) }}
         </div>
       </div>
@@ -295,11 +301,22 @@ const statusEdgeStyle = computed(() => ({ '--node-status-tone': statusEdgeTone.v
   background: transparent !important;
   border-bottom: 0 !important;
   backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
 }
 
 .transit-node-card {
   container-type: inline-size;
+  isolation: isolate;
+}
+
+.transit-node-card::after {
+  position: absolute;
+  z-index: 0;
+  inset: 1px;
+  border-radius: calc(1rem - 1px);
+  background: linear-gradient(135deg, rgb(255 255 255 / 0.09), transparent 32%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.1);
+  content: '';
+  pointer-events: none;
 }
 
 .transit-node-card__status-rail {
@@ -391,7 +408,7 @@ const statusEdgeStyle = computed(() => ({ '--node-status-tone': statusEdgeTone.v
   }
 
   [data-node-resource-value] {
-    font-size: 0.5rem;
+    font-size: 0.5625rem;
   }
 
   .node-card-cell {

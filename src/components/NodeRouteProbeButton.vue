@@ -29,7 +29,7 @@ const forceEligible = computed(() => props.nodes.length ? routeProbe.pendingCoun
 const visible = computed(() => appStore.routeProbeEnabled
   && appStore.privateFeaturesAllowed
   && (routeProbe.probing.value || pending.value > 0 || forceEligible.value > 0))
-const summaryHasFailure = computed(() => Boolean(routeProbe.lastError.value)
+const summaryNeedsAttention = computed(() => Boolean(routeProbe.lastError.value)
   || routeProbe.lastOutcomes.value.some(outcome => outcome.status !== 'updated'))
 
 function handleClick(): void {
@@ -64,13 +64,13 @@ function handleClick(): void {
       v-if="routeProbe.lastSummary.value && !routeProbe.probing.value"
       data-route-probe-summary
       class="flex min-w-0 max-w-[18rem] items-center gap-1 truncate rounded-md border px-2 py-1 text-[10px]"
-      :class="summaryHasFailure
+      :class="summaryNeedsAttention
         ? 'border-amber-500/20 bg-amber-500/8 text-amber-700 dark:text-amber-400'
         : 'border-emerald-500/20 bg-emerald-500/8 text-emerald-700 dark:text-emerald-400'"
       :title="routeProbe.lastSummary.value"
       aria-live="polite"
     >
-      <Icon :icon="summaryHasFailure ? 'tabler:alert-triangle' : 'tabler:circle-check'" class="shrink-0" :width="12" :height="12" />
+      <Icon :icon="summaryNeedsAttention ? 'tabler:alert-triangle' : 'tabler:circle-check'" class="shrink-0" :width="12" :height="12" />
       <span class="truncate">{{ routeProbe.lastSummary.value }}</span>
     </span>
   </div>

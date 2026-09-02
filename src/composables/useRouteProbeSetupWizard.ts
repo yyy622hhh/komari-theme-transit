@@ -233,14 +233,29 @@ export function useRouteProbeSetupWizard(nodes: MaybeRefOrGetter<NodeData[]>) {
   }, ROSTER_REFRESH_INTERVAL_MS)
   onScopeDispose(() => clearInterval(refreshTimer))
 
+  /**
+   * 缺助手的节点集合没变时跳过重新拉取。Agent token 是静态的，不会随时间
+   * 改变；`refreshMissingHelpers` 每 15 秒都会调用这里一次，环境检查开着期间
+   * 只要还有一台没装助手，之前的实现就会一直重新拉一遍全节点表外加所有 token，
+   * 而通常这段时间里缺助手的那批节点根本没变化。
+   */
+  let missingHelperTokenKey: string | null = null
+
   async function loadMissingHelperTokens(): Promise<void> {
     const generation = rosterGeneration
     const missing = missingHelperNodes.value.map(node => node.uuid)
-    const tokens = missing.length
-      ? await loadRouteProbeNodeTokens(missing, controller.signal)
-      : {}
+    if (!missing.length) {
+      missingHelperTokenKey = null
+      nodeTokens.value = {}
+      return
+    }
+    const key = [...missing].sort().join(',')
+    if (key === missingHelperTokenKey)
+      return
+    const tokens = await loadRouteProbeNodeTokens(missing, controller.signal)
     if (generation !== rosterGeneration)
       return
+    missingHelperTokenKey = key
     nodeTokens.value = tokens
   }
 
@@ -254,10 +269,10 @@ export function useRouteProbeSetupWizard(nodes: MaybeRefOrGetter<NodeData[]>) {
    * 既不出现在这条命令的 shell 历史里，也不会在 `ps` 里露出来。真正的 token
    * 通过 `tokenFor()` 单独复制，运行到提示时再粘贴。
    */
+  const installEndpoint = computed(() => typeof window === 'undefined' ? '' : window.location.origin)
   const installCommand = computed(() => {
     const release = `v${__BUILD_VERSION__}`
-    const endpoint = typeof window === 'undefined' ? '' : window.location.origin
-    return buildRouteProbeInstallCommand(endpoint, release)
+    return buildRouteProbeInstallCommand(installEndpoint.value, release)
   })
 
   function tokenFor(uuid: string): string {
@@ -310,6 +325,7 @@ export function useRouteProbeSetupWizard(nodes: MaybeRefOrGetter<NodeData[]>) {
     eligibleNodes.value = []
     mainlandCount.value = 0
     nodeTokens.value = {}
+    missingHelperTokenKey = null
   }
 
   return {
@@ -331,6 +347,7 @@ export function useRouteProbeSetupWizard(nodes: MaybeRefOrGetter<NodeData[]>) {
     saveError,
     runCheck,
     loadNodeTokens,
+    installEndpoint,
     installCommand,
     tokenFor,
     goToConfirm,

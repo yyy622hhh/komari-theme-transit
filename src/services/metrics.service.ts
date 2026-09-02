@@ -2,6 +2,7 @@ import type { MetricDefinition, MetricQueryParams, MetricQueryResponse, PingMetr
 import { CACHE_CONFIG } from '@/constants/cache'
 import { REQUEST_CONFIG } from '@/constants/request'
 import { SharedCache } from '@/services/cache.service'
+import { observePingTaskEpochs } from '@/services/ping-task-epoch.service'
 import { requestManager } from '@/services/request.service'
 import { getSharedRpc, isRpcPermissionError, RpcError } from '@/utils/rpc'
 
@@ -181,6 +182,7 @@ export async function loadPublicPingTasks(): Promise<PingTaskInfo[]> {
   // Neither return nor re-cache a pre-mutation snapshot, even if it arrives last.
   if (generation !== publicPingTasksGeneration)
     return loadPublicPingTasks()
+  observePingTaskEpochs(tasks, 'public')
   return publicPingTasksCache.set(key, tasks)
 }
 

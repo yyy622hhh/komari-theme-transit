@@ -113,7 +113,7 @@ export function formatTopologyRouteHint(input: TopologyRouteHintInput): string {
   if (input.pending)
     return `正在按 ${probeText} 自动创建探测任务。`
   if (state.verdict === 'healthy')
-    return `探测方式：${probeText} · 正常`
+    return `探测方式：${probeText} · 可用`
   if (state.verdict === 'dead')
     return `探测方式：${probeText} · 没有成功响应，正在自动换用其它方式。`
   return `探测方式：${probeText} · 正在等待首批采样`

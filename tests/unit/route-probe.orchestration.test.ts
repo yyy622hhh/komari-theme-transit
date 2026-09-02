@@ -9,6 +9,48 @@ import { resetSharedRpc } from '../../src/utils/rpc'
 // probeNodeRoutes 一直用 force:true 校验登录，所以每个用例都得应付一次 /me 请求，
 // 不管测试前有没有预置过 session。loadRouteProbeNodeTokens 用 force:false，
 // 预置一个新鲜的已登录 session 就能跳过网络校验。
+//
+// 保存路径统一走 `saveRouteProbeResults`（写 Transit 主题数据），这里整体
+// mock 掉那一层：真正的 HTTP 读改写流程已经由 tests/visual 覆盖，这里只关心
+// 编排本身——一次轮询里的多台节点是否合并成一次保存、保存失败如何归因、
+// 没有旧标签时是否真的跳过清理这一趟额外请求。
+const fakeRouteResults = {
+  saved: {} as Record<string, string>,
+  saveCalls: [] as Array<{ theme: string, results: Record<string, string> }>,
+  saveError: null as string | null,
+}
+
+function resetFakeRouteResults(): void {
+  fakeRouteResults.saved = {}
+  fakeRouteResults.saveCalls = []
+  fakeRouteResults.saveError = null
+}
+
+mock.module('../../src/services/route-probe-results.service', () => ({
+  saveRouteProbeResults: async (options: { theme: string, results: Record<string, string>, activeNodeIds?: readonly string[] }) => {
+    if (fakeRouteResults.saveError)
+      throw new Error(fakeRouteResults.saveError)
+    fakeRouteResults.saveCalls.push({ theme: options.theme, results: { ...options.results } })
+    // 贴近真实 mergeRouteProbeResults 的行为：不在白名单里的 uuid 直接被滤掉，
+    // 不进入保存后返回的结果集——用来验证「探测期间节点掉出列表」这条路径。
+    const allowed = options.activeNodeIds ? new Set(options.activeNodeIds.map(id => id.trim())) : null
+    for (const [uuid, tag] of Object.entries(options.results)) {
+      if (!allowed || allowed.has(uuid))
+        fakeRouteResults.saved[uuid] = tag
+    }
+    return { ...fakeRouteResults.saved }
+  },
+  // 这几个用例都不给节点预置 `transit-route:` 遗留标签，批量写回按设计会跳过
+  // 清理这一步（见 route-probe.service.ts 的 writeRouteTagsBatch），所以这里
+  // 不需要还原真实清理逻辑——真被调用说明「跳过清理」的判断本身坏了。
+  cleanupPersistedLegacyRouteTag: async () => {
+    throw new Error('测试没有预置遗留标签，不应该走到清理这一步')
+  },
+}))
+
+function persistence(theme = 'Transit', activeNodeIds?: readonly string[]) {
+  return activeNodeIds ? { theme, activeNodeIds } : { theme }
+}
 
 const originalFetch = globalThis.fetch
 const originalSetTimeout = globalThis.setTimeout
@@ -25,6 +67,7 @@ interface BackendFixture {
   getNodes?: () => Record<string, { tags?: string, token?: string }>
   companionEnqueueStatus?: number
   companionBatch?: (poll: number) => unknown
+  companionStatusStatus?: (poll: number) => number | null
   execDispatch?: () => ExecTaskDispatch
   execResults?: (taskId: string, poll: number) => ExecTaskResult[]
   editClient?: (params: Record<string, unknown>) => void
@@ -43,6 +86,9 @@ function mockBackend(fixture: BackendFixture): () => void {
     }
     if (url.includes('/transit-route-probe/v1/status')) {
       companionPoll += 1
+      const status = fixture.companionStatusStatus?.(companionPoll) ?? null
+      if (status !== null)
+        return new Response('', { status })
       return new Response(JSON.stringify(fixture.companionBatch!(companionPoll)), { headers: { 'Content-Type': 'application/json' } })
     }
     if (!init?.body) {
@@ -82,6 +128,7 @@ afterEach(() => {
   Date.now = originalNow
   resetSharedRpc()
   setAuthSessionFromLogin(false)
+  resetFakeRouteResults()
 })
 
 function candidates(...names: string[]) {
@@ -111,14 +158,14 @@ __TRANSIT_ROUTE_CM__
 
 describe('probeNodeRoutes 顶层门禁', () => {
   test('没有候选节点时直接返回 null，不做登录校验', async () => {
-    const result = await probeNodeRoutes([], 'beijing')
+    const result = await probeNodeRoutes([], 'beijing', { trigger: 'manual', persistence: persistence() })
     expect(result).toBeNull()
   })
 
   test('登录状态过期时拒绝下发', async () => {
     const restore = mockBackend({ authenticated: false })
     try {
-      await expect(probeNodeRoutes(candidates('n1'), 'beijing')).rejects.toThrow('登录状态已过期')
+      await expect(probeNodeRoutes(candidates('n1'), 'beijing', { trigger: 'manual', persistence: persistence() })).rejects.toThrow('登录状态已过期')
     }
     finally {
       restore()
@@ -131,7 +178,6 @@ describe('probeNodeRoutes：节点助手路径', () => {
     test(`waits for a valid companion result after ${completeAt / 1000}s including queue/backoff and upload`, async () => {
       const started = originalNow()
       let elapsed = 0
-      let edits = 0
       Date.now = () => started + elapsed
       globalThis.setTimeout = ((fn: (...args: unknown[]) => void, ms?: number, ...args: unknown[]) => {
         if (ms === 5000) {
@@ -150,15 +196,12 @@ describe('probeNodeRoutes：节点助手路径', () => {
           attempts: 1,
           helper_seen_at: Date.now(),
         }] }),
-        getNodes: () => ({ slow: { tags: 'keep-original-tag' } }),
-        editClient: (params) => {
-          edits++
-          expect(String(params.tags)).toContain('keep-original-tag;transit-route:')
-        },
+        getNodes: () => ({ slow: { tags: '' } }),
       })
       try {
-        expect((await probeNodeRoutes(candidates('slow'), 'beijing'))?.outcomes[0]?.status).toBe('updated')
-        expect(edits).toBe(1)
+        expect((await probeNodeRoutes(candidates('slow'), 'beijing', { trigger: 'manual', persistence: persistence() }))?.outcomes[0]?.status).toBe('updated')
+        // 没有遗留标签，批量写回应该跳过清理这一趟额外请求。
+        expect(fakeRouteResults.saved.slow).toContain('transit-route:')
         expect(elapsed).toBe(completeAt)
       }
       finally { restore() }
@@ -177,12 +220,12 @@ describe('probeNodeRoutes：节点助手路径', () => {
     }) as typeof setTimeout
     const restore = mockBackend({ companionBatch: () => ({ batch_id: 'batch-1', jobs: [{ client: 'stuck', city: 'beijing', status: 'running', tag: null, error: null, attempts: 1, helper_seen_at: Date.now() }] }) })
     try {
-      expect((await probeNodeRoutes(candidates('stuck'), 'beijing'))?.outcomes[0]?.status).toBe('timeout')
+      expect((await probeNodeRoutes(candidates('stuck'), 'beijing', { trigger: 'manual', persistence: persistence() }))?.outcomes[0]?.status).toBe('timeout')
       expect(elapsed).toBe(630_000)
     }
     finally { restore() }
   })
-  test('两台节点在第一次轮询就全部拿到结果：一台成功写回，一台报告未装 traceroute', async () => {
+  test('两台节点在第一次轮询就全部拿到结果：合并成一次保存，一台成功写回，一台报告未装 traceroute', async () => {
     const routeTag = formatNodeRouteTag(parseRouteTraceOutput(REAL_TRACE_OUTPUT), Date.now())
     const restore = mockBackend({
       companionBatch: () => ({
@@ -196,18 +239,63 @@ describe('probeNodeRoutes：节点助手路径', () => {
         'ok': { tags: '香港<blue>' },
         'no-tr': { tags: '' },
       }),
-      editClient: (params) => {
-        expect(params.uuid).toBe('ok')
-        expect(String(params.tags)).toContain(routeTag)
-        expect(String(params.tags)).toContain('香港<blue>')
-      },
     })
     try {
-      const summary = await probeNodeRoutes(candidates('ok', 'no-tr'), 'beijing')
+      const summary = await probeNodeRoutes(candidates('ok', 'no-tr'), 'beijing', { trigger: 'manual', persistence: persistence() })
       expect(summary?.taskId).toBe('companion:batch-1')
       const outcomes = new Map(summary?.outcomes.map(outcome => [outcome.uuid, outcome]))
       expect(outcomes.get('ok')?.status).toBe('updated')
       expect(outcomes.get('no-tr')?.status).toBe('no-traceroute')
+      // 一轮里唯一成功的节点合并进同一次保存调用，不是逐台各存一次。
+      expect(fakeRouteResults.saveCalls).toHaveLength(1)
+      expect(fakeRouteResults.saveCalls[0]!.results).toEqual({ ok: routeTag })
+    }
+    finally {
+      restore()
+    }
+  })
+
+  test('两台节点在同一轮都成功时，只合并成一次保存请求', async () => {
+    const routeTag = formatNodeRouteTag(parseRouteTraceOutput(REAL_TRACE_OUTPUT), Date.now())
+    const restore = mockBackend({
+      companionBatch: () => ({
+        batch_id: 'batch-1',
+        jobs: [
+          { client: 'a', city: 'beijing', status: 'completed', tag: routeTag, error: null, attempts: 1, helper_seen_at: Date.now() },
+          { client: 'b', city: 'beijing', status: 'completed', tag: routeTag, error: null, attempts: 1, helper_seen_at: Date.now() },
+        ],
+      }),
+      getNodes: () => ({ a: { tags: '' }, b: { tags: '' } }),
+    })
+    try {
+      const summary = await probeNodeRoutes(candidates('a', 'b'), 'beijing', { trigger: 'manual', persistence: persistence() })
+      expect(summary?.outcomes.every(outcome => outcome.status === 'updated')).toBe(true)
+      expect(fakeRouteResults.saveCalls).toHaveLength(1)
+      expect(fakeRouteResults.saveCalls[0]!.results).toEqual({ a: routeTag, b: routeTag })
+    }
+    finally {
+      restore()
+    }
+  })
+
+  test('插件侧的 invalid-city/internal-error 不归因为节点助手未连接', async () => {
+    const restore = mockBackend({
+      companionBatch: () => ({
+        batch_id: 'batch-1',
+        jobs: [
+          { client: 'bad-city', city: 'beijing', status: 'failed', tag: null, error: 'invalid-city', attempts: 0, helper_seen_at: Date.now() },
+          { client: 'plugin-bug', city: 'beijing', status: 'failed', tag: null, error: 'internal-error', attempts: 0, helper_seen_at: Date.now() },
+        ],
+      }),
+      getNodes: () => ({ 'bad-city': { tags: '' }, 'plugin-bug': { tags: '' } }),
+    })
+    try {
+      const summary = await probeNodeRoutes(candidates('bad-city', 'plugin-bug'), 'beijing', { trigger: 'manual', persistence: persistence() })
+      const outcomes = new Map(summary?.outcomes.map(outcome => [outcome.uuid, outcome]))
+      expect(outcomes.get('bad-city')?.status).toBe('failed')
+      expect(outcomes.get('bad-city')?.detail).toContain('城市')
+      expect(outcomes.get('plugin-bug')?.status).toBe('failed')
+      expect(outcomes.get('plugin-bug')?.detail).toContain('内部错误')
     }
     finally {
       restore()
@@ -224,14 +312,95 @@ describe('probeNodeRoutes：节点助手路径', () => {
       getNodes: () => ({ stale: { tags: '' } }),
     })
     try {
-      const summary = await probeNodeRoutes(candidates('stale'), 'beijing')
+      const summary = await probeNodeRoutes(candidates('stale'), 'beijing', { trigger: 'manual', persistence: persistence() })
       expect(summary?.outcomes[0]?.status).toBe('failed')
       expect(summary?.outcomes[0]?.detail).toContain('过期')
+      expect(fakeRouteResults.saveCalls).toHaveLength(0)
     }
     finally {
       restore()
     }
   })
+
+  test('保存到主题数据失败时，批次内每台都报告失败并各自留痕，而不是静默写回旧标签', async () => {
+    const routeTag = formatNodeRouteTag(parseRouteTraceOutput(REAL_TRACE_OUTPUT), Date.now())
+    fakeRouteResults.saveError = '模拟保存失败'
+    const restore = mockBackend({
+      companionBatch: () => ({
+        batch_id: 'batch-1',
+        jobs: [{ client: 'ok', city: 'beijing', status: 'completed', tag: routeTag, error: null, attempts: 1, helper_seen_at: Date.now() }],
+      }),
+      getNodes: () => ({ ok: { tags: '' } }),
+    })
+    try {
+      const summary = await probeNodeRoutes(candidates('ok'), 'beijing', { trigger: 'manual', persistence: persistence() })
+      expect(summary?.outcomes[0]?.status).toBe('failed')
+      expect(summary?.outcomes[0]?.detail).toContain('模拟保存失败')
+    }
+    finally {
+      restore()
+    }
+  })
+
+  test('节点在等待结果期间掉出白名单时，报告的原因是节点已不在列表，而不是笼统的服务器未保留', async () => {
+    const routeTag = formatNodeRouteTag(parseRouteTraceOutput(REAL_TRACE_OUTPUT), Date.now())
+    const restore = mockBackend({
+      companionBatch: () => ({
+        batch_id: 'batch-1',
+        jobs: [{ client: 'gone', city: 'beijing', status: 'completed', tag: routeTag, error: null, attempts: 1, helper_seen_at: Date.now() }],
+      }),
+      getNodes: () => ({ gone: { tags: '' } }),
+    })
+    try {
+      // activeNodeIds 不包含 'gone'，模拟探测期间该节点已被隐藏/删除。
+      const summary = await probeNodeRoutes(candidates('gone'), 'beijing', { trigger: 'manual', persistence: persistence('Transit', ['other-node']) })
+      expect(summary?.outcomes[0]?.status).toBe('failed')
+      expect(summary?.outcomes[0]?.detail).toContain('已不在当前节点列表中')
+    }
+    finally {
+      restore()
+    }
+  })
+
+  test('单次状态轮询失败不会整批判死，下一轮恢复正常就能继续拿到结果', async () => {
+    const routeTag = formatNodeRouteTag(parseRouteTraceOutput(REAL_TRACE_OUTPUT), Date.now())
+    stubInstantTimers()
+    let calls = 0
+    const restore = mockBackend({
+      companionStatusStatus: () => {
+        calls += 1
+        return calls === 1 ? 500 : null
+      },
+      companionBatch: () => ({
+        batch_id: 'batch-1',
+        jobs: [{ client: 'ok', city: 'beijing', status: 'completed', tag: routeTag, error: null, attempts: 1, helper_seen_at: Date.now() }],
+      }),
+      getNodes: () => ({ ok: { tags: '' } }),
+    })
+    try {
+      const summary = await probeNodeRoutes(candidates('ok'), 'beijing', { trigger: 'manual', persistence: persistence() })
+      expect(summary?.outcomes[0]?.status).toBe('updated')
+      expect(calls).toBeGreaterThan(1)
+    }
+    finally {
+      restore()
+    }
+  }, 5000)
+
+  test('已接单批次的状态查询明确 404 时立即放弃，不重试也不回退到远程执行', async () => {
+    stubInstantTimers()
+    const restore = mockBackend({
+      companionStatusStatus: () => 404,
+      getNodes: () => ({ ok: { tags: '' } }),
+    })
+    try {
+      await expect(probeNodeRoutes(candidates('ok'), 'beijing', { trigger: 'manual', persistence: persistence() })).rejects.toThrow()
+      expect(fakeRouteResults.saveCalls).toHaveLength(0)
+    }
+    finally {
+      restore()
+    }
+  }, 5000)
 })
 
 describe('probeNodeRoutes：伴生插件不可用时回退到远程执行', () => {
@@ -250,15 +419,12 @@ describe('probeNodeRoutes：伴生插件不可用时回退到远程执行', () =
         return [{ client: 'relay', result: REAL_TRACE_OUTPUT, exit_code: 0, finished_at: new Date().toISOString(), created_at: new Date().toISOString() }]
       },
       getNodes: () => ({ relay: { tags: '' } }),
-      editClient: (params) => {
-        expect(params.uuid).toBe('relay')
-        expect(String(params.tags)).toContain('transit-route:')
-      },
     })
     try {
-      const summary = await probeNodeRoutes(candidates('relay'), 'beijing')
+      const summary = await probeNodeRoutes(candidates('relay'), 'beijing', { trigger: 'manual', persistence: persistence() })
       expect(summary?.taskId).toBe('exec-task-1')
       expect(summary?.outcomes[0]?.status).toBe('updated')
+      expect(fakeRouteResults.saved.relay).toContain('transit-route:')
     }
     finally {
       restore()
@@ -273,7 +439,7 @@ describe('probeNodeRoutes：伴生插件不可用时回退到远程执行', () =
       execResults: () => [{ client: 'relay', result: 'Remote control is disabled.', exit_code: 1, finished_at: new Date().toISOString(), created_at: new Date().toISOString() }],
     })
     try {
-      const summary = await probeNodeRoutes(candidates('relay'), 'beijing')
+      const summary = await probeNodeRoutes(candidates('relay'), 'beijing', { trigger: 'manual', persistence: persistence() })
       expect(summary?.outcomes[0]?.status).toBe('remote-disabled')
     }
     finally {

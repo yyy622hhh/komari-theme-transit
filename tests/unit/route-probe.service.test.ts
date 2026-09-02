@@ -22,6 +22,12 @@ describe('采集节点的挑选（频率控制）', () => {
     expect(selectRouteProbeCandidates(nodes, NOW)).toEqual([])
   })
 
+  test('主题里的新结果优先于节点旧标签参与新鲜度判断', () => {
+    const nodes = [node({ tags: tagAt(8 * DAY) })]
+    const stored = { u1: tagAt(2 * DAY) }
+    expect(selectRouteProbeCandidates(nodes, NOW, new Set(), false, stored)).toEqual([])
+  })
+
   test('force 跳过新鲜度检查，但仍然排除离线和中国大陆节点', () => {
     const fresh = [node({ tags: tagAt(2 * DAY) })]
     expect(selectRouteProbeCandidates(fresh, NOW, new Set(), true).map(c => c.uuid)).toEqual(['u1'])

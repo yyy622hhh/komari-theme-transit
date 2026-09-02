@@ -156,22 +156,36 @@ describe('topology route and metric alignment', () => {
 })
 
 describe('topology probe targets', () => {
-  test('sends ICMP to the backbone landmark and TCP 53 to the carrier resolver', () => {
+  test('uses separate built-in ICMP and TCP 53 candidates', () => {
     const probe = getTopologyProbe('beijing-telecom')
     expect(getTopologyProbeTarget(probe, { type: 'icmp' })).toBe(probe.landmarkAddress)
     expect(getTopologyProbeTarget(probe, { type: 'tcp', port: 53 })).toBe(probe.dnsAddress)
-    // 骨干网关不接这些端口，入口阶梯不走它们，也不能给出目标地址。
+    // 内置入口候选不声明这些端口可用，入口阶梯也不能给出对应目标地址。
     expect(getTopologyProbeTarget(probe, { type: 'tcp', port: 443 })).toBe('')
     expect(getTopologyProbeTarget(probe, { type: 'tcp', port: 80 })).toBe('')
     expect(getTopologyProbeTarget(probe, { type: 'tcp', port: 22 })).toBe('')
     expect(getTopologyProbeTarget(probe, { type: 'tcp', port: 8080 })).toBe('')
   })
 
-  test('every preset carries both an ICMP landmark and a TCP resolver', () => {
+  test('every preset carries both an ICMP candidate and a TCP resolver candidate', () => {
     for (const probe of TOPOLOGY_PROBE_OPTIONS) {
       expect(getTopologyProbeTarget(probe, { type: 'icmp' })).toBeTruthy()
       expect(getTopologyProbeTarget(probe, { type: 'tcp', port: 53 })).toBeTruthy()
     }
+  })
+
+  test('locks the reviewed built-in ICMP candidate table', () => {
+    expect(Object.fromEntries(TOPOLOGY_PROBE_OPTIONS.map(option => [option.key, option.landmarkAddress]))).toEqual({
+      'beijing-telecom': '220.181.38.150',
+      'beijing-unicom': '202.106.50.1',
+      'beijing-mobile': '221.130.33.52',
+      'shanghai-telecom': '202.96.209.133',
+      'shanghai-unicom': '210.22.97.1',
+      'shanghai-mobile': '211.136.112.200',
+      'guangzhou-telecom': '58.60.188.222',
+      'guangzhou-unicom': '210.21.196.6',
+      'guangzhou-mobile': '120.196.165.24',
+    })
   })
 })
 

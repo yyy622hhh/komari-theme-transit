@@ -13,8 +13,7 @@
   border: 1px solid var(--transit-border);
   background: var(--transit-panel-bg);
   box-shadow: var(--transit-panel-shadow);
-  backdrop-filter: blur(18px) saturate(118%);
-  -webkit-backdrop-filter: blur(18px) saturate(118%);
+  backdrop-filter: blur(22px) saturate(132%);
 }
 
 .transit-control {
@@ -22,7 +21,6 @@
   background: var(--transit-control-bg) !important;
   color: var(--muted-foreground);
   backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
 }
 
 .transit-control:hover {
@@ -33,8 +31,7 @@
   border: 1px solid var(--transit-border);
   background: var(--transit-card-bg);
   box-shadow: var(--transit-card-shadow);
-  backdrop-filter: blur(16px) saturate(112%);
-  -webkit-backdrop-filter: blur(16px) saturate(112%);
+  backdrop-filter: blur(24px) saturate(138%);
 }
 
 .transit-divider {
@@ -59,7 +56,6 @@
   .transit-node-card {
     background: var(--card) !important;
     backdrop-filter: none !important;
-    -webkit-backdrop-filter: none !important;
   }
 }
 
@@ -104,18 +100,18 @@
   --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   --transit-border: rgb(100 116 139 / 0.2);
   --transit-divider: rgb(100 116 139 / 0.16);
-  --transit-panel-bg: rgb(248 250 252 / 0.78);
+  --transit-panel-bg: rgb(248 250 252 / 0.74);
   --transit-control-bg: rgb(248 250 252 / 0.72);
-  --transit-card-bg: rgb(248 250 252 / 0.9);
-  --transit-cell-bg: rgb(241 245 249 / 0.74);
+  --transit-card-bg: rgb(248 250 252 / 0.78);
+  --transit-cell-bg: rgb(241 245 249 / 0.48);
   --transit-hover-bg: rgb(15 23 42 / 0.025);
   --transit-dot-ring: rgb(241 245 249 / 0.96);
   --transit-rail: rgb(100 116 139 / 0.42);
   --transit-text-primary: rgb(30 41 59);
   --transit-text-secondary: rgb(71 85 105);
   --transit-text-tertiary: rgb(100 116 139);
-  --transit-panel-shadow: inset 0 1px 0 rgb(255 255 255 / 0.72), 0 18px 50px -42px rgb(15 23 42 / 0.3);
-  --transit-card-shadow: inset 0 1px 0 rgb(255 255 255 / 0.78), 0 16px 38px -34px rgb(15 23 42 / 0.34);
+  --transit-panel-shadow: inset 0 1px 0 rgb(255 255 255 / 0.78), 0 22px 54px -40px rgb(15 23 42 / 0.34);
+  --transit-card-shadow: inset 0 1px 0 rgb(255 255 255 / 0.82), 0 20px 44px -32px rgb(15 23 42 / 0.38);
 }
 
 .dark {
@@ -155,20 +151,46 @@
   --chart-3: oklch(0.769 0.188 70.08);
   --chart-4: oklch(0.627 0.265 303.9);
   --chart-5: oklch(0.645 0.246 16.439);
-  --transit-border: rgb(71 85 105 / 0.46);
-  --transit-divider: rgb(255 255 255 / 0.055);
-  --transit-panel-bg: rgb(14 19 25 / 0.84);
+  --transit-border: rgb(148 163 184 / 0.34);
+  --transit-divider: rgb(255 255 255 / 0.1);
+  --transit-panel-bg: rgb(9 22 34 / 0.78);
   --transit-control-bg: rgb(14 19 25 / 0.8);
-  --transit-card-bg: rgb(14 19 25 / 0.84);
-  --transit-cell-bg: rgb(255 255 255 / 0.018);
-  --transit-hover-bg: rgb(255 255 255 / 0.018);
+  --transit-card-bg: rgb(9 22 34 / 0.82);
+  --transit-cell-bg: rgb(255 255 255 / 0.055);
+  --transit-hover-bg: rgb(255 255 255 / 0.04);
   --transit-dot-ring: rgb(16 24 32 / 0.98);
   --transit-rail: rgb(71 85 105 / 0.65);
   --transit-text-primary: rgb(226 232 240);
-  --transit-text-secondary: rgb(148 163 184);
-  --transit-text-tertiary: rgb(125 142 166);
-  --transit-panel-shadow: inset 0 1px 0 rgb(255 255 255 / 0.025), 0 18px 50px -42px rgb(0 0 0 / 0.72);
-  --transit-card-shadow: inset 0 1px 0 rgb(255 255 255 / 0.025), 0 18px 50px -42px rgb(0 0 0 / 0.95);
+  --transit-text-secondary: rgb(184 197 214);
+  --transit-text-tertiary: rgb(158 174 195);
+  --transit-panel-shadow: inset 0 1px 0 rgb(255 255 255 / 0.12), 0 24px 60px -38px rgb(0 8 18 / 0.82);
+  --transit-card-shadow: inset 0 1px 0 rgb(255 255 255 / 0.14), 0 22px 48px -32px rgb(0 8 18 / 0.9);
+}
+
+html.personal-wallpaper-glass:not(.legacy-webkit) .transit-panel,
+html.personal-wallpaper-glass:not(.legacy-webkit) .transit-node-card {
+  backdrop-filter: blur(26px) saturate(156%) !important;
+}
+
+html.personal-wallpaper-glass:not(.legacy-webkit) .transit-panel {
+  background-color: rgb(241 245 249 / 0.76);
+}
+
+html.personal-wallpaper-glass:not(.legacy-webkit) .transit-node-card {
+  background-color: rgb(241 245 249 / 0.8);
+}
+
+html.personal-wallpaper-glass.dark:not(.legacy-webkit) .transit-panel {
+  background-color: rgb(8 21 34 / 0.78);
+}
+
+html.personal-wallpaper-glass.dark:not(.legacy-webkit) .transit-node-card {
+  background-color: rgb(8 21 34 / 0.82);
+}
+
+.dark .transit-panel :where(.text-slate-400, .text-slate-500),
+.dark .transit-node-card :where(.text-slate-400, .text-slate-500) {
+  color: var(--transit-text-secondary) !important;
 }
 
 @theme inline {
@@ -386,9 +408,10 @@ html.legacy-webkit body {
 
 html.legacy-webkit .node-card,
 html.legacy-webkit .bg-card,
-html.legacy-webkit [data-slot='card'] {
+html.legacy-webkit [data-slot='card'],
+html.legacy-webkit .transit-panel,
+html.legacy-webkit .transit-node-card {
   background-color: var(--card) !important;
-  -webkit-backdrop-filter: none !important;
   backdrop-filter: none !important;
 }
 
@@ -423,7 +446,6 @@ html.legacy-webkit [data-slot='card'] {
   background-color: var(--glass-light-card, rgb(241 245 249 / 0.74)) !important;
   border: 1px solid var(--glass-light-border, rgb(226 232 240 / 0.68)) !important;
   backdrop-filter: blur(14px) saturate(145%) !important;
-  -webkit-backdrop-filter: blur(14px) saturate(145%) !important;
   box-shadow: var(--glass-light-shadow, 0 8px 28px rgb(15 23 42 / 0.18)) !important;
 }
 
@@ -458,7 +480,6 @@ html.personal-wallpaper-glass:not(.legacy-webkit) .bg-card,
 html.personal-wallpaper-glass:not(.legacy-webkit) [data-slot='card'] {
   background-color: color-mix(in srgb, var(--glass-light-card, rgb(241 245 249 / 0.74)) 80%, transparent) !important;
   backdrop-filter: blur(20px) saturate(160%) !important;
-  -webkit-backdrop-filter: blur(20px) saturate(160%) !important;
 }
 
 html.personal-wallpaper-glass.dark:not(.legacy-webkit) .node-card,
@@ -470,7 +491,6 @@ html.personal-wallpaper-glass.dark:not(.legacy-webkit) [data-slot='card'] {
 html.personal-wallpaper-glass:not(.legacy-webkit) .bg-background {
   background-color: color-mix(in srgb, var(--glass-light-control, rgb(241 245 249 / 0.76)) 82%, transparent) !important;
   backdrop-filter: blur(18px) saturate(155%) !important;
-  -webkit-backdrop-filter: blur(18px) saturate(155%) !important;
 }
 
 html.personal-wallpaper-glass.dark:not(.legacy-webkit) .bg-background {
@@ -558,7 +578,6 @@ html.personal-wallpaper-glass.dark:not(.legacy-webkit) .bg-background {
 .site-header {
   background-color: var(--glass-light-header, rgb(241 245 249 / 0.76)) !important;
   backdrop-filter: blur(14px) saturate(150%) !important;
-  -webkit-backdrop-filter: blur(14px) saturate(150%) !important;
   border-bottom: 1px solid rgb(226 232 240 / 0.58) !important;
 }
 
@@ -572,7 +591,6 @@ html.personal-wallpaper-glass.dark:not(.legacy-webkit) .bg-background {
 .bg-background {
   background-color: var(--glass-light-control, rgb(241 245 249 / 0.76)) !important;
   backdrop-filter: blur(14px) saturate(145%) !important;
-  -webkit-backdrop-filter: blur(14px) saturate(145%) !important;
 }
 
 .dark .bg-background {
@@ -594,34 +612,38 @@ html.personal-wallpaper-glass.dark:not(.legacy-webkit) .bg-background {
 @supports (-moz-appearance: none) {
   .node-card,
   .bg-card,
-  [data-slot='card'] {
+  [data-slot='card'],
+  .transit-panel,
+  .transit-node-card {
     background-color: color-mix(in srgb, var(--glass-light-card, #f1f5f9) 88%, rgb(226 232 240)) !important;
     backdrop-filter: none !important;
-    -webkit-backdrop-filter: none !important;
   }
 
   .node-card:hover,
   .bg-card:hover,
-  [data-slot='card']:hover {
+  [data-slot='card']:hover,
+  .transit-node-card:hover {
     background-color: color-mix(in srgb, var(--glass-light-card-hover, #f8fafc) 88%, rgb(226 232 240)) !important;
   }
 
   .dark .node-card,
   .dark .bg-card,
-  .dark [data-slot='card'] {
+  .dark [data-slot='card'],
+  .dark .transit-panel,
+  .dark .transit-node-card {
     background-color: color-mix(in srgb, var(--glass-dark-card, #0f0f19) 92%, black) !important;
   }
 
   .dark .node-card:hover,
   .dark .bg-card:hover,
-  .dark [data-slot='card']:hover {
+  .dark [data-slot='card']:hover,
+  .dark .transit-node-card:hover {
     background-color: color-mix(in srgb, var(--glass-dark-card-hover, #0f0f19) 94%, black) !important;
   }
 
   .site-header,
   .bg-background {
     backdrop-filter: none !important;
-    -webkit-backdrop-filter: none !important;
   }
 
   .site-header {
@@ -643,9 +665,10 @@ html.personal-wallpaper-glass.dark:not(.legacy-webkit) .bg-background {
   html.personal-wallpaper-glass .node-card,
   html.personal-wallpaper-glass .bg-card,
   html.personal-wallpaper-glass [data-slot='card'],
+  html.personal-wallpaper-glass .transit-panel,
+  html.personal-wallpaper-glass .transit-node-card,
   html.personal-wallpaper-glass .bg-background {
     backdrop-filter: none !important;
-    -webkit-backdrop-filter: none !important;
   }
 }
 
@@ -653,9 +676,10 @@ html.personal-wallpaper-glass.dark:not(.legacy-webkit) .bg-background {
   html.personal-wallpaper-glass .node-card,
   html.personal-wallpaper-glass .bg-card,
   html.personal-wallpaper-glass [data-slot='card'],
+  html.personal-wallpaper-glass .transit-panel,
+  html.personal-wallpaper-glass .transit-node-card,
   html.personal-wallpaper-glass .bg-background {
     background-color: var(--card) !important;
     backdrop-filter: none !important;
-    -webkit-backdrop-filter: none !important;
   }
 }

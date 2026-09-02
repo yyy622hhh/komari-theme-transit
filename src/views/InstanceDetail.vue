@@ -25,6 +25,7 @@ import * as financeHelper from '@/utils/financeHelper'
 import { formatBytesPerSecondWithConfig, formatBytesWithConfig, formatUptimeWithFormat } from '@/utils/helper'
 import { getOSImage, getOSName } from '@/utils/osImageHelper'
 import { getRegionCode, getRegionDisplayName } from '@/utils/regionHelper'
+import { resolveNodeRouteTag } from '@/utils/routeProbeResults'
 
 import { formatPrice, formatPriceWithCycle, getExpireStatus, getExpireText, isFreePrice, parseTags } from '@/utils/tagHelper'
 
@@ -57,6 +58,9 @@ const data = computed(() => nodesStore.visibleNodesByUuid.get(String(route.param
 const detailNodes = computed(() => nodesStore.visibleNodes)
 const detailNodeIndex = computed(() => detailNodes.value.findIndex(node => node.uuid === data.value?.uuid))
 const isFavoriteNode = computed(() => data.value ? appStore.isFavoriteNode(data.value.uuid) : false)
+const effectiveRouteTag = computed(() => data.value
+  ? resolveNodeRouteTag(data.value.uuid, data.value.tags, appStore.routeProbeResults)
+  : '')
 const showPrice = computed(() => appStore.privateFeaturesAllowed || !appStore.hidePriceWhenLoggedOut)
 const needsExchangeRates = computed(() => showPrice.value && appStore.detailMetricCardOrder.includes('remainingValue'))
 const { rates: exchangeRates } = useDailyExchangeRates(needsExchangeRates)
@@ -558,8 +562,8 @@ const metricCards = computed<MetricCard[]>(() => appStore.detailMetricCardOrder.
             {{ tag }}
           </Badge>
         </div>
-        <!-- 三网回程线路，由采集端写入节点 tags；没有数据时整块不渲染 -->
-        <NodeRouteBadges :tags="data.tags" />
+        <!-- 三网回程线路；优先读取主题数据并兼容旧节点标签，没有数据时不渲染 -->
+        <NodeRouteBadges :tags="effectiveRouteTag" />
         <div class="ml-auto flex h-8 shrink-0 items-center gap-1 rounded-md bg-background/50 p-0.5 backdrop-blur-xs">
           <UiButton
             variant="ghost"

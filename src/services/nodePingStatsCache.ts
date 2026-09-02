@@ -6,17 +6,34 @@ import { normalizeCarrierPingTaskName } from '@/utils/topologyPresets'
 
 export type PingTaskNameMatch = 'contains' | 'exact' | 'normalized-exact'
 
-const CACHE_VERSION = 16
+const CACHE_VERSION = 17
 const CACHE_KEY_PREFIX = 'komari-theme-emerald:node-ping-stats'
 const CACHE_INDEX_KEY = `${CACHE_KEY_PREFIX}:index`
 const pendingStatsCacheTouches = new Map<string, number>()
 let statsCacheIndexFlushQueued = false
 
-function getCacheKey(uuid: string, hours: number, maxCount?: number, taskNameFilter = '', taskNameMatch: PingTaskNameMatch = 'contains'): string {
+export function clearNodePingStatsCache(): void {
+  pendingStatsCacheTouches.clear()
+  if (typeof localStorage === 'undefined')
+    return
+  try {
+    for (let index = localStorage.length - 1; index >= 0; index--) {
+      const key = localStorage.key(index)
+      if (key?.startsWith(`${CACHE_KEY_PREFIX}:`))
+        localStorage.removeItem(key)
+    }
+    localStorage.removeItem(CACHE_INDEX_KEY)
+  }
+  catch {
+    // The cache is optional; live statistics still use the new epoch immediately.
+  }
+}
+
+function getCacheKey(uuid: string, hours: number, maxCount?: number, taskNameFilter = '', taskNameMatch: PingTaskNameMatch = 'contains', taskType = ''): string {
   const normalizedFilter = taskNameMatch === 'exact'
     ? normalizeExactPingTaskName(taskNameFilter)
     : taskNameMatch === 'normalized-exact' ? normalizeCarrierPingTaskName(taskNameFilter) : normalizePingTaskFilter(taskNameFilter)
-  return `${CACHE_KEY_PREFIX}:${uuid}:${hours}:${maxCount ?? 'all'}:${taskNameMatch}:${normalizedFilter || 'all'}`
+  return `${CACHE_KEY_PREFIX}:${uuid}:${hours}:${maxCount ?? 'all'}:${taskNameMatch}:${normalizedFilter || 'all'}:${taskType.trim().toLowerCase() || 'any'}`
 }
 
 function isValidHistoryPoint(value: unknown): value is NodePingHistoryPoint {
@@ -143,12 +160,12 @@ export interface CachedNodePingStats {
   sampleUpdatedAt: number
 }
 
-export function readStatsCache(uuid: string, hours: number, maxCount?: number, taskNameFilter = '', taskNameMatch: PingTaskNameMatch = 'contains'): CachedNodePingStats | null {
+export function readStatsCache(uuid: string, hours: number, maxCount?: number, taskNameFilter = '', taskNameMatch: PingTaskNameMatch = 'contains', taskType = ''): CachedNodePingStats | null {
   if (typeof localStorage === 'undefined')
     return null
 
   try {
-    const key = getCacheKey(uuid, hours, maxCount, taskNameFilter, taskNameMatch)
+    const key = getCacheKey(uuid, hours, maxCount, taskNameFilter, taskNameMatch, taskType)
     const raw = localStorage.getItem(key)
     if (!raw)
       return null
@@ -183,6 +200,7 @@ export function writeStatsCache(
   sampleUpdatedAt: number,
   taskNameFilter = '',
   taskNameMatch: PingTaskNameMatch = 'contains',
+  taskType = '',
 ): void {
   if (typeof localStorage === 'undefined')
     return
@@ -190,7 +208,7 @@ export function writeStatsCache(
     return
 
   try {
-    const key = getCacheKey(uuid, hours, maxCount, taskNameFilter, taskNameMatch)
+    const key = getCacheKey(uuid, hours, maxCount, taskNameFilter, taskNameMatch, taskType)
     const updatedAt = Date.now()
     localStorage.setItem(
       key,

@@ -39,7 +39,8 @@ export interface CarrierProbeHealth {
   successRate: number | null
   abnormalNodeUuids: string[]
   commonModeEvents: number
-  fallback: CarrierProbeCandidate
+  /** `null` when the built-in candidate is the task already running — nothing to verify against. */
+  fallback: CarrierProbeCandidate | null
   current: ProbeCurrentState
   recovered: boolean
 }
@@ -333,7 +334,14 @@ export async function loadCarrierProbeHealth(nodes: readonly CarrierProbeNode[])
     const totals = aggregateSamples(observations)
     const abnormal = observations.filter(item => item.total >= MIN_NODE_SAMPLES && item.valid / item.total < MIGRATION_SUCCESS_RATE)
     const commonModeEvents = id === null ? 0 : commonModeByTaskId.get(id) ?? 0
-    const fallback = buildCarrierProbeCandidate('tcp', option.dnsAddress, 53, 'builtin')!
+    const builtinCandidate = buildCarrierProbeCandidate('icmp', option.landmarkAddress, undefined, 'builtin')!
+    const runningCandidate = task ? currentCarrierProbeCandidate(task) : null
+    // Verifying the exact target the task already polls tells the operator nothing:
+    // it would spend a canary task and up to 4 minutes to "discover" the status
+    // already shown above. Only offer it once it actually differs.
+    const fallback = runningCandidate && runningCandidate.type === builtinCandidate.type && runningCandidate.target === builtinCandidate.target
+      ? null
+      : builtinCandidate
     const taskRecords = raw.filter(record => record.task_id === id)
     const current = task?.clients.length && !onlineClients.length
       ? resolveProbeCurrentState(taskRecords, { online: false, now })

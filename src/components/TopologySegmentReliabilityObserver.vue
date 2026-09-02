@@ -82,6 +82,7 @@ const snapshot = computed<TopologySegmentReliabilitySnapshot>(() => {
       sourceUuid: sourceNode.value?.uuid ?? '',
       taskId: weekPing.selectedTaskId.value ?? dayPing.selectedTaskId.value,
       taskName: weekPing.selectedTaskName.value || dayPing.selectedTaskName.value || config.value.taskFilter,
+      probeType: weekPing.probeType.value || dayPing.probeType.value,
       diagnosis: diagnoseTopologySegment({
         currentLatency: props.current?.latency ?? null,
         currentLoss: props.current?.loss ?? null,

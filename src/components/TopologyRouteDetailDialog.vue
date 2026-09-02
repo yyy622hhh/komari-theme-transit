@@ -9,6 +9,7 @@ import TelemetrySampleStrip from '@/components/TelemetrySampleStrip.vue'
 import TopologySegmentHistory from '@/components/TopologySegmentHistory.vue'
 import { AppDialog } from '@/components/ui/app-dialog'
 import { message } from '@/utils/message'
+import { probeFailureRateColumnLabel, probeFailureRateExplanation } from '@/utils/pingCurrentState'
 import { describeTopologyPeakInsight } from '@/utils/topologyInsights'
 import { buildTopologyDiagnosticReport } from '@/utils/topologyReport'
 
@@ -54,6 +55,16 @@ const isOpen = computed({
 
 const title = computed(() => props.route?.nodeNames.filter(Boolean).join(' → ') || '线路详情')
 
+/**
+ * 一条线路可能有多段，各段探测方式不一定相同。全线只用一种方式时给出针对
+ * 该方式的具体解释，比通用的三选一说明更直接；混用时退回通用说明。
+ */
+const failureRateExplanation = computed(() => probeFailureRateExplanation([
+  ...(props.route?.segmentMetrics.map(segment => segment?.probeType ?? '') ?? []),
+  props.route?.directionComparison?.forward.telemetry?.probeType ?? '',
+  props.route?.directionComparison?.reverse.telemetry?.probeType ?? '',
+]))
+
 function scoreTone(score: TopologyRouteScore): string {
   if (score.tone === 'critical')
     return 'text-rose-600 dark:text-rose-400'
@@ -74,6 +85,14 @@ function formatLatency(value: number | null): string {
 
 function formatLoss(value: number | null | undefined): string {
   return value === null || value === undefined ? '-' : `${value.toFixed(value >= 10 ? 0 : 1)}%`
+}
+
+function failureLabelFor(telemetry: TopologySegmentTelemetry | undefined): string {
+  return probeFailureRateColumnLabel([telemetry?.probeType ?? ''])
+}
+
+function snapshotFailureLabel(snapshot: TopologySegmentReliabilitySnapshot): string {
+  return probeFailureRateColumnLabel([snapshot.insights?.probeType ?? ''])
 }
 
 function isFreshTelemetry(telemetry: TopologySegmentTelemetry | undefined): telemetry is TopologySegmentTelemetry {
@@ -106,7 +125,8 @@ function hourlySamples(snapshot: TopologySegmentReliabilitySnapshot, segmentInde
     const evening = bucket.hour >= 20 && bucket.hour <= 23
     const hasData = bucket.latencyMedian !== null || bucket.lossMedian !== null
     const latencyText = bucket.latencyMedian === null ? '无延迟数据' : `${Math.round(bucket.latencyMedian)} ms`
-    const lossText = bucket.lossMedian === null ? '无失败率数据' : `${bucket.lossMedian.toFixed(bucket.lossMedian >= 10 ? 0 : 1)}% 探测失败率`
+    const failureLabel = snapshotFailureLabel(snapshot)
+    const lossText = bucket.lossMedian === null ? `无${failureLabel}数据` : `${bucket.lossMedian.toFixed(bucket.lossMedian >= 10 ? 0 : 1)}% ${failureLabel}`
     return {
       key: `segment-${segmentIndex}-hour-${bucket.hour}`,
       tone: hasData ? (evening ? 'warning' : 'healthy') : 'muted',
@@ -210,7 +230,7 @@ async function copyDiagnosticReport(): Promise<void> {
   <AppDialog
     v-model:open="isOpen"
     :title="title"
-    description="当前连通性与历史统计分开显示；TCP 探测失败率不代表业务流量丢包。"
+    :description="failureRateExplanation"
     content-class="max-w-4xl"
   >
     <div v-if="route" class="space-y-4">
@@ -340,7 +360,7 @@ async function copyDiagnosticReport(): Promise<void> {
             </div>
             <div class="mt-2 flex gap-4 text-[11px] tabular-nums">
               <span>延迟 <strong>{{ formatLatency(reading.telemetry?.latency ?? null) }}</strong></span>
-              <span>探测失败率 <strong>{{ formatLoss(reading.telemetry?.loss) }}</strong></span>
+              <span>{{ failureLabelFor(reading.telemetry) }} <strong>{{ formatLoss(reading.telemetry?.loss) }}</strong></span>
             </div>
             <dl class="mt-2 grid gap-1 text-[9px] text-muted-foreground">
               <div class="flex min-w-0 gap-2">
@@ -393,7 +413,7 @@ async function copyDiagnosticReport(): Promise<void> {
           <dl class="mt-3 grid gap-2 text-[10px] sm:grid-cols-2 lg:grid-cols-4">
             <div class="rounded-lg border border-border/45 bg-background/35 p-2.5">
               <dt class="text-muted-foreground">
-                近 1h 均值 / 失败率
+                近 1h 均值 / {{ snapshotFailureLabel(snapshot) }}
               </dt>
               <dd class="mt-1 font-semibold tabular-nums">
                 {{ formatLatency(snapshot.insights.evidence.currentLatency) }} / {{ formatLoss(snapshot.insights.evidence.currentLoss) }}
@@ -409,7 +429,7 @@ async function copyDiagnosticReport(): Promise<void> {
             </div>
             <div class="rounded-lg border border-border/45 bg-background/35 p-2.5">
               <dt class="text-muted-foreground">
-                24h 探测失败率基线
+                24h {{ snapshotFailureLabel(snapshot) }}基线
               </dt>
               <dd class="mt-1 font-semibold tabular-nums">
                 {{ formatLoss(snapshot.insights.evidence.baselineLossMedian) }} · {{ snapshot.insights.evidence.baselineSampleCount }} 个样本

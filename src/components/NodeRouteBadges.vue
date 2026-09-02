@@ -10,7 +10,7 @@ import { ROUTE_ASN_LABELS } from '@/utils/routeClassification'
 import { parseNodeRouteTag } from '@/utils/routeTag'
 
 const props = defineProps<{
-  /** 节点的原始 `tags` 字段；没有回程标签时整个组件不渲染。 */
+  /** 单条回程结果或兼容旧版的节点 `tags`；没有数据时整个组件不渲染。 */
   tags?: string | null
   /**
    * 紧凑形态：去掉标签里的运营商前缀，改用一个运营商色点表示。

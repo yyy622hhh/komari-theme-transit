@@ -141,7 +141,7 @@ export async function runCarrierValidation(key: string, original: AdminPingTask,
     try {
       ops.progress?.('sampling', '临时任务已创建，等待原始样本。', canary)
       const verdict = assessCarrierProbeCandidate(await waitSamples(canary, createdAt, ops))
-      recordTopologyWrite({ trigger: 'manual', action: `验证备用目标 ${task.name}`, outcome: 'ok', detail: verdict.reason })
+      recordTopologyWrite({ trigger: 'manual', action: `验证候选目标 ${task.name}`, outcome: 'ok', detail: verdict.reason })
       return { ...candidate, ...verdict, canaryTaskId: canary.id, canaryTaskName: canary.name, createdAt, expiresAt: createdAt + TTL_MS, originalSnapshot: carrierTaskSnapshot(task), candidateFingerprint: `${candidate.type}:${candidate.target}`, evidenceClients: clients }
     }
     catch (error) {

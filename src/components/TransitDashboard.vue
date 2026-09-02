@@ -58,7 +58,7 @@ onMounted(() => {
 
 <template>
   <section id="asset-summary" class="relative z-1 scroll-mt-20 px-4 pb-3 pt-3">
-    <div class="mx-auto max-w-[1560px] space-y-3">
+    <div class="mx-auto max-w-[1680px] space-y-3">
       <div class="transit-panel telemetry-scroll rounded-2xl">
         <div class="transit-telemetry-grid grid min-w-[840px] grid-cols-[0.82fr_1.28fr_1.28fr_1fr_1.18fr_1.5fr] divide-x">
           <div class="telemetry-item">
@@ -91,9 +91,9 @@ onMounted(() => {
         </div>
       </div>
 
-      <TransitAlertStrip :nodes="nodes" />
-
       <NetworkTopology v-if="appStore.topologyEnabled" embedded :nodes="nodes" />
+
+      <TransitAlertStrip :nodes="nodes" />
     </div>
   </section>
 </template>

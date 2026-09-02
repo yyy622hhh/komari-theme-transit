@@ -7,7 +7,7 @@ import { useNodeCarrierPingStats } from '@/composables/useNodePingStats'
 import { useAppStore } from '@/stores/app'
 import { useNodesStore } from '@/stores/nodes'
 import { formatDateTime } from '@/utils/helper'
-import { formatProbeCurrentCompactLabel, formatProbeCurrentLabel, probeFailureRateLabel } from '@/utils/pingCurrentState'
+import { probeFailureRateLabel } from '@/utils/pingCurrentState'
 import { formatPingFreshnessAge } from '@/utils/pingFreshness'
 
 export type CarrierPingBar = TelemetrySample
@@ -29,8 +29,6 @@ export interface CarrierPingDisplay {
   lossTooltip: string
   delayed: boolean
   stale: boolean
-  currentLabel: string
-  currentCompactLabel: string
   currentStatus: ProbeCurrentStatus
   probeType: string
 }
@@ -153,7 +151,6 @@ export function useNodeCarrierPingDisplay(uuid: MaybeRefOrGetter<string>) {
 
   const carrierDisplays = computed<CarrierPingDisplay[]>(() => carrierStats.carriers.value.map((carrier) => {
     const currentStatus = nodesStore.nodesByUuid.get(toValue(uuid))?.online === false ? 'offline' : carrier.current.status
-    const currentLabel = formatProbeCurrentLabel(currentStatus, carrier.stats.commonModeLossEvents > 0 || carrier.stats.avgLoss > 0)
     const label = appStore.lang === 'zh-CN' ? carrier.labelZh : carrier.labelEn
     const taskHint = carrier.taskNames.length
       ? carrier.taskNames.join(' / ')
@@ -209,8 +206,15 @@ export function useNodeCarrierPingDisplay(uuid: MaybeRefOrGetter<string>) {
     const volatility = carrier.stats.avgVolatility > 0
       ? `，${appStore.lang === 'zh-CN' ? '波动 P99/P50' : 'variability P99/P50'} ${carrier.stats.avgVolatility.toFixed(2)}×`
       : ''
+    // 三网卡片按分区拉取，一个分区认不出探测类型时 carrier.probeType 就会退到
+    // 空字符串——这时和逐条采样一样按「连接失败率」措辞，不能替运营者断言这条
+    // 数据一定来自 ICMP，那样会在类型未知的分区上把丢包率和连接失败率的语义
+    // 混着讲。
+    const lossRateLabel = appStore.lang === 'zh-CN'
+      ? probeFailureRateLabel(carrier.probeType)
+      : carrier.probeType === 'icmp' ? 'ICMP packet loss' : 'connection failure rate'
     const lossTooltip = carrier.stats.hasData
-      ? `${taskHint}\n${appStore.lang === 'zh-CN' ? (carrier.probeType === 'icmp' ? '近 1 小时 ICMP 丢包率' : '近 1 小时探测失败率') : 'Last hour probe failure rate'} ${carrier.stats.avgLoss.toFixed(1)}%${volatility}${carrier.stats.commonModeLossEvents > 0
+      ? `${taskHint}\n${appStore.lang === 'zh-CN' ? `近 1 小时 ${lossRateLabel}` : `Last hour ${lossRateLabel}`} ${carrier.stats.avgLoss.toFixed(1)}%${volatility}${carrier.stats.commonModeLossEvents > 0
         ? appStore.lang === 'zh-CN'
           ? `，其中 ${carrier.stats.commonModeLossEvents} 次为多节点同步目标异常，未计入节点告警`
           : `; ${carrier.stats.commonModeLossEvents} synchronized target failure(s) excluded from node alerts`
@@ -230,12 +234,10 @@ export function useNodeCarrierPingDisplay(uuid: MaybeRefOrGetter<string>) {
       latencyBars,
       lossBars,
       latencyTooltip,
-      lossTooltip: `${lossTooltip}\n当前：${currentLabel}；样本更新：${carrier.current.latestAt ? formatDateTime(new Date(carrier.current.latestAt)) : '未知'}；最近成功：${carrier.current.lastSuccessAt ? formatDateTime(new Date(carrier.current.lastSuccessAt)) : '窗口内无成功'}`,
+      lossTooltip: `${lossTooltip}\n样本更新：${carrier.current.latestAt ? formatDateTime(new Date(carrier.current.latestAt)) : '未知'}`,
       delayed: carrier.delayed,
       stale: carrier.stale,
       currentStatus,
-      currentLabel,
-      currentCompactLabel: formatProbeCurrentCompactLabel(currentStatus, carrier.stats.commonModeLossEvents > 0 || carrier.stats.avgLoss > 0),
       probeType: carrier.probeType,
     }
   }))

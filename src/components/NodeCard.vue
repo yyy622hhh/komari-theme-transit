@@ -14,6 +14,7 @@ import { formatBytesPerSecondWithConfig, formatBytesWithConfig, formatDateTime, 
 import { getDiskPercentage, getMemoryPercentage, getTrafficUsed, getTrafficUsedPercentage, hasTrafficLimit } from '@/utils/nodeMetricsHelper'
 import { getOSImage, getOSName } from '@/utils/osImageHelper'
 import { getRegionCode, getRegionDisplayName } from '@/utils/regionHelper'
+import { resolveNodeRouteTag } from '@/utils/routeProbeResults'
 import { parseNodeRouteTag } from '@/utils/routeTag'
 import { formatCurrencyValue, formatPriceWithCycle, getDaysUntilExpired, getExpireStatus, getRemainingValue, isFreePrice, parseTags } from '@/utils/tagHelper'
 
@@ -185,7 +186,12 @@ const remainingInfoTags = computed<RemainingInfoTag[]>(() => {
 })
 
 const customTags = computed(() => parseTags(props.node.tags).map(t => t.text))
-const hasReturnRoute = computed(() => parseNodeRouteTag(props.node.tags) !== null)
+const effectiveRouteTag = computed(() => resolveNodeRouteTag(
+  props.node.uuid,
+  props.node.tags,
+  appStore.routeProbeResults,
+))
+const hasReturnRoute = computed(() => parseNodeRouteTag(effectiveRouteTag.value) !== null)
 
 function getRegionAltText(region: string): string {
   return getRegionDisplayName(region) || getRegionCode(region)
@@ -512,7 +518,7 @@ function hasRegion(region: string | null | undefined): boolean {
 
         <!-- 自定义标签与三网回程线路。回程徽章排在前面：它比第 N 个自定义标签更值得占位。 -->
         <div v-if="customTags.length > 0 || hasReturnRoute" data-node-tag-row class="flex flex-wrap items-center gap-1">
-          <NodeRouteBadges :tags="props.node.tags" compact />
+          <NodeRouteBadges :tags="effectiveRouteTag" compact />
           <Badge
             v-for="(tag, i) in customTags" :key="i"
             variant="outline"

@@ -108,7 +108,10 @@ const sitename = computed(() => appStore.publicSettings?.sitename || 'Komari Mon
     class="site-header transition-all duration-200 top-0 sticky z-10 border-b border-transparent"
     :class="isScrolled ? '!border-slate-500/10 backdrop-blur-lg' : 'bg-transparent'"
   >
-    <div class="px-4 flex-between h-14 max-w-[1280px] mx-auto">
+    <div
+      class="mx-auto h-14 px-4 flex-between"
+      :class="appStore.opsDashboardEnabled ? 'max-w-[1712px]' : 'max-w-[1280px]'"
+    >
       <RouterLink to="/" class="flex min-w-0 flex-1 items-center gap-3" aria-label="返回首页">
         <Avatar class="size-8 shrink-0">
           <AvatarImage :src="siteFavicon" :alt="sitename" />

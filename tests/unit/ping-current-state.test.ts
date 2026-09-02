@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { rawPingQueryStart } from '../../src/services/ping-raw-samples.service'
-import { formatProbeCurrentCompactLabel, formatProbeCurrentLabel, hasCurrentCommonModeFailure, normalizeRawPingSamples, probeCurrentTone, probeFailureRateLabel, rawPingSamplesFromMetrics, resolveProbeCurrentState } from '../../src/utils/pingCurrentState'
+import { formatProbeCurrentCompactLabel, formatProbeCurrentLabel, hasCurrentCommonModeFailure, normalizeRawPingSamples, probeCurrentTone, probeFailureRateColumnLabel, probeFailureRateExplanation, probeFailureRateLabel, rawPingSamplesFromMetrics, resolveProbeCurrentState } from '../../src/utils/pingCurrentState'
 
 const now = Date.now()
 const records = (values: number[], client = 'a', id = 1) => values.map((value, index) => ({ client, task_id: id, value, time: new Date(now - (values.length - index) * 30_000).toISOString() }))
@@ -13,13 +13,19 @@ describe('current probe state is separate from the historical window', () => {
     expect(formatProbeCurrentLabel('healthy', false)).toBe('正常')
     for (const status of ['failed', 'intermittent', 'stale', 'insufficient', 'offline'] as const)
       expect(formatProbeCurrentLabel(status, true)).not.toContain('已恢复')
-    expect(probeFailureRateLabel('tcp')).toBe('探测失败率')
-    expect(probeFailureRateLabel('')).toBe('探测失败率')
+    expect(probeFailureRateLabel('tcp')).toBe('连接失败率')
+    expect(probeFailureRateLabel('')).toBe('连接失败率')
     expect(probeFailureRateLabel('icmp')).toBe('ICMP 丢包率')
+    expect(probeFailureRateColumnLabel(['icmp'])).toBe('丢包率')
+    expect(probeFailureRateColumnLabel(['tcp'])).toBe('失败率')
+    expect(probeFailureRateColumnLabel(['icmp', 'tcp'])).toBe('失败率')
+    expect(probeFailureRateExplanation(['tcp'])).toContain('不是 ICMP 丢包率')
   })
-  test('compact labels preserve failure and unknown states, with distinct current-state tones', () => {
-    for (const status of ['failed', 'intermittent', 'stale', 'insufficient', 'offline'] as const)
-      expect(formatProbeCurrentCompactLabel(status, true)).toBe(formatProbeCurrentLabel(status))
+  test('compact labels reduce detailed states to normal, abnormal, or no data', () => {
+    for (const status of ['failed', 'intermittent'] as const)
+      expect(formatProbeCurrentCompactLabel(status, true)).toBe('异常')
+    for (const status of ['stale', 'insufficient', 'offline'] as const)
+      expect(formatProbeCurrentCompactLabel(status, true)).toBe('暂无数据')
     expect(probeCurrentTone('failed')).not.toBe(probeCurrentTone('healthy'))
     expect(probeCurrentTone('intermittent')).not.toBe(probeCurrentTone('failed'))
     expect(probeCurrentTone('stale')).toBe(probeCurrentTone('insufficient'))

@@ -82,6 +82,7 @@ const managerOpen = ref(false)
 const timelineOpen = ref(false)
 const detailOpen = ref(false)
 const selectedRouteKey = ref<string | null>(null)
+const mobileTopologyExpanded = ref(false)
 const routeSegmentHealth = ref<Record<string, Record<number, TopologyRouteHealth>>>({})
 const routeSegmentMetrics = ref<Record<string, Record<number, TopologySegmentTelemetry>>>({})
 const routeSegmentReliability = ref<Record<string, Record<number, TopologySegmentReliabilitySnapshot>>>({})
@@ -209,9 +210,11 @@ const routes = computed<RouteRow[]>(() => configuredRoutes.value.map((configured
     directionLabel: direction.label,
   }
 }).filter(route => route.nodes.filter(node => node.name.trim()).length >= 2))
-const desktopRouteMinWidthClass = computed(() => routes.value.some(route => route.nodes.length >= 4)
-  ? 'min-w-[1260px]'
-  : 'min-w-[980px]')
+const desktopRouteMinWidthClass = computed(() => {
+  if (props.embedded)
+    return routes.value.some(route => route.nodes.length >= 4) ? 'min-w-[1060px]' : 'min-w-[860px]'
+  return routes.value.some(route => route.nodes.length >= 4) ? 'min-w-[1260px]' : 'min-w-[980px]'
+})
 
 const directions = computed<RouteDirection[]>(() => {
   const counts = new Map<string, RouteDirection>()
@@ -279,7 +282,8 @@ function updateRouteSegmentMetrics(routeKey: string, segmentIndex: number, metri
     && previous.loss === metrics.loss
     && previous.volatility === metrics.volatility
     && previous.hasLiveData === metrics.hasLiveData
-    && previous.stale === metrics.stale) {
+    && previous.stale === metrics.stale
+    && previous.probeType === metrics.probeType) {
     return
   }
   routeSegmentMetrics.value = {
@@ -513,6 +517,13 @@ function hasRegion(region: string | null | undefined): boolean {
 }
 
 function desktopRouteGridTemplate(route: RouteRow): string {
+  if (props.embedded) {
+    if (route.nodes.length >= 4)
+      return '136px minmax(150px,1fr) 128px minmax(150px,1fr) 128px minmax(150px,1fr) 144px'
+    if (route.nodes.length === 2)
+      return '132px minmax(520px,1fr) 164px'
+    return '132px minmax(170px,1fr) 152px minmax(170px,1fr) 164px'
+  }
   if (route.nodes.length >= 4)
     return '154px minmax(150px,1fr) 150px minmax(150px,1fr) 150px minmax(150px,1fr) 174px'
   if (route.nodes.length === 2)
@@ -526,10 +537,15 @@ function desktopRouteGridTemplate(route: RouteRow): string {
     v-if="routes.length"
     :class="embedded ? '' : 'px-4 pb-4'"
     class="relative z-1 scroll-mt-20 pointer-events-auto"
+    :data-topology-density="embedded ? 'compact' : 'comfortable'"
+    :data-topology-mobile-expanded="!isDesktop && mobileTopologyExpanded ? '' : undefined"
     aria-labelledby="topology-title"
   >
     <div class="transit-panel overflow-hidden rounded-2xl">
-      <header class="transit-divider flex min-h-12 items-center justify-between gap-3 border-b px-4 py-2 sm:px-5">
+      <header
+        class="transit-divider flex items-center justify-between gap-3 border-b px-4 sm:px-5"
+        :class="embedded ? 'min-h-10 py-1.5' : 'min-h-12 py-2'"
+      >
         <div class="flex items-center gap-2">
           <Icon icon="tabler:route" :width="17" class="text-emerald-400" />
           <h2 id="topology-title" class="text-sm font-semibold">
@@ -537,8 +553,8 @@ function desktopRouteGridTemplate(route: RouteRow): string {
           </h2>
         </div>
         <div class="flex items-center gap-2 text-[10px] text-slate-600 dark:text-slate-400 sm:text-[11px]">
-          <span>{{ routes.length }} 条线路</span>
-          <span class="text-slate-400 dark:text-slate-700">·</span>
+          <span class="hidden sm:inline">{{ routes.length }} 条线路</span>
+          <span class="hidden text-slate-400 dark:text-slate-700 sm:inline">·</span>
           <span role="status" aria-live="polite" aria-atomic="true">{{ healthSummary.label }}</span>
           <span class="size-1.5 rounded-full" :class="healthSummary.dot" />
           <span
@@ -562,17 +578,35 @@ function desktopRouteGridTemplate(route: RouteRow): string {
             v-if="appStore.privateFeaturesAllowed"
             type="button"
             class="transit-divider ml-1 inline-flex h-7 items-center gap-1 rounded-md border px-2 text-slate-600 transition-colors hover:border-emerald-500/30 hover:text-slate-900 dark:text-slate-400 dark:hover:border-emerald-400/25 dark:hover:text-slate-200"
+            aria-label="管理"
             @click="openManager"
           >
-            <Icon icon="tabler:settings" :width="13" />管理
+            <Icon icon="tabler:settings" :width="13" /><span class="hidden sm:inline">管理</span>
+          </button>
+          <button
+            v-if="!isDesktop"
+            type="button"
+            data-topology-mobile-toggle
+            class="transit-divider inline-flex size-7 items-center justify-center rounded-md border text-slate-600 transition-colors hover:border-emerald-500/30 hover:text-slate-900 dark:text-slate-400 dark:hover:border-emerald-400/25 dark:hover:text-slate-200"
+            :aria-label="mobileTopologyExpanded ? '收起线路详情' : '展开线路详情'"
+            :aria-expanded="mobileTopologyExpanded"
+            @click="mobileTopologyExpanded = !mobileTopologyExpanded"
+          >
+            <Icon :icon="mobileTopologyExpanded ? 'tabler:chevron-up' : 'tabler:chevron-down'" :width="14" />
           </button>
         </div>
       </header>
 
+      <div v-if="!isDesktop && !mobileTopologyExpanded" data-topology-mobile-summary class="transit-divider flex items-center justify-between gap-3 border-b px-4 py-2 text-[10px] text-slate-600 dark:text-slate-400">
+        <span>{{ routes.length }} 条线路 · {{ healthSummary.label }}</span>
+        <span>展开查看路径与采样</span>
+      </div>
+
       <nav
-        v-if="directions.length > 1"
+        v-if="directions.length > 1 && (isDesktop || mobileTopologyExpanded)"
         aria-label="线路方向"
-        class="transit-divider topology-direction-scroll flex min-w-0 gap-1 overflow-x-auto border-b px-3 py-2 sm:px-4"
+        class="transit-divider topology-direction-scroll flex min-w-0 gap-1 overflow-x-auto border-b px-3 sm:px-4"
+        :class="embedded ? 'py-1.5' : 'py-2'"
       >
         <button
           type="button"
@@ -603,8 +637,12 @@ function desktopRouteGridTemplate(route: RouteRow): string {
           v-for="route in visibleRoutes"
           :key="route.key"
           data-topology-route
-          class="transit-divider transit-hover-surface group relative grid w-full items-center gap-3 border-b px-2 transition-colors last:border-b-0"
-          :class="[route.nodes.length >= 4 ? 'min-h-20' : 'min-h-16', desktopRouteMinWidthClass, routeRankingLabel(route) === '推荐' && 'bg-emerald-500/[0.025] before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-full before:bg-emerald-400/80']"
+          class="transit-divider transit-hover-surface group relative grid w-full items-center border-b px-2 transition-colors last:border-b-0"
+          :class="[
+            embedded ? 'min-h-14 gap-2' : route.nodes.length >= 4 ? 'min-h-20 gap-3' : 'min-h-16 gap-3',
+            desktopRouteMinWidthClass,
+            routeRankingLabel(route) === '推荐' && 'bg-emerald-500/[0.025] before:absolute before:inset-y-2 before:left-0 before:w-0.5 before:rounded-full before:bg-emerald-400/80',
+          ]"
           :style="{ gridTemplateColumns: desktopRouteGridTemplate(route) }"
         >
           <div class="min-w-0">
@@ -634,7 +672,7 @@ function desktopRouteGridTemplate(route: RouteRow): string {
               :aria-label="`线路状态：${routeStatusLabel(route)}，近 1 小时线路健康评分 ${getRouteScore(route).score} 分，${getRouteScore(route).label}${routeRankingLabel(route) ? `，${routeRankingLabel(route)}` : ''}，查看详情`"
               @click="openRouteDetail(route)"
             >
-              近1h {{ getRouteScore(route).score }} 分 {{ getRouteScore(route).label }}
+              近1h {{ getRouteScore(route).score }} 分
               <span
                 v-if="routeRankingLabel(route)"
                 class="ml-1 rounded border border-current/20 px-1 py-px text-[8px] no-underline"
@@ -669,6 +707,7 @@ function desktopRouteGridTemplate(route: RouteRow): string {
 
           <template v-for="(metric, segmentIndex) in route.metrics.slice(0, Math.max(1, route.nodes.length - 1))" :key="`${route.key}-${segmentIndex}`">
             <TopologyEdgeMetric
+              :compact="embedded"
               :metric="metric || '-,-'"
               :probe-mode="route.probeModes[segmentIndex]"
               :nodes="nodes"
@@ -709,7 +748,7 @@ function desktopRouteGridTemplate(route: RouteRow): string {
         </article>
       </div>
 
-      <div v-else class="px-3">
+      <div v-else-if="mobileTopologyExpanded" class="px-3">
         <article
           v-for="route in visibleRoutes"
           :key="route.key"
@@ -743,7 +782,7 @@ function desktopRouteGridTemplate(route: RouteRow): string {
               :aria-label="`线路状态：${routeStatusLabel(route)}，近 1 小时线路健康评分 ${getRouteScore(route).score} 分，${getRouteScore(route).label}${routeRankingLabel(route) ? `，${routeRankingLabel(route)}` : ''}，查看详情`"
               @click="openRouteDetail(route)"
             >
-              近1h {{ getRouteScore(route).score }} 分 {{ getRouteScore(route).label }}
+              近1h {{ getRouteScore(route).score }} 分
               <span v-if="routeRankingLabel(route)" class="ml-1 rounded border border-current/20 px-1 py-px text-[8px]">
                 {{ routeRankingLabel(route) }}
               </span>

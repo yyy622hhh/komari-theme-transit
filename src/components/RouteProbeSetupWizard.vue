@@ -279,6 +279,9 @@ async function handleEnable(): Promise<void> {
           <p v-if="!wizard.installCommand.value" role="alert" class="text-xs text-amber-700 dark:text-amber-400">
             请通过 HTTPS 地址打开面板后生成安装命令；不会自动允许明文传输节点凭据。
           </p>
+          <p v-else class="break-words text-[10px] text-muted-foreground">
+            已自动使用当前 Komari 面板根地址：<code class="font-mono text-foreground/80">{{ wizard.installEndpoint.value }}</code>。复制的是完整安装命令，会下载并安装所需的两个脚本，无需手工替换地址或版本。
+          </p>
           <p class="text-[10px] text-muted-foreground">
             命令不含 token；在节点上执行后会提示输入 Agent token，届时点击对应节点名称复制粘贴即可。
           </p>

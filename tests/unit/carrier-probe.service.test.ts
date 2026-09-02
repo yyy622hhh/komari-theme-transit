@@ -25,6 +25,14 @@ function task(overrides: Partial<AdminPingTask> = {}): AdminPingTask {
 }
 
 describe('carrier probe health and migration', () => {
+  test('内置候选不会覆盖同名线上任务的真实目标', () => {
+    const current = task()
+    const preset = getTopologyProbe('beijing-mobile')
+    expect(preset.landmarkAddress).toBe('221.130.33.52')
+    expect(selectCarrierProbeTask([current], preset)).toBe(current)
+    expect(selectCarrierProbeTask([current], preset)?.target).toBe('221.179.155.161')
+  })
+
   test('区分四种目标健康状态并复用 5 台同步失败门槛', () => {
     expect(classifyCarrierProbeHealth({ onlineNodes: 0, observations: [], commonModeEvents: 0 })).toBe('insufficient-evidence')
     expect(classifyCarrierProbeHealth({
