@@ -1,6 +1,6 @@
 import type { Plugin } from 'vite'
 import { execSync } from 'node:child_process'
-import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, statSync, unlinkSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { relative, resolve } from 'node:path'
 import process from 'node:process'
@@ -146,6 +146,51 @@ function collectSortedArchiveFiles(root: string, archiveRoot: string): ArchiveFi
   return files.sort((left, right) => left.archivePath < right.archivePath ? -1 : left.archivePath > right.archivePath ? 1 : 0)
 }
 
+const BUILD_ZIP_PATTERN = /^komari-theme-Transit-build-.+\.zip$/
+// 保留最近多少个构建产物 zip（含当次）。这是常量、不是可配置项：产物 zip 只是
+// 本地构建残留，按项目「不加旋钮」的约定，没必要给一个环境变量开关。
+const KEEP_RECENT_BUILDS = 3
+
+/**
+ * 构建产物 zip 在仓库根按 commit SHA 累积、从不覆盖旧的，本地会越堆越多。
+ * 每次构建后按 mtime 只保留最近 KEEP_RECENT_BUILDS 个，其余删掉。当次产物
+ * （最新，且已显式排除）永远保留。清理失败只告警，绝不让构建失败。
+ */
+function pruneOldBuildZips(currentZipName: string): void {
+  let entries: string[]
+  try {
+    entries = readdirSync(__dirname)
+  }
+  catch (err) {
+    console.warn('[komari-theme-zip] Could not scan for old build zips:', err instanceof Error ? err.message : err)
+    return
+  }
+
+  const olderZips = entries
+    .filter(name => BUILD_ZIP_PATTERN.test(name) && name !== currentZipName)
+    .flatMap((name) => {
+      // 单个文件 stat 失败（构建期间被别的进程删掉、悬空软链）不该拖垮整轮清理。
+      try {
+        return [{ name, mtimeMs: statSync(resolve(__dirname, name)).mtimeMs }]
+      }
+      catch {
+        return []
+      }
+    })
+    .sort((left, right) => right.mtimeMs - left.mtimeMs)
+
+  // 当次产物必留，所以旧文件的保留额度是 KEEP_RECENT_BUILDS - 1。
+  for (const stale of olderZips.slice(Math.max(0, KEEP_RECENT_BUILDS - 1))) {
+    try {
+      unlinkSync(resolve(__dirname, stale.name))
+      console.log(`[komari-theme-zip] Removed stale build ${stale.name}`)
+    }
+    catch (err) {
+      console.warn(`[komari-theme-zip] Could not remove ${stale.name}:`, err instanceof Error ? err.message : err)
+    }
+  }
+}
+
 /**
  * Vite 插件：构建后打包 Komari 主题 Zip
  * theme.zip
@@ -186,6 +231,7 @@ function komariThemeZip(): Plugin {
         output.on('close', () => {
           const sizeMB = (archive.pointer() / 1024 / 1024).toFixed(2)
           console.log(`[komari-theme-zip] Created ${zipFileName} (${sizeMB} MB)`)
+          pruneOldBuildZips(zipFileName)
           resolve(undefined)
         })
 
