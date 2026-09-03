@@ -153,6 +153,28 @@ describe('topology route and metric alignment', () => {
     expect(invalid[0]?.nodes[0]?.role).toBe('入口|extra|more')
     expect(validateTopologyRoutes(invalid)).toContain('第 1 条线路节点名称、地区或角色不能包含“|”或“;”')
   })
+
+  test('degrades a four-node route with too few metrics instead of throwing', () => {
+    const fourNodes = () => [
+      { name: '入口', region: 'CN', role: '入口' },
+      { name: '线路机', region: 'JP', role: '线路机' },
+      { name: '跳板', region: 'HK', role: '跳板' },
+      { name: '落地机', region: 'US', role: '落地机' },
+    ]
+
+    // metrics 数量本应对齐 nodes-1；这里故意给不足两段，模拟未来某条构造路径漏填。
+    const noMetrics = createTopologyRoute(fourNodes(), [])
+    expect(() => serializeTopologyRoutes([noMetrics])).not.toThrow()
+    expect(serializeTopologyRoutes([noMetrics])).toEqual({
+      topologyRoute: '入口|CN|入口;线路机|JP|线路机;落地机|US|落地机',
+      topologyMetrics: '',
+    })
+
+    const oneMetric = createTopologyRoute(fourNodes(), [
+      { live: false, nodeName: '', taskFilter: '', fallbackLatency: 42, fallbackLoss: 0 },
+    ])
+    expect(serializeTopologyRoutes([oneMetric]).topologyMetrics).toBe('42,0')
+  })
 })
 
 describe('topology probe targets', () => {

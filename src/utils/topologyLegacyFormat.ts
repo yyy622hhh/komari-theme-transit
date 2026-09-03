@@ -172,12 +172,15 @@ export function serializeTopologyRoutes(routes: TopologyRouteConfig[]): { topolo
       })
       .join(';'))
       .join('||'),
-    topologyMetrics: activeRoutes.map(({ route, nodes }) => (route.nodes.length >= 4
-      ? [route.metrics[0]!, route.metrics.at(-1)!]
-      : route.metrics.slice(0, Math.max(1, nodes.length - 1)))
-      .map(formatTopologyMetric)
-      .join(';'))
-      .join('||'),
+    topologyMetrics: activeRoutes.map(({ route, nodes }) => {
+      // 含跳板时降级只保留首段和末段（入口→线路机、跳板→落地机），丢掉中间段。
+      // metrics 与 nodes 的数量对齐由构造路径维护、不由类型强制，所以这里对
+      // 「四节点却不足两段」也要安全降级，而不是靠 `!` 断言崩在 formatTopologyMetric。
+      const collapsed = route.nodes.length >= 4
+        ? (route.metrics.length > 1 ? [route.metrics[0]!, route.metrics.at(-1)!] : route.metrics.slice(0, 1))
+        : route.metrics.slice(0, Math.max(1, nodes.length - 1))
+      return collapsed.map(formatTopologyMetric).join(';')
+    }).join('||'),
   }
 }
 
