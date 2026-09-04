@@ -14,6 +14,7 @@ export interface CarrierOperationRecord {
   uncertainCreation?: boolean
 }
 const PREFIX = 'transit:carrier-operation:v1:'
+const MAX_RECENT_NON_RECOVERY_OPERATIONS = 20
 const TERMINAL = new Set<CarrierOperationPhase>(['done', 'failed', 'recovery'])
 
 export function carrierTaskSnapshot(task: AdminPingTask): string {
@@ -55,12 +56,34 @@ export function readCarrierOperations(): CarrierOperationRecord[] {
   return records.sort((a, b) => b.startedAt - a.startedAt)
 }
 
+export function selectCarrierOperationIdsToRetain(records: readonly CarrierOperationRecord[]): Set<string> {
+  const sorted = [...records].sort((a, b) => b.startedAt - a.startedAt)
+  const recoveryRelevant = sorted.filter(record => record.phase !== 'done'
+    && (record.phase === 'creating' || record.uncertainCreation === true || record.created.length > 0))
+  const recoveryIds = new Set(recoveryRelevant.map(record => record.id))
+  const recentCompleted = sorted
+    .filter(record => !recoveryIds.has(record.id))
+    .slice(0, MAX_RECENT_NON_RECOVERY_OPERATIONS)
+  return new Set([...recoveryRelevant, ...recentCompleted].map(record => record.id))
+}
+
+function pruneCarrierOperations(): void {
+  const records = readCarrierOperations()
+  const retained = selectCarrierOperationIdsToRetain(records)
+  for (const record of records) {
+    if (!retained.has(record.id))
+      localStorage.removeItem(PREFIX + record.id)
+  }
+}
+
 export function saveCarrierOperation(record: CarrierOperationRecord): void {
   if (typeof localStorage === 'undefined')
     return
   // Explicit projection: credentials and arbitrary backend fields never enter the journal.
   const cleanTask = (task: AdminPingTask): AdminPingTask => ({ id: task.id, name: task.name, target: task.target, type: task.type, clients: [...task.clients], interval: task.interval, default_on: Boolean(task.default_on) })
   localStorage.setItem(PREFIX + record.id, JSON.stringify({ ...record, original: cleanTask(record.original), created: record.created.map(cleanTask) }))
+  if (TERMINAL.has(record.phase))
+    pruneCarrierOperations()
 }
 
 export function protectedCarrierTaskIds(now = Date.now()): Set<number> {

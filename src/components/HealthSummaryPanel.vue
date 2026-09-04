@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { NodeData } from '@/stores/nodes'
 import type { PingRecord, StatusRecord } from '@/utils/rpc'
-import { Icon } from '@iconify/vue'
+import { Icon } from '@iconify/vue/offline'
 import { computed, ref, watch } from 'vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { ThemeSettingsVersionEntry, ThemeSettingsVersionSource } from '@/utils/themeSettingsHistory'
-import { Icon } from '@iconify/vue'
+import { Icon } from '@iconify/vue/offline'
 import { ref } from 'vue'
 import { Button } from '@/components/ui/button'
 import { CardX } from '@/components/ui/card-x'

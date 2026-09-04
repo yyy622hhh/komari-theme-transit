@@ -1,93 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { sanitizeMarkdownUrl } from '@/utils/markdown'
+import { parseMarkdown, sanitizeMarkdownUrl } from '@/utils/markdown'
 
 const props = defineProps<{
   content: string
 }>()
-const IMAGE_REGEX = /^!\[([^\]]*)\]\(([^)]+)\)/
-const LINK_REGEX = /^\[([^\]]+)\]\(([^)]+)\)/
-const BOLD_ASTERISK_REGEX = /^\*\*([^*]+)\*\*/
-const BOLD_UNDERSCORE_REGEX = /^__([^_]+)__/
-const ITALIC_ASTERISK_REGEX = /^\*([^*]+)\*/
-const ITALIC_UNDERSCORE_REGEX = /^_([^_]+)_/
-const CODE_REGEX = /^`([^`]+)`/
-const NEXT_SPECIAL_REGEX = /[![*_`\n]/
-
-interface Token {
-  type: 'text' | 'bold' | 'italic' | 'link' | 'image' | 'code' | 'br'
-  content?: string
-  url?: string
-  alt?: string
-  children?: Token[]
-}
-
-function parseMarkdown(text: string): Token[] {
-  if (!text)
-    return []
-
-  const tokens: Token[] = []
-  let remaining = text
-
-  while (remaining.length > 0) {
-    const imageMatch = remaining.match(IMAGE_REGEX)
-    if (imageMatch) {
-      tokens.push({ type: 'image', alt: imageMatch[1], url: imageMatch[2] })
-      remaining = remaining.slice(imageMatch[0].length)
-      continue
-    }
-
-    const linkMatch = remaining.match(LINK_REGEX)
-    if (linkMatch) {
-      tokens.push({ type: 'link', content: linkMatch[1], url: linkMatch[2] })
-      remaining = remaining.slice(linkMatch[0].length)
-      continue
-    }
-
-    const boldMatch = remaining.match(BOLD_ASTERISK_REGEX) || remaining.match(BOLD_UNDERSCORE_REGEX)
-    if (boldMatch) {
-      tokens.push({ type: 'bold', content: boldMatch[1] })
-      remaining = remaining.slice(boldMatch[0].length)
-      continue
-    }
-
-    const italicMatch = remaining.match(ITALIC_ASTERISK_REGEX) || remaining.match(ITALIC_UNDERSCORE_REGEX)
-    if (italicMatch) {
-      tokens.push({ type: 'italic', content: italicMatch[1] })
-      remaining = remaining.slice(italicMatch[0].length)
-      continue
-    }
-
-    const codeMatch = remaining.match(CODE_REGEX)
-    if (codeMatch) {
-      tokens.push({ type: 'code', content: codeMatch[1] })
-      remaining = remaining.slice(codeMatch[0].length)
-      continue
-    }
-
-    if (remaining[0] === '\n') {
-      tokens.push({ type: 'br' })
-      remaining = remaining.slice(1)
-      continue
-    }
-
-    const nextSpecial = remaining.search(NEXT_SPECIAL_REGEX)
-    if (nextSpecial === -1) {
-      tokens.push({ type: 'text', content: remaining })
-      break
-    }
-    else if (nextSpecial === 0) {
-      tokens.push({ type: 'text', content: remaining[0]! })
-      remaining = remaining.slice(1)
-    }
-    else {
-      tokens.push({ type: 'text', content: remaining.slice(0, nextSpecial) })
-      remaining = remaining.slice(nextSpecial)
-    }
-  }
-
-  return tokens
-}
 
 const tokens = computed(() => parseMarkdown(props.content))
 </script>

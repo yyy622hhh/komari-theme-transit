@@ -1,8 +1,10 @@
 import type { ThemeSettings } from '@/utils/themeSettings'
+import { validateThemeSettings } from '@/utils/themeSettings'
 import { themeSettingsEqual } from '@/utils/themeSettingsBackup'
 
 const STORAGE_KEY = 'transit:theme-settings-history'
 const MAX_ENTRIES = 20
+const MAX_INSPECTED_ENTRIES = MAX_ENTRIES * 4
 
 export type ThemeSettingsVersionSource = 'initial' | 'external-change' | 'theme-write' | 'import' | 'rollback'
 
@@ -22,13 +24,33 @@ function canUseLocalStorage(): boolean {
   return typeof localStorage !== 'undefined'
 }
 
-function isEntry(value: unknown): value is ThemeSettingsVersionEntry {
+const VERSION_SOURCES = new Set<ThemeSettingsVersionSource>([
+  'initial',
+  'external-change',
+  'theme-write',
+  'import',
+  'rollback',
+])
+
+function parseEntry(value: unknown): ThemeSettingsVersionEntry | null {
   if (!value || typeof value !== 'object')
-    return false
+    return null
   const entry = value as Record<string, unknown>
-  return typeof entry.at === 'number'
-    && Boolean(entry.settings) && typeof entry.settings === 'object'
-    && typeof entry.source === 'string'
+  if (typeof entry.at !== 'number' || !Number.isFinite(entry.at)
+    || !VERSION_SOURCES.has(entry.source as ThemeSettingsVersionSource)
+    || !entry.settings || typeof entry.settings !== 'object' || Array.isArray(entry.settings)) {
+    return null
+  }
+  try {
+    return {
+      at: entry.at as number,
+      settings: validateThemeSettings(entry.settings),
+      source: entry.source as ThemeSettingsVersionSource,
+    }
+  }
+  catch {
+    return null
+  }
 }
 
 export function readThemeSettingsHistory(): ThemeSettingsVersionEntry[] {
@@ -39,7 +61,17 @@ export function readThemeSettingsHistory(): ThemeSettingsVersionEntry[] {
     if (!raw)
       return []
     const parsed = JSON.parse(raw) as unknown
-    return Array.isArray(parsed) ? parsed.filter(isEntry) : []
+    if (!Array.isArray(parsed))
+      return []
+    const entries: ThemeSettingsVersionEntry[] = []
+    for (const value of parsed.slice(0, MAX_INSPECTED_ENTRIES)) {
+      const entry = parseEntry(value)
+      if (entry)
+        entries.push(entry)
+      if (entries.length >= MAX_ENTRIES)
+        break
+    }
+    return entries
   }
   catch {
     return []

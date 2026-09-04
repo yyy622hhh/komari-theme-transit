@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { PersonalWallpaperEffect } from '@/utils/wallpaper'
-import { Icon } from '@iconify/vue'
+import { Icon } from '@iconify/vue/offline'
 import { computed, ref, watch } from 'vue'
 import { AppDialog } from '@/components/ui/app-dialog'
 import { Button } from '@/components/ui/button'

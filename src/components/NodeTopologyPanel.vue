@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { NodeProviderMetadata } from '@/composables/useNodeProviderMetadata'
 import type { NodeData } from '@/stores/nodes'
-import { Icon } from '@iconify/vue'
+import { Icon } from '@iconify/vue/offline'
 import { computed, ref } from 'vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'

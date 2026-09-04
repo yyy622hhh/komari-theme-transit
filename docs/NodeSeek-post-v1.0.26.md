@@ -1,5 +1,7 @@
 # [开源] Transit：面向多节点/多线路场景的 Komari 监控主题，支持拓扑、三网 Ping、拖动排序和本机壁纸
 
+> 归档说明：这是 v1.0.26 发布时的社区帖子快照，正文中的版本和功能描述保留当时状态。当前稳定版与安装说明请以 [README](../README.md) 和 [GitHub Releases](https://github.com/yyy622hhh/komari-theme-transit/releases/latest) 为准。
+
 大家好，最近把自己一直在用的 Komari 主题整理并开源了，项目叫 **Transit**。
 
 它不是单纯换一套颜色，而是针对多节点、多线路、跨境链路监控重新做了首页信息架构：把线路拓扑、三网 Ping、节点资源、流量/到期、异常告警和资产信息放到同一套界面里。

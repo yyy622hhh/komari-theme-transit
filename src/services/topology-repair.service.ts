@@ -1,15 +1,30 @@
 import type { AdminPingTask, TopologyHopProbe, TopologyPingEndpoint } from '@/services/ping-task.service'
 import type { EntryProbePlan, HopTaskPlan } from '@/services/topology-probe.service'
+import type { TopologyRetiredTask } from '@/services/topology-repair.helpers'
 import type { NodeData } from '@/stores/nodes'
 import type { TopologyRouteConfig } from '@/utils/topologyModel'
 import type { TopologyProbeOption } from '@/utils/topologyPresets'
-import { entryTaskIds, restrictTopologyPingEndpoint } from '@/services/ping-task.service'
+import { restrictTopologyPingEndpoint } from '@/services/ping-task.service'
 import { isStaleManagedThemeSettingsError } from '@/services/theme-settings.service'
+import {
+  listLiveEntryTaskIds,
+  listOwnedRetiredTaskIds,
+  liveTopologyTaskNames,
+} from '@/services/topology-repair.helpers'
 import { isTopologySaveCommittedError } from '@/services/topology.service'
 import { getTopologyRouteEntryProbe, resolveTopologyNode, shouldAutoApplyTopologyProbe } from '@/utils/topologyHelper'
 import { getTopologyMetricProbeMode } from '@/utils/topologyModel'
 import { rememberCreatedTopologyTask } from '@/utils/topologyTaskSnapshot'
 import { recordTopologyWrite, summarizeTaskNames } from '@/utils/topologyWriteLog'
+
+export type { TopologyRepairAvailability, TopologyRetiredTask } from '@/services/topology-repair.helpers'
+export {
+  canRunTopologyProbeRepair,
+  listLiveEntryTaskIds,
+  listOwnedRetiredTaskIds,
+  listOwnedUnboundTaskIds,
+  liveTopologyTaskNames,
+} from '@/services/topology-repair.helpers'
 
 /** 自愈流程使用的 `useTopologyManager()` 最小切面。 */
 export interface TopologyRepairManagerLike {
@@ -68,109 +83,8 @@ export interface TopologyRepairDeps {
   signal?: AbortSignal
 }
 
-export interface TopologyRetiredTask {
-  id: number
-  name: string
-}
-
-export function liveTopologyTaskNames(routes: readonly Pick<TopologyRouteConfig, 'metrics'>[]): Set<string> {
-  return new Set(routes.flatMap(route => route.metrics
-    .filter(metric => metric.live)
-    .map(metric => metric.taskFilter.trim())
-    .filter(Boolean)))
-}
-
-/**
- * 按「线路机 + 当前绑定名」反查仍需保留的入口任务 id。
- * 换挡前后故意同名，所以本轮退休 id 要从保护名单拿掉；若扣掉后一个匹配都不剩，把匹配到的 id 重新保护回去。
- */
-export function listLiveEntryTaskIds(
-  routes: readonly Pick<TopologyRouteConfig, 'nodes' | 'metrics'>[],
-  nodes: readonly NodeData[],
-  tasks: readonly AdminPingTask[],
-  retiredIds: ReadonlySet<number> = new Set(),
-): Set<number> {
-  return new Set(routes.flatMap((route) => {
-    const metric = route.metrics[0]
-    const boundName = metric?.taskFilter.trim()
-    if (!metric?.live || !boundName)
-      return []
-    const source = resolveTopologyNode(nodes, route.nodes[1]?.name ?? '', route.nodes[1]?.uuid ?? '')
-    if (!source?.uuid)
-      return []
-    const matchingIds = [...entryTaskIds(tasks, source.uuid, boundName)]
-    const remaining = matchingIds.filter(id => !retiredIds.has(id))
-    return remaining.length ? remaining : matchingIds
-  }))
-}
-
-/**
- * 只删本会话创建、且不在排除名单里的探测任务。跳数段按「名字是否仍被某条线路
- * 绑定」排除；入口段名字在换挡前后常常不变，只能按「是不是本轮刚建的」排除，
- * 见 `runTopologyProbeRepair` 里对 entryRetiredIds 的调用和旁边的注释。
- */
-export function listOwnedRetiredTaskIds(
-  retired: readonly TopologyRetiredTask[],
-  sessionCreatedIds: ReadonlySet<number>,
-  exclude: { boundTaskNames?: ReadonlySet<string>, excludeIds?: ReadonlySet<number> },
-): number[] {
-  return [...new Set(retired
-    .filter(task => sessionCreatedIds.has(task.id)
-      && !exclude.boundTaskNames?.has(task.name.trim())
-      && !exclude.excludeIds?.has(task.id))
-    .map(task => task.id))]
-}
-
-/**
- * 对照当前任务列表：主题建过、但已经没有任何线路绑定的任务。
- * 用来清掉换入口后留下的「北京电信」之类，不依赖规划阶段有没有记下 retired。
- */
-export function listOwnedUnboundTaskIds(
-  ownedIds: ReadonlySet<number>,
-  tasks: ReadonlyArray<{ id?: number, name: string }>,
-  boundTaskNames: ReadonlySet<string>,
-): number[] {
-  const namesById = new Map<number, string>()
-  for (const task of tasks) {
-    if (!Number.isInteger(task.id))
-      continue
-    namesById.set(task.id!, task.name.trim())
-  }
-  return [...ownedIds].filter((id) => {
-    const name = namesById.get(id)
-    return Boolean(name) && !boundTaskNames.has(name!)
-  })
-}
-
 function ownedRetiredTasks(tasks: ReadonlyArray<{ id?: number, name: string }>): TopologyRetiredTask[] {
   return tasks.flatMap(task => (Number.isInteger(task.id) ? [{ id: task.id!, name: task.name }] : []))
-}
-
-export interface TopologyRepairAvailability {
-  /** 组件已卸载，effect scope 已停止。 */
-  disposed: boolean
-  /** 站长通过主题设置关掉了无人值守自愈；关掉后只剩对话框里的手动操作。 */
-  autoRepairEnabled: boolean
-  /** 拓扑管理对话框正打开——操作者在手动编辑时，后台自愈让路。 */
-  managerOpen: boolean
-  /** 对应 appStore.privateFeaturesAllowed：只有已登录管理员才能触发写操作。 */
-  privateFeaturesAllowed: boolean
-  /** appStore.topologyRoute：旧格式线路串。JSON-only 配置可能为空。 */
-  topologyRoute: string
-  /** JSON 拓扑里是否已经有线路。与 topologyRoute 任一有值即可自愈。 */
-  topologyConfigured?: boolean
-  /** 标签页在后台时没人看结果，也不需要发起写操作；恢复可见后由调用方立即重查一次。 */
-  pageVisible: boolean
-}
-
-/** 是否可以跑一轮自愈。抽成纯函数，每个分支各自独立可测，不需要 Pinia。 */
-export function canRunTopologyProbeRepair(state: TopologyRepairAvailability): boolean {
-  return !state.disposed
-    && state.autoRepairEnabled
-    && !state.managerOpen
-    && state.privateFeaturesAllowed
-    && (Boolean(state.topologyRoute.trim()) || Boolean(state.topologyConfigured))
-    && state.pageVisible
 }
 
 export type TopologyRepairOutcome = 'skipped' | 'no-op' | 'repaired' | 'cleanup-failed'

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { RouteGrade } from '@/utils/routeClassification'
 import type { NodeRouteEntry } from '@/utils/routeTag'
-import { Icon } from '@iconify/vue'
+import { Icon } from '@iconify/vue/offline'
 import { computed } from 'vue'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { useAppStore } from '@/stores/app'

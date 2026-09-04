@@ -2,6 +2,23 @@
 
 所有面向用户的重要变化记录在此。项目遵循 [Semantic Versioning](https://semver.org/)。
 
+## [1.4.4] - 2026-09-04
+
+### Changed
+
+- 图标组件统一使用本地离线入口，Markdown 公告、拖动排序、汇率网络逻辑和 3D 地球按需加载，避免把非首屏能力提前打进初始资源；Sortable 保持为独立延迟 chunk。
+- 将拓扑节点解析、指标格式化、修复筛选和线路提示等逻辑拆成聚焦模块，保持原有导出兼容并降低核心文件的理解成本。
+
+### Reliability / Safety
+
+- 本地主题设置历史、拓扑写入记录和监测目标操作记录增加结构校验、文本长度限制与保留上限，避免损坏或超大浏览器存储拖垮管理界面，同时保留仍需人工恢复的任务证据。
+- Markdown 解析器改为游标式扫描并合并连续文本，长串未闭合标记不再产生大量碎片节点；链接和图片继续经过既有协议白名单过滤。
+- 3D 地球仅在页面与组件实际可见时初始化，并在重新进入可视区域后恢复，减少后台标签页的 WebGL 与下载开销。
+
+### Testing
+
+- 新增 Markdown 长输入、主题历史与拓扑日志边界、监测操作记录保留测试；收紧首页、Sortable、Globe 和 Three 的独立体积预算，并加入本地覆盖率检查入口。
+
 ## [1.4.3] - 2026-09-02
 
 ### Fixed
@@ -962,7 +979,8 @@
 - 亮暗主题、桌面/移动布局和 Transit 风格内嵌 Komari 管理端。
 - Playwright 视觉与交互回归、自动构建和 GitHub Release 发布流程。
 
-[Unreleased]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.4.3...HEAD
+[Unreleased]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.4.4...HEAD
+[1.4.4]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.4.3...v1.4.4
 [1.4.3]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.4.2...v1.4.3
 [1.4.1]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/yyy622hhh/komari-theme-transit/compare/v1.3.12...v1.4.0

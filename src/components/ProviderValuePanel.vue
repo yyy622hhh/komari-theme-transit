@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { NodeData } from '@/stores/nodes'
-import { Icon } from '@iconify/vue'
+import { Icon } from '@iconify/vue/offline'
 import { computed, onMounted, ref } from 'vue'
 import { Badge } from '@/components/ui/badge'
 import { CardX } from '@/components/ui/card-x'

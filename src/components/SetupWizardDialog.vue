@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { SetupWizardPresetFields } from '@/utils/setupWizardPresets'
-import { Icon } from '@iconify/vue'
+import { Icon } from '@iconify/vue/offline'
 import { computed, watch } from 'vue'
 import { AppDialog } from '@/components/ui/app-dialog'
 import { Button } from '@/components/ui/button'

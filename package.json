@@ -27,6 +27,7 @@
     "type-check": "vue-tsc --build",
     "publish": "bun scripts/publish.ts",
     "test:unit": "bun test tests/unit",
+    "test:coverage": "bun test --coverage --coverage-reporter=text --coverage-reporter=lcov tests/unit",
     "test:komari": "bun scripts/komari-lab.ts",
     "test:visual": "bun run build-only && playwright test",
     "test:functional": "VITE_COMPONENT_BOUNDARY_TEST=true bun run build-only && playwright test --config playwright.functional.config.ts",

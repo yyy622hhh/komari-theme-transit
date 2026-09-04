@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { CsvColumn, SnapshotRow } from '@/components/snapshotExport.types'
 import type { NodeData } from '@/stores/nodes'
-import { Icon } from '@iconify/vue'
+import { Icon } from '@iconify/vue/offline'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { Button } from '@/components/ui/button'
 import { CardX } from '@/components/ui/card-x'

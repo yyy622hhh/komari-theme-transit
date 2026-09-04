@@ -1,5 +1,8 @@
 const STORAGE_KEY = 'transit:topology-write-log'
 const MAX_ENTRIES = 60
+const MAX_INSPECTED_ENTRIES = MAX_ENTRIES * 4
+const MAX_ACTION_LENGTH = 500
+const MAX_DETAIL_LENGTH = 2_000
 
 export type TopologyWriteTrigger = 'manual' | 'auto'
 export type TopologyWriteOutcome = 'ok' | 'failed'
@@ -36,8 +39,9 @@ function isEntry(value: unknown): value is TopologyWriteEntry {
   if (!value || typeof value !== 'object')
     return false
   const entry = value as Record<string, unknown>
-  return typeof entry.at === 'number'
-    && typeof entry.action === 'string'
+  return typeof entry.at === 'number' && Number.isFinite(entry.at)
+    && typeof entry.action === 'string' && entry.action.length <= MAX_ACTION_LENGTH
+    && (entry.detail === undefined || (typeof entry.detail === 'string' && entry.detail.length <= MAX_DETAIL_LENGTH))
     && (entry.trigger === 'manual' || entry.trigger === 'auto')
     && (entry.outcome === 'ok' || entry.outcome === 'failed')
 }
@@ -50,7 +54,16 @@ export function readTopologyWriteLog(): TopologyWriteEntry[] {
     if (!raw)
       return []
     const parsed = JSON.parse(raw) as unknown
-    return Array.isArray(parsed) ? parsed.filter(isEntry) : []
+    if (!Array.isArray(parsed))
+      return []
+    const entries: TopologyWriteEntry[] = []
+    for (const value of parsed.slice(0, MAX_INSPECTED_ENTRIES)) {
+      if (isEntry(value))
+        entries.push(value)
+      if (entries.length >= MAX_ENTRIES)
+        break
+    }
+    return entries
   }
   catch {
     return []
@@ -61,7 +74,14 @@ export function readTopologyWriteLog(): TopologyWriteEntry[] {
 export function recordTopologyWrite(entry: Omit<TopologyWriteEntry, 'at'> & { at?: number }): void {
   if (!canUseLocalStorage())
     return
-  const next = [{ at: entry.at ?? Date.now(), ...entry }, ...readTopologyWriteLog()].slice(0, MAX_ENTRIES)
+  const normalized = {
+    at: typeof entry.at === 'number' && Number.isFinite(entry.at) ? entry.at : Date.now(),
+    trigger: entry.trigger,
+    action: entry.action.slice(0, MAX_ACTION_LENGTH),
+    outcome: entry.outcome,
+    ...(entry.detail === undefined ? {} : { detail: entry.detail.slice(0, MAX_DETAIL_LENGTH) }),
+  }
+  const next = [normalized, ...readTopologyWriteLog()].slice(0, MAX_ENTRIES)
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
   }

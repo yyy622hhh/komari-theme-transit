@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { NodeData } from '@/stores/nodes'
-import { Icon } from '@iconify/vue'
+import { Icon } from '@iconify/vue/offline'
 import { computed } from 'vue'
 import NodeRouteBadges from '@/components/NodeRouteBadges.vue'
 import TelemetrySampleStrip from '@/components/TelemetrySampleStrip.vue'

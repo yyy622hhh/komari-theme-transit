@@ -28,8 +28,8 @@ bun run test:performance
 ## 预算策略
 
 - 首屏资源 gzip 以 130 KiB 为优化目标，145 KiB 为发布硬限；
-- 关键路由与运行时块设置独立预算，防止代码从首屏转移后在其他关键页面失控；
-- Globe 和 Three 必须保持独立动态块，不允许出现在首屏 module preload；
+- 关键路由与运行时块设置独立预算，`HomeView` 保持在 24 KiB gzip 内，排序编辑所需的 Sortable 保持为独立按需 chunk；
+- Globe、Three 和 Sortable 都不允许出现在首屏 module preload；
 - 浏览器耗时预算采用宽松的回归上限，主要捕获数量级退化，不作为跨机器微基准；
 - JSON 报告作为 CI artifact 保留，用于趋势分析。需要调整预算时，应在 PR 中附带前后报告和原因。
 

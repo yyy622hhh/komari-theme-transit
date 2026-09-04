@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Icon } from '@iconify/vue'
+import { Icon } from '@iconify/vue/offline'
 import { nextTick, onErrorCaptured, ref, watch } from 'vue'
 import { Button } from '@/components/ui/button'
 import { logAppError } from '@/utils/safeError'

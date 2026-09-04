@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { DetailMetricCardKey } from '@/stores/app'
 import type { CurrencyCode } from '@/utils/financeHelper'
-import { Icon } from '@iconify/vue'
+import { Icon } from '@iconify/vue/offline'
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ComponentErrorBoundary from '@/components/ComponentErrorBoundary.vue'

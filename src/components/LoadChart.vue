@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { RecordFormat } from '@/utils/recordHelper'
-import { Icon } from '@iconify/vue'
+import { Icon } from '@iconify/vue/offline'
 import dayjs from 'dayjs'
 import { computed, reactive, watch, watchEffect } from 'vue'
 import VChart from 'vue-echarts'

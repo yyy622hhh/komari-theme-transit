@@ -5,7 +5,7 @@ import { gzipSync } from 'node:zlib'
 import { formatKiB, formatKiBRounded, INITIAL_GZIP_HARD_LIMIT, INITIAL_GZIP_TARGET, judgeInitialGzip } from './bundle-budget'
 
 const DIST_DIR = resolve(process.cwd(), 'dist')
-const FORBIDDEN_PRELOADS = ['v3-history', 'echarts', 'globe', 'VisitorInfo', 'visitorFingerprint']
+const FORBIDDEN_PRELOADS = ['v3-history', 'echarts', 'globe', 'sortable', 'VisitorInfo', 'visitorFingerprint']
 const FORBIDDEN_INITIAL_SNIPPETS = [
   { label: 'visitor IP provider', value: 'https://ipwho.is/' },
   { label: 'visitor fingerprint collector', value: 'WEBGL_debug_renderer_info' },

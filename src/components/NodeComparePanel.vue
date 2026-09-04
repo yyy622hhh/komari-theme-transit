@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { NodeData } from '@/stores/nodes'
-import { Icon } from '@iconify/vue'
+import { Icon } from '@iconify/vue/offline'
 import { useStorageAsync } from '@vueuse/core'
 import { computed, ref, watch } from 'vue'
 import { Button } from '@/components/ui/button'

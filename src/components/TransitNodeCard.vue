@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { NodeData } from '@/stores/nodes'
-import { Icon } from '@iconify/vue'
+import { Icon } from '@iconify/vue/offline'
 import { computed } from 'vue'
 import NodeCardInsightPanel from '@/components/NodeCardInsightPanel.vue'
 import NodeRoutePanel from '@/components/NodeRoutePanel.vue'

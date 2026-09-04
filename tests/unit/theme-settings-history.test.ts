@@ -81,6 +81,24 @@ describe('theme settings history', () => {
     expect(readThemeSettingsHistory()).toEqual([{ at: 1, settings: { a: 1 }, source: 'initial' }])
   })
 
+  test('bounds and validates snapshots loaded from storage', () => {
+    const entries = Array.from({ length: 30 }, (_, index) => ({
+      at: index,
+      settings: { index },
+      source: 'external-change',
+    }))
+    entries.splice(1, 0, { at: 1, settings: {}, source: 'unknown' })
+    localStorage.setItem('transit:theme-settings-history', JSON.stringify(entries))
+
+    const history = readThemeSettingsHistory()
+    expect(history).toHaveLength(20)
+    expect(history.every(entry => entry.source === 'external-change')).toBe(true)
+    expect(history.at(-1)?.settings).toEqual({ index: 19 })
+
+    localStorage.setItem('transit:theme-settings-history', '[{"at":1,"settings":{"__proto__":{"polluted":true}},"source":"initial"}]')
+    expect(readThemeSettingsHistory()).toEqual([])
+  })
+
   test('is a no-op without localStorage rather than crashing', () => {
     Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: undefined })
     expect(recordThemeSettingsVersion({ a: 1 }, 'initial')).toBe(false)

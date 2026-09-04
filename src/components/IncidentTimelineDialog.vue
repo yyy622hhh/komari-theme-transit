@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { IncidentEvent } from '@/composables/useIncidentTimeline'
-import { Icon } from '@iconify/vue'
+import { Icon } from '@iconify/vue/offline'
 import { computed, ref } from 'vue'
 import { AppDialog } from '@/components/ui/app-dialog'
 import { useIncidentTimeline } from '@/composables/useIncidentTimeline'

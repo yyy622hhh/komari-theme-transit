@@ -42,6 +42,7 @@ bun run icons:check
 bun run type-check
 bun run audit:source-size
 bun run test:unit
+bun run test:coverage
 bun run build-only
 bun run audit:bundle
 bun run audit:performance
@@ -50,6 +51,8 @@ bun run audit:dependencies
 ```
 
 `audit:reproducible` 会在同一检出目录和工具链中连续重建并比较 Release zip 的 SHA-256，用于阻止本项目构建逻辑产生非确定性输出；它不替代跨操作系统、跨工具链的独立可复现构建证明。
+
+`test:coverage` 生成本地文本报告和 `coverage/lcov.info`，用于修改共享逻辑时检查未覆盖分支；覆盖率结果不提交仓库，也不替代按风险补充有针对性的断言。
 
 涉及页面、样式、响应式或交互时还需运行：
 

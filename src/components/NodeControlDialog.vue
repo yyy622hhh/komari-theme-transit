@@ -2,7 +2,7 @@
 import type { NodeData } from '@/stores/nodes'
 import type { NodeCardPanelMode } from '@/utils/nodeCardPanel'
 import type { NodeControl } from '@/utils/nodeControl'
-import { Icon } from '@iconify/vue'
+import { Icon } from '@iconify/vue/offline'
 import { computed, ref, watch } from 'vue'
 import { AppDialog } from '@/components/ui/app-dialog'
 import { Button } from '@/components/ui/button'

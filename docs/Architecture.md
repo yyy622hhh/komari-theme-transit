@@ -24,7 +24,7 @@ Vue Component
 
 - `src/services/` — business and infrastructure services.
 - `src/constants/` — grouped runtime and architecture constants.
-- `src/types/` — shared type entry point.
+- `src/types/` — focused shared contracts such as telemetry sample types; import the concrete module rather than a barrel entry point.
 
 ## Core services
 

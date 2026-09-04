@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { CSSProperties } from 'vue'
 import type { NodeData } from '@/stores/nodes'
-import { Icon } from '@iconify/vue'
+import { Icon } from '@iconify/vue/offline'
 import { useVirtualList } from '@vueuse/core'
 import { computed, ref, TransitionGroup, watch } from 'vue'
 import NodePingListCell from '@/components/NodePingListCell.vue'

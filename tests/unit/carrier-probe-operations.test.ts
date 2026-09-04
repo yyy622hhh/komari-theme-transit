@@ -1,7 +1,8 @@
+import type { CarrierOperationRecord } from '../../src/services/carrier-probe-operation.service'
 import type { CarrierProbeOperations } from '../../src/services/carrier-probe.service'
 import type { AdminPingTask } from '../../src/services/ping-task.model'
 import { describe, expect, test } from 'bun:test'
-import { carrierTaskSnapshot, reconcileCarrierOperation, withCarrierOperationLock } from '../../src/services/carrier-probe-operation.service'
+import { carrierTaskSnapshot, reconcileCarrierOperation, selectCarrierOperationIdsToRetain, withCarrierOperationLock } from '../../src/services/carrier-probe-operation.service'
 import { buildCarrierProbeCandidate, currentCarrierProbeCandidate, migrateCarrierProbeTask, validateCarrierProbeCandidate } from '../../src/services/carrier-probe.service'
 
 function harness() {
@@ -43,6 +44,33 @@ function harness() {
 }
 
 describe('carrier operation safety', () => {
+  test('journal retention caps completed records without dropping recovery evidence', () => {
+    const task: AdminPingTask = { id: 10, name: '北京移动', type: 'icmp', target: '192.0.2.1', clients: ['a'], interval: 30, default_on: true }
+    const records: CarrierOperationRecord[] = Array.from({ length: 30 }, (_, index) => ({
+      id: `done-${index}`,
+      key: 'beijing-mobile',
+      kind: 'verify' as const,
+      original: task,
+      created: [],
+      phase: 'done' as const,
+      startedAt: index,
+      updatedAt: index,
+      message: 'done',
+    }))
+    records.push(
+      { ...records[0]!, id: 'needs-created-cleanup', phase: 'failed', created: [{ ...task, id: 11 }] },
+      { ...records[0]!, id: 'uncertain-creation', phase: 'failed', uncertainCreation: true },
+    )
+
+    const retained = selectCarrierOperationIdsToRetain(records)
+    expect(retained).toHaveLength(22)
+    expect(retained.has('done-29')).toBe(true)
+    expect(retained.has('done-10')).toBe(true)
+    expect(retained.has('done-9')).toBe(false)
+    expect(retained.has('needs-created-cleanup')).toBe(true)
+    expect(retained.has('uncertain-creation')).toBe(true)
+  })
+
   test('replacement preserves offline assignments but confirms success using online sources', async () => {
     const h = harness()
     h.original.clients.push('offline')

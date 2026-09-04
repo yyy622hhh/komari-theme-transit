@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { NodeData } from '@/stores/nodes'
 import type { NodeAlert } from '@/utils/nodeAlert'
-import { Icon } from '@iconify/vue'
+import { Icon } from '@iconify/vue/offline'
 import { useMediaQuery } from '@vueuse/core'
 import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'

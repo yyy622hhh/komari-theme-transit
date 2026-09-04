@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { VisitorLookupResult as VisitorData } from '@/utils/visitorInfoLookup'
-import { Icon } from '@iconify/vue'
+import { Icon } from '@iconify/vue/offline'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useAppStore } from '@/stores/app'
 import { lookupVisitorInfo } from '@/utils/visitorInfoLookup'

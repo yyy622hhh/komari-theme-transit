@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { MetricCustomRange } from '@/utils/metricRange'
-import { Icon } from '@iconify/vue'
+import { Icon } from '@iconify/vue/offline'
 import dayjs from 'dayjs'
 import { computed, onBeforeUnmount, onMounted, reactive, ref, shallowRef, watch, watchEffect } from 'vue'
 import VChart from 'vue-echarts'

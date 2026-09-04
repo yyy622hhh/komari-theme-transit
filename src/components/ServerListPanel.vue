@@ -2,7 +2,7 @@
 import type { ServerListSortKey, ServerListStatusFilter } from '@/services/server-list.service'
 import type { NodeData } from '@/stores/nodes'
 import type { NodeCardPanelDefaultMode } from '@/utils/nodeCardPanel'
-import { Icon } from '@iconify/vue'
+import { Icon } from '@iconify/vue/offline'
 import { computed, nextTick, ref } from 'vue'
 import { AppDialog } from '@/components/ui/app-dialog'
 import { Badge } from '@/components/ui/badge'

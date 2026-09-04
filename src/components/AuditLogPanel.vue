@@ -2,7 +2,7 @@
 import type { SnapshotCsvColumn } from '@/services/snapshot.service'
 import type { AuditLogEntry } from '@/utils/rpc'
 import type { ParsedVisitorAuditMessage, VisitorEventMeta } from '@/utils/visitorAudit'
-import { Icon } from '@iconify/vue'
+import { Icon } from '@iconify/vue/offline'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'

@@ -2,12 +2,11 @@
 import type { PrivateHomeToolKey } from '@/constants/security'
 import type { HomeQuickControlKey } from '@/stores/app'
 import type { NodeData } from '@/stores/nodes'
-import { Icon } from '@iconify/vue'
+import { Icon } from '@iconify/vue/offline'
 import { useDebounceFn } from '@vueuse/core'
 import { computed, defineAsyncComponent, nextTick, onActivated, onDeactivated, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import DeferredRender from '@/components/DeferredRender.vue'
-import MarkdownRenderer from '@/components/MarkdownRenderer.vue'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Empty } from '@/components/ui/empty'
@@ -57,7 +56,7 @@ defineOptions({
     HealthSummaryPanel: defineAsyncComponent(() => import('@/components/HealthSummaryPanel.vue')),
     Icon,
     UiInput: Input,
-    MarkdownRenderer,
+    MarkdownRenderer: defineAsyncComponent(() => import('@/components/MarkdownRenderer.vue')),
     NodeCard: defineAsyncComponent(() => import('@/components/NodeCard.vue')),
     NodeComparePanel: defineAsyncComponent(() => import('@/components/NodeComparePanel.vue')),
     NodeControlDialog: defineAsyncComponent(() => import('@/components/NodeControlDialog.vue')),

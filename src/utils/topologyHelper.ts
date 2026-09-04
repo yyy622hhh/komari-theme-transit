@@ -2,118 +2,32 @@ import type { TopologyMetricConfig, TopologyNodeConfig, TopologyQuickNode, Topol
 import type { TopologyProbeOption } from '@/utils/topologyPresets'
 import { formatCityNameZh } from '@/utils/cityNameHelper'
 import { createAutoTopologyMetric, createTopologyRoute, TOPOLOGY_LIMITS, TOPOLOGY_METRIC_RESERVED_PATTERN, TOPOLOGY_NODE_RESERVED_PATTERN } from '@/utils/topologyModel'
+import {
+  listQuickTopologyNodes,
+} from '@/utils/topologyNodes'
 import { createCustomTopologyProbe, findQuickTopologyTaskProbe, findTopologyProbeKey, findTopologyProbeOption, getTopologyProbe, normalizePingTaskName, normalizeQuickTopologyTaskNames, normalizeTopologyProbeTarget, pickQuickTopologyTaskName } from '@/utils/topologyPresets'
 
+export type { TopologySampleTone } from '@/utils/topologyMetrics'
+export {
+  calculateTopologyLatencyBaseline,
+  formatTopologyLatency,
+  formatTopologyLoss,
+  resolveTopologySampleTone,
+} from '@/utils/topologyMetrics'
 // 拓扑模型的类型在这里再导出一次：调用方谈的是「拓扑」，不该被迫记住类型定义
 // 落在哪个内部文件。值和函数不转发，避免这里退化成一个什么都能拿到的桶。
 export type { TopologyMetricConfig, TopologyNodeConfig, TopologyQuickNode, TopologyRouteConfig } from '@/utils/topologyModel'
+export {
+  findUniqueTopologyNode,
+  getQuickTopologySourceNode,
+  hydrateTopologyRouteNodes,
+  listQuickTopologyNodes,
+  resolveTopologyMetricSource,
+  resolveTopologyNode,
+} from '@/utils/topologyNodes'
 export type { TopologyProbeOption } from '@/utils/topologyPresets'
 
 const CJK_UNIFIED_IDEOGRAPH_REGEX = /\p{Script=Han}/u
-
-function quickNodeRank(node: TopologyQuickNode): number {
-  if (node.online === true)
-    return 0
-  if (node.online === false)
-    return 2
-  return 1
-}
-
-/**
- * 新建线路时可选的候选节点。
- *
- * 排除离线节点是有意的：快速添加会当场规划并验证探测，离线节点给不出任何采样。
- * 编辑已有线路的下拉走的是全量节点列表（离线的会标注「离线」），这样节点掉线后
- * 仍然可以修线路。
- */
-export function listQuickTopologyNodes<T extends TopologyQuickNode>(nodes: readonly T[]): T[] {
-  const nameCounts = new Map<string, number>()
-  for (const node of nodes) {
-    const name = node.name.trim().toLowerCase()
-    if (name)
-      nameCounts.set(name, (nameCounts.get(name) ?? 0) + 1)
-  }
-
-  return nodes
-    .map((node, index) => ({ node, index }))
-    .filter(({ node }) => node.name.trim()
-      && node.online !== false
-      && (Boolean(node.uuid?.trim()) || nameCounts.get(node.name.trim().toLowerCase()) === 1)
-      && !TOPOLOGY_NODE_RESERVED_PATTERN.test(node.name)
-      && !TOPOLOGY_NODE_RESERVED_PATTERN.test(node.region ?? ''))
-    .sort((left, right) => quickNodeRank(left.node) - quickNodeRank(right.node) || left.index - right.index)
-    .map(({ node }) => node)
-}
-
-export function getQuickTopologySourceNode<T extends TopologyQuickNode>(nodes: readonly T[]): T | null {
-  return listQuickTopologyNodes(nodes)[0] ?? null
-}
-
-export function findUniqueTopologyNode<T extends Pick<TopologyQuickNode, 'name'>>(nodes: readonly T[], name: string): T | undefined {
-  const normalized = name.trim().toLowerCase()
-  if (!normalized)
-    return undefined
-  const matches = nodes.filter(node => node.name.trim().toLowerCase() === normalized)
-  return matches.length === 1 ? matches[0] : undefined
-}
-
-export function resolveTopologyNode<T extends TopologyQuickNode>(
-  nodes: readonly T[],
-  name: string,
-  uuid = '',
-): T | undefined {
-  const id = uuid.trim()
-  if (id) {
-    const matches = nodes.filter(node => node.uuid?.trim() === id)
-    if (matches.length === 1)
-      return matches[0]
-  }
-  return findUniqueTopologyNode(nodes, name)
-}
-
-/**
- * 实时探测来源优先按 UUID 认，节点改名后 hop 边仍能对上。
- * 入口段可以把探测放到另一台机器上：当 nodeName 唯一指向另一台节点时，以名字为准，
- * 不能被线路机 UUID 盖掉。
- */
-export function resolveTopologyMetricSource<T extends TopologyQuickNode>(
-  nodes: readonly T[],
-  nodeName: string,
-  uuid = '',
-): T | undefined {
-  const named = nodeName.trim()
-  const id = uuid.trim()
-  const namedNode = findUniqueTopologyNode(nodes, named)
-  if (id) {
-    const matches = nodes.filter(node => node.uuid?.trim() === id)
-    if (matches.length === 1) {
-      if (namedNode && namedNode.uuid?.trim() && namedNode.uuid.trim() !== id)
-        return namedNode
-      return matches[0]
-    }
-  }
-  return namedNode
-}
-
-/** 只给线路机/落地机补 UUID；入口是探测标签，不能误绑到同名节点。 */
-export function hydrateTopologyRouteNodes(
-  routes: TopologyRouteConfig[],
-  nodes: readonly TopologyQuickNode[],
-): void {
-  for (const route of routes) {
-    route.nodes.forEach((config, index) => {
-      if (index === 0)
-        return
-      const resolved = resolveTopologyNode(nodes, config.name, config.uuid)
-      if (!resolved?.uuid)
-        return
-      config.uuid = resolved.uuid
-      config.name = resolved.name.trim()
-      if (resolved.region?.trim())
-        config.region = resolved.region.trim()
-    })
-  }
-}
 
 function makeUniqueQuickEntryLabel(label: string, configuredNames: Set<string>): string {
   const trimmedLabel = label.trim() || '自定义入口'
@@ -552,45 +466,4 @@ export function validateTopologyRoutes(routes: TopologyRouteConfig[]): string[] 
     })
     return errors
   })
-}
-
-export function formatTopologyLatency(value: number | null): string {
-  if (value === null)
-    return '-'
-  return value >= 0 && value < 1 ? '<1ms' : `${Math.round(value)}ms`
-}
-
-export function formatTopologyLoss(value: number | null): string {
-  return value === null ? '-' : `${value.toFixed(1)}%`
-}
-
-export type TopologySampleTone = 'healthy' | 'warning' | 'critical'
-
-export function calculateTopologyLatencyBaseline(values: Array<number | null>): number | null {
-  const sorted = values
-    .filter((value): value is number => value !== null && Number.isFinite(value))
-    .sort((left, right) => left - right)
-  if (!sorted.length)
-    return null
-
-  const middle = Math.floor(sorted.length / 2)
-  if (sorted.length % 2)
-    return sorted[middle] ?? null
-  return ((sorted[middle - 1] ?? 0) + (sorted[middle] ?? 0)) / 2
-}
-
-export function resolveTopologySampleTone(
-  latency: number | null,
-  loss: number | null,
-  baseline: number | null,
-): TopologySampleTone {
-  if (latency === null || (loss ?? 0) >= 20)
-    return 'critical'
-  if ((loss ?? 0) > 3)
-    return 'warning'
-
-  const hasMeaningfulLatencySpike = baseline !== null
-    && latency - baseline >= 5
-    && (baseline <= 0 || latency > baseline * 1.18)
-  return hasMeaningfulLatencySpike ? 'warning' : 'healthy'
 }

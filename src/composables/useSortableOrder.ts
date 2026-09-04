@@ -1,6 +1,6 @@
-import type { SortableEvent } from 'sortablejs'
+import type Sortable from 'sortablejs'
 import type { MaybeRefOrGetter, Ref } from 'vue'
-import Sortable from 'sortablejs'
+import type { SortableEvent } from '@/utils/sortable'
 import { nextTick, onScopeDispose, toValue, watch } from 'vue'
 
 export function useSortableOrder(
@@ -41,10 +41,22 @@ export function useSortableOrder(
       if (cancelled)
         return
 
+      let createSortable: typeof import('@/utils/sortable')['createSortable']
+      try {
+        ({ createSortable } = await import('@/utils/sortable'))
+      }
+      catch {
+        if (!cancelled)
+          window.$message?.warning('拖动排序组件加载失败，仍可使用键盘调整顺序。')
+        return
+      }
+      if (cancelled)
+        return
+
       instances = containers.flatMap((container) => {
         if (!container.value)
           return []
-        return [Sortable.create(container.value, {
+        return [createSortable(container.value, {
           animation: 160,
           chosenClass: 'server-order-chosen',
           delay: 120,

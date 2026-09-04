@@ -296,8 +296,10 @@ function stopGlobe() {
     globeHostRef.value.replaceChildren()
 }
 
-onMounted(() => {
-  void startGlobe()
+onMounted(async () => {
+  await nextTick()
+  if (shouldRender.value)
+    void startGlobe()
 })
 
 onBeforeUnmount(() => {
@@ -326,6 +328,10 @@ watch(() => appStore.stopEarth, (stopped) => {
 })
 
 watch(shouldRender, (visible) => {
+  if (visible && !globe) {
+    void startGlobe()
+    return
+  }
   if (!globe)
     return
   applyControls()

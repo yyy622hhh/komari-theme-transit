@@ -25,8 +25,9 @@ const ASSET_TAG_PATTERN = /<(?:script|link)\s[^>]*>/gi
 const ASSET_URL_PATTERN = /(?:src|href)=["']([^"']+)["']/i
 const LEADING_SLASH_PATTERN = /^\//
 const budgets: AssetBudget[] = [
-  { label: 'home-view', pattern: /^HomeView-[\w-]+\.js$/, gzipBytes: 30 * 1024, required: true },
+  { label: 'home-view', pattern: /^HomeView-[\w-]+\.js$/, gzipBytes: 24 * 1024, required: true },
   { label: 'init-runtime', pattern: /^init-[\w-]+\.js$/, gzipBytes: 6 * 1024, required: true },
+  { label: 'sortable', pattern: /^sortable(?:\.esm)?-[\w-]+\.js$/, gzipBytes: 16 * 1024, required: true },
   { label: 'globe.gl', pattern: /^globe\.gl-[\w-]+\.js$/, gzipBytes: 400 * 1024, rawBytes: 1_300 * 1024, required: true },
   { label: 'three', pattern: /^three\.module-[\w-]+\.js$/, gzipBytes: 205 * 1024, rawBytes: 780 * 1024, required: true },
 ]

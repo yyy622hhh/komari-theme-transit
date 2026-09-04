@@ -66,6 +66,27 @@ describe('topology write log', () => {
     expect(readTopologyWriteLog()).toEqual([])
   })
 
+  test('bounds stored entries and rejects unbounded text', () => {
+    const entries = Array.from({ length: 80 }, (_, index) => ({ at: index, action: `entry-${index}`, trigger: 'auto', outcome: 'ok' }))
+    localStorage.setItem('transit:topology-write-log', JSON.stringify(entries))
+    expect(readTopologyWriteLog()).toHaveLength(60)
+    expect(readTopologyWriteLog().at(-1)?.action).toBe('entry-59')
+
+    localStorage.setItem('transit:topology-write-log', JSON.stringify([
+      { at: 1, action: 'x'.repeat(501), trigger: 'auto', outcome: 'ok' },
+      { at: 2, action: 'valid', trigger: 'manual', outcome: 'failed', detail: 'x'.repeat(2001) },
+    ]))
+    expect(readTopologyWriteLog()).toEqual([])
+  })
+
+  test('truncates caller-provided text before persisting it', () => {
+    recordTopologyWrite({ trigger: 'auto', action: 'a'.repeat(700), outcome: 'failed', detail: 'd'.repeat(3000), at: Number.NaN })
+    const entry = readTopologyWriteLog()[0]!
+    expect(entry.action).toHaveLength(500)
+    expect(entry.detail).toHaveLength(2000)
+    expect(Number.isFinite(entry.at)).toBe(true)
+  })
+
   test('clears completely', () => {
     recordTopologyWrite({ trigger: 'manual', action: '创建', outcome: 'ok' })
     clearTopologyWriteLog()

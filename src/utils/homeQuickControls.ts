@@ -1,7 +1,7 @@
 import type { HomeQuickControlKey } from '@/stores/app.types'
 import type { NodeData } from '@/stores/nodes'
-import type { ExchangeRates } from '@/utils/financeHelper'
-import { calculateMonthlyCostCNY } from '@/utils/financeHelper'
+import type { ExchangeRates } from '@/utils/financeCore'
+import { calculateMonthlyCostCNY } from '@/utils/financeCore'
 import {
   getRealtimePeakSpeed,
   getTotalTraffic,

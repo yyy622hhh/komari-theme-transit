@@ -1,14 +1,14 @@
 import type { MaybeRefOrGetter } from 'vue'
-import type { ExchangeRateSource } from '@/utils/financeHelper'
+import type { ExchangeRateSource } from '@/utils/financeCore'
 import { ref, toValue, watch } from 'vue'
-import * as financeHelper from '@/utils/financeHelper'
+import { DEFAULT_EXCHANGE_RATES } from '@/utils/financeCore'
 
 export function useDailyExchangeRates(
   enabled: MaybeRefOrGetter<boolean>,
   options: { applyOverrides?: boolean } = {},
 ) {
-  const rates = ref(financeHelper.DEFAULT_EXCHANGE_RATES)
-  const dailyRates = ref(financeHelper.DEFAULT_EXCHANGE_RATES)
+  const rates = ref(DEFAULT_EXCHANGE_RATES)
+  const dailyRates = ref(DEFAULT_EXCHANGE_RATES)
   const source = ref<ExchangeRateSource | 'loading'>('loading')
   const updatedAt = ref<number | null>(null)
   const loading = ref(false)
@@ -23,6 +23,7 @@ export function useDailyExchangeRates(
       loading.value = true
 
       try {
+        const financeHelper = await import('@/utils/financeHelper')
         const result = await financeHelper.getDailyExchangeRates()
         if (!toValue(enabled))
           return

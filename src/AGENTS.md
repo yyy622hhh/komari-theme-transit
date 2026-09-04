@@ -85,7 +85,7 @@ Cache/request keys must include every dimension that changes the result, especia
 - If a primitive is missing, follow the existing pattern: reka-ui + class-variance-authority + `cn()`.
 - Do not introduce Naive UI, UnoCSS, SCSS, or a new component library.
 - Component styling should use Tailwind utilities and design tokens from `styles/main.css`.
-- Use `@iconify/vue` for all icons. Lucide icons use the `lucide:` prefix. Icons must be discoverable as `prefix:name` string literals so `bun run icons:generate` can pack them; do not fetch `api.iconify.design` at runtime.
+- Use the `@iconify/vue/offline` entry point for all icons; runtime Iconify API access is intentionally absent. Lucide icons use the `lucide:` prefix. Icons must be discoverable as `prefix:name` string literals so `bun run icons:generate` can pack them; do not fetch `api.iconify.design` at runtime.
 - Only app global is `window.$message`; do not assume `$dialog`, `$notification`, `$loadingBar`, or `$modal`.
 
 ## Views and async components

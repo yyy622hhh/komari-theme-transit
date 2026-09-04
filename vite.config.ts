@@ -12,6 +12,7 @@ import { defineConfig } from 'vite'
 import vueDevTools from 'vite-plugin-vue-devtools'
 
 const require = createRequire(import.meta.url)
+const projectRoot = process.cwd()
 const fs = require('node:fs')
 // archiver@8 dropped the callable factory export in favor of format-specific
 // classes; ZipArchive keeps the same stream/event API the code below relies on.
@@ -45,7 +46,7 @@ function bundleComposition(): Plugin {
         .map((chunk) => {
           const modules = Object.entries(chunk.modules)
             .map(([id, info]) => ({
-              id: relative(__dirname, id.replace(/^\0/, '')),
+              id: relative(projectRoot, id.replace(/^\0/, '')),
               bytes: info.renderedLength,
             }))
             .filter(module => module.bytes > 0)
@@ -75,7 +76,7 @@ function bundleComposition(): Plugin {
   }
 }
 
-const themeJsonPath = resolve(__dirname, 'komari-theme.json')
+const themeJsonPath = resolve(projectRoot, 'komari-theme.json')
 const devApiTarget = process.env.VITE_API_TARGET || 'http://127.0.0.1:25774'
 const isFunctionalTestBuild = process.env.VITE_COMPONENT_BOUNDARY_TEST === 'true'
 
@@ -159,7 +160,7 @@ const KEEP_RECENT_BUILDS = 3
 function pruneOldBuildZips(currentZipName: string): void {
   let entries: string[]
   try {
-    entries = readdirSync(__dirname)
+    entries = readdirSync(projectRoot)
   }
   catch (err) {
     console.warn('[komari-theme-zip] Could not scan for old build zips:', err instanceof Error ? err.message : err)
@@ -171,7 +172,7 @@ function pruneOldBuildZips(currentZipName: string): void {
     .flatMap((name) => {
       // 单个文件 stat 失败（构建期间被别的进程删掉、悬空软链）不该拖垮整轮清理。
       try {
-        return [{ name, mtimeMs: statSync(resolve(__dirname, name)).mtimeMs }]
+        return [{ name, mtimeMs: statSync(resolve(projectRoot, name)).mtimeMs }]
       }
       catch {
         return []
@@ -182,7 +183,7 @@ function pruneOldBuildZips(currentZipName: string): void {
   // 当次产物必留，所以旧文件的保留额度是 KEEP_RECENT_BUILDS - 1。
   for (const stale of olderZips.slice(Math.max(0, KEEP_RECENT_BUILDS - 1))) {
     try {
-      unlinkSync(resolve(__dirname, stale.name))
+      unlinkSync(resolve(projectRoot, stale.name))
       console.log(`[komari-theme-zip] Removed stale build ${stale.name}`)
     }
     catch (err) {
@@ -205,10 +206,10 @@ function komariThemeZip(): Plugin {
     closeBundle: async () => {
       const commitHash = getCommitHash()
       const zipFileName = `komari-theme-Transit-build-${commitHash}.zip`
-      const distDir = resolve(__dirname, 'dist')
+      const distDir = resolve(projectRoot, 'dist')
       const embeddedAdminDir = resolve(distDir, 'admin-app')
-      const previewPath = resolve(__dirname, 'docs/preview.png')
-      const outputPath = resolve(__dirname, zipFileName)
+      const previewPath = resolve(projectRoot, 'docs/preview.png')
+      const outputPath = resolve(projectRoot, zipFileName)
       const themeManifest = readThemeManifest()
       const archiveDate = getArchiveDate()
       const manifestPreviewName = typeof themeManifest.preview === 'string' && themeManifest.preview.trim()
