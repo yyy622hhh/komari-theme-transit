@@ -109,6 +109,8 @@ export interface VisualFixtureOptions {
   carrierRecentOutcome?: 'healthy' | 'failed' | 'stale' | 'insufficient'
   /** 三网卡片数据协议；默认保留 TCP，用于覆盖迁移前场景。 */
   carrierProbeType?: 'icmp' | 'tcp'
+  /** 文档截图可覆盖地区；普通回归继续使用覆盖面更广的 all。 */
+  carrierPingRegion?: 'beijing' | 'shanghai' | 'guangdong' | 'all'
   preserveOperationJournal?: boolean
   routeProbeStorageDegraded?: boolean
   /** 拒绝回程结果的主题设置保存，验证保存失败时不会清理旧标签。 */
@@ -981,7 +983,7 @@ export async function installKomariFixture(page: Page, options: VisualFixtureOpt
     opsDashboardEnabled: options.opsDashboard ?? false,
     topologyEnabled: options.opsDashboard ?? false,
     topologyAutoRepairEnabled: options.topologyAutoRepairEnabled ?? true,
-    carrierPingRegion: 'all',
+    carrierPingRegion: options.carrierPingRegion ?? 'all',
     routeProbeEnabled: options.routeProbeEnabled,
     routeProbeAutoEnabled: options.routeProbeLegacyAutoEnabled,
     nodeCardPanels: options.nodeCardPanels ? JSON.stringify(options.nodeCardPanels) : undefined,

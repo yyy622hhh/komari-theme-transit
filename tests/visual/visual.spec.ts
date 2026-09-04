@@ -1985,22 +1985,22 @@ test('Transit documentation screenshots', async ({ browser }) => {
 
   await capture(
     { width: 1440, height: 900 },
-    { opsDashboard: true, dark: true },
+    { opsDashboard: true, dark: true, carrierPingRegion: 'beijing', carrierProbeType: 'icmp' },
     page => page.screenshot({ path: 'docs/screenshots/transit-overview-dark.png' }),
   )
   await capture(
     { width: 1440, height: 900 },
-    { opsDashboard: true },
+    { opsDashboard: true, carrierPingRegion: 'beijing', carrierProbeType: 'icmp' },
     page => page.screenshot({ path: 'docs/screenshots/transit-overview-light.png' }),
   )
   await capture(
     { width: 1280, height: 720 },
-    { opsDashboard: true, dark: true },
+    { opsDashboard: true, dark: true, carrierPingRegion: 'beijing', carrierProbeType: 'icmp' },
     page => page.screenshot({ path: 'docs/preview.png' }),
   )
   await capture(
     { width: 1440, height: 900 },
-    { opsDashboard: true, dark: true, authenticated: true },
+    { opsDashboard: true, dark: true, authenticated: true, carrierPingRegion: 'beijing', carrierProbeType: 'icmp' },
     async (page) => {
       const dialog = await openTopologyManager(page)
       return dialog.screenshot({ path: 'docs/screenshots/transit-topology-manager.png' })
