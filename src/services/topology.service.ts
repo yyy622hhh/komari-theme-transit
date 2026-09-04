@@ -42,6 +42,15 @@ function getSaveKey(theme: string): string {
   return `topology:save:${theme}`
 }
 
+export function buildTopologySettingsPatch(routes: TopologyRouteConfig[]): Record<string, unknown> {
+  return {
+    topologyEnabled: true,
+    topologyConfig: serializeTopologyConfig(routes),
+    ...serializeTopologyRoutes(routes),
+    topologyOwnedPingTaskIds: serializeTopologyOwnedPingTaskIds(getTopologyCreatedTaskIds()),
+  }
+}
+
 export async function saveTopologyConfiguration(options: SaveTopologyOptions): Promise<Record<string, unknown>> {
   const validationErrors = validateTopologyRoutes(options.routes)
   if (validationErrors[0])
@@ -49,12 +58,7 @@ export async function saveTopologyConfiguration(options: SaveTopologyOptions): P
 
   // 写双份：JSON 是新的真值，旧的两条字符串继续写，好让降级安装或还没升级的
   // 页面不会看到空拓扑。确认没人回滚之后才能停写旧字段。
-  const patch = {
-    topologyEnabled: true,
-    topologyConfig: serializeTopologyConfig(options.routes),
-    ...serializeTopologyRoutes(options.routes),
-    topologyOwnedPingTaskIds: serializeTopologyOwnedPingTaskIds(getTopologyCreatedTaskIds()),
-  }
+  const patch = buildTopologySettingsPatch(options.routes)
 
   return saveManagedThemeSettings({
     theme: options.theme,
