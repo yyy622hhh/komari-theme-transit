@@ -1175,15 +1175,14 @@ test('Transit topology manager adds a relay-only route when the optional landing
   expect(addedTasks[0]?.name).toBe('北京电信')
 })
 
-test('Transit topology keeps new landing hops on ICMP even when the relay has no prior ICMP success', async ({ page }) => {
+test('Transit topology plans an unbound landing using the source capability ladder', async ({ page }) => {
   const addedTasks: Array<Record<string, unknown>> = []
   await page.setViewportSize({ width: 1440, height: 900 })
   await installKomariFixture(page, {
     opsDashboard: true,
     authenticated: true,
     emptyTopology: true,
-    // 线路机上 ICMP 任务一次都没成功；第二段仍固定使用 ICMP，不能拿 TCP 连接
-    // 失败率冒充丢包率。
+    // 未绑定任务且来源没有 ICMP 成功证据，允许规划 TCP，但不能将其标为 ICMP。
     topologyProbeStats: [
       { task_id: 1, name: 'Tokyo', total: 48, valid: 0 },
       { task_id: 11, name: '北京联通', total: 48, valid: 47 },
@@ -1202,10 +1201,10 @@ test('Transit topology keeps new landing hops on ICMP even when the relay has no
   await dialog.getByRole('button', { name: '添加线路' }).click()
 
   const route = dialog.locator('[data-topology-route-id]').first()
-  await expect(route).toHaveAttribute('data-topology-hop-probe', 'ICMP')
-  await expect(route).toHaveAttribute('data-topology-hop-task', 'Transit-东京-高负载-to-新加坡-A100')
+  await expect(route).toHaveAttribute('data-topology-hop-probe', 'TCP 443')
+  await expect(route).toHaveAttribute('data-topology-hop-task', 'Transit-东京-高负载-to-新加坡-A100-tcp-443')
   await expect.poll(() => addedTasks.length).toBe(1)
-  expect(addedTasks[0]).toMatchObject({ type: 'icmp', target: '192.0.2.13' })
+  expect(addedTasks[0]).toMatchObject({ type: 'tcp', target: '192.0.2.13:443' })
 })
 
 test('Transit topology keeps a dead ICMP hop instead of relabeling TCP failures as packet loss', async ({ page }) => {
@@ -1235,15 +1234,15 @@ test('Transit topology keeps a dead ICMP hop instead of relabeling TCP failures 
   const dialog = await openTopologyManager(page)
   const firstRoute = dialog.locator('[data-topology-route-id]').first()
   await expect(firstRoute).toHaveAttribute('data-topology-hop-probe', 'ICMP')
-  await expect(firstRoute.locator('[data-topology-hop-hint]')).toContainText('ICMP 都探测不通')
+  await expect(firstRoute.locator('[data-topology-hop-hint]')).toContainText('ICMP 没有成功响应')
   expect(addedTasks.every(task => task.type === 'icmp')).toBe(true)
   expect(addedTasks.some(task => task.type === 'tcp')).toBe(false)
   expect(deletedTaskIds).toEqual([])
 })
 
-test('Transit background repair migrates an existing TCP hop to ICMP', async ({ page }) => {
+test('Transit background repair preserves an existing TCP hop and its port', async ({ page }) => {
   const addedTasks: Array<Record<string, unknown>> = []
-  const saves: unknown[] = []
+  const saves: Array<Record<string, unknown>> = []
   await page.setViewportSize({ width: 1440, height: 900 })
   await installKomariFixture(page, {
     opsDashboard: true,
@@ -1266,8 +1265,11 @@ test('Transit background repair migrates an existing TCP hop to ICMP', async ({ 
   await expect(page.locator('.topology-scroll article').first()).toBeVisible()
   await page.clock.fastForward(60_000)
 
-  await expect.poll(() => addedTasks.some(task => task.type === 'icmp' && task.target === '192.0.2.11')).toBe(true)
-  await expect.poll(() => saves.length).toBeGreaterThan(0)
+  const dialog = await openTopologyManager(page)
+  await expect(dialog.locator('[data-topology-route-id]').first()).toHaveAttribute('data-topology-hop-probe', 'TCP 22')
+  // 第二条线路的落地地址与旧绑定不一致，允许修复；第一条正确绑定不可改变。
+  expect(addedTasks.some(task => String(task.target).startsWith('192.0.2.11'))).toBe(false)
+  expect(saves.every(save => String(save.topologyMetrics).split('||')[0]?.includes('PandaOps-Local-Hop'))).toBe(true)
 })
 
 test('Transit background hop repair preserves explicitly static segments', async ({ page }) => {
@@ -1311,7 +1313,7 @@ test('Transit topology never deletes a pre-existing task based on its name alone
   await openStablePage(page)
 
   const dialog = await openTopologyManager(page)
-  await expect(dialog.locator('[data-topology-route-id]').first()).toHaveAttribute('data-topology-hop-probe', 'ICMP')
+  await expect(dialog.locator('[data-topology-route-id]').first()).toHaveAttribute('data-topology-hop-probe', 'TCP 443')
   expect(deletedTaskIds).toEqual([])
 })
 
@@ -1356,7 +1358,7 @@ test('Transit topology keeps its session-created ICMP task after failed samples'
   expect(deletedTaskIds).toEqual([])
 })
 
-test('Transit topology switches the entry probe once ICMP is proven dead, retiring the task it created', async ({ page }) => {
+test('Transit topology preserves the bound entry protocol after failed samples', async ({ page }) => {
   const probeStats: Array<{ task_id: number, total: number, valid: number }> = []
   const deletedTaskIds: number[][] = []
   await page.setViewportSize({ width: 1440, height: 900 })
@@ -1387,13 +1389,12 @@ test('Transit topology switches the entry probe once ICMP is proven dead, retiri
   // 是 hop（第 2 段）；mock 按创建顺序从 101 起分配 id，所以入口任务是 102。
   probeStats.push({ task_id: 102, total: 48, valid: 0 })
   await dialog.getByRole('button', { name: '重新检测' }).click()
-  await expect(route).toHaveAttribute('data-topology-entry-hop-probe', 'TCP 53')
+  await expect(route).toHaveAttribute('data-topology-entry-hop-probe', 'ICMP')
   await expect(route).toHaveAttribute('data-topology-entry-task', '北京电信')
-  await expect.poll(() => deletedTaskIds.flat()).toContain(102)
+  expect(deletedTaskIds).toEqual([])
 })
 
-test('Transit topology creates the replacement entry task even when deleting the old one keeps failing', async ({ page }) => {
-  // 两阶段提交的关键属性：新任务的创建不依赖旧任务先删除成功。
+test('Transit topology does not attempt replacement or cleanup merely because a bound entry fails', async ({ page }) => {
   const probeStats: Array<{ task_id: number, total: number, valid: number }> = []
   const addedTasks: Array<Record<string, unknown>> = []
   let deleteAttempts = 0
@@ -1435,11 +1436,10 @@ test('Transit topology creates the replacement entry task even when deleting the
 
   probeStats.push({ task_id: 102, total: 48, valid: 0 })
   await dialog.getByRole('button', { name: '重新检测' }).click()
-  // 删除持续失败，但新任务照样建成功、探测方式照样换过去。
-  await expect(route).toHaveAttribute('data-topology-entry-hop-probe', 'TCP 53')
+  await expect(route).toHaveAttribute('data-topology-entry-hop-probe', 'ICMP')
   await expect(route).toHaveAttribute('data-topology-entry-task', '北京电信')
-  await expect.poll(() => deleteAttempts).toBeGreaterThan(0)
-  await expect.poll(() => addedTasks.filter(task => task.name === '北京电信').length).toBe(2)
+  expect(deleteAttempts).toBe(0)
+  expect(addedTasks.filter(task => task.name === '北京电信')).toHaveLength(1)
 })
 
 test('Transit topology quick generation uses the selected source and landing nodes', async ({ page }) => {
@@ -3362,7 +3362,7 @@ test('carrier target migration validates a canary and switches to a fresh task i
   await migrate.click()
   await dialog.getByRole('button', { name: '再次点击确认迁移' }).click()
   await expect(dialog).toContainText('目标迁移成功，旧历史已隔离')
-  await expect(dialog.getByText('ICMP · 221.130.33.52', { exact: true }).first()).toBeVisible()
+  await expect(dialog.getByText('TCP · 211.136.25.153:443', { exact: true }).first()).toBeVisible()
 })
 
 test('carrier target migration compensates a failed switch and reports the old task retained', async ({ page }) => {

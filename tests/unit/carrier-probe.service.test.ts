@@ -3,11 +3,12 @@ import { describe, expect, test } from 'bun:test'
 import {
   assessCarrierProbeCandidate,
   buildCarrierProbeCandidate,
+  builtinCarrierProbeFallback,
   classifyCarrierProbeHealth,
   selectCarrierProbeTask,
   staleTransitCanaryTaskIds,
 } from '../../src/services/carrier-probe.service'
-import { getTopologyProbe } from '../../src/utils/topologyPresets'
+import { getTopologyProbe, getTopologyProbeTarget } from '../../src/utils/topologyPresets'
 
 const CLIENTS = Array.from({ length: 5 }, (_, index) => `node-${index + 1}`)
 
@@ -25,6 +26,26 @@ function task(overrides: Partial<AdminPingTask> = {}): AdminPingTask {
 }
 
 describe('carrier probe health and migration', () => {
+  test.each([
+    ['beijing-telecom', '220.181.38.150', 443],
+    ['beijing-unicom', '123.123.123.123', 53],
+    ['beijing-mobile', '211.136.25.153', 443],
+  ] as const)('offers %s as a TCP candidate without overwriting an existing task', (key, host, port) => {
+    const preset = getTopologyProbe(key)
+    const current = task({ name: preset.taskFilter, type: 'icmp', target: '192.0.2.55' })
+    expect(builtinCarrierProbeFallback(preset, current)).toMatchObject({ type: 'tcp', host, port, target: `${host}:${port}`, source: 'builtin' })
+    expect(getTopologyProbeTarget(preset, { type: 'tcp', port })).toBe(host)
+    expect(current.target).toBe('192.0.2.55')
+    expect(current.type).toBe('icmp')
+    expect(builtinCarrierProbeFallback(preset, { ...current, type: 'tcp', target: `${host}:${port}` })).toBeNull()
+  })
+
+  test('retains other regions as candidates without creating tasks or declaring them healthy', () => {
+    const candidate = builtinCarrierProbeFallback(getTopologyProbe('shanghai-unicom'), null)
+    expect(candidate).toMatchObject({ type: 'tcp', target: '210.22.70.3:53', source: 'builtin' })
+    expect(candidate?.migratable).toBeUndefined()
+  })
+
   test('内置候选不会覆盖同名线上任务的真实目标', () => {
     const current = task()
     const preset = getTopologyProbe('beijing-mobile')

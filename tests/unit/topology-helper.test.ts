@@ -182,8 +182,9 @@ describe('topology probe targets', () => {
     const probe = getTopologyProbe('beijing-telecom')
     expect(getTopologyProbeTarget(probe, { type: 'icmp' })).toBe(probe.landmarkAddress)
     expect(getTopologyProbeTarget(probe, { type: 'tcp', port: 53 })).toBe(probe.dnsAddress)
-    // 内置入口候选不声明这些端口可用，入口阶梯也不能给出对应目标地址。
-    expect(getTopologyProbeTarget(probe, { type: 'tcp', port: 443 })).toBe('')
+    expect(getTopologyProbeTarget(probe, { type: 'tcp', port: 443 })).toBe('220.181.38.150')
+    // 只允许显式声明的端口，不能给其它端口猜目标。
+    expect(getTopologyProbeTarget(getTopologyProbe('shanghai-telecom'), { type: 'tcp', port: 443 })).toBe('')
     expect(getTopologyProbeTarget(probe, { type: 'tcp', port: 80 })).toBe('')
     expect(getTopologyProbeTarget(probe, { type: 'tcp', port: 22 })).toBe('')
     expect(getTopologyProbeTarget(probe, { type: 'tcp', port: 8080 })).toBe('')

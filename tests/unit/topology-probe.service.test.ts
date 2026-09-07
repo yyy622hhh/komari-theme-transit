@@ -255,6 +255,46 @@ describe('planWorkingHopTask cache freshness', () => {
 })
 
 describe('topology hop task planning', () => {
+  test.each([0, 100])('preserves a bound TCP service even with %i successful samples and a healthy ICMP alternative', async (valid) => {
+    const bound: AdminPingTask = { id: 1, name: 'selected-service', clients: [source.uuid], type: 'tcp', target: `${landing.ipv4}:32022`, interval: 30 }
+    const restore = mockKomari([
+      bound,
+      { id: 2, name: 'other-icmp', clients: [source.uuid], type: 'icmp', target: landing.ipv4!, interval: 30 },
+    ], [{ task_id: '1', total: 100, valid }, { task_id: '2', total: 100, valid: 100 }])
+    try {
+      const plan = await planWorkingHopTask(source, landing, bound.name, { preserveBoundTask: true })
+      expect(plan.task).toMatchObject(bound)
+      expect(plan).toMatchObject({ probe: { type: 'tcp', port: 32022 }, needsCreation: false, switchedFrom: null, exhausted: valid === 0, retiredTasks: [] })
+    }
+    finally { restore() }
+  })
+
+  test('does not preserve a binding that points at a different landing address', async () => {
+    const restore = mockKomari([
+      { id: 1, name: 'old-service', clients: [source.uuid], type: 'tcp', target: '192.0.2.99:32022', interval: 30 },
+    ], [{ task_id: '1', total: 100, valid: 100 }])
+    try {
+      const plan = await planWorkingHopTask(source, landing, 'old-service', { preserveBoundTask: true })
+      expect(plan.task.target).toStartWith(landing.ipv4!)
+      expect(plan.task.id).not.toBe(1)
+    }
+    finally { restore() }
+  })
+
+  test('preserves an explicitly bound dead TCP carrier target rather than selecting a healthy ICMP alias', async () => {
+    const bound: AdminPingTask = { id: 1, name: '北京-电信', clients: [source.uuid], type: 'tcp', target: '192.0.2.55:443', interval: 60 }
+    const restore = mockKomari([
+      bound,
+      { id: 2, name: 'Transit-entry-beijing-telecom-icmp', clients: [source.uuid], type: 'icmp', target: '192.0.2.77', interval: 30 },
+    ], [{ task_id: '1', total: 100, valid: 0 }, { task_id: '2', total: 100, valid: 100 }])
+    try {
+      const plan = await planEntryProbeTask(source, getTopologyProbe('beijing-telecom'), { currentTaskName: bound.name, preserveBoundTask: true })
+      expect(plan.task).toMatchObject(bound)
+      expect(plan).toMatchObject({ probe: { type: 'tcp', port: 443 }, exhausted: true, needsCreation: false, switchedFrom: null, retiredTasks: [] })
+    }
+    finally { restore() }
+  })
+
   test('icmp-only mode migrates a healthy legacy TCP binding instead of relabeling its failures as packet loss', async () => {
     const tcpTaskName = 'Transit-Relay-JP-to-Exit-SG-tcp-22'
     const restore = mockKomari(

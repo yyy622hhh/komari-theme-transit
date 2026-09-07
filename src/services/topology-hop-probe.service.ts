@@ -155,7 +155,7 @@ export async function planWorkingHopTask(
   source: TopologyPingEndpoint,
   landing: TopologyPingEndpoint,
   currentTaskName = '',
-  options: { fresh?: boolean, icmpOnly?: boolean } = {},
+  options: { fresh?: boolean, icmpOnly?: boolean, preserveBoundTask?: boolean } = {},
 ): Promise<HopTaskPlan> {
   if (!source.uuid.trim() || !landing.uuid.trim())
     throw new Error('线路机或落地机已失效，请重新选择。')
@@ -249,6 +249,12 @@ export async function planWorkingHopTask(
 
   if (bound) {
     const boundProbe = topologyHopProbeFromTask(bound) ?? DEFAULT_TOPOLOGY_HOP_PROBE
+    // 保存与后台修复必须尊重管理员已绑定的目标、协议和端口。失败是需要展示
+    // 的观测结果，不能靠改成另一种探测来隐藏；目标/来源不匹配的任务不会成为 bound。
+    if (options.preserveBoundTask && currentTaskName.trim() === bound.name.trim()) {
+      const plan = planForTask(bound, boundProbe, null)
+      return { ...plan, exhausted: plan.verdict === 'dead', retiredTasks: [] }
+    }
     // 旧版本可能把后半段自动降级成 TCP。新策略必须迁回 ICMP，不能因为旧 TCP
     // 当前健康就继续展示“连接失败率”。若已经有 ICMP 任务则直接认回（即便它
     // 正在显示 100% 丢包），否则创建一条独立任务并写回新绑定。

@@ -72,7 +72,7 @@ describe('formatTopologyRouteHint', () => {
       ...baseInput,
       state: state({ exhausted: true, targetAddress: '198.51.100.7' }),
     })
-    expect(hint).toContain('都探测不通')
+    expect(hint).toContain('没有成功响应')
     expect(hint).toContain('198.51.100.7')
   })
 
@@ -96,9 +96,9 @@ describe('formatTopologyRouteHint', () => {
       .toBe('探测方式：ICMP · 可用')
   })
 
-  test('reports a dead binding that is about to be switched', () => {
+  test('reports a dead binding without promising an automatic protocol switch', () => {
     expect(formatTopologyRouteHint({ ...baseInput, state: state({ verdict: 'dead' }) }))
-      .toBe('探测方式：ICMP · 没有成功响应，正在自动换用其它方式。')
+      .toBe('探测方式：ICMP · 没有成功响应，请检查目标或手动更换探测任务。')
   })
 
   test('reports pending samples for anything else', () => {
@@ -176,11 +176,11 @@ describe('formatTopologyEntryHint', () => {
       state: state({ exhausted: true, targetAddress: '219.141.140.10' }),
     })
     expect(hint).toContain('北京电信')
-    expect(hint).toContain('都探测不通')
+    expect(hint).toContain('没有成功响应')
     expect(hint).toContain('219.141.140.10')
   })
 
-  test('quotes the custom ladder, not TCP 53, when a custom entry is exhausted', () => {
+  test('reports only the configured port instead of claiming all protocols failed', () => {
     const hint = formatTopologyEntryHint({
       probeLabel: '',
       expectedTaskName: 'Transit-entry-custom-tcp-22',
@@ -188,9 +188,10 @@ describe('formatTopologyEntryHint', () => {
       sourceName: 'Relay-JP',
       live: true,
       pending: false,
-      state: state({ exhausted: true, targetAddress: '203.0.113.10' }),
+      state: state({ exhausted: true, probe: { type: 'tcp', port: 22 }, targetAddress: '203.0.113.10' }),
     })
-    expect(hint).toContain('TCP 443')
+    expect(hint).toContain('TCP 22')
+    expect(hint).not.toContain('TCP 443')
     expect(hint).not.toContain('TCP 53')
   })
 

@@ -223,7 +223,7 @@ export function useTopologyRoutePlanner(
     if (!probe || (!isCustom && !shouldAutoApplyTopologyProbe(route)))
       return null
     const endpoint: TopologyPingEndpoint = { uuid: sourceUuid, name: sourceName }
-    const plan = await planEntryProbeTask(endpoint, probe, { ...options, currentTaskName: route.metrics[0]?.taskFilter })
+    const plan = await planEntryProbeTask(endpoint, probe, { ...options, currentTaskName: route.metrics[0]?.taskFilter, preserveBoundTask: true })
     return { probeKey: probe.key, probe, plan }
   }
 
@@ -359,7 +359,7 @@ export function useTopologyRoutePlanner(
             catalog.rememberTask(segmentSource.uuid, metric.taskFilter)
           continue
         }
-        const planned = await planWorkingHopTask(segmentSource, segmentTarget, metric.taskFilter, { icmpOnly: true })
+        const planned = await planWorkingHopTask(segmentSource, segmentTarget, metric.taskFilter, { preserveBoundTask: true })
         if (routeTaskRuns.get(route.id) !== runId || !isOpen() || !manager.routes.includes(route))
           return
         metric.live = true

@@ -79,7 +79,7 @@ function entryProbeTarget(probe: TopologyProbeOption, hopProbe: TopologyHopProbe
 export async function planEntryProbeTask(
   source: TopologyPingEndpoint,
   probe: TopologyProbeOption,
-  options: { fresh?: boolean, currentTaskName?: string } = {},
+  options: { fresh?: boolean, currentTaskName?: string, preserveBoundTask?: boolean } = {},
 ): Promise<EntryProbePlan> {
   if (!source.uuid.trim())
     throw new Error('线路机已失效，请重新选择。')
@@ -120,6 +120,17 @@ export async function planEntryProbeTask(
   const rank = (task: AdminPingTask): number => {
     const taskVerdict = assessHopTask(profile, task)
     return taskVerdict === 'healthy' ? 2 : taskVerdict === 'pending' ? 1 : 0
+  }
+  const boundCandidates = options.preserveBoundTask && currentTaskName
+    ? candidates.filter(task => normalizePingTaskName(task.name) === currentTaskName)
+    : []
+  if (boundCandidates.length) {
+    const bound = [...boundCandidates].sort((a, b) => rank(b) - rank(a) || (b.id ?? 0) - (a.id ?? 0))[0]!
+    const boundProbe = topologyHopProbeFromTask(bound)
+    if (boundProbe) {
+      const verdict = assessHopTask(profile, bound)
+      return { task: bound, probe: boundProbe, verdict, needsCreation: false, exhausted: verdict === 'dead', switchedFrom: null, retiredTasks: [] }
+    }
   }
   const [existing, ...duplicates] = [...candidates].sort((a, b) => rank(b) - rank(a) || (b.id ?? 0) - (a.id ?? 0))
 

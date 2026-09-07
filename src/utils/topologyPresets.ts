@@ -29,6 +29,8 @@ export interface TopologyProbeOption {
    * 对所有来源开放 DNS over TCP。
    */
   dnsAddress: string
+  /** 首选内置 TCP 候选，仅供显式验证；不能覆盖已绑定任务或代表实时可用性。 */
+  tcpCandidate?: { host: string, port: number }
   /** 每种探测方式各自的目标地址；没有配置的档位表示这个预设不支持该方式。 */
   probeTargets: {
     icmp?: string
@@ -44,16 +46,16 @@ function defineTopologyProbe(option: Omit<TopologyProbeOption, 'probeTargets'>):
     ...option,
     probeTargets: {
       icmp: option.landmarkAddress,
-      // 只开 53：见 `OPS_TOPOLOGY_ENTRY_PROBE_LADDER` 为什么入口不走 443/80/22。
-      tcp: { 53: option.dnsAddress },
+      // HTTPS 只能使用明确配置的候选，不能直接尝试 DNS 地址的 443 端口。
+      tcp: { 53: option.dnsAddress, ...(option.tcpCandidate ? { [option.tcpCandidate.port]: option.tcpCandidate.host } : {}) },
     },
   }
 }
 
 export const TOPOLOGY_PROBE_OPTIONS: TopologyProbeOption[] = [
-  defineTopologyProbe({ key: 'beijing-telecom', city: '北京', carrier: '电信', label: '北京电信', taskFilter: '北京电信', landmarkAddress: '220.181.38.150', dnsAddress: '219.141.136.10' }),
-  defineTopologyProbe({ key: 'beijing-unicom', city: '北京', carrier: '联通', label: '北京联通', taskFilter: '北京联通', landmarkAddress: '202.106.50.1', dnsAddress: '202.106.0.20' }),
-  defineTopologyProbe({ key: 'beijing-mobile', city: '北京', carrier: '移动', label: '北京移动', taskFilter: '北京移动', landmarkAddress: '221.130.33.52', dnsAddress: '221.130.33.52' }),
+  defineTopologyProbe({ key: 'beijing-telecom', city: '北京', carrier: '电信', label: '北京电信', taskFilter: '北京电信', landmarkAddress: '220.181.38.150', dnsAddress: '219.141.136.10', tcpCandidate: { host: '220.181.38.150', port: 443 } }),
+  defineTopologyProbe({ key: 'beijing-unicom', city: '北京', carrier: '联通', label: '北京联通', taskFilter: '北京联通', landmarkAddress: '202.106.50.1', dnsAddress: '123.123.123.123' }),
+  defineTopologyProbe({ key: 'beijing-mobile', city: '北京', carrier: '移动', label: '北京移动', taskFilter: '北京移动', landmarkAddress: '221.130.33.52', dnsAddress: '221.130.33.52', tcpCandidate: { host: '211.136.25.153', port: 443 } }),
   defineTopologyProbe({ key: 'shanghai-telecom', city: '上海', carrier: '电信', label: '上海电信', taskFilter: '上海电信', landmarkAddress: '202.96.209.133', dnsAddress: '202.96.209.133' }),
   defineTopologyProbe({ key: 'shanghai-unicom', city: '上海', carrier: '联通', label: '上海联通', taskFilter: '上海联通', landmarkAddress: '210.22.97.1', dnsAddress: '210.22.70.3' }),
   defineTopologyProbe({ key: 'shanghai-mobile', city: '上海', carrier: '移动', label: '上海移动', taskFilter: '上海移动', landmarkAddress: '211.136.112.200', dnsAddress: '211.136.112.50' }),

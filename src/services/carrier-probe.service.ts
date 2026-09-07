@@ -146,6 +146,14 @@ export function buildCarrierProbeCandidate(
   }
 }
 
+export function builtinCarrierProbeFallback(option: TopologyProbeOption, task: AdminPingTask | null): CarrierProbeCandidate | null {
+  const tcp = option.tcpCandidate ?? { host: option.dnsAddress, port: 53 }
+  const candidate = buildCarrierProbeCandidate('tcp', tcp.host, tcp.port, 'builtin')
+  const running = task ? currentCarrierProbeCandidate(task) : null
+  // 同目标无需再创建 canary；候选缺失或非法也不能被视为健康目标。
+  return candidate && running?.type === candidate.type && running.target === candidate.target ? null : candidate
+}
+
 export function assessCarrierProbeCandidate(samples: readonly CarrierNodeSamples[]): Pick<CarrierProbeCandidate, 'migratable' | 'lowConfidence' | 'successRate' | 'reason'> {
   if (!samples.length)
     return { migratable: false, lowConfidence: false, reason: '还没有在线节点样本。' }
@@ -334,14 +342,7 @@ export async function loadCarrierProbeHealth(nodes: readonly CarrierProbeNode[])
     const totals = aggregateSamples(observations)
     const abnormal = observations.filter(item => item.total >= MIN_NODE_SAMPLES && item.valid / item.total < MIGRATION_SUCCESS_RATE)
     const commonModeEvents = id === null ? 0 : commonModeByTaskId.get(id) ?? 0
-    const builtinCandidate = buildCarrierProbeCandidate('icmp', option.landmarkAddress, undefined, 'builtin')!
-    const runningCandidate = task ? currentCarrierProbeCandidate(task) : null
-    // Verifying the exact target the task already polls tells the operator nothing:
-    // it would spend a canary task and up to 4 minutes to "discover" the status
-    // already shown above. Only offer it once it actually differs.
-    const fallback = runningCandidate && runningCandidate.type === builtinCandidate.type && runningCandidate.target === builtinCandidate.target
-      ? null
-      : builtinCandidate
+    const fallback = builtinCarrierProbeFallback(option, task)
     const taskRecords = raw.filter(record => record.task_id === id)
     const current = task?.clients.length && !onlineClients.length
       ? resolveProbeCurrentState(taskRecords, { online: false, now })

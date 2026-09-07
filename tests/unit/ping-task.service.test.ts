@@ -1003,8 +1003,7 @@ describe('ensureTopologyEntryProbeTask', () => {
   })
 
   test('refuses a rung the preset has no target for instead of guessing an address', async () => {
-    // 入口阶梯只有 ICMP 和 TCP 53；443 在骨干网关上没有意义，宁可报错也不能
-    // 拿 ICMP 的地址凑一个 443 任务出来。
+    // 没有显式声明 TCP 80 时，不能拿 ICMP 地址凑一个 HTTP 任务。
     const originalFetch = globalThis.fetch
     globalThis.fetch = mock(async (_input: RequestInfo | URL, init?: RequestInit) => {
       if (!init?.body)
@@ -1016,9 +1015,9 @@ describe('ensureTopologyEntryProbeTask', () => {
     }) as typeof fetch
 
     try {
-      await expect(ensureTopologyEntryProbeTask(source, probe, { hopProbe: { type: 'tcp', port: 443 } }))
+      await expect(ensureTopologyEntryProbeTask(source, probe, { hopProbe: { type: 'tcp', port: 80 } }))
         .rejects
-        .toThrow('没有配置 TCP 443 探测目标')
+        .toThrow('没有配置 TCP 80 探测目标')
     }
     finally {
       globalThis.fetch = originalFetch

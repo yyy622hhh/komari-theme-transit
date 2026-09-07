@@ -1,7 +1,6 @@
 import type { TopologyHopProbe } from '@/services/ping-task.service'
 import type { HopTaskVerdict } from '@/services/topology-probe.service'
-import { OPS_TOPOLOGY_CUSTOM_ENTRY_PROBE_LADDER, OPS_TOPOLOGY_ENTRY_PROBE_LADDER } from '@/constants/ops'
-import { describeTopologyHopProbe, normalizeTopologyHopProbe } from '@/services/ping-task.service'
+import { describeTopologyHopProbe } from '@/services/ping-task.service'
 import { findTopologyProbeKey } from '@/utils/topologyPresets'
 
 export interface TopologyRouteProbeState {
@@ -37,14 +36,6 @@ export function findUniquePresetEntryTask(taskNames: readonly string[], entryNam
   return matches.length === 1 ? matches[0]! : ''
 }
 
-function ladderText(ladder: readonly TopologyHopProbe[]): string {
-  return ladder.map(rung => describeTopologyHopProbe(normalizeTopologyHopProbe(rung))).join('、')
-}
-
-const HOP_PROBE_LADDER_TEXT = describeTopologyHopProbe({ type: 'icmp' })
-const ENTRY_PROBE_LADDER_TEXT = ladderText(OPS_TOPOLOGY_ENTRY_PROBE_LADDER)
-const CUSTOM_ENTRY_PROBE_LADDER_TEXT = ladderText(OPS_TOPOLOGY_CUSTOM_ENTRY_PROBE_LADDER)
-
 export interface TopologyRouteHintInput {
   planning: boolean
   taskError: string
@@ -68,7 +59,7 @@ export function formatTopologyRouteHint(input: TopologyRouteHintInput): string {
     return ''
   const probeText = describeTopologyHopProbe(state.probe)
   if (state.exhausted)
-    return `${HOP_PROBE_LADDER_TEXT} 都探测不通；落地机上报地址 ${state.targetAddress} 可能不是真实入站地址。`
+    return `${probeText} 没有成功响应；请检查目标 ${state.targetAddress} 或手动更换探测任务。`
   if (state.switchedFrom)
     return `${describeTopologyHopProbe(state.switchedFrom)} 探测不通，已自动改用 ${probeText}。`
   if (input.pending)
@@ -76,7 +67,7 @@ export function formatTopologyRouteHint(input: TopologyRouteHintInput): string {
   if (state.verdict === 'healthy')
     return `探测方式：${probeText} · 可用`
   if (state.verdict === 'dead')
-    return `探测方式：${probeText} · 没有成功响应，正在自动换用其它方式。`
+    return `探测方式：${probeText} · 没有成功响应，请检查目标或手动更换探测任务。`
   return `探测方式：${probeText} · 正在等待首批采样`
 }
 
@@ -100,8 +91,7 @@ export function formatTopologyEntryHint(input: TopologyEntryHintInput): string {
     return `正在为入口自动创建探测任务“${input.expectedTaskName}”…`
   }
   if (input.state?.exhausted) {
-    const ladder = input.probeLabel ? ENTRY_PROBE_LADDER_TEXT : CUSTOM_ENTRY_PROBE_LADDER_TEXT
-    return `“${input.expectedTaskName}”按 ${ladder} 都探测不通，需要手动处理（检查线路机是否能连到 ${input.state.targetAddress}，或换一个入口）。`
+    return `“${input.expectedTaskName}”按 ${describeTopologyHopProbe(input.state.probe)} 没有成功响应，需要手动处理（检查线路机是否能连到 ${input.state.targetAddress}，或换一个入口）。`
   }
   if (input.live) {
     return input.probeLabel
