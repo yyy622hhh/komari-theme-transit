@@ -55,7 +55,7 @@
     "reka-ui": "^2.6.1",
     "sortablejs": "^1.15.7",
     "tailwind-merge": "^3.4.0",
-    "three": "0.185.1",
+    "three": "0.186.0",
     "vue": "^3.5.28",
     "vue-echarts": "^8.0.1",
     "vue-router": "^5.0.2"
