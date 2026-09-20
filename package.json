@@ -43,8 +43,8 @@
     "icons:check": "bun scripts/generate-icon-collection.ts --check"
   },
   "dependencies": {
-    "@iconify/vue": "5.0.1",
-    "@vueuse/core": "^14.2.1",
+    "@iconify/vue": "5.0.2",
+    "@vueuse/core": "^15.0.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cobe": "^2.0.1",
@@ -55,7 +55,7 @@
     "reka-ui": "^2.6.1",
     "sortablejs": "^1.15.7",
     "tailwind-merge": "^3.4.0",
-    "three": "0.185.1",
+    "three": "0.186.0",
     "vue": "^3.5.28",
     "vue-echarts": "^8.0.1",
     "vue-router": "^5.0.2"
@@ -71,7 +71,7 @@
     "@tsconfig/node24": "24.0.5",
     "@types/node": "26.2.0",
     "@types/sortablejs": "^1.15.9",
-    "@types/three": "0.185.4",
+    "@types/three": "0.186.0",
     "@vitejs/plugin-vue": "^6.0.4",
     "@vue/eslint-config-typescript": "^14.6.0",
     "@vue/tsconfig": "0.9.1",
